@@ -1,0 +1,8 @@
+# BEGIN: ai-tools-gitignore (managed by setup-ai-tools-global.ps1 - do not hand-edit between markers)
+# serena (LSP agent) - local cache and memories, regenerate with activate_project/onboarding
+.serena/
+
+# graphify knowledge graph - fully regenerable via `graphify extract .` / `graphify update .`
+graphify-out/
+# END: ai-tools-gitignore
+.claude/settings.json
