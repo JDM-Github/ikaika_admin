@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Portal\Models\Employee;
 use Tests\TestCase;
 
 class PortalApiTest extends TestCase
@@ -31,7 +32,16 @@ class PortalApiTest extends TestCase
 
     public function test_portal_employees_endpoint(): void
     {
-        $this->getJson('/api/development/portal/employees')
+        $employee = Employee::query()->where('status', 'Active')->first();
+        $this->assertNotNull($employee);
+
+        $token = $this->postJson('/api/development/portal/auth/login', [
+            'id_no' => $employee->id_no,
+        ])->json('token');
+
+        $this->getJson('/api/development/portal/employees', [
+            'Authorization' => "Bearer {$token}",
+        ])
             ->assertOk()
             ->assertJsonPath('product', 'portal')
             ->assertJsonPath('resource', 'employees')

@@ -1,5 +1,8 @@
 <?php
 
+use App\Modules\Portal\PortalModule;
+use App\Modules\ProjectEstimator\ProjectEstimatorModule;
+
 /**
  * Product catalog for the central platform.
  *
@@ -17,6 +20,13 @@
 return [
 
     'channel' => env('API_CHANNEL', 'development'),
+
+    /*
+     * Portal login issues an HS256 JWT. Claims carry the employee id and role so the
+     * app does not send an id on every call; the signature is what the API trusts.
+     */
+    'jwt_secret' => env('PORTAL_JWT_SECRET', env('APP_KEY')),
+    'jwt_ttl' => (int) env('PORTAL_JWT_TTL', 28800),
 
     'catalog' => [
 
@@ -45,7 +55,7 @@ return [
             'username' => env('PORTAL_DB_USERNAME', env('DB_USERNAME', 'root')),
             'password' => env('PORTAL_DB_PASSWORD', env('DB_PASSWORD', '')),
             'enabled' => filter_var(env('PORTAL_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
-            'module' => App\Modules\Portal\PortalModule::class,
+            'module' => PortalModule::class,
         ],
 
         'project-estimator' => [
@@ -59,7 +69,7 @@ return [
             'username' => env('ESTIMATOR_DB_USERNAME', env('DB_USERNAME', 'root')),
             'password' => env('ESTIMATOR_DB_PASSWORD', env('DB_PASSWORD', '')),
             'enabled' => filter_var(env('ESTIMATOR_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
-            'module' => App\Modules\ProjectEstimator\ProjectEstimatorModule::class,
+            'module' => ProjectEstimatorModule::class,
         ],
 
     ],
