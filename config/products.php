@@ -1,13 +1,15 @@
 <?php
 
+use App\Modules\Core\CoreModule;
 use App\Modules\Portal\PortalModule;
 use App\Modules\ProjectEstimator\ProjectEstimatorModule;
 
 /**
  * Product catalog for the central platform.
  *
- * Route shape:  /api/{channel}/{product}/{resource}
- * Example:      /api/development/portal/employees
+ * Route shape:  {API_PATH_PREFIX}/api/{channel}/{product}/{resource}
+ * Local:        /api/development/portal/employees
+ * Bluehost:     /staging/central-api/api/staging/core/health
  *
  * Adding a new product (e.g. project-estimator):
  *   1. Create a MySQL database and put its name in .env
@@ -22,6 +24,11 @@ return [
     'channel' => env('API_CHANNEL', 'development'),
 
     /*
+     * Subdirectory in front of /api. Empty locally. Bluehost example: /staging/central-api
+     */
+    'path_prefix' => env('API_PATH_PREFIX', ''),
+
+    /*
      * Portal login issues an HS256 JWT. Claims carry the employee id and role so the
      * app does not send an id on every call; the signature is what the API trusts.
      */
@@ -32,7 +39,7 @@ return [
 
         'core' => [
             'name' => 'Core Platform',
-            'description' => 'Shared identities, teams, roles, files, and audit.',
+            'description' => 'Shared recycle bin and write-action log, split by product (portal vs estimator).',
             'connection' => 'core',
             'driver' => env('CORE_DB_DRIVER', 'mysql'),
             'host' => env('CORE_DB_HOST', env('DB_HOST', '127.0.0.1')),
@@ -41,7 +48,7 @@ return [
             'username' => env('CORE_DB_USERNAME', env('DB_USERNAME', 'root')),
             'password' => env('CORE_DB_PASSWORD', env('DB_PASSWORD', '')),
             'enabled' => true,
-            'module' => null,
+            'module' => CoreModule::class,
         ],
 
         'portal' => [

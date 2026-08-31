@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
-use App\Support\PortalJwt;
+use App\Support\Portal\PortalJwt;
+use App\Support\Portal\PortalManageUserPresenter;
+use App\Support\ProductNav;
 use App\Support\ProductRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,31 +21,20 @@ class ProductController extends Controller
         $config = ProductRegistry::get($product);
         $module = ProductRegistry::module($product);
         $health = ProductRegistry::ping($product);
-        $channel = config('products.channel');
 
-        $resources = collect($module?->resources() ?? [])->map(function (array $resource, string $name) use ($product, $channel, $health) {
-            $count = null;
-
-            if ($health['ok'] && isset($resource['model'])) {
-                $count = $resource['model']::query()->count();
-            }
-
-            return [
-                'name' => $name,
-                'label' => $resource['label'] ?? $name,
-                'count' => $count,
-                'url' => "/api/{$channel}/{$product}/{$name}",
-            ];
-        })->values();
+        $nav = ProductNav::product($product, $config, $module, true, $health, withCounts: true);
 
         return response()->json([
             'product' => $product,
-            'name' => $config['name'] ?? $product,
-            'description' => $config['description'] ?? null,
-            'connection' => $config['connection'] ?? null,
-            'database' => $config['database'] ?? null,
+            'name' => $nav['name'],
+            'description' => $nav['description'],
+            'connection' => $nav['connection'],
+            'database' => $nav['database'],
             'health' => $health,
-            'resources' => $resources,
+            'auth' => $nav['auth'],
+            'utilities' => $nav['utilities'],
+            'resources' => $nav['resources'],
+            'sections' => $nav['sections'],
         ]);
     }
 
@@ -79,7 +70,9 @@ class ProductController extends Controller
             return ['ok' => false, 'reason' => 'expired'];
         }
 
-        $employee = Employee::query()->find($claims['sub'] ?? null);
+        $employee = Employee::query()
+            ->select(PortalManageUserPresenter::sessionColumns())
+            ->find($claims['sub'] ?? null);
         if ($employee === null) {
             return ['ok' => false, 'reason' => 'expired'];
         }

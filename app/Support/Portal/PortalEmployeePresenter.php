@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Support;
+namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
 
@@ -20,6 +20,7 @@ class PortalEmployeePresenter
             'last_name' => $employee->last_name,
             'email' => $employee->email,
             'role' => $employee->role,
+            'role_level' => $employee->role_level,
             'job_title' => $employee->job_title,
             'department' => $employee->department,
             'status' => $employee->status,

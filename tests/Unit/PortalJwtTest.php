@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Support\PortalJwt;
+use App\Support\Portal\PortalJwt;
 use Tests\TestCase;
 use UnexpectedValueException;
 

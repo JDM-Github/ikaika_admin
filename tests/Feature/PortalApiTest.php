@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\ApiPath;
+use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
 class PortalApiTest extends TestCase
@@ -12,13 +14,58 @@ class PortalApiTest extends TestCase
         $this->get('/')->assertOk();
     }
 
+    public function test_playground_api_paths_include_the_subdirectory_the_page_is_served_from(): void
+    {
+        URL::useOrigin('https://ikaikabim.com/staging/central-api');
+
+        try {
+            $html = view('playground', [
+                'channel' => 'staging',
+                'apiRoot' => ApiPath::publicPath(),
+                'catalogUrl' => ApiPath::publicPath('staging'),
+            ])->render();
+
+            $this->assertStringContainsString('/staging/central-api/api', $html);
+            $this->assertStringContainsString('/staging/central-api/api/staging', $html);
+        } finally {
+            URL::useOrigin(null);
+        }
+    }
+
     public function test_catalog_lists_portal_on_the_development_channel(): void
     {
         $this->getJson('/api/development')
             ->assertOk()
             ->assertJsonPath('channel', 'development')
             ->assertJsonPath('convention', '/api/{channel}/{product}/{resource}')
-            ->assertJsonFragment(['key' => 'portal', 'database' => 'test_portal_database']);
+            ->assertJsonFragment(['key' => 'portal', 'database' => 'test_portal_database'])
+            ->assertJsonFragment(['base_url' => '/api/development/portal']);
+    }
+
+    public function test_catalog_exposes_portal_auth_and_separated_manage_users(): void
+    {
+        $portal = collect($this->getJson('/api/development')->json('products'))
+            ->firstWhere('key', 'portal');
+
+        $this->assertIsArray($portal);
+        $this->assertSame('Login', $portal['auth'][0]['label'] ?? null);
+        $this->assertSame('POST', $portal['auth'][0]['method'] ?? null);
+        $this->assertSame('/api/development/portal/auth/login', $portal['auth'][0]['url'] ?? null);
+        $this->assertSame('manage', $portal['sections'][0]['name'] ?? null);
+        $this->assertSame('Users', $portal['sections'][0]['resources'][0]['label'] ?? null);
+        $this->assertSame('PATCH', $portal['sections'][0]['resources'][0]['operations'][1]['method'] ?? null);
+        $this->assertNotEmpty($portal['resources']);
+    }
+
+    public function test_playground_has_login_and_product_navigation(): void
+    {
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Sign in', false)
+            ->assertSee('id_no', false)
+            ->assertSee('Separated', false)
+            ->assertSee('Practice', false)
+            ->assertSee('data-product', false);
     }
 
     public function test_portal_module_reads_the_portal_database(): void

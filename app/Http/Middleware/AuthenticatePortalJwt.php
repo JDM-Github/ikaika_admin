@@ -3,7 +3,8 @@
 namespace App\Http\Middleware;
 
 use App\Modules\Portal\Models\Employee;
-use App\Support\PortalJwt;
+use App\Support\Portal\PortalJwt;
+use App\Support\Portal\PortalManageUserPresenter;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -32,7 +33,9 @@ class AuthenticatePortalJwt
         }
 
         $employeeId = $payload['sub'] ?? null;
-        $employee = Employee::query()->find($employeeId);
+        $employee = Employee::query()
+            ->select(PortalManageUserPresenter::sessionColumns())
+            ->find($employeeId);
         if ($employee === null) {
             abort(401, 'The session is invalid or has expired.');
         }

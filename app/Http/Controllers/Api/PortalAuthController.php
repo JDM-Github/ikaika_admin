@@ -4,8 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
-use App\Support\PortalEmployeePresenter;
-use App\Support\PortalJwt;
+use App\Support\Portal\PortalEmployeePresenter;
+use App\Support\Portal\PortalJwt;
+use App\Support\Portal\PortalManageUserPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -24,7 +25,10 @@ class PortalAuthController extends Controller
             abort(401, 'Unknown ID number.');
         }
 
-        $employee = Employee::query()->where('id_no', $idNo)->first();
+        $employee = Employee::query()
+            ->select(PortalManageUserPresenter::sessionColumns())
+            ->where('id_no', $idNo)
+            ->first();
         if ($employee === null) {
             abort(401, 'Unknown ID number.');
         }

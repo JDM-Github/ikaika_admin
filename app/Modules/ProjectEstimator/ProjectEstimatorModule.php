@@ -32,4 +32,19 @@ class ProjectEstimatorModule implements ProductModule
             ],
         ];
     }
+
+    public function sections(): array
+    {
+        return [];
+    }
+
+    public function authOperations(): array
+    {
+        return [];
+    }
+
+    public function utilities(): array
+    {
+        return [];
+    }
 }
