@@ -8,6 +8,7 @@ use App\Modules\Portal\Models\Employee;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreRecycleKey;
 use App\Support\Portal\PortalSubmittedReportPresenter;
+use App\Support\Portal\PortalTimezone;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -441,6 +442,390 @@ class PortalSubmittedReportsTest extends TestCase
         )->assertUnauthorized();
     }
 
+    public function test_a_member_files_a_daily_report_and_reads_it_back(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $today = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $projectLabel = PortalSubmittedReportPresenter::projectLabel(
+            $project->project_number ?? null,
+            $project->project_name ?? null,
+        );
+        $activityLabel = PortalSubmittedReportPresenter::activityLabel(
+            $activity->name ?? null,
+            $activity->id_no ?? null,
+        );
+
+        $response = $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [[
+                'reportDate' => $today,
+                'remarks' => 'Filed from the portal',
+                'entries' => [[
+                    'projectLabel' => $projectLabel,
+                    'activityLabel' => $activityLabel,
+                    'hoursRendered' => 5.5,
+                    'elementChange' => 2,
+                ]],
+            ]],
+        ], $headers);
+
+        $response->assertCreated()
+            ->assertJsonPath('section', 'reports')
+            ->assertJsonPath('resource', 'submitted')
+            ->assertJsonPath('data.0.id', $today.'-daily')
+            ->assertJsonPath('data.0.kind', 'daily')
+            ->assertJsonPath('data.0.reason', 'Filed from the portal');
+        $this->assertSame(5.5, $response->json('data.0.entries.0.hoursRendered'));
+
+        $this->getJson(
+            '/api/development/portal/reports/submitted?from='.$today.'&to='.$today,
+            $headers,
+        )->assertOk()->assertJsonPath('data.0.id', $today.'-daily');
+
+        $action = Action::query()
+            ->where('record_id', $today.'-daily')
+            ->where('action_type', CoreActionType::ADD)
+            ->first();
+        $this->assertNotNull($action);
+        $this->assertSame(CoreRecycleKey::submittedReport((int) $actor->getKey(), $today, 'daily'), $action->recycle_key);
+    }
+
+    public function test_a_late_report_files_against_an_older_day_and_reads_back_as_late(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $day = $this->freeDate($actor, 40);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'late',
+            'reports' => [[
+                'reportDate' => $day,
+                'remarks' => 'Filed after a power outage',
+                'entries' => [[
+                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                        $project->project_number ?? null,
+                        $project->project_name ?? null,
+                    ),
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                        $activity->name ?? null,
+                        $activity->id_no ?? null,
+                    ),
+                    'hoursRendered' => 8,
+                    'elementChange' => 0,
+                ]],
+            ]],
+        ], $headers)
+            ->assertCreated()
+            ->assertJsonPath('data.0.id', $day.'-late')
+            ->assertJsonPath('data.0.kind', 'late');
+
+        $this->getJson(
+            '/api/development/portal/reports/submitted/days?from='.$day.'&to='.$day,
+            $headers,
+        )->assertOk()
+            ->assertJsonPath('data.0.date', $day)
+            ->assertJsonPath('data.0.kind', 'late');
+    }
+
+    public function test_filing_refuses_a_day_that_already_holds_a_report_of_either_kind(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $earn = $this->firstEarnCode();
+        $today = Carbon::today()->toDateString();
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $this->insertLine($actor, [
+            'report_date' => $today,
+            'hours_rendered' => 8,
+        ], $project, $activity, $earn);
+
+        $body = [
+            'kind' => 'late',
+            'reports' => [[
+                'reportDate' => $today,
+                'entries' => [[
+                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                        $project->project_number ?? null,
+                        $project->project_name ?? null,
+                    ),
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                        $activity->name ?? null,
+                        $activity->id_no ?? null,
+                    ),
+                    'hoursRendered' => 4,
+                    'elementChange' => 0,
+                ]],
+            ]],
+        ];
+
+        $this->postJson('/api/development/portal/reports/submitted', $body, $headers)
+            ->assertStatus(422);
+
+        $lines = DB::connection('portal')->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->where('user_reports.report_date', $today)
+            ->count();
+        $this->assertSame(1, $lines);
+    }
+
+    public function test_filing_refuses_a_future_day_and_a_daily_report_older_than_the_window(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $entries = [[
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                $project->project_number ?? null,
+                $project->project_name ?? null,
+            ),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                $activity->name ?? null,
+                $activity->id_no ?? null,
+            ),
+            'hoursRendered' => 4,
+            'elementChange' => 0,
+        ]];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'late',
+            'reports' => [['reportDate' => Carbon::tomorrow()->toDateString(), 'entries' => $entries]],
+        ], $headers)->assertStatus(422);
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [['reportDate' => Carbon::today()->subDays(30)->toDateString(), 'entries' => $entries]],
+        ], $headers)->assertStatus(422);
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'weekly',
+            'reports' => [['reportDate' => Carbon::today()->toDateString(), 'entries' => $entries]],
+        ], $headers)->assertStatus(422);
+    }
+
+    public function test_filing_names_the_label_the_database_does_not_have(): void
+    {
+        $actor = $this->activeMember();
+        $activity = $this->firstActivity();
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [[
+                'reportDate' => $this->freeDate($actor, 0),
+                'entries' => [[
+                    'projectLabel' => 'ZZZZZ No Such Project',
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                        $activity->name ?? null,
+                        $activity->id_no ?? null,
+                    ),
+                    'hoursRendered' => 4,
+                    'elementChange' => 0,
+                ]],
+            ]],
+        ], $headers)
+            ->assertStatus(422)
+            ->assertJsonPath('message', '"ZZZZZ No Such Project" is not one of your projects.');
+    }
+
+    public function test_a_multi_day_filing_is_all_or_nothing(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $earn = $this->firstEarnCode();
+        $free = $this->freeDate($actor, 2);
+        $taken = $this->freeDate($actor, 3);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $this->insertLine($actor, ['report_date' => $taken, 'hours_rendered' => 8], $project, $activity, $earn);
+
+        $entries = [[
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                $project->project_number ?? null,
+                $project->project_name ?? null,
+            ),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                $activity->name ?? null,
+                $activity->id_no ?? null,
+            ),
+            'hoursRendered' => 4,
+            'elementChange' => 0,
+        ]];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [
+                ['reportDate' => $free, 'entries' => $entries],
+                ['reportDate' => $taken, 'entries' => $entries],
+            ],
+        ], $headers)->assertStatus(422);
+
+        $this->assertSame(0, DB::connection('portal')->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->where('user_reports.report_date', $free)
+            ->count());
+    }
+
+    public function test_a_late_report_cannot_be_filed_for_today(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $entries = [[
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                $project->project_number ?? null,
+                $project->project_name ?? null,
+            ),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                $activity->name ?? null,
+                $activity->id_no ?? null,
+            ),
+            'hoursRendered' => 4,
+            'elementChange' => 0,
+        ]];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'late',
+            'reports' => [[
+                'reportDate' => Carbon::today()->toDateString(),
+                'entries' => $entries,
+            ]],
+        ], $headers)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'A late report is for a previous day.');
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'late',
+            'reports' => [['reportDate' => $this->freeDate($actor, 1), 'entries' => $entries]],
+        ], $headers)->assertCreated();
+    }
+
+    public function test_leave_blocks_a_filing_unless_the_request_was_rejected(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $onLeave = $this->freeDate($actor, 1);
+        $refused = $this->freeDate($actor, 2);
+        $this->insertRequest($actor, ['request_date' => $onLeave, 'status' => 'Pending']);
+        $this->insertRequest($actor, ['request_date' => $refused, 'status' => 'Rejected']);
+
+        $entries = [[
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                $project->project_number ?? null,
+                $project->project_name ?? null,
+            ),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                $activity->name ?? null,
+                $activity->id_no ?? null,
+            ),
+            'hoursRendered' => 4,
+            'elementChange' => 0,
+        ]];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [['reportDate' => $onLeave, 'entries' => $entries]],
+        ], $headers)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'You have leave filed for '.$onLeave.', so there is no report to file.');
+
+        // Rejected leave means the day was worked after all.
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [['reportDate' => $refused, 'entries' => $entries]],
+        ], $headers)->assertCreated();
+
+        $days = $this->getJson(
+            '/api/development/portal/reports/submitted/days?from='.$refused.'&to='.$onLeave,
+            $headers,
+        )->assertOk();
+
+        $this->assertSame([$onLeave], $days->json('leaveDays'));
+    }
+
+    public function test_the_days_list_reads_two_columns_and_no_label_joins(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstProject();
+        $activity = $this->firstActivity();
+        $earn = $this->firstEarnCode();
+        for ($day = 10; $day <= 14; $day++) {
+            $this->insertLine($actor, [
+                'report_date' => sprintf('2024-03-%02d', $day),
+                'hours_rendered' => 8,
+            ], $project, $activity, $earn);
+        }
+
+        $token = $this->loginToken($actor);
+        $queries = [];
+        DB::connection('portal')->listen(function ($query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+
+        $response = $this->getJson(
+            '/api/development/portal/reports/submitted/days?from=2024-03-01&to=2024-03-31',
+            ['Authorization' => "Bearer {$token}"],
+        )->assertOk();
+        // The token check reads the employee row; the payload itself is the two below.
+        $queries = array_values(array_filter(
+            $queries,
+            static fn (string $sql): bool => ! str_contains($sql, 'from `employees` '),
+        ));
+
+        $this->assertCount(5, $response->json('data'));
+        $this->assertSame('2024-03-10', $response->json('data.0.date'));
+        $this->assertSame('daily', $response->json('data.0.kind'));
+        $this->assertSame(0, $this->countContaining($queries, 'projects_user_reports'));
+        $this->assertSame(0, $this->countContaining($queries, 'user_reports_activity_codes'));
+        $this->assertSame(0, $this->countContaining($queries, 'user_reports_earn_codes'));
+        // The filed days and the leave days, and nothing else.
+        $this->assertSame(1, $this->countContaining($queries, 'user_reports'));
+        $this->assertSame(1, $this->countContaining($queries, 'offset_work_day'));
+        $this->assertLessThanOrEqual(2, count($queries));
+    }
+
+    public function test_the_window_ends_on_the_day_the_member_is_standing_in(): void
+    {
+        $actor = $this->activeMember();
+        // 22:00 UTC: already the 2nd in Manila, still the 1st in New York. A server resolving
+        // this against its own clock hands one of them a calendar that is a day out. The clock
+        // moves before the token is minted, so the session is issued against the same instant.
+        Carbon::setTestNow(Carbon::parse('2026-09-01 22:00:00', 'UTC'));
+        $token = $this->loginToken($actor);
+
+        $manila = $this->withHeaders([
+            'Authorization' => 'Bearer '.$token,
+            PortalTimezone::NAME_HEADER => 'Asia/Manila',
+        ])->getJson('/api/development/portal/reports/submitted/days')->assertOk();
+        Cache::flush();
+        $newYork = $this->withHeaders([
+            'Authorization' => 'Bearer '.$token,
+            PortalTimezone::NAME_HEADER => 'America/New_York',
+        ])->getJson('/api/development/portal/reports/submitted/days')->assertOk();
+
+        $this->assertSame('2026-09-02', $manila->json('range.to'));
+        $this->assertSame('2026-09-01', $newYork->json('range.to'));
+
+        Carbon::setTestNow();
+    }
+
     private function activeMember(): Employee
     {
         $employee = Employee::query()
@@ -543,9 +928,46 @@ class PortalSubmittedReportsTest extends TestCase
         ]);
     }
 
+    /**
+     * A day inside the filing window that this member has not already used. The seeded database
+     * carries real timesheets, so a hard-coded offset is not reliably free.
+     */
+    private function freeDate(Employee $actor, int $daysAgo): string
+    {
+        for ($offset = $daysAgo; $offset < $daysAgo + 400; $offset++) {
+            $candidate = Carbon::today()->subDays($offset)->toDateString();
+            $taken = DB::connection('portal')->table('user_reports')
+                ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+                ->where('employees_user_reports.employee_id', $actor->getKey())
+                ->where('user_reports.report_date', $candidate)
+                ->exists();
+            if (! $taken) {
+                return $candidate;
+            }
+        }
+
+        $this->fail('No free report date was available for this member.');
+    }
+
     private function firstProject(): object
     {
         $row = DB::connection('portal')->table('projects')->whereNotNull('project_name')->first();
+        $this->assertNotNull($row);
+
+        return $row;
+    }
+
+    /**
+     * Filing is scoped to the member's own board, so a create test cannot use just any project.
+     */
+    private function firstOwnProject(Employee $actor): object
+    {
+        $row = DB::connection('portal')->table('employees_projects')
+            ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
+            ->where('employees_projects.employee_id', $actor->getKey())
+            ->whereNotNull('projects.project_name')
+            ->select(['projects.id', 'projects.project_number', 'projects.project_name', 'projects.type_of_job'])
+            ->first();
         $this->assertNotNull($row);
 
         return $row;

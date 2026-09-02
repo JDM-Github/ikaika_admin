@@ -155,6 +155,151 @@ class PortalModule implements ProductModule
                     ],
                 ],
             ],
+            'requests' => [
+                'label' => 'Requests',
+                'requires_admin' => false,
+                'resources' => [
+                    'leave' => [
+                        'label' => 'Leave',
+                        'path' => 'requests/leave',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'requests/leave',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'requests/leave',
+                                'label' => 'File',
+                                'auth' => true,
+                                'body' => [
+                                    'leaveType' => '02 Sick Leave',
+                                    'startDate' => '2026-09-09',
+                                    'endDate' => '2026-09-09',
+                                    'reason' => 'Flu',
+                                ],
+                            ],
+                        ],
+                    ],
+                    'overtime' => [
+                        'label' => 'Overtime',
+                        'path' => 'requests/overtime',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'requests/overtime',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'requests/overtime',
+                                'label' => 'File',
+                                'auth' => true,
+                                'body' => [
+                                    'requests' => [
+                                        [
+                                            'requestDate' => '2026-08-20',
+                                            'reason' => 'Deadline',
+                                            'entries' => [
+                                                [
+                                                    'projectLabel' => '260005 IKAIKA Portal V2',
+                                                    'activityLabel' => '5000 - WEB APPLICATION DEVELOPMENT',
+                                                    'hoursRendered' => 2,
+                                                    'elementChange' => 0,
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'offset' => [
+                        'label' => 'Offset',
+                        'path' => 'requests/offset',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'requests/offset',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'requests/offset',
+                                'label' => 'File',
+                                'auth' => true,
+                                'body' => [
+                                    'requests' => [
+                                        [
+                                            'workDate' => '2026-08-16',
+                                            'dayOffDate' => '2026-08-18',
+                                            'reason' => 'Saturday coverage',
+                                            'entries' => [
+                                                [
+                                                    'projectLabel' => '260005 IKAIKA Portal V2',
+                                                    'activityLabel' => '5000 - WEB APPLICATION DEVELOPMENT',
+                                                    'hoursRendered' => 8,
+                                                    'elementChange' => 0,
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'reimbursement' => [
+                        'label' => 'Reimbursement',
+                        'path' => 'requests/reimbursement',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'requests/reimbursement',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'requests/reimbursement',
+                                'label' => 'File',
+                                'auth' => true,
+                                'body' => [
+                                    'requestDate' => '2026-08-04',
+                                    'items' => [
+                                        [
+                                            'label' => 'Office Grocery',
+                                            'cost' => 2095.6,
+                                            'quantity' => 1,
+                                            'teamLabel' => 'Angeles Pampanga Office',
+                                            'purpose' => 'Office grocery and maintenance',
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            [
+                                'method' => 'PATCH',
+                                'path' => 'requests/reimbursement/{id}',
+                                'label' => 'Edit',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'requests/reimbursement/{id}/cancel',
+                                'label' => 'Cancel',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
             'administration' => [
                 'label' => 'Administration',
                 'requires_admin' => false,

@@ -27,6 +27,9 @@ final class PortalSubmittedReports
 
     private const MAX_ENTRIES = 20;
 
+    // One POST files the whole builder, and the builder holds at most the eight-day date strip.
+    private const MAX_GROUPS = 8;
+
     private const CACHE_VERSION_KEY = 'portal:reports:submitted:version';
 
     private const LOOKUP_CHUNK = 500;
@@ -35,9 +38,13 @@ final class PortalSubmittedReports
 
     private const CORE_RESOURCE = 'reports.submitted';
 
+    // A freshly filed report has not been through anyone yet; replace() keeps whatever it finds.
+    private const NEW_APPROVAL = 'Pending';
+
     public function __construct(
         private readonly CoreLedger $ledger,
         private readonly PortalRecycleBin $recycleBin,
+        private readonly PortalTimezone $timezone,
     ) {}
 
     /**
@@ -61,6 +68,39 @@ final class PortalSubmittedReports
         return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor, $from, $to): array {
             return $this->build($actor, $from, $to);
         });
+    }
+
+    /**
+     * The days an overtime request already claims. Public because overtime is filed elsewhere but
+     * decided by the same occupancy read, and duplicating that query would let the two drift.
+     *
+     * @return list<string>
+     */
+    public function overtimeDays(Employee $actor, string $from, string $to): array
+    {
+        return $this->occupancy($actor, $from, $to)['overtime'];
+    }
+
+    /**
+     * Both days of an offset pair: the day worked and the day taken off. Public because offset
+     * is filed elsewhere but decided by the same occupancy read.
+     *
+     * @return list<string>
+     */
+    public function offsetDays(Employee $actor, string $from, string $to): array
+    {
+        return $this->occupancy($actor, $from, $to)['offset'];
+    }
+
+    /**
+     * The days leave already keeps the member out of the office -- refused requests excluded, the
+     * same subset a report may not be filed against.
+     *
+     * @return list<string>
+     */
+    public function leaveDays(Employee $actor, string $from, string $to): array
+    {
+        return $this->occupancy($actor, $from, $to)['blocked'];
     }
 
     public function bumpCache(): void
@@ -146,6 +186,155 @@ final class PortalSubmittedReports
         }
 
         abort(500, 'The report was saved but could not be read back.');
+    }
+
+    /**
+     * The days the member has already filed, as {date, kind}. The date strip and the late
+     * calendar grey those out, so a second report for the same day is never offered. Kept
+     * apart from list() on purpose: this reads two indexed columns and joins nothing.
+     *
+     * @return array{
+     *     section: string,
+     *     resource: string,
+     *     data: list<array{date: string, kind: string}>,
+     *     leaveDays: list<string>,
+     *     overtimeDays: list<string>,
+     *     offsetDays: list<string>,
+     *     range: array{from: string, to: string}
+     * }
+     */
+    public function days(Employee $actor, Request $request): array
+    {
+        [$from, $to] = $this->dateRange($request);
+
+        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+        $key = 'portal:reports:submitted:days:'.$version.':'.$actor->getKey().':'.$from.':'.$to;
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor, $from, $to): array {
+            // One occupancy read answers leave, overtime, and both days of an offset pair.
+            $occupancy = $this->occupancy($actor, $from, $to);
+
+            return [
+                'section' => 'reports',
+                'resource' => 'submitted',
+                'data' => $this->filedDays((int) $actor->getKey(), $from, $to),
+                'leaveDays' => $occupancy['blocked'],
+                'overtimeDays' => $occupancy['overtime'],
+                'offsetDays' => $occupancy['offset'],
+                'range' => ['from' => $from, 'to' => $to],
+            ];
+        });
+    }
+
+    /**
+     * File a new daily or late report. The body carries one kind and one group per day, so the
+     * whole builder lands in a single transaction rather than one request per day half-saving.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>}
+     */
+    public function create(Employee $actor, Request $request): array
+    {
+        $kind = $this->validatedKind($request);
+        $groups = $this->validatedGroups($request, $kind);
+        $employeeId = (int) $actor->getKey();
+
+        $dates = [];
+        foreach ($groups as $group) {
+            $dates[] = $group['date'];
+        }
+        $this->assertDatesAreFree($employeeId, $dates);
+
+        $this->assertDatesAreWorked($actor, $dates);
+
+        $lateSubmission = $kind === PortalSubmittedReportPresenter::KIND_LATE ? 'Yes' : null;
+        // The filer's own wall clock, so date_created reads beside report_date the way the
+        // seeded rows do. The audit instant lives on core.actions, which keeps server time.
+        $createdAt = $this->timezone->now()->toDateTimeString();
+        // Filing is scoped to the member's own board, the same list the picker offers. An edit
+        // keeps the full catalogue: a report already filed must stay editable if the assignment
+        // is later removed.
+        $projects = $this->ownProjectCatalog($employeeId);
+        $activities = $this->activityCatalog();
+        $earnCodeId = $this->regularEarnCodeId();
+
+        $resolved = [];
+        foreach ($groups as $index => $group) {
+            $resolved[$index] = $this->resolveNewEntries($group['entries'], $projects, $activities, $earnCodeId);
+        }
+
+        $insertedIds = $this->connection()->transaction(function () use (
+            $employeeId,
+            $groups,
+            $resolved,
+            $lateSubmission,
+            $createdAt,
+        ): array {
+            $ids = [];
+            foreach ($groups as $index => $group) {
+                foreach ($resolved[$index] as $entry) {
+                    $ids[] = $this->insertLine(
+                        $employeeId,
+                        $group['date'],
+                        $entry,
+                        $group['remarks'],
+                        $lateSubmission,
+                        self::NEW_APPROVAL,
+                        $createdAt,
+                    );
+                }
+            }
+
+            return $ids;
+        });
+
+        try {
+            foreach ($groups as $group) {
+                $id = $group['date'].'-'.$kind;
+                $this->ledger->recordAdd(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreRecycleKey::submittedReport($employeeId, $group['date'], $kind),
+                    self::CORE_TARGET,
+                    [
+                        'id' => $id,
+                        'kind' => $kind,
+                        'submittedOn' => $group['date'],
+                        'entries' => $group['entries'],
+                        'remarks' => $group['remarks'],
+                    ],
+                    self::CORE_RESOURCE,
+                    $id,
+                    $employeeId,
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            }
+        } catch (Throwable $error) {
+            $this->deleteLines($insertedIds);
+            throw $error;
+        }
+
+        $this->bumpCache();
+        $this->recycleBin->bumpCache();
+
+        $wanted = [];
+        foreach ($groups as $group) {
+            $wanted[] = $group['date'].'-'.$kind;
+        }
+        $fresh = $this->build($actor, min($dates), max($dates));
+        $rows = [];
+        foreach ($fresh['data'] as $row) {
+            if (in_array($row['id'] ?? null, $wanted, true)) {
+                $rows[] = $row;
+            }
+        }
+        if (count($rows) !== count($wanted)) {
+            abort(500, 'The report was filed but could not be read back.');
+        }
+
+        return [
+            'section' => 'reports',
+            'resource' => 'submitted',
+            'data' => $rows,
+        ];
     }
 
     public function destroy(Employee $actor, string $id): void
@@ -485,7 +674,7 @@ final class PortalSubmittedReports
         $fromRaw = trim((string) $request->query('from', ''));
         $toRaw = trim((string) $request->query('to', ''));
 
-        $to = $toRaw === '' ? Carbon::today() : $this->parseDate($toRaw);
+        $to = $toRaw === '' ? $this->timezone->today() : $this->parseDate($toRaw);
         $floor = $to->copy()->subMonths(self::MAX_RANGE_MONTHS)->startOfMonth();
         $from = $fromRaw === '' ? $floor->copy() : $this->parseDate($fromRaw);
 
@@ -507,7 +696,9 @@ final class PortalSubmittedReports
         }
 
         try {
-            $date = Carbon::createFromFormat('Y-m-d', $value);
+            // Built in the member's zone, so comparing it with today compares two wall clocks
+            // rather than an instant against a day boundary somewhere else.
+            $date = Carbon::createFromFormat('Y-m-d', $value, $this->timezone->zone());
         } catch (Throwable) {
             abort(422, 'Dates must use YYYY-MM-DD.');
         }
@@ -555,7 +746,13 @@ final class PortalSubmittedReports
      * the payload already sends. Cancelled rows are ignored; pending and rejected still occupy
      * the day, because a request that was filed is why that weekday is not missing.
      *
-     * @return array{leave: list<string>, offset: list<string>}
+     * `blocked` is the subset of `leave` a new report may not be filed against: a rejected leave
+     * request means the member was told to work that day, so the day is theirs to report on.
+     *
+     * `overtime` is the day an overtime request already claims, on the same refused-means-free
+     * rule: an overtime request that was turned down leaves the day open to ask again.
+     *
+     * @return array{leave: list<string>, offset: list<string>, blocked: list<string>, overtime: list<string>}
      */
     private function occupancy(Employee $actor, string $from, string $to): array
     {
@@ -564,7 +761,7 @@ final class PortalSubmittedReports
             is_string($actor->last_name) ? $actor->last_name : null,
         );
         if ($name === 'Member') {
-            return ['leave' => [], 'offset' => []];
+            return ['leave' => [], 'offset' => [], 'blocked' => [], 'overtime' => []];
         }
 
         $rows = $this->connection()
@@ -588,6 +785,8 @@ final class PortalSubmittedReports
 
         $leave = [];
         $offset = [];
+        $blocked = [];
+        $overtime = [];
         foreach ($rows as $row) {
             $kind = PortalSubmittedReportPresenter::occupancy(
                 $row->type ?? null,
@@ -599,11 +798,27 @@ final class PortalSubmittedReports
                 $date = $this->calendarDate($row->request_date ?? null);
                 if ($date !== null) {
                     $leave[] = $date;
+                    if (! PortalSubmittedReportPresenter::isRefused($row->status ?? null)) {
+                        $blocked[] = $date;
+                    }
+                }
+
+                continue;
+            }
+            // A refused overtime request is the day back on offer, same rule leave follows.
+            if ($kind === PortalSubmittedReportPresenter::OCCUPANCY_OVERTIME) {
+                $date = $this->calendarDate($row->request_date ?? null);
+                if ($date !== null && ! PortalSubmittedReportPresenter::isRefused($row->status ?? null)) {
+                    $overtime[] = $date;
                 }
 
                 continue;
             }
             if ($kind !== PortalSubmittedReportPresenter::OCCUPANCY_OFFSET) {
+                continue;
+            }
+            // A refused offset is both days back on offer, the same rule leave and overtime follow.
+            if (PortalSubmittedReportPresenter::isRefused($row->status ?? null)) {
                 continue;
             }
             $work = $this->calendarDate($row->original_work_day ?? null);
@@ -619,7 +834,197 @@ final class PortalSubmittedReports
         return [
             'leave' => PortalSubmittedReportPresenter::uniqueDates($leave),
             'offset' => PortalSubmittedReportPresenter::uniqueDates($offset),
+            'blocked' => PortalSubmittedReportPresenter::uniqueDates($blocked),
+            'overtime' => PortalSubmittedReportPresenter::uniqueDates($overtime),
         ];
+    }
+
+    /**
+     * One grouped read over (employee_id, report_date): two columns, no label joins, so the
+     * picker can ask for two years of days without paying for two years of entries.
+     *
+     * @return list<array{date: string, kind: string}>
+     */
+    private function filedDays(int $employeeId, string $from, string $to): array
+    {
+        $rows = UserReport::query()
+            ->toBase()
+            ->select(['user_reports.report_date', 'user_reports.late_submission'])
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $employeeId)
+            ->whereNotNull('user_reports.report_date')
+            ->whereBetween('user_reports.report_date', [$from, $to])
+            ->groupBy('user_reports.report_date', 'user_reports.late_submission')
+            ->orderBy('user_reports.report_date')
+            ->get();
+
+        $days = [];
+        foreach ($rows as $row) {
+            $date = $this->calendarDate($row->report_date ?? null);
+            if ($date === null) {
+                continue;
+            }
+            $kind = PortalSubmittedReportPresenter::kind($row->late_submission ?? null);
+            $days[$date.'-'.$kind] = ['date' => $date, 'kind' => $kind];
+        }
+
+        return array_values($days);
+    }
+
+    private function validatedKind(Request $request): string
+    {
+        $kind = strtolower(trim((string) $request->input('kind', '')));
+        if ($kind !== PortalSubmittedReportPresenter::KIND_DAILY && $kind !== PortalSubmittedReportPresenter::KIND_LATE) {
+            abort(422, 'A report is either daily or late.');
+        }
+
+        return $kind;
+    }
+
+    /**
+     * @return list<array{
+     *     date: string,
+     *     remarks: ?string,
+     *     entries: list<array{projectLabel: string, activityLabel: string, hoursRendered: float, elementChange: float}>
+     * }>
+     */
+    private function validatedGroups(Request $request, string $kind): array
+    {
+        $raw = $request->input('reports');
+        if (! is_array($raw) || $raw === []) {
+            abort(422, 'Add at least one day before filing.');
+        }
+        if (count($raw) > self::MAX_GROUPS) {
+            abort(422, 'A single filing cannot cover more than 8 days.');
+        }
+
+        $groups = [];
+        $seen = [];
+        foreach ($raw as $item) {
+            if (! is_array($item)) {
+                abort(422, 'Each day must be an object.');
+            }
+            $date = $this->parseDate(trim((string) ($item['reportDate'] ?? '')))->toDateString();
+            $this->assertFilableDate($date, $kind);
+            if (in_array($date, $seen, true)) {
+                abort(422, 'That filing lists the same day twice.');
+            }
+            $seen[] = $date;
+            $groups[] = [
+                'date' => $date,
+                'remarks' => $this->validatedRemarksValue($item['remarks'] ?? null),
+                'entries' => $this->validatedEntryList($item['entries'] ?? null),
+            ];
+        }
+
+        return $groups;
+    }
+
+    /**
+     * Daily files against the same seven-day strip an edit may touch. Late is any previous day:
+     * a missed daily filing is filed here, and the two forms still cannot double a day because
+     * assertDatesAreFree refuses a second report on one date.
+     */
+    private function assertFilableDate(string $date, string $kind): void
+    {
+        if ($kind === PortalSubmittedReportPresenter::KIND_DAILY) {
+            $this->assertMutableDate($date);
+
+            return;
+        }
+
+        $day = $this->parseDate($date);
+        $today = $this->timezone->today();
+        if ($day->gte($today)) {
+            abort(422, 'A late report is for a previous day.');
+        }
+        if ($day->lt($today->copy()->subMonths(self::MAX_RANGE_MONTHS)->startOfMonth())) {
+            abort(422, 'A late report cannot reach further back than two years.');
+        }
+    }
+
+    /**
+     * A day holds one report, whichever kind it is: two would double the hours it carries.
+     *
+     * @param  list<string>  $dates
+     */
+    private function assertDatesAreFree(int $employeeId, array $dates): void
+    {
+        if ($dates === []) {
+            return;
+        }
+
+        $taken = UserReport::query()
+            ->toBase()
+            ->select(['user_reports.report_date'])
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $employeeId)
+            ->whereIn('user_reports.report_date', $dates)
+            ->limit(1)
+            ->get()
+            ->first();
+
+        if ($taken === null) {
+            return;
+        }
+
+        $day = $this->calendarDate($taken->report_date ?? null) ?? 'that day';
+        abort(422, 'A report already exists for '.$day.'. Edit it from Submitted Reports instead.');
+    }
+
+    /**
+     * Leave that was filed and not refused means the member was not at work, so there is nothing
+     * to report. A rejected request is the opposite: they were told to work that day.
+     *
+     * @param  list<string>  $dates
+     */
+    private function assertDatesAreWorked(Employee $actor, array $dates): void
+    {
+        if ($dates === []) {
+            return;
+        }
+
+        $blocked = $this->occupancy($actor, min($dates), max($dates))['blocked'];
+        foreach ($dates as $date) {
+            if (in_array($date, $blocked, true)) {
+                abort(422, 'You have leave filed for '.$date.', so there is no report to file.');
+            }
+        }
+    }
+
+    /**
+     * The create twin of resolveEntries: no existing lines to inherit an earn code from, and the
+     * two catalogs are read once for the whole batch rather than once per day.
+     *
+     * @param  list<array{projectLabel: string, activityLabel: string, hoursRendered: float, elementChange: float}>  $entries
+     * @param  array<string, int>  $projects
+     * @param  array<string, int>  $activities
+     * @return list<array{projectId: int, activityCodeId: int, earnCodeId: ?int, hoursRendered: float, elementChange: float}>
+     */
+    private function resolveNewEntries(array $entries, array $projects, array $activities, ?int $earnCodeId): array
+    {
+        $resolved = [];
+        foreach ($entries as $entry) {
+            $projectId = $projects[$this->lookupKey($entry['projectLabel'])] ?? null;
+            $activityId = $activities[$this->lookupKey($entry['activityLabel'])] ?? null;
+            // Names the label rather than the rule: a picker offering something the database does
+            // not have is the usual cause, and the generic wording hides which half was wrong.
+            if ($projectId === null) {
+                abort(422, '"'.$entry['projectLabel'].'" is not one of your projects.');
+            }
+            if ($activityId === null) {
+                abort(422, 'No activity matches "'.$entry['activityLabel'].'".');
+            }
+            $resolved[] = [
+                'projectId' => $projectId,
+                'activityCodeId' => $activityId,
+                'earnCodeId' => $earnCodeId,
+                'hoursRendered' => $entry['hoursRendered'],
+                'elementChange' => $entry['elementChange'],
+            ];
+        }
+
+        return $resolved;
     }
 
     /**
@@ -637,7 +1042,7 @@ final class PortalSubmittedReports
     private function assertMutableDate(string $date): void
     {
         $day = $this->parseDate($date);
-        $today = Carbon::today();
+        $today = $this->timezone->today();
         $floor = $today->copy()->subDays(self::MUTATION_WINDOW_DAYS);
         if ($day->gt($today) || $day->lt($floor)) {
             abort(422, 'Reports can only be changed for today or the last seven days.');
@@ -823,7 +1228,14 @@ final class PortalSubmittedReports
      */
     private function validatedEntries(Request $request): array
     {
-        $raw = $request->input('entries');
+        return $this->validatedEntryList($request->input('entries'));
+    }
+
+    /**
+     * @return list<array{projectLabel: string, activityLabel: string, hoursRendered: float, elementChange: float}>
+     */
+    private function validatedEntryList(mixed $raw): array
+    {
         if (! is_array($raw) || $raw === []) {
             abort(422, 'Add at least one entry before saving.');
         }
@@ -897,12 +1309,24 @@ final class PortalSubmittedReports
         if (! $request->exists('remarks') || $request->input('remarks') === null) {
             return null;
         }
-        $value = trim((string) $request->input('remarks'));
-        if (strlen($value) > 500) {
+
+        return $this->validatedRemarksValue($request->input('remarks'));
+    }
+
+    private function validatedRemarksValue(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (! is_scalar($value)) {
+            abort(422, 'Remarks must be text.');
+        }
+        $text = trim((string) $value);
+        if (strlen($text) > 500) {
             abort(422, 'Remarks cannot exceed 500 characters.');
         }
 
-        return $value === '' ? null : $value;
+        return $text === '' ? null : $text;
     }
 
     /**
@@ -944,6 +1368,33 @@ final class PortalSubmittedReports
         $rows = $this->connection()
             ->table('projects')
             ->select(['id', 'project_number', 'project_name'])
+            ->get();
+
+        $catalog = [];
+        foreach ($rows as $row) {
+            $label = PortalSubmittedReportPresenter::projectLabel(
+                $row->project_number ?? null,
+                $row->project_name ?? null,
+            );
+            $catalog[$this->lookupKey($label)] = (int) $row->id;
+        }
+
+        return $catalog;
+    }
+
+    /**
+     * The projects this member is assigned to, keyed the same way projectCatalog() keys the whole
+     * table. One read over the (employee_id, project_id) primary key.
+     *
+     * @return array<string, int>
+     */
+    private function ownProjectCatalog(int $employeeId): array
+    {
+        $rows = $this->connection()
+            ->table('employees_projects')
+            ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
+            ->where('employees_projects.employee_id', $employeeId)
+            ->select(['projects.id', 'projects.project_number', 'projects.project_name'])
             ->get();
 
         $catalog = [];
@@ -1134,7 +1585,7 @@ final class PortalSubmittedReports
         mixed $lateSubmission,
         mixed $approval,
         mixed $created,
-    ): void {
+    ): int {
         $id = (int) $this->connection()->table('user_reports')->insertGetId([
             'report_date' => $date,
             'hours_rendered' => $entry['hoursRendered'],
@@ -1163,6 +1614,8 @@ final class PortalSubmittedReports
                 'earn_code_id' => $entry['earnCodeId'],
             ]);
         }
+
+        return $id;
     }
 
     private function lookupKey(string $label): string

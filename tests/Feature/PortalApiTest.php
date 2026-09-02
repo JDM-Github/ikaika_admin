@@ -19,11 +19,9 @@ class PortalApiTest extends TestCase
         URL::useOrigin('https://ikaikabim.com/staging/central-api');
 
         try {
-            $html = view('playground', [
-                'channel' => 'staging',
-                'apiRoot' => ApiPath::publicPath(),
-                'catalogUrl' => ApiPath::publicPath('staging'),
-            ])->render();
+            // The same bootstrap the route passes: assembling it here by hand let this
+            // test pass while the page itself was missing a variable.
+            $html = view('playground', ApiPath::pageBootstrap('staging'))->render();
 
             $this->assertStringContainsString('/staging/central-api/api', $html);
             $this->assertStringContainsString('/staging/central-api/api/staging', $html);

@@ -29,6 +29,11 @@ class AppServiceProvider extends ServiceProvider
             config(['app.asset_url' => '/'.$directory]);
         }
 
+        // One browser tab paging a grid is a burst of reads, not a write path.
+        RateLimiter::for('workspace', function (Request $request) {
+            return Limit::perMinute(240)->by('workspace:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-manage-users', function (Request $request) {
             return Limit::perMinute(60)->by('manage-users:'.$this->portalLimiterKey($request));
         });
@@ -43,6 +48,18 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('portal-reports-submitted-write', function (Request $request) {
             return Limit::perMinute(20)->by('reports-submitted-write:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-reports-projects', function (Request $request) {
+            return Limit::perMinute(60)->by('reports-projects:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-requests', function (Request $request) {
+            return Limit::perMinute(60)->by('requests:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-requests-write', function (Request $request) {
+            return Limit::perMinute(20)->by('requests-write:'.$this->portalLimiterKey($request));
         });
 
         // Shared reference data that changes once a year, so the ceiling only has to stop a runaway.

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Route;
  *   routes/portal/auth.php      Auth
  *   routes/portal/manage.php    Manage / Users
  *   routes/portal/reports.php   Reports / Submitted
+ *   routes/portal/requests.php  Requests / Overtime
  *   routes/portal/calendar.php        Calendar / Holidays
  *   routes/portal/administration.php  Administration / Recycle Bin
  */
@@ -15,6 +16,7 @@ Route::prefix('portal')->group(function (): void {
     require __DIR__.'/auth.php';
     require __DIR__.'/manage.php';
     require __DIR__.'/reports.php';
+    require __DIR__.'/requests.php';
     require __DIR__.'/calendar.php';
     require __DIR__.'/administration.php';
 });

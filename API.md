@@ -26,6 +26,31 @@ Send `Accept: application/json`. IDs are numeric SQL `id`. `airtable_record_id` 
 
 ---
 
+## Timezones — send one on every request
+
+**Every client must send the zone it is standing in.** The app runs on UTC and members do not.
+A report date, a leave day, and the seven-day filing window are **calendar dates**, not instants,
+so resolving them against the server's clock puts a Manila member a day behind their own morning
+and a US member a day ahead of their own evening: the picker offers a day and the write refuses it,
+or the other way round.
+
+| Header | Example | Notes |
+|---|---|---|
+| `X-Portal-Timezone` | `Asia/Manila` | IANA name. **Preferred** — it carries its own daylight-saving rules |
+| `X-Portal-Timezone-Offset` | `-480` | Minutes to add to local time to reach UTC, exactly JavaScript's `Date#getTimezoneOffset()`. Manila sends `-480`, New York `300` |
+
+Send both where you can: the name is used when it resolves, the offset stands in for a runtime
+whose Intl data cannot name the zone, and an unrecognised or out-of-range value falls back to the
+application zone. Read them from the browser or device per request, not once at start-up — a laptop
+can cross a zone between one call and the next.
+
+Everything the API decides about a *day* is resolved in that zone: `today`, the daily report's
+seven-day strip, the late report's "a previous day", the leave floor and its year-ahead ceiling,
+the mutation window on PATCH and DELETE, and the default `to` on every dated list. Stored
+`date_created` on a request or report is written as the filer's own wall clock, matching how the
+seeded rows read; the audit trail in **core.actions** keeps server time, so ordering across members
+is still comparable there.
+
 ## Products
 
 | Product | Key | Frontend | Notes |
@@ -48,9 +73,20 @@ Sectioned portal routes (Manage / Users, …) live **beside** the generic resour
 | `GET` | `/api/staging/portal/auth/me` | `Authorization: Bearer {token}` |
 | `GET` | `/api/staging/portal/manage/users` | Bearer + Admin or Executive |
 | `PATCH` | `/api/staging/portal/manage/users/{id}/role` | Bearer + Admin or Executive. Body `{ "role": "Admin" }`, `{ "role": "User" }`, or `{ "role": "ProjectAdmin" }` |
+| `GET` | `/api/staging/portal/reports/projects` | Bearer. The member's own projects plus the activity codes each job type allows |
 | `GET` | `/api/staging/portal/reports/submitted` | Bearer. Own timesheets only. `from` / `to` as YYYY-MM-DD, max 24 months |
+| `GET` | `/api/staging/portal/reports/submitted/days` | Bearer. Own filed days `{date, kind}` plus `leaveDays`, `overtimeDays`, and `offsetDays`. Same `from` / `to` window |
+| `POST` | `/api/staging/portal/reports/submitted` | Bearer. Files own daily or late report. Body `{ kind, reports[] }`. One report per day |
 | `PATCH` | `/api/staging/portal/reports/submitted/{id}` | Bearer. Own timesheet group. `{id}` is `YYYY-MM-DD-daily` or `YYYY-MM-DD-late`. Today or last 7 days |
 | `DELETE` | `/api/staging/portal/reports/submitted/{id}` | Bearer. Own timesheet group. Same id and window as PATCH |
+| `GET` | `/api/staging/portal/requests/leave` | Bearer. Own leave, the leave-type vocabulary, and the days a report already covers |
+| `POST` | `/api/staging/portal/requests/leave` | Bearer. Files own leave. Body `{ leaveType, startDate, endDate, reason }`. One row per day |
+| `PATCH` | `/api/staging/portal/requests/leave/{id}` | Bearer. Changes own pending leave day. Body `{ leaveType, requestDate, reason }` |
+| `POST` | `/api/staging/portal/requests/leave/{id}/cancel` | Bearer. Withdraws own pending leave day. Status becomes Cancelled |
+| `GET` | `/api/staging/portal/requests/overtime` | Bearer. Own overtime |
+| `POST` | `/api/staging/portal/requests/overtime` | Bearer. Files own overtime. Body `{ requests[] }`. Only against a day already reported |
+| `GET` | `/api/staging/portal/requests/offset` | Bearer. Own offset |
+| `POST` | `/api/staging/portal/requests/offset` | Bearer. Files own offset. Body `{ requests[] }` |
 | `GET` | `/api/staging/portal/administration/recycle-bin` | Bearer. Own bin for members. `type=report\|request\|project`. Admin/Executive may send `scope=all` and `employee_id` |
 | `GET` | `/api/staging/portal/administration/recycle-bin/{id}` | Bearer. One deleted report's generated details. Members: own rows. Admin/Executive: any portal row |
 | `POST` | `/api/staging/portal/administration/recycle-bin/{id}/restore` | Bearer. Restore a recycled submitted report. Members: own rows. Admin/Executive: any portal row |
@@ -94,6 +130,83 @@ List query params: `page` (default 1), `per_page` (default 20, max 100), `q` (se
 
 ---
 
+## Workspace browser (`_schema` + `_grid`)
+
+The page at `/` is an Airtable-style workspace over all three databases. It runs on four
+**read-only** endpoints. They introspect `information_schema` rather than the 13 Eloquent
+models, so every one of the 77 tables is browsable, not just the modelled ones.
+
+| Method | Path | Auth | Behavior |
+|---|---|---|---|
+| `GET` | `/api/{channel}/{product}/_schema` | Bearer | Browsable tables with exact row counts |
+| `GET` | `/api/{channel}/{product}/_schema/{table}` | Bearer | Every field, typed, plus column presets |
+| `GET` | `/api/{channel}/{product}/_grid/{table}` | Bearer | One page of typed cells |
+| `GET` | `/api/{channel}/{product}/_grid/{table}/{id}` | Bearer | One record, every field, every chip |
+
+`{product}` is `core`, `portal` or `project-estimator`. Rate limited to 240 requests a
+minute per actor: one browser tab paging a grid is a burst of reads, not a write path.
+
+**Junctions are link fields, not tables.** These databases were converted from Airtable, so
+26 of the portal's 48 tables are junctions. They never appear in `_schema`; they surface as
+`link__{target}` chip columns on both parents, which is what the Airtable base actually
+showed. A junction carrying a qualifier splits into one field per value, so the estimator's
+`employees_projects` becomes `link__employees__pm`, `link__employees__member` and
+`link__employees__support`. `GET .../_schema/employees_projects` is a `404`.
+
+**Grid query params**
+
+| Param | Default | Notes |
+|---|---|---|
+| `page` | `1` | |
+| `per_page` | `50` | Capped at 200 |
+| `cols` | `key` | `key`, `all`, or a comma-separated list. A filtered or sorted column is added to a preset |
+| `q` | — | Searches the searchable columns of that table |
+| `sort` | identity column, ascending | `column:asc` or `column:desc`; an unknown column falls back rather than reaching SQL |
+| `filter[column]` | — | `eq:`, `ne:`, `contains:`, `starts:`, `gte:`, `lte:`, `empty`, `filled` |
+
+**Cell envelopes.** Every cell is `{"v": value}` so `NULL`, `""` and `0` stay distinguishable
+— Airtable renders the first two identically, which is a standing source of "the data is
+wrong" reports. A link cell is `{"chips": [{"id", "label"}], "more": 0, "to": "employees"}`;
+chips are resolved with one batched join per column, never one per row, and capped at
+`workspace.chips_per_cell` (3) on a grid, uncapped on a single record.
+
+**Redaction.** `password_hash`, `invite_code`, `remember_token` and anything matching
+`password` / `secret` / `bcrypt` are withheld from everyone, admin included. Government IDs,
+bank details, date of birth, home address and personal contact columns are admin-only and
+are dropped from the select list, so they never reach the response body at all.
+
+```json
+{
+  "product": "project-estimator",
+  "table": "projects",
+  "label": "Projects",
+  "title": "project_name",
+  "columns": ["id", "project_name", "link__employees__pm"],
+  "data": [
+    {
+      "id": { "v": 1 },
+      "project_name": { "v": "25401 GBC Derick" },
+      "link__employees__pm": { "chips": [{ "id": 4, "label": "220302-0003" }], "more": 0, "to": "employees" }
+    }
+  ],
+  "meta": {
+    "current_page": 1, "per_page": 50, "total": 120, "unfiltered_total": 120,
+    "last_page": 3, "filtered": false, "filters": {}, "q": "", "sort": "id:asc"
+  },
+  "sql": "select `id`, `project_name` from `projects` limit 50 offset 0"
+}
+```
+
+`meta.total` and `meta.unfiltered_total` are both returned so the footer can say
+`18 of 122 projects · filtered` instead of quietly showing a smaller number. `sql` is the
+exact statement behind the page, surfaced in the UI under `SQL`.
+
+**Writes are not exposed.** These databases are live production mirrors and the portal
+already owns curated write endpoints with a ledger and a recycle bin; the workspace would
+bypass both. The page carries a `Read only` badge to say so.
+
+---
+
 ## Portal models
 
 ### Live
@@ -113,11 +226,37 @@ Roles: `role_level` Executive is highest and **cannot be changed**. PATCH body `
 
 Signed-in users who are not Admin/Executive, and anyone who tries to change an Executive, get `403` with `message`, `warning`, and `notified`. Administrators are emailed (rate-limited 15 min per actor + method + path). Unauthenticated `401`s and policy refusals (self-demote, last admin) do not email. Cached 30s; writes bump the cache version. Rate limit 60/min reads, 20/min writes, keyed by employee id.
 
+#### Reports / Projects — **live** (sectioned)
+
+Sidebar: the project and activity pickers on **Daily Report** and **Late Report**. Laravel:
+`app/Http/Controllers/Api/Portal/Reports/ProjectsController.php`.
+
+`GET /api/development/portal/reports/projects`
+
+Only the projects the signed-in member is assigned to, through `employees_projects`, whatever
+`role_on_project` they hold. `data` is `{ id, label, jobType }` — `label` is the same
+`{project_number} {project_name}` string the submitted-report payloads use, so a picked value can
+be posted straight back; `jobType` is `projects.type_of_job` and doubles as the discipline filter.
+
+`activityGroups` is `{ jobType, activities[] }`, one group per job type on the member's board
+rather than one code list per project: forty projects sharing eight job types would otherwise
+repeat the same twenty strings forty times. A job type's codes come from
+`job_type_allowed_activities.activity_code_id_initials` — a comma-separated list of leading digits
+matched against `activity_codes.id_no`. A job type with no row, or a row with no initials, falls
+into the `jobType: null` group, which carries the whole catalogue: a missing rule is not a reason
+a member cannot report their day. Activity labels are the same strings POST and PATCH accept.
+
+Three small reads (the pivot join, the job-type rules, the code list), cached 30s per employee.
+Filing is scoped to this same board: a POST naming a project the member is not on is `422`. An
+edit is not — a report already filed stays editable if the assignment is later removed.
+
 #### Reports / Submitted — **live** (sectioned)
 
 Sidebar: **Reports → Submitted Reports**. Laravel: `app/Http/Controllers/Api/Portal/Reports/SubmittedController.php`. Calendar, not a paged table.
 
 `GET /api/development/portal/reports/submitted`  
+`GET /api/development/portal/reports/submitted/days`  
+`POST /api/development/portal/reports/submitted`  
 `PATCH /api/development/portal/reports/submitted/{id}`  
 `DELETE /api/development/portal/reports/submitted/{id}`
 
@@ -133,7 +272,272 @@ Each entry is one timesheet line: `projectLabel`, `activityLabel`, `earnCodeLabe
 
 DELETE also snapshots the group into **core.recycle** (`product = portal`, key `{employeeId}:{id}`) and appends **core.actions** (`action_type = delete`). PATCH appends `action_type = edit`. Restoring from the Recycle Bin re-inserts the snapshot and calls `CoreLedger::recordAdd`, which logs `action_type = add` and drops that recycle row — the original `delete` action stays. A later **add** of the same key (filing a new report for that day) also calls `recordAdd` and drops the trash, because restoring the old filing would overwrite the new one. See `sql/core/README.md`. Every future database write (not fetches) must record an action the same way, with `product` set to `portal` or `project-estimator`.
 
+POST files a new report from the Daily Report and Late Report screens. Body is one `kind`
+(`daily` or `late`) plus `reports`, up to **8** day groups of
+`{ "reportDate": "YYYY-MM-DD", "entries": [...], "remarks": "optional" }` — the builder can hold
+several days, and one request writes them in one transaction so a half-saved filing is not
+possible. Entries use the same shape and the same rules as PATCH (project labels from the member's own
+board and known activity labels, hours above 0, at most 8 per line and 8 per day, at most 20 lines per day). Daily files
+against today or the last seven days; **late is any previous day** — yesterday back to the
+24-month read window. Today is still daily-only. **A day holds one report of either kind** — a
+second filing for a day the member already has is `422`, so the two forms cannot double the hours
+on a day even when yesterday is offered on both. A day the member has **leave** filed for is also `422`: there is no
+work to report. Rejected leave does not block — a refused request means they were told to work. New lines are
+written with `approval = Pending` and `late_submission = Yes` for late. Each group appends
+`action_type = add` and drops any recycle row under the same key, exactly as a Recycle Bin restore
+does — a fresh filing must win over a stale snapshot. Response is `201` with the created groups in
+the same shape GET returns.
+
+GET `/days` is the slim companion the report-entry forms use to decide which days they may offer.
+One grouped read over `report_date` and `late_submission` gives `data` as `{ date, kind }` — no
+label joins — and one read of `requests` gives `leaveDays` (days a non-refused leave request
+covers), `overtimeDays` (days a non-refused overtime request already claims), and `offsetDays`
+(both days of a non-refused offset pair). Two queries, nothing else. Same `from` / `to` clamping
+as the list, cached 30s under the same version, so a POST, PATCH or DELETE — of a report, overtime,
+or offset — refreshes it. Holidays and weekends are **not** in here: both are workable days, the
+forms only tint them, and holidays already have `/calendar/holidays`.
+
+The two report forms and the overtime form read `data` in opposite directions. Daily and late must
+**not** offer a day that is already in it. Overtime may offer **only** the days in it: overtime is
+hours on top of a day that was worked, so a day with no report has no regular day to extend.
+Offset ignores `data` and reads `offsetDays` (and `leaveDays`) instead: it is an exchange, not a
+timesheet. A client that cannot reach this endpoint must fall back to offering every day rather
+than none — "nothing is filed" and "we could not check" close opposite halves of the picker, and
+the writes refuse a bad day either way.
+
 Do not return approval, approver remarks, bank, tax, or identity documents. `counts` (`reports`, `days`, `daily`, `late`, `hours`) match the grouped window. Cached 30s per employee + range. Do not use generic `GET /portal/reports`.
+
+#### Requests / Leave — **live** (sectioned)
+
+Sidebar: **Requests → Leave Request**. Laravel: `app/Http/Controllers/Api/Portal/Requests/LeaveController.php`, `app/Support/Portal/PortalLeaveRequests.php`.
+
+`GET /api/development/portal/requests/leave`
+`POST /api/development/portal/requests/leave`
+
+The signed-in member's own leave. JWT required; **not** Admin-only. Ownership is the composed
+`first_name last_name`, the same key the occupancy reads match on, because `requests` has no
+employee junction.
+
+**One day per row.** A five-day leave in the seeded data is five rows under one reason, so the
+form's start and end dates are a range the server expands, not a pair it stores. One transaction
+writes them all: a five-day application cannot land as three days and a failure. `leaveToOn` is
+therefore absent from these rows — each one is its own day.
+
+`leaveType` goes in `category`, which is otherwise unused. The table has no leave-type column and
+the form collects one, so this is where it lands; the list round-trips out again as
+`leaveTypeLabel`. Older rows with an empty `category` read back as `Leave`.
+
+Body: `{ "leaveType", "startDate", "endDate", "reason" }`, dates as `YYYY-MM-DD`. `leaveType` is
+allow-listed against the company vocabulary the form offers (`01 Vacation Leave` … `05 Maternity or
+Paternity Leave`) — move the list on both sides together. `reason` is required, at most 500
+characters. The range is inclusive, at most **31 days**, and reaches 24 months back (the timesheet
+read window) to **12 months ahead** — leave is booked as well as recorded, which is why this one
+picker reaches forward where the report ones do not.
+
+Two rules close a day, and both are enforced here as well as in the picker:
+
+- **Leave already filed for it.** A refused request reopens the day, the same rule the report
+  forms and overtime follow.
+- **A report already filed against it.** This is the mirror of the report forms' own rule: a day
+  with a report on it was worked, so asking to be away from it contradicts the record rather than
+  adding to it. Weekends and holidays are **not** closed — they are only tinted, as everywhere else.
+
+An offset's day off is deliberately **not** closed; the two are decided by different people and
+overlapping them is a scheduling question rather than a data error.
+
+Rows are classified by the same `PortalSubmittedReportPresenter::occupancy` rule the calendar uses,
+so a legacy untyped row carrying `no_of_hours` stays what it is — extra time worked, not a day
+away — and never appears in this history. New rows are written `type = Leave`, `status = Pending`.
+
+GET returns `data` (`id`, `createdOn`, `requestedOn`, `leaveTypeLabel`, `remarks`, `status`,
+`approverRemarks`), `types` (the vocabulary), and `reportedDays` (the days a report covers, so the
+form asks once rather than per day). No `memberName` on an own row — only the approval queue needs
+to say whose. `status` is lower-cased (`pending` / `approved` / `rejected` / `cancelled`) the way
+every request payload sends it. Same `from` / `to` clamping as the timesheet list. Cached 30s per
+employee and range.
+
+Each day appends `action_type = add` to **core.actions** under `resource = requests.leave` and
+recycle key `{employeeId}:{date}-leave`, so the Recycle Bin's `type=request` filter picks it up
+without further wiring. A ledger failure rolls the inserted rows back. Filing bumps this cache and
+the submitted-reports one, because leave is what closes a day to the report forms. Response is
+`201` with the created rows in the same shape GET returns. Rate limit 60/min reads, 20/min writes.
+
+`PATCH /requests/leave/{id}` changes one day: body `{ leaveType, requestDate, reason }`, same
+allow-list and same conflict rules as filing, and the day it already holds is not a clash with
+itself. `POST /requests/leave/{id}/cancel` withdraws one: the row **stays** and its status becomes
+`Cancelled`, because the history is a record of what was asked for and a request that vanished
+would read as one never filed. A cancelled day is free again, for this form and the report forms
+both.
+
+Both refuse anything already decided on (`422` — a decided request is the approver's record), and
+answer `404` rather than `403` for somebody else's row: whose request it is is not this member's to
+learn. Both append `action_type = edit` to **core.actions**. There is still no DELETE — nothing
+here is destroyed.
+
+Leave starts **today or later**: it is asked for, not recorded after the fact. An edit may keep a
+day that has since gone by, but cannot move one further into the past. Note that the seeded
+Airtable rows include leave filed days or weeks after the fact — that history is preserved and
+readable, it just cannot be created through this endpoint any more.
+
+#### Requests / Overtime — **live** (sectioned)
+
+Sidebar: **Requests → Overtime Request**. Laravel: `app/Http/Controllers/Api/Portal/Requests/OvertimeController.php`, `app/Support/Portal/PortalOvertimeRequests.php`.
+
+`GET /api/development/portal/requests/overtime`
+`POST /api/development/portal/requests/overtime`
+
+The signed-in member's own overtime. JWT required; **not** Admin-only. Ownership is the composed
+`first_name last_name`, the same key `leaveDays` and `offsetDays` already use.
+
+GET returns `data` (`id`, `createdOn`, `requestedOn`, `hours`, `remarks`, `status`,
+`approverRemarks`) and `range`. No `memberName` on an own row. Rows are classified by the same
+`PortalSubmittedReportPresenter::occupancy` rule so leave and offset never appear here. Same
+`from` / `to` clamping as leave (24 months back, 12 ahead). Cached 30s per employee and range.
+
+`POST /api/development/portal/requests/overtime`
+
+Files the signed-in member's own overtime into `requests` (`type = Overtime`, `status = Pending`).
+JWT required; **not** Admin-only. The table has no employee junction — Airtable stored the member
+as `name` — so rows are written and matched under the composed `first_name last_name`, the same
+key `leaveDays` and `offsetDays` already use. A profile with no name on it is `422` rather than a
+row nobody can find again.
+
+Body is `requests`, up to **8** day groups of
+`{ "requestDate": "YYYY-MM-DD", "reason": "required", "entries": [...] }` — the builder holds
+several days and one request writes them in one transaction. Entries use the report shape
+(`projectLabel`, `activityLabel`, `hoursRendered`, `elementChange`), at most 20 per day, hours
+above 0, at most 8 per line and 8 per day. Project labels must be on the member's **own board**
+(`employees_projects`), the same list `/reports/projects` offers.
+
+Three rules decide the day, and all three are enforced here as well as in the picker:
+
+- **It must already carry the member's own report.** Overtime is extra hours on a day that was
+  worked; a day with no report has nothing to extend. No report is `422`.
+- **One overtime request per day.** A second would double the claim. A refused request reopens the
+  day, the same rule leave follows — being told no is not a claim.
+- **Today or the last seven days**, the window the eight-day strip offers.
+
+`requests` holds one `reason` and no line items, so the entry breakdown is appended to it as one
+`- project / activity / Nh` line each under the member's own words. Dropping it would leave an
+approver eight hours with nothing behind them. Distinct projects are linked through
+`projects_requests`; `linked_report_ids` is left null — nothing reads it yet.
+
+Each group appends `action_type = add` to **core.actions** under `resource = requests.overtime` and
+recycle key `{employeeId}:{date}-overtime`, so the Recycle Bin's `type=request` filter picks it up
+without further wiring. A ledger failure rolls the inserted rows back. Filing bumps the
+submitted-reports cache version, which is what `/reports/submitted/days` is cached under, so the
+strip greys the day on the next read. Response is `201` with
+`{ id, requestedFor, hours, reason, status, type }` per group. Rate limit 20/min, keyed by
+employee id.
+
+User Requests reads this list through the GET above, not the generic `GET /portal/requests` dump.
+
+#### Requests / Offset — **live** (sectioned)
+
+Sidebar: **Requests → Offset Request**. Laravel: `app/Http/Controllers/Api/Portal/Requests/OffsetController.php`, `app/Support/Portal/PortalOffsetRequests.php`.
+
+`GET /api/development/portal/requests/offset`
+`POST /api/development/portal/requests/offset`
+
+The signed-in member's own offset. JWT required; **not** Admin-only. Ownership is the composed
+`first_name last_name`, the same key `leaveDays` and `offsetDays` already use.
+
+GET returns `data` (`id`, `createdOn`, `requestedOn` as the work day, `dayOffOn`, `hours`,
+`remarks`, `status`, `approverRemarks`) and `range`. No `memberName` on an own row. Occupancy
+filters to offset rows only. Same `from` / `to` clamping as leave. Cached 30s per employee and
+range.
+
+`POST /api/development/portal/requests/offset`
+
+Files the signed-in member's own offset into `requests` (`type = Offset`, `status = Pending`).
+JWT required; **not** Admin-only. Ownership is the composed `first_name last_name`, the same key
+`leaveDays` and `offsetDays` already use. A profile with no name on it is `422`.
+
+Body is `requests`, up to **8** pairs of
+`{ "workDate": "YYYY-MM-DD", "dayOffDate": "YYYY-MM-DD", "reason": "required", "entries": [...] }`
+— the builder holds several exchanges and one request writes them in a single transaction.
+Entries use the report shape (`projectLabel`, `activityLabel`, `hoursRendered`, `elementChange`),
+at most 20 per pair, hours above 0, at most 8 per line and 8 per day. Project labels must be on
+the member's **own board** (`employees_projects`), the same list `/reports/projects` offers.
+
+Offset is an exchange, not extra hours on a reported day, so there is **no** "must already have a
+report" rule. Four rules decide the pair, and all four are enforced here as well as in the pickers:
+
+- **Two different dates.** Offsetting a day against itself is not an exchange. `422`.
+- **The day worked is today or the last seven days.** The day off may also sit in that window, or
+  be booked ahead up to a fortnight.
+- **Neither day already carries an offset or leave.** Both the work day and the day off occupy the
+  calendar (`offsetDays`). A refused offset reopens both days, the same rule leave and overtime
+  follow.
+- **One pair cannot reuse a day another pair in the same filing already claimed**, as work or as
+  a day off.
+
+`request_date` and `original_work_day` are the day worked; `offset_work_day` is the day off;
+`no_of_hours` and `offset_hrs` both hold the hours on the work day. The entry breakdown is
+appended to `reason` as one `- project / activity / Nh` line each under the member's own words.
+Distinct projects are linked through `projects_requests`.
+
+Each pair appends `action_type = add` to **core.actions** under `resource = requests.offset` and
+recycle key `{employeeId}:{workDate}-offset`. A ledger failure rolls the inserted rows back.
+Filing bumps the submitted-reports cache version, so `/reports/submitted/days` greys both days
+on the next read. Response is `201` with
+`{ id, workOn, dayOffOn, hours, reason, status, type }` per pair. Rate limit 20/min, keyed by
+employee id.
+
+User Requests reads this list through the GET above, not the generic `GET /portal/requests` dump.
+
+#### Requests / Reimbursement — **live** (sectioned)
+
+Sidebar: **Requests → Reimbursement Request**. Laravel: `app/Http/Controllers/Api/Portal/Requests/ReimbursementController.php`, `app/Support/Portal/PortalReimbursementRequests.php`.
+
+`GET /api/development/portal/requests/reimbursement`
+`POST /api/development/portal/requests/reimbursement`
+`PATCH /api/development/portal/requests/reimbursement/{id}`
+`POST /api/development/portal/requests/reimbursement/{id}/cancel`
+
+The signed-in member's own expense claims. JWT required; **not** Admin-only. Ownership is the
+`employees_reimbursements` junction, so a row is the member's even when `employee_name_input` is
+messy Airtable text.
+
+**One SQL row per item.** The form lets a member add several expenses and submit once, so one
+request writes every item in a single transaction under the same `date_created` stamp. GET groups
+those rows back into one claim (`id` is the smallest item id). Seeded Airtable rows only carry a
+date on `date_created`, so same-day items with the same status still group; a new filing writes a
+datetime so two submissions a minute apart stay two claims.
+
+`team` is the **office** the expense belongs to, the same vocabulary the old portal offered:
+`Angeles Pampanga Office` and `Cebu Office`. It is **not** a department (`Structural`,
+`Architectural`, …) and it is **not** `employees.location` (`Pampanga`, `Cebu`). GET returns that
+pair as `teams`; POST allow-lists against it. Historical rows may still carry an older `team`
+string; the picker does not.
+
+**Any calendar date is allowed.** Reimbursement records spending rather than booking a day, so
+there is no "today or later" rule. The only clamp is ten years back and a year ahead, so a typo
+cannot store year 0001. Dates are `YYYY-MM-DD`.
+
+Body: `{ "requestDate", "items": [{ "label", "cost", "quantity", "teamLabel", "purpose" }] }`.
+At most **20** items. `label` is required, at most 500 characters. `cost` is above zero.
+`quantity` is a whole number from 1 to 9999. `teamLabel` must be one of `teams`. `purpose` is
+optional, at most 500 characters. New rows are `status = Pending`. Receipts are not stored yet.
+
+GET returns `data` (`id`, `referenceCode`, `memberName`, `submittedOn` which is `reimb_date`,
+`status`, `approverRemarks`, `items` (`id`, `label`, `cost`, `quantity`, `teamLabel`, `purpose`,
+`receiptName`)), `teams`, and `range`. Seeded `Completed` claims read back as `approved` — that is
+how those rows mark a paid reimbursement, and the rest of the portal speaks approved / pending /
+rejected / cancelled. Cached 30s per employee and range. Default window is ten years back to a
+year ahead.
+
+Filing appends `action_type = add` to **core.actions** under `resource = requests.reimbursement`
+and recycle key `{employeeId}:{date}-reimbursement-{claimId}`. A ledger failure rolls the inserted
+rows and junction back. Response is `201` with the grouped claim in the same shape GET returns.
+Rate limit 60/min reads, 20/min writes.
+
+A claim nobody has decided on is still the member's to change: `PATCH /requests/reimbursement/{id}`
+rewrites every item in one transaction under the stamp the filing already had, so the group stays
+one claim (`id` is still the smallest item id). `POST /requests/reimbursement/{id}/cancel` sets
+every item to `Cancelled`; the rows stay. A decided claim is the approver's record and returns
+`422`. Somebody else's claim is `404`, not `403`. Both writes are `action_type = edit` and bump
+the same cache. Rate limit 20/min.
 
 #### Administration / Recycle Bin — **live** (sectioned)
 

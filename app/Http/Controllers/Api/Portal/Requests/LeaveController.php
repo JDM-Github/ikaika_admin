@@ -1,16 +1,16 @@
 <?php
 
-namespace App\Http\Controllers\Api\Portal\Reports;
+namespace App\Http\Controllers\Api\Portal\Requests;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
-use App\Support\Portal\PortalSubmittedReports;
+use App\Support\Portal\PortalLeaveRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class SubmittedController extends Controller
+class LeaveController extends Controller
 {
-    public function __construct(private readonly PortalSubmittedReports $reports) {}
+    public function __construct(private readonly PortalLeaveRequests $leave) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -19,17 +19,7 @@ class SubmittedController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->reports->list($actor, $request));
-    }
-
-    public function days(Request $request): JsonResponse
-    {
-        $actor = $request->attributes->get('portalEmployee');
-        if (! $actor instanceof Employee) {
-            abort(401, 'Authentication is required.');
-        }
-
-        return response()->json($this->reports->days($actor, $request));
+        return response()->json($this->leave->list($actor, $request));
     }
 
     public function store(Request $request): JsonResponse
@@ -39,7 +29,7 @@ class SubmittedController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->reports->create($actor, $request), 201);
+        return response()->json($this->leave->create($actor, $request), 201);
     }
 
     public function update(Request $request, string $id): JsonResponse
@@ -49,18 +39,16 @@ class SubmittedController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->reports->replace($actor, $id, $request));
+        return response()->json($this->leave->replace($actor, $id, $request));
     }
 
-    public function destroy(Request $request, string $id): JsonResponse
+    public function cancel(Request $request, string $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');
         if (! $actor instanceof Employee) {
             abort(401, 'Authentication is required.');
         }
 
-        $this->reports->destroy($actor, $id);
-
-        return response()->json(null, 204);
+        return response()->json($this->leave->cancel($actor, $id));
     }
 }

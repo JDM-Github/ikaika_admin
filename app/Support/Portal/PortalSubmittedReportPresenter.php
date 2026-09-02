@@ -15,6 +15,8 @@ final class PortalSubmittedReportPresenter
 
     public const OCCUPANCY_OFFSET = 'offset';
 
+    public const OCCUPANCY_OVERTIME = 'overtime';
+
     private const UNASSIGNED = 'Unassigned';
 
     /**
@@ -151,7 +153,12 @@ final class PortalSubmittedReportPresenter
         if ($kind === 'offset' || ($originalWorkDay !== null && $offsetWorkDay !== null)) {
             return self::OCCUPANCY_OFFSET;
         }
-        if (in_array($kind, ['overtime', 'holiday-work', 'holiday work'], true)) {
+        // Overtime is named rather than dropped: it occupies the day for a second overtime
+        // request without occupying it for a report, which is the opposite of leave.
+        if ($kind === 'overtime') {
+            return self::OCCUPANCY_OVERTIME;
+        }
+        if (in_array($kind, ['holiday-work', 'holiday work'], true)) {
             return null;
         }
         if ($kind === 'leave') {
@@ -164,9 +171,36 @@ final class PortalSubmittedReportPresenter
         return self::OCCUPANCY_LEAVE;
     }
 
+    /**
+     * The four statuses the portal knows, lower-cased the way every request payload sends them.
+     * Anything unrecognised is Pending: a request nobody has decided on has not been decided on.
+     */
+    public static function requestStatus(mixed $status): string
+    {
+        if (self::isCancelled($status)) {
+            return 'cancelled';
+        }
+        if (self::isRefused($status)) {
+            return 'rejected';
+        }
+
+        return in_array(strtolower(trim((string) $status)), ['approved', 'accepted'], true)
+            ? 'approved'
+            : 'pending';
+    }
+
     public static function isCancelled(mixed $status): bool
     {
         return in_array(strtolower(trim((string) $status)), ['cancelled', 'canceled', 'withdrawn'], true);
+    }
+
+    /**
+     * A refused leave day is a day that was worked. Pending and approved both keep the member out
+     * of the office, so only this one leaves the day free to file a report against.
+     */
+    public static function isRefused(mixed $status): bool
+    {
+        return in_array(strtolower(trim((string) $status)), ['rejected', 'declined', 'denied'], true);
     }
 
     /**

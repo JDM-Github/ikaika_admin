@@ -84,6 +84,21 @@ class ApiPath
         return $mount.$routePath;
     }
 
+    /**
+     * Everything the browser page needs to address the API from wherever it is mounted.
+     *
+     * @return array{channel: string, mount: string, apiRoot: string, catalogUrl: string}
+     */
+    public static function pageBootstrap(string $channel): array
+    {
+        return [
+            'channel' => $channel,
+            'mount' => self::browserMount(),
+            'apiRoot' => self::publicPath(),
+            'catalogUrl' => self::publicPath($channel),
+        ];
+    }
+
     public static function isApiRequest(Request $request): bool
     {
         $prefix = self::routePrefix();

@@ -38,13 +38,15 @@ class PortalSubmittedReportPresenterTest extends TestCase
         $this->assertSame('15', PortalSubmittedReportPresenter::referenceCode(' ', 15));
     }
 
-    public function test_leave_and_offset_are_occupancy_and_overtime_is_not(): void
+    public function test_leave_offset_and_overtime_are_each_named(): void
     {
         $this->assertSame('leave', PortalSubmittedReportPresenter::occupancy(null, null, null, null));
         $this->assertSame('leave', PortalSubmittedReportPresenter::occupancy('Leave', 8, null, null));
         $this->assertSame('offset', PortalSubmittedReportPresenter::occupancy('Offset', 8, '2026-05-27', '2026-06-01'));
         $this->assertSame('offset', PortalSubmittedReportPresenter::occupancy(null, 8, '2026-05-02', '2026-05-07'));
-        $this->assertNull(PortalSubmittedReportPresenter::occupancy('Overtime', 4, null, null));
+        // Overtime occupies the day against a second overtime request, not against a report.
+        $this->assertSame('overtime', PortalSubmittedReportPresenter::occupancy('Overtime', 4, null, null));
+        $this->assertNull(PortalSubmittedReportPresenter::occupancy('Holiday Work', 4, null, null));
         $this->assertNull(PortalSubmittedReportPresenter::occupancy(null, 4, null, null));
         $this->assertTrue(PortalSubmittedReportPresenter::isCancelled('Cancelled'));
         $this->assertFalse(PortalSubmittedReportPresenter::isCancelled('Pending'));

@@ -11,4 +11,24 @@ final class CoreRecycleKey
     {
         return $employeeId.':'.$date.'-'.$kind;
     }
+
+    public static function overtimeRequest(int $employeeId, string $date): string
+    {
+        return $employeeId.':'.$date.'-overtime';
+    }
+
+    public static function offsetRequest(int $employeeId, string $date): string
+    {
+        return $employeeId.':'.$date.'-offset';
+    }
+
+    public static function leaveRequest(int $employeeId, string $date): string
+    {
+        return $employeeId.':'.$date.'-leave';
+    }
+
+    public static function reimbursementRequest(int $employeeId, string $date, int $claimId): string
+    {
+        return $employeeId.':'.$date.'-reimbursement-'.$claimId;
+    }
 }

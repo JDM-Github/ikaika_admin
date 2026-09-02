@@ -28,6 +28,8 @@ final class PortalHolidays
 
     private const CACHE_VERSION_KEY = 'portal:calendar:holidays:version';
 
+    public function __construct(private readonly PortalTimezone $timezone) {}
+
     private const TYPE_REGULAR = 'regular';
 
     private const TYPE_SPECIAL = 'special';
@@ -160,7 +162,7 @@ final class PortalHolidays
         $toRaw = trim((string) $request->query('to', ''));
 
         $from = $fromRaw === ''
-            ? Carbon::today()->subYears(self::MAX_RANGE_YEARS)->startOfYear()
+            ? $this->timezone->today()->subYears(self::MAX_RANGE_YEARS)->startOfYear()
             : $this->parseDate($fromRaw);
         $ceiling = $from->copy()->addYears(self::MAX_RANGE_YEARS)->endOfYear();
         $to = $toRaw === '' ? $ceiling->copy() : $this->parseDate($toRaw);
