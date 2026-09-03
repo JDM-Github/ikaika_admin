@@ -26,6 +26,12 @@ return [
     'cache_ttl' => 300,
 
     /*
+     * Databases an administrator may correct a value in from the grid. core keeps the
+     * ledger those corrections are written to, so it is never a target of one.
+     */
+    'writable_products' => ['portal', 'project-estimator'],
+
+    /*
      * Tables that are infrastructure rather than data. Junction tables are detected
      * by shape and hidden automatically, so they never need listing here.
      */

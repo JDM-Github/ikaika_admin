@@ -33,5 +33,8 @@
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
         <env name="API_PATH_PREFIX" value=""/>
+        <env name="CLOUDINARY_CLOUD_NAME" value="test-cloud"/>
+        <env name="CLOUDINARY_API_KEY" value="test-key"/>
+        <env name="CLOUDINARY_API_SECRET" value="test-secret"/>
     </php>
 </phpunit>

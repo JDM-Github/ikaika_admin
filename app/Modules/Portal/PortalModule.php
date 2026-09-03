@@ -87,6 +87,44 @@ class PortalModule implements ProductModule
     public function sections(): array
     {
         return [
+            'home' => [
+                'label' => 'Home',
+                'requires_admin' => false,
+                'resources' => [
+                    'dashboard' => [
+                        'label' => 'Dashboard',
+                        'path' => 'home',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'home',
+                                'label' => 'Show',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+            'projects' => [
+                'label' => 'Projects',
+                'requires_admin' => false,
+                'resources' => [
+                    'board' => [
+                        'label' => 'View Projects',
+                        'path' => 'projects',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'projects',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
             'manage' => [
                 'label' => 'Manage',
                 'requires_admin' => true,
@@ -217,6 +255,18 @@ class PortalModule implements ProductModule
                                     ],
                                 ],
                             ],
+                            [
+                                'method' => 'PATCH',
+                                'path' => 'requests/overtime/{id}',
+                                'label' => 'Edit',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'requests/overtime/{id}/cancel',
+                                'label' => 'Cancel',
+                                'auth' => true,
+                            ],
                         ],
                     ],
                     'offset' => [
@@ -253,6 +303,18 @@ class PortalModule implements ProductModule
                                     ],
                                 ],
                             ],
+                            [
+                                'method' => 'PATCH',
+                                'path' => 'requests/offset/{id}',
+                                'label' => 'Edit',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'requests/offset/{id}/cancel',
+                                'label' => 'Cancel',
+                                'auth' => true,
+                            ],
                         ],
                     ],
                     'reimbursement' => [
@@ -283,6 +345,12 @@ class PortalModule implements ProductModule
                                         ],
                                     ],
                                 ],
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'requests/reimbursement/receipts',
+                                'label' => 'Upload receipt',
+                                'auth' => true,
                             ],
                             [
                                 'method' => 'PATCH',

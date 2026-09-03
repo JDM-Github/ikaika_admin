@@ -53,6 +53,78 @@ final class PortalSubmittedReportPresenter
         return $value !== '' ? $value : null;
     }
 
+    /**
+     * Offset and overtime store the builder's line items in `reason` because the requests table
+     * has no entry rows. The member's words stay first; each following `- project / activity / Nh`
+     * line is an entry. The list and the details sheet show those apart, the way the old portal
+     * kept PROJECT / ACTIVITY / REMARKS as three columns.
+     *
+     * @return array{
+     *     remarks: ?string,
+     *     entries: list<array{projectLabel: string, activityLabel: string, hoursRendered: float, elementChange: float}>,
+     *     projectLabel: ?string
+     * }
+     */
+    public static function splitComposedReason(?string $reason): array
+    {
+        $text = trim((string) $reason);
+        if ($text === '') {
+            return ['remarks' => null, 'entries' => [], 'projectLabel' => null];
+        }
+
+        $remarkLines = [];
+        $entries = [];
+        foreach (preg_split("/\r\n|\n|\r/", $text) as $line) {
+            $line = trim((string) $line);
+            if ($line === '') {
+                continue;
+            }
+            $entry = self::composedEntryLine($line);
+            if ($entry !== null) {
+                $entries[] = $entry;
+
+                continue;
+            }
+            $remarkLines[] = $line;
+        }
+
+        $remarks = trim(implode("\n", $remarkLines));
+
+        return [
+            'remarks' => $remarks === '' ? null : $remarks,
+            'entries' => $entries,
+            'projectLabel' => $entries[0]['projectLabel'] ?? null,
+        ];
+    }
+
+    /**
+     * @return array{projectLabel: string, activityLabel: string, hoursRendered: float, elementChange: float}|null
+     */
+    private static function composedEntryLine(string $line): ?array
+    {
+        if (preg_match('/^-\s+(.+)\s+\/\s+([\d.]+)h$/', $line, $match) !== 1) {
+            return null;
+        }
+        $rest = $match[1] ?? '';
+        $separator = strrpos($rest, ' / ');
+        if ($separator === false) {
+            return null;
+        }
+        $project = trim(substr($rest, 0, $separator));
+        $activity = trim(substr($rest, $separator + 3));
+        $hours = round((float) ($match[2] ?? 0), 2);
+        if ($project === '' || $activity === '' || $hours <= 0) {
+            return null;
+        }
+
+        return [
+            'projectLabel' => $project,
+            'activityLabel' => $activity,
+            'hoursRendered' => $hours,
+            'elementChange' => 0.0,
+        ];
+    }
+
     public static function projectLabel(mixed $number, mixed $name): string
     {
         $label = trim(trim((string) $number).' '.trim((string) $name));

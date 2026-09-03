@@ -2,7 +2,7 @@
     <div class="brand">IKAIKA <small>Workspace · {{ $channel }}</small></div>
     <div class="bases" id="bases"></div>
     <div class="spacer"></div>
-    <span class="badge" title="The grid reads the live databases and never writes to them.">Read only</span>
+    <span class="badge" id="grants" hidden></span>
     <button type="button" class="keyhint" id="palette-open">Ctrl K &nbsp;jump to a table</button>
     <button type="button" class="ghost" id="console-toggle">Console</button>
     <form class="auth" id="login-form">
@@ -29,6 +29,8 @@
             </div>
             <div class="spacer"></div>
             <input class="search" id="search" placeholder="Search this table" spellcheck="false" autocomplete="off">
+            <button type="button" class="ghost" id="add-filter" title="Narrow this table by a column or a relationship">Filter</button>
+            <button type="button" class="ghost" id="open-views" title="Saved questions about this table">Views</button>
             <div class="seg" id="preset">
                 <button type="button" data-cols="key" class="active">Key</button>
                 <button type="button" data-cols="all">All</button>
@@ -52,3 +54,5 @@
 
 <div id="peek"></div>
 <div id="palette"></div>
+<div id="menu"></div>
+<div id="toast" aria-live="polite"></div>

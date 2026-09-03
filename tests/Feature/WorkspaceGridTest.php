@@ -6,10 +6,12 @@ use App\Modules\Portal\Models\Employee;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\ActsAsPortalEmployee;
 use Tests\TestCase;
 
 class WorkspaceGridTest extends TestCase
 {
+    use ActsAsPortalEmployee;
     use DatabaseTransactions;
 
     /**
@@ -83,6 +85,27 @@ class WorkspaceGridTest extends TestCase
         $this->getJson('/api/development/portal/_grid/projects?filter[drop_table]=eq:1', $this->authHeaders())
             ->assertOk()
             ->assertJsonMissing(['columns' => ['drop_table']]);
+    }
+
+    public function test_empty_and_filled_partition_a_column_between_them(): void
+    {
+        // Both arrive with no colon to split on, so a naive split read them as the
+        // literal value "empty" and quietly matched nothing.
+        $blank = DB::connection('portal')->table('projects')
+            ->where(function ($query): void {
+                $query->whereNull('type_of_job')->orWhere('type_of_job', '=', '');
+            })
+            ->count();
+        $this->assertGreaterThan(0, $blank);
+
+        $this->getJson('/api/development/portal/_grid/projects?filter[type_of_job]=empty', $this->authHeaders())
+            ->assertOk()
+            ->assertJsonPath('meta.total', $blank)
+            ->assertJsonPath('meta.filtered', true);
+
+        $filled = $this->getJson('/api/development/portal/_grid/projects?filter[type_of_job]=filled', $this->authHeaders());
+        $filled->assertOk();
+        $this->assertSame($filled->json('meta.unfiltered_total') - $blank, $filled->json('meta.total'));
     }
 
     public function test_search_and_sort_are_allow_listed_against_real_columns(): void
@@ -179,26 +202,65 @@ class WorkspaceGridTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_bank_and_government_id_columns_never_reach_a_member(): void
+    public function test_a_member_is_turned_away_from_the_workspace_with_a_reason(): void
+    {
+        $headers = $this->headersFor($this->member());
+
+        $this->getJson('/api/development/portal/_schema', $headers)
+            ->assertForbidden()
+            ->assertJsonPath('message', 'The data workspace is for administrators. Your work lives in the portal.');
+
+        $this->getJson('/api/development/portal/_grid/employees', $headers)->assertForbidden();
+    }
+
+    public function test_a_project_admin_sees_private_columns_locked_rather_than_missing(): void
     {
         $member = $this->member();
-        $token = $this->postJson('/api/development/portal/auth/login', ['id_no' => $member->id_no])->json('token');
+        DB::connection('portal')->table('employees')->where('id', $member->id)->update(['role' => 'ProjectAdmin']);
+        $headers = $this->headersFor($member->fresh());
 
-        $response = $this->getJson(
-            '/api/development/portal/_grid/employees?per_page=25&cols=all',
-            ['Authorization' => 'Bearer '.$token],
-        );
+        $response = $this->getJson('/api/development/portal/_grid/employees?per_page=5&cols=all', $headers);
         $response->assertOk();
 
-        $first = $response->json('data.0');
-        $this->assertArrayNotHasKey('bank_account_number', $first);
-        $this->assertArrayNotHasKey('tax_identification_no', $first);
-        $this->assertArrayNotHasKey('sss_no', $first);
-        $this->assertArrayNotHasKey('date_of_birth', $first);
+        // The column is on screen so the grid is not silently hiding it, but no value
+        // and no probe of one ever leaves PHP.
+        $this->assertSame(['locked' => true], $response->json('data.0.bank_account_number'));
+        $this->assertSame(['locked' => true], $response->json('data.0.tax_identification_no'));
+        $this->assertStringNotContainsString('bank_account_number`', (string) $response->json('sql'));
 
-        $encoded = $response->getContent();
-        $this->assertStringNotContainsString('bank_account_number', $encoded);
-        $this->assertStringNotContainsString('philhealth_no', $encoded);
+        $schema = $this->getJson('/api/development/portal/_schema/employees', $headers);
+        $schema->assertOk()->assertJsonPath('editable', false);
+
+        $fields = collect($schema->json('fields'))->keyBy('name');
+        $this->assertTrue($fields['sss_no']['locked']);
+        $this->assertFalse($fields['sss_no']['sortable']);
+        $this->assertFalse($fields['id_no']['locked']);
+
+        // A secret is absent at every tier, never merely locked.
+        $this->assertArrayNotHasKey('password_hash', $fields->all());
+        $this->assertNotContains('sss_no', $schema->json('presets.key'));
+    }
+
+    public function test_a_locked_column_cannot_be_filtered_or_sorted_back_into_view(): void
+    {
+        $member = $this->member();
+        DB::connection('portal')->table('employees')->where('id', $member->id)->update(['role' => 'ProjectAdmin']);
+        $headers = $this->headersFor($member->fresh());
+
+        $response = $this->getJson(
+            '/api/development/portal/_grid/employees?per_page=5&filter[bank_account_number]=filled&sort=sss_no:desc',
+            $headers,
+        );
+
+        $response->assertOk()
+            ->assertJsonPath('meta.filtered', false)
+            ->assertJsonPath('meta.sort', 'id:asc');
+
+        $this->assertSame(
+            $response->json('meta.total'),
+            $response->json('meta.unfiltered_total'),
+            'A locked column narrowed the page, which would leak which rows hold a value.',
+        );
     }
 
     public function test_the_estimator_resolves_links_without_any_foreign_keys(): void
@@ -253,32 +315,5 @@ class WorkspaceGridTest extends TestCase
         }
 
         return $count;
-    }
-
-    private function member(): Employee
-    {
-        $employee = Employee::query()
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->whereRaw("LOWER(COALESCE(role, '')) = 'user'")
-            ->whereNotNull('id_no')->where('id_no', '!=', '')->first();
-        $this->assertNotNull($employee);
-
-        return $employee;
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function authHeaders(): array
-    {
-        $employee = Employee::query()
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->whereNotNull('id_no')->where('id_no', '!=', '')->first();
-        $this->assertNotNull($employee);
-
-        $token = $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->json('token');
-        $this->assertIsString($token);
-
-        return ['Authorization' => 'Bearer '.$token];
     }
 }

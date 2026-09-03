@@ -34,10 +34,10 @@ class PortalSubmittedReportsTest extends TestCase
     {
         $this->getJson('/api/development/portal')
             ->assertOk()
-            ->assertJsonPath('sections.1.name', 'reports')
-            ->assertJsonPath('sections.1.resources.0.name', 'submitted')
-            ->assertJsonPath('sections.1.resources.0.url', '/api/development/portal/reports/submitted')
-            ->assertJsonPath('sections.1.requires_admin', false);
+            ->assertJsonPath('sections.3.name', 'reports')
+            ->assertJsonPath('sections.3.resources.0.name', 'submitted')
+            ->assertJsonPath('sections.3.resources.0.url', '/api/development/portal/reports/submitted')
+            ->assertJsonPath('sections.3.requires_admin', false);
     }
 
     public function test_a_member_reads_only_their_own_skinny_grouped_history(): void

@@ -8,8 +8,10 @@ use App\Support\Core\CoreLedger;
 use App\Support\Core\CoreRecycleKey;
 use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -41,6 +43,25 @@ final class PortalReimbursementRequests
 
     private const MAX_QUANTITY = 9999;
 
+    private const MAX_RECEIPT_BYTES = 8388608;
+
+    private const RECEIPT_FIELD = 'receipts';
+
+    private const RECEIPT_TABLE = 'reimbursements';
+
+    private const RECEIPT_CACHE_TTL_SECONDS = 3600;
+
+    /** @var list<string> */
+    private const RECEIPT_MIMES = [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'image/heic',
+        'image/heif',
+        'application/pdf',
+    ];
+
     private const NEW_STATUS = 'Pending';
 
     private const CANCELLED_STATUS = 'Cancelled';
@@ -65,6 +86,7 @@ final class PortalReimbursementRequests
     public function __construct(
         private readonly CoreLedger $ledger,
         private readonly PortalTimezone $timezone,
+        private readonly PortalCloudinary $cloudinary,
     ) {}
 
     /**
@@ -109,7 +131,7 @@ final class PortalReimbursementRequests
     public function create(Employee $actor, Request $request): array
     {
         $date = $this->validatedDate($request);
-        $items = $this->validatedItems($request);
+        $items = $this->validatedItems($actor, $request);
         $employeeId = (int) $actor->getKey();
         $name = $this->memberName($actor);
         $createdAt = $this->timezone->now();
@@ -138,6 +160,7 @@ final class PortalReimbursementRequests
                     'employee_id' => $employeeId,
                     'reimbursement_id' => $id,
                 ]);
+                $this->writeReceipt($id, $item['receipt']);
                 $ids[] = $id;
             }
 
@@ -167,6 +190,7 @@ final class PortalReimbursementRequests
         }
 
         $this->bumpCache();
+        $this->forgetReceipts($actor, $items);
 
         $claim = $this->readClaim($insertedIds, $actor);
         if ($claim === null) {
@@ -190,7 +214,7 @@ final class PortalReimbursementRequests
     {
         $rows = $this->ownPendingClaim($actor, $id);
         $date = $this->validatedDate($request);
-        $items = $this->validatedItems($request);
+        $items = $this->validatedItems($actor, $request);
         $employeeId = (int) $actor->getKey();
         $name = $this->memberName($actor);
         $seed = $rows[0];
@@ -221,6 +245,7 @@ final class PortalReimbursementRequests
                 $existingId = $existingIds[$index] ?? null;
                 if ($existingId !== null) {
                     $this->connection()->table('reimbursements')->where('id', $existingId)->update($payload);
+                    $this->writeReceipt($existingId, $item['receipt']);
                     $kept[] = $existingId;
 
                     continue;
@@ -232,6 +257,7 @@ final class PortalReimbursementRequests
                     'employee_id' => $employeeId,
                     'reimbursement_id' => $newId,
                 ]);
+                $this->writeReceipt($newId, $item['receipt']);
                 $kept[] = $newId;
             }
 
@@ -258,6 +284,7 @@ final class PortalReimbursementRequests
         );
 
         $this->bumpCache();
+        $this->forgetReceipts($actor, $items);
 
         $claim = $this->readClaim($keptIds, $actor);
         if ($claim === null) {
@@ -315,6 +342,48 @@ final class PortalReimbursementRequests
             'section' => 'requests',
             'resource' => 'reimbursement',
             'data' => $claim,
+        ];
+    }
+
+    /**
+     * Upload one receipt to Cloudinary and hold it until the claim is filed. The file is not a
+     * row yet: the item id does not exist until POST /requests/reimbursement writes it.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function storeReceipt(Employee $actor, Request $request): array
+    {
+        $file = $request->file('file');
+        if (! $file instanceof UploadedFile || ! $file->isValid()) {
+            abort(422, 'Choose an image or PDF receipt.');
+        }
+        if ($file->getSize() > self::MAX_RECEIPT_BYTES) {
+            abort(422, 'A receipt cannot be larger than 8 MB.');
+        }
+        $mime = $file->getMimeType();
+        if (! is_string($mime) || ! in_array($mime, self::RECEIPT_MIMES, true)) {
+            abort(422, 'A receipt has to be a JPEG, PNG, WebP, GIF or PDF.');
+        }
+
+        $stored = $this->cloudinary->uploadReceipt($file);
+        $receiptId = (string) Str::uuid();
+        Cache::put(
+            $this->receiptCacheKey($actor, $receiptId),
+            $stored,
+            self::RECEIPT_CACHE_TTL_SECONDS,
+        );
+
+        return [
+            'section' => 'requests',
+            'resource' => 'reimbursement',
+            'data' => [
+                'receiptId' => $receiptId,
+                'fileName' => $stored['fileName'],
+                'fileUrl' => $stored['fileUrl'],
+                'mimeType' => $stored['mimeType'],
+                'sizeBytes' => $stored['sizeBytes'],
+                'thumbUrl' => $this->cloudinary->thumbUrl($stored['fileUrl'], $stored['mimeType']),
+            ],
         ];
     }
 
@@ -428,6 +497,10 @@ final class PortalReimbursementRequests
             ->orderByDesc('reimbursements.id')
             ->get();
 
+        $receipts = $this->receiptsByItemId(
+            $rows->map(static fn (object $row): int => (int) $row->id)->all(),
+        );
+
         $groups = [];
         foreach ($rows as $row) {
             $groups[$this->claimKey($employeeId, $row)][] = $row;
@@ -435,7 +508,7 @@ final class PortalReimbursementRequests
 
         $data = [];
         foreach ($groups as $group) {
-            $claim = $this->presentClaim($group, $actor);
+            $claim = $this->presentClaim($group, $actor, $receipts);
             if ($claim !== null) {
                 $data[] = $claim;
             }
@@ -474,14 +547,15 @@ final class PortalReimbursementRequests
             ->get()
             ->all();
 
-        return $this->presentClaim($rows, $actor);
+        return $this->presentClaim($rows, $actor, $this->receiptsByItemId($ids));
     }
 
     /**
      * @param  list<object>  $rows
+     * @param  array<int, object>  $receipts
      * @return array<string, mixed>|null
      */
-    private function presentClaim(array $rows, Employee $actor): ?array
+    private function presentClaim(array $rows, Employee $actor, array $receipts): ?array
     {
         if ($rows === []) {
             return null;
@@ -497,15 +571,25 @@ final class PortalReimbursementRequests
         $items = [];
         $approverRemarks = null;
         foreach ($rows as $row) {
-            $ids[] = (int) $row->id;
+            $itemId = (int) $row->id;
+            $ids[] = $itemId;
+            $receipt = $receipts[$itemId] ?? null;
+            $fileUrl = $receipt === null ? null : $this->text($receipt->file_url ?? null);
+            $fileName = $receipt === null ? null : $this->text($receipt->file_name ?? null);
+            $mime = $receipt === null ? null : $this->text($receipt->mime_type ?? null);
             $items[] = [
-                'id' => (string) (int) $row->id,
+                'id' => (string) $itemId,
                 'label' => $this->text($row->item ?? null) ?? 'Item',
                 'cost' => round((float) ($row->cost ?? 0), 2),
                 'quantity' => $this->quantity($row->qty ?? null),
                 'teamLabel' => $this->text($row->team ?? null),
                 'purpose' => $this->text($row->purpose ?? null),
-                'receiptName' => null,
+                'receiptName' => $fileName,
+                'receiptUrl' => $fileUrl,
+                'receiptMime' => $mime,
+                'receiptThumbUrl' => $fileUrl === null || $mime === null
+                    ? null
+                    : $this->cloudinary->thumbUrl($fileUrl, $mime),
             ];
             if ($approverRemarks === null) {
                 $approverRemarks = $this->text($row->approver_remarks ?? null);
@@ -597,9 +681,16 @@ final class PortalReimbursementRequests
     }
 
     /**
-     * @return list<array{label: string, cost: float, quantity: int, teamLabel: string, purpose: ?string}>
+     * @return list<array{
+     *     label: string,
+     *     cost: float,
+     *     quantity: int,
+     *     teamLabel: string,
+     *     purpose: ?string,
+     *     receipt: ?array{fileName: string, fileUrl: string, sizeBytes: int, mimeType: string, cacheKey: ?string}
+     * }>
      */
-    private function validatedItems(Request $request): array
+    private function validatedItems(Employee $actor, Request $request): array
     {
         $raw = $request->input('items');
         if (! is_array($raw) || $raw === []) {
@@ -632,6 +723,7 @@ final class PortalReimbursementRequests
                 'quantity' => $this->validatedQuantity($item['quantity'] ?? null),
                 'teamLabel' => $team,
                 'purpose' => $this->validatedPurpose($item['purpose'] ?? null),
+                'receipt' => $this->validatedReceipt($actor, $item),
             ];
         }
 
@@ -773,6 +865,120 @@ final class PortalReimbursementRequests
     }
 
     /**
+     * @param  array<string, mixed>  $item
+     * @return array{fileName: string, fileUrl: string, sizeBytes: int, mimeType: string, cacheKey: ?string}|null
+     */
+    private function validatedReceipt(Employee $actor, array $item): ?array
+    {
+        $receiptId = trim((string) ($item['receiptId'] ?? ''));
+        if ($receiptId !== '') {
+            $key = $this->receiptCacheKey($actor, $receiptId);
+            $cached = Cache::get($key);
+            if (! is_array($cached) || ! is_string($cached['fileUrl'] ?? null)) {
+                abort(422, 'That receipt upload expired. Attach the file again.');
+            }
+
+            return [
+                'fileName' => is_string($cached['fileName'] ?? null) ? $cached['fileName'] : 'receipt',
+                'fileUrl' => $cached['fileUrl'],
+                'sizeBytes' => (int) ($cached['sizeBytes'] ?? 0),
+                'mimeType' => is_string($cached['mimeType'] ?? null)
+                    ? $cached['mimeType']
+                    : 'application/octet-stream',
+                'cacheKey' => $key,
+            ];
+        }
+
+        $url = trim((string) ($item['receiptUrl'] ?? ''));
+        if ($url === '') {
+            return null;
+        }
+        if (! $this->cloudinary->isOwnedUrl($url)) {
+            abort(422, 'That receipt is not one this form uploaded.');
+        }
+        $name = trim((string) ($item['receiptName'] ?? ''));
+        $mime = trim((string) ($item['receiptMime'] ?? ''));
+
+        return [
+            'fileName' => $name !== '' ? $name : 'receipt',
+            'fileUrl' => $url,
+            'sizeBytes' => is_numeric($item['receiptSize'] ?? null) ? (int) $item['receiptSize'] : 0,
+            'mimeType' => $mime !== '' ? $mime : 'application/octet-stream',
+            'cacheKey' => null,
+        ];
+    }
+
+    /**
+     * @param  array{fileName: string, fileUrl: string, sizeBytes: int, mimeType: string, cacheKey: ?string}|null  $receipt
+     */
+    private function writeReceipt(int $itemId, ?array $receipt): void
+    {
+        $this->connection()->table('attachments')
+            ->where('table_name', self::RECEIPT_TABLE)
+            ->where('record_id', $itemId)
+            ->where('field_name', self::RECEIPT_FIELD)
+            ->delete();
+
+        if ($receipt === null) {
+            return;
+        }
+
+        $this->connection()->table('attachments')->insert([
+            'table_name' => self::RECEIPT_TABLE,
+            'record_id' => $itemId,
+            'field_name' => self::RECEIPT_FIELD,
+            'file_url' => $receipt['fileUrl'],
+            'file_name' => $receipt['fileName'],
+            'file_size_bytes' => $receipt['sizeBytes'],
+            'mime_type' => $receipt['mimeType'],
+        ]);
+    }
+
+    /**
+     * @param  list<int>  $ids
+     * @return array<int, object>
+     */
+    private function receiptsByItemId(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        $rows = $this->connection()
+            ->table('attachments')
+            ->select(['record_id', 'file_url', 'file_name', 'file_size_bytes', 'mime_type'])
+            ->where('table_name', self::RECEIPT_TABLE)
+            ->where('field_name', self::RECEIPT_FIELD)
+            ->whereIn('record_id', $ids)
+            ->get();
+
+        $mapped = [];
+        foreach ($rows as $row) {
+            $mapped[(int) $row->record_id] = $row;
+        }
+
+        return $mapped;
+    }
+
+    /**
+     * @param  list<array{receipt: ?array{cacheKey: ?string}}>  $items
+     */
+    private function forgetReceipts(Employee $actor, array $items): void
+    {
+        foreach ($items as $item) {
+            $key = $item['receipt']['cacheKey'] ?? null;
+            if (is_string($key) && $key !== '') {
+                Cache::forget($key);
+            }
+        }
+    }
+
+    private function receiptCacheKey(Employee $actor, string $receiptId): string
+    {
+        return 'portal:requests:reimbursement:receipt:'.$actor->getKey().':'.$receiptId;
+    }
+
+    /**
      * @param  list<int>  $ids
      */
     private function deleteClaims(array $ids): void
@@ -781,6 +987,11 @@ final class PortalReimbursementRequests
             return;
         }
 
+        $this->connection()->table('attachments')
+            ->where('table_name', self::RECEIPT_TABLE)
+            ->where('field_name', self::RECEIPT_FIELD)
+            ->whereIn('record_id', $ids)
+            ->delete();
         $this->connection()->table('employees_reimbursements')->whereIn('reimbursement_id', $ids)->delete();
         $this->connection()->table('reimbursements')->whereIn('id', $ids)->delete();
     }

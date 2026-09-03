@@ -77,6 +77,14 @@ class PortalOffsetRequestsTest extends TestCase
         $this->assertStringContainsString('Saturday coverage', (string) $row->reason);
         $this->assertStringContainsString('REVIT MODELING', (string) $row->reason);
 
+        $listed = $this->withToken($token)->getJson(
+            '/api/development/portal/requests/offset?from='.$work.'&to='.$dayOff,
+        )->assertOk();
+        $this->assertSame('Saturday coverage', $listed->json('data.0.remarks'));
+        $this->assertSame($this->projectLabel($project), $listed->json('data.0.projectLabel'));
+        $this->assertCount(2, $listed->json('data.0.entries'));
+        $this->assertSame('QC', $listed->json('data.0.entries.1.activityLabel'));
+
         $this->assertTrue(DB::connection('portal')->table('projects_requests')
             ->where('request_id', $row->id)
             ->where('project_id', $project->id)
@@ -274,11 +282,118 @@ class PortalOffsetRequestsTest extends TestCase
         $this->assertSame([$dayOff], $list->json('data.*.dayOffOn'));
         $this->assertEquals(8, $list->json('data.0.hours'));
         $this->assertSame('approved', $list->json('data.0.status'));
-        $this->assertSame(
-            ['id', 'createdOn', 'requestedOn', 'dayOffOn', 'hours', 'remarks', 'status', 'approverRemarks'],
-            array_keys($list->json('data.0')),
-        );
+        $this->assertSame('existing offset', $list->json('data.0.remarks'));
+        $this->assertSame([], $list->json('data.0.entries'));
         $this->assertArrayNotHasKey('memberName', $list->json('data.0'));
+    }
+
+    public function test_a_pending_offset_can_be_edited_and_a_decided_one_cannot(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $work = $this->freeDate($actor, 2);
+        $dayOff = $this->freeDayOff($actor, $work, 1);
+        $movedOff = $this->freeDayOff($actor, $work, 2);
+        $id = $this->insertOffset($actor, $work, $dayOff, 'Pending');
+        Cache::flush();
+        $token = $this->loginToken($actor);
+
+        $this->withToken($token)->patchJson('/api/development/portal/requests/offset/'.$id, [
+            'workDate' => $work,
+            'dayOffDate' => $movedOff,
+            'reason' => 'Coverage moved',
+            'entries' => [[
+                'projectLabel' => $this->projectLabel($project),
+                'activityLabel' => 'QC',
+                'hoursRendered' => 8,
+                'elementChange' => 1,
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.requestedOn', $work)
+            ->assertJsonPath('data.dayOffOn', $movedOff)
+            ->assertJsonPath('data.remarks', 'Coverage moved')
+            ->assertJsonPath('data.entries.0.activityLabel', 'QC');
+
+        $this->assertTrue(Action::query()
+            ->where('resource', 'requests.offset')
+            ->where('record_id', (string) $id)
+            ->where('action_type', CoreActionType::EDIT)
+            ->exists());
+
+        DB::connection('portal')->table('requests')->where('id', $id)->update(['status' => 'Approved']);
+        Cache::flush();
+
+        $this->withToken($token)->patchJson('/api/development/portal/requests/offset/'.$id, [
+            'workDate' => $work,
+            'dayOffDate' => $movedOff,
+            'reason' => 'Too late',
+            'entries' => [[
+                'projectLabel' => $this->projectLabel($project),
+                'activityLabel' => 'QC',
+                'hoursRendered' => 8,
+                'elementChange' => 0,
+            ]],
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Only a request nobody has decided on yet can be changed.');
+
+        $this->withToken($token)
+            ->postJson('/api/development/portal/requests/offset/'.$id.'/cancel')
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Only a request nobody has decided on yet can be changed.');
+    }
+
+    public function test_a_pending_request_can_be_cancelled_and_the_day_comes_back(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $work = $this->freeDate($actor, 2);
+        $dayOff = $this->freeDayOff($actor, $work, 1);
+        $id = $this->insertOffset($actor, $work, $dayOff, 'Pending');
+        Cache::flush();
+        $token = $this->loginToken($actor);
+
+        $this->withToken($token)
+            ->postJson('/api/development/portal/requests/offset/'.$id.'/cancel')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'cancelled');
+
+        // The row stays: the history records what was asked for, not only what stood.
+        $this->assertSame('Cancelled', DB::connection('portal')->table('requests')
+            ->where('id', $id)->value('status'));
+
+        // And both days are free again, so the same pair can be asked for a second time.
+        Cache::flush();
+        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
+            'requests' => [$this->group($work, $dayOff, $project)],
+        ])->assertCreated();
+    }
+
+    public function test_somebody_elses_offset_is_not_found_rather_than_forbidden(): void
+    {
+        $actor = $this->activeMember();
+        $other = $this->otherActiveMember($actor);
+        $work = Carbon::today()->subDays(2)->toDateString();
+        $dayOff = Carbon::today()->addDays(1)->toDateString();
+        $id = $this->insertOffset($other, $work, $dayOff, 'Pending');
+        $token = $this->loginToken($actor);
+
+        // Whose request it is is not this member's to learn.
+        $this->withToken($token)
+            ->postJson('/api/development/portal/requests/offset/'.$id.'/cancel')
+            ->assertStatus(404);
+        $this->withToken($token)->patchJson('/api/development/portal/requests/offset/'.$id, [
+            'workDate' => $work,
+            'dayOffDate' => $dayOff,
+            'reason' => 'Coverage moved',
+            'entries' => [[
+                'projectLabel' => '260005 IKAIKA Portal V2',
+                'activityLabel' => 'QC',
+                'hoursRendered' => 8,
+                'elementChange' => 1,
+            ]],
+        ])->assertStatus(404);
     }
 
     public function test_offset_requires_authentication(): void
@@ -286,6 +401,8 @@ class PortalOffsetRequestsTest extends TestCase
         $this->postJson('/api/development/portal/requests/offset', ['requests' => []])
             ->assertStatus(401);
         $this->getJson('/api/development/portal/requests/offset')->assertStatus(401);
+        $this->patchJson('/api/development/portal/requests/offset/1', [])->assertStatus(401);
+        $this->postJson('/api/development/portal/requests/offset/1/cancel')->assertStatus(401);
     }
 
     /**

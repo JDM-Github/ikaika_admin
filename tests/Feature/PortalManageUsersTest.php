@@ -32,9 +32,9 @@ class PortalManageUsersTest extends TestCase
     {
         $this->getJson('/api/development/portal')
             ->assertOk()
-            ->assertJsonPath('sections.0.name', 'manage')
-            ->assertJsonPath('sections.0.resources.0.name', 'users')
-            ->assertJsonPath('sections.0.resources.0.url', '/api/development/portal/manage/users');
+            ->assertJsonPath('sections.2.name', 'manage')
+            ->assertJsonPath('sections.2.resources.0.name', 'users')
+            ->assertJsonPath('sections.2.resources.0.url', '/api/development/portal/manage/users');
     }
 
     public function test_the_roster_is_skinny_and_includes_counts(): void

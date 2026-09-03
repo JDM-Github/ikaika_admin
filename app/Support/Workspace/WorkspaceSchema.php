@@ -8,7 +8,8 @@ namespace App\Support\Workspace;
  * Junction tables never appear in the rail. They are Airtable link fields wearing a
  * table costume -- 26 of the portal's 48 tables are junctions -- so they are folded
  * into chip columns on both parents instead, which is what the Airtable base they
- * were converted from actually showed.
+ * were converted from actually showed. WorkspaceLinks builds those columns; this
+ * class decides what a table looks like once they are in.
  */
 final class WorkspaceSchema
 {
@@ -22,7 +23,15 @@ final class WorkspaceSchema
      */
     private const KEY_PRESET_SIZE = 8;
 
-    public function __construct(private readonly WorkspaceIntrospector $introspector) {}
+    /**
+     * Chip columns the Key preset shows before it goes back to scalars.
+     */
+    private const KEY_PRESET_LINKS = 3;
+
+    public function __construct(
+        private readonly WorkspaceIntrospector $introspector,
+        private readonly WorkspaceLinks $links,
+    ) {}
 
     /**
      * The table rail: every browsable table with its exact row count.
@@ -77,32 +86,46 @@ final class WorkspaceSchema
      * Every field of one table, ordered so the useful half of a 93-column table is on
      * screen before the first horizontal scroll.
      *
-     * @return array{product: string, table: string, label: string, rows: int, title: string, fields: list<array<string, mixed>>, presets: array{key: list<string>, all: list<string>}}
+     * @return array{product: string, table: string, label: string, rows: int, title: string, key: ?string, editable: bool, fields: list<array<string, mixed>>, presets: array{key: list<string>, all: list<string>}}
      */
-    public function table(string $product, string $table, bool $isAdmin): array
+    public function table(string $product, string $table, WorkspaceAccess $access): array
     {
         $this->assertBrowsable($product, $table);
 
         $columns = $this->introspector->columns($product)[$table] ?? [];
         $readable = [];
         foreach ($columns as $column) {
-            if (! WorkspaceRedactor::isHidden($column['name'], $isAdmin)) {
+            if (! WorkspaceRedactor::isSecret($column['name'])) {
                 $readable[] = $column;
             }
         }
 
         $probeable = [];
         foreach ($readable as $column) {
-            if ($this->isStringColumn($column['data_type'])) {
+            if ($this->isStringColumn($column['data_type']) && ! $this->isLocked($column['name'], $access)) {
                 $probeable[] = $column['name'];
             }
         }
 
         $probes = $this->introspector->probe($product, $table, $probeable);
         $title = $this->titleColumn($product, $table);
+        $references = $this->links->parentColumns($product, $table);
+        $key = $this->introspector->surrogateKey($product, $table);
+        $writable = $key !== null && $access->canEdit() && WorkspaceWriter::isWritable($product);
 
         $fields = [];
         foreach ($readable as $column) {
+            $reference = $references[$column['name']] ?? null;
+            if ($reference !== null) {
+                $fields[] = array_merge($reference, [
+                    'locked' => false,
+                    'filled' => $probes[$column['name']]['nonnull'] ?? null,
+                ]);
+
+                continue;
+            }
+
+            $locked = $this->isLocked($column['name'], $access);
             $type = WorkspaceFieldType::infer($column, $probes[$column['name']] ?? null);
             if ($column['name'] === $title && $type !== WorkspaceFieldType::ID) {
                 $type = WorkspaceFieldType::TITLE;
@@ -114,10 +137,12 @@ final class WorkspaceSchema
                 'type' => $type,
                 'width' => WorkspaceFieldType::width($type),
                 'nullable' => $column['nullable'],
-                'sortable' => true,
-                'searchable' => WorkspaceFieldType::isSearchable($type),
+                'sortable' => ! $locked,
+                'searchable' => ! $locked && WorkspaceFieldType::isSearchable($type),
                 'numeric' => WorkspaceFieldType::isNumericType($type),
-                'filled' => $probes[$column['name']]['nonnull'] ?? null,
+                'filled' => $locked ? null : ($probes[$column['name']]['nonnull'] ?? null),
+                'locked' => $locked,
+                'editable' => $writable && ! $locked && WorkspaceFieldType::isEditable($type),
             ];
 
             if ($type === WorkspaceFieldType::SELECT) {
@@ -127,11 +152,11 @@ final class WorkspaceSchema
             $fields[] = $field;
         }
 
-        foreach ($this->linkFields($product, $table) as $link) {
+        foreach ($this->links->fields($product, $table) as $link) {
             $fields[] = $link;
         }
 
-        $fields = $this->ordered($fields);
+        $fields = $this->ordered($fields, $table);
         $counts = $this->introspector->rowCounts($product, [$table]);
 
         return [
@@ -140,107 +165,21 @@ final class WorkspaceSchema
             'label' => $this->tableLabel($product, $table),
             'rows' => $counts[$table] ?? 0,
             'title' => $title,
+            'key' => $key,
+            'editable' => $writable,
             'fields' => $fields,
             'presets' => $this->presets($fields),
         ];
     }
 
     /**
-     * Link fields for one table, one per junction side. A junction carrying a
-     * qualifier column splits into one field per value, so employees_projects becomes
-     * PM, Project Members and Support Members rather than a single opaque column.
-     *
-     * @return list<array<string, mixed>>
+     * A private column stays on screen for someone who may not read it, greyed and
+     * empty. Dropping it outright made the grid look as though the column did not
+     * exist, which answers the question worse than naming who may see it.
      */
-    public function linkFields(string $product, string $table): array
+    private function isLocked(string $column, WorkspaceAccess $access): bool
     {
-        $labels = (array) config('workspace.link_labels', []);
-        $fields = [];
-
-        foreach ($this->introspector->junctions($product) as $junction => $shape) {
-            foreach ([['left', 'right'], ['right', 'left']] as [$near, $far]) {
-                if ($shape[$near] !== $table) {
-                    continue;
-                }
-
-                $target = $shape[$far];
-                $variants = [null];
-                if ($shape['qualifier'] !== null) {
-                    $found = $this->introspector->options($product, $junction, $shape['qualifier'], 8);
-                    $variants = $found === [] ? [null] : $found;
-                }
-
-                foreach ($variants as $variant) {
-                    $name = $variant === null ? 'link__'.$target : 'link__'.$target.'__'.$variant;
-                    $label = $variant === null
-                        ? WorkspaceFieldType::label($target)
-                        : (string) ($labels[$variant] ?? WorkspaceFieldType::label($variant));
-
-                    $fields[] = [
-                        'name' => $name,
-                        'label' => $label,
-                        'hint' => $this->linkHint($junction, $target, (string) $shape[$far.'_column']),
-                        'type' => WorkspaceFieldType::LINK,
-                        'width' => WorkspaceFieldType::width(WorkspaceFieldType::LINK),
-                        'nullable' => true,
-                        'sortable' => false,
-                        'searchable' => false,
-                        'numeric' => false,
-                        'filled' => null,
-                        'target' => $target,
-                        'via' => $junction,
-                        'near_column' => $shape[$near.'_column'],
-                        'far_column' => $shape[$far.'_column'],
-                        'qualifier' => $shape['qualifier'],
-                        'variant' => $variant,
-                    ];
-                }
-            }
-        }
-
-        return $this->disambiguated($fields);
-    }
-
-    /**
-     * Two junctions can reach the same table from one side, and a self-join reaches it
-     * twice through a single junction -- employees links to employees as both manager
-     * and report. A bare link__employees would collide, so colliding names take the
-     * relationship as a suffix and the rest keep the clean name.
-     *
-     * @param  list<array<string, mixed>>  $fields
-     * @return list<array<string, mixed>>
-     */
-    private function disambiguated(array $fields): array
-    {
-        $seen = [];
-        foreach ($fields as $field) {
-            $seen[(string) $field['name']] = ($seen[(string) $field['name']] ?? 0) + 1;
-        }
-
-        $resolved = [];
-        foreach ($fields as $field) {
-            $name = (string) $field['name'];
-            if (($seen[$name] ?? 0) > 1) {
-                $field['name'] = $name.'__'.$field['hint'];
-                $field['label'] = $field['label'].' ('.WorkspaceFieldType::label((string) $field['hint']).')';
-            }
-
-            unset($field['hint']);
-            $resolved[] = $field;
-        }
-
-        return $resolved;
-    }
-
-    /**
-     * What tells two links to the same table apart: the column pointed at for a
-     * self-join, the junction otherwise.
-     */
-    private function linkHint(string $junction, string $target, string $farColumn): string
-    {
-        $stem = str_ends_with($farColumn, '_id') ? substr($farColumn, 0, -3) : $farColumn;
-
-        return $stem === rtrim($target, 's') ? $junction : $stem;
+        return WorkspaceRedactor::isPrivate($column) && ! $access->canReadPrivate();
     }
 
     /**
@@ -337,15 +276,41 @@ final class WorkspaceSchema
      * @param  list<array<string, mixed>>  $fields
      * @return list<array<string, mixed>>
      */
-    private function ordered(array $fields): array
+    private function ordered(array $fields, string $table): array
     {
-        usort($fields, function (array $a, array $b): int {
+        usort($fields, function (array $a, array $b) use ($table): int {
             $rank = WorkspaceFieldType::rank((string) $a['type']) <=> WorkspaceFieldType::rank((string) $b['type']);
+            if ($rank !== 0) {
+                return $rank;
+            }
 
-            return $rank !== 0 ? $rank : strcmp((string) $a['name'], (string) $b['name']);
+            $priority = $this->linkPriority($a, $table) <=> $this->linkPriority($b, $table);
+
+            return $priority !== 0 ? $priority : strcmp((string) $a['name'], (string) $b['name']);
         });
 
         return array_values($fields);
+    }
+
+    /**
+     * Which links lead the pack. A link we bothered to name in config is one the
+     * Airtable base showed as its own field, and a self-join -- an employee's manager
+     * and reports -- is the one a reader is least often after.
+     *
+     * @param  array<string, mixed>  $field
+     */
+    private function linkPriority(array $field, string $table): int
+    {
+        if (($field['type'] ?? '') !== WorkspaceFieldType::LINK) {
+            return 0;
+        }
+
+        $variant = $field['variant'] ?? null;
+        if (is_string($variant) && isset(((array) config('workspace.link_labels', []))[$variant])) {
+            return 0;
+        }
+
+        return ($field['target'] ?? null) === $table ? 2 : 1;
     }
 
     /**
@@ -366,6 +331,7 @@ final class WorkspaceSchema
             }
         }
 
+        $links = 0;
         foreach ($fields as $field) {
             if (count($key) >= self::KEY_PRESET_SIZE + count(array_slice($key, 0, 2))) {
                 break;
@@ -375,6 +341,19 @@ final class WorkspaceSchema
             }
             if ($field['type'] === WorkspaceFieldType::EXTERNAL || $field['filled'] === 0) {
                 continue;
+            }
+            if (($field['locked'] ?? false) === true) {
+                continue;
+            }
+
+            // employees carries eight of them; unchecked they would fill the preset and
+            // leave no room for the name the reader came to find.
+            if ($field['type'] === WorkspaceFieldType::LINK) {
+                if ($links >= self::KEY_PRESET_LINKS) {
+                    continue;
+                }
+
+                $links++;
             }
 
             $key[] = (string) $field['name'];

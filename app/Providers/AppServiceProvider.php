@@ -34,6 +34,19 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(240)->by('workspace:'.$this->portalLimiterKey($request));
         });
 
+        // A cell at a time by hand. Anything faster is a script and belongs elsewhere.
+        RateLimiter::for('workspace-write', function (Request $request) {
+            return Limit::perMinute(30)->by('workspace-write:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-home', function (Request $request) {
+            return Limit::perMinute(60)->by('home:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-projects', function (Request $request) {
+            return Limit::perMinute(60)->by('projects:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-manage-users', function (Request $request) {
             return Limit::perMinute(60)->by('manage-users:'.$this->portalLimiterKey($request));
         });

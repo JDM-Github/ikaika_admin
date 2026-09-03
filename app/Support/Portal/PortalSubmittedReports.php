@@ -107,6 +107,10 @@ final class PortalSubmittedReports
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         Cache::forever(self::CACHE_VERSION_KEY, $current + 1);
+
+        // The dashboard reads this month's reports; a filed or deleted day must refresh it too.
+        $homeVersion = (int) Cache::get(PortalHome::CACHE_VERSION_KEY, 1);
+        Cache::forever(PortalHome::CACHE_VERSION_KEY, $homeVersion + 1);
     }
 
     /**

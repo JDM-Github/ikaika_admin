@@ -304,7 +304,8 @@
     tbody tr:hover td { background: #1c1f25; }
     tbody tr.on td { background: #1f2530; }
 
-    td.gutter { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
+    td.gutter { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; cursor: pointer; }
+    tbody tr:hover td.gutter { color: var(--ink); }
     td.num { text-align: right; font-variant-numeric: tabular-nums; }
     td.mono, th.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 
@@ -347,6 +348,127 @@
 
     .check { color: var(--ok); }
     .uncheck { color: #4b525d; }
+
+    /* A column the reader may not open is shown, not hidden -- an absent column reads
+       as "no such data", which is a worse answer than "not yours to see". */
+    .locked { color: #4b525d; letter-spacing: 2px; user-select: none; }
+    th.locked-head .head span:first-child { color: #5b6270; }
+
+    /* One chip standing for a foreign key, not a list. */
+    .chip.one { background: transparent; border-style: dashed; }
+
+    td.editable { cursor: text; }
+    td.editable:hover { box-shadow: inset 0 0 0 1px var(--line); }
+    td.editing { padding: 0; box-shadow: inset 0 0 0 2px var(--accent); }
+
+    td.editing input, td.editing select {
+        width: 100%;
+        height: calc(var(--row-height) - 2px);
+        border: 0;
+        background: var(--raise);
+        padding: 0 9px;
+        outline: none;
+    }
+
+    td.saving { opacity: 0.5; }
+
+    /* Menus ----------------------------------------------------------- */
+
+    .menu {
+        position: fixed;
+        z-index: 40;
+        min-width: 260px;
+        max-width: 340px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .menu h4 {
+        margin: 2px 4px 0;
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--dim);
+    }
+
+    .menu select, .menu input[type="text"] {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 6px 8px;
+        outline: none;
+    }
+
+    .menu select:focus, .menu input:focus { border-color: var(--accent); }
+
+    .menu .actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 2px; }
+
+    .menu .actions button {
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--muted);
+        border-radius: 6px;
+        padding: 4px 11px;
+    }
+
+    .menu .actions button.go { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); }
+    .menu .actions button:hover { color: var(--ink); }
+
+    .menu .item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        text-align: left;
+        padding: 6px 8px;
+        border-radius: 6px;
+    }
+
+    .menu .item:hover { background: var(--accent-soft); color: var(--ink); }
+    .menu .item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .menu .item .who { color: var(--dim); font-size: 11px; }
+    .menu .item .drop { color: var(--dim); padding: 0 3px; }
+    .menu .item .drop:hover { color: var(--bad); }
+    .menu .none { color: var(--dim); padding: 6px 8px; }
+    .menu label { display: flex; align-items: center; gap: 7px; color: var(--muted); padding: 0 4px; }
+
+    /* Toast ----------------------------------------------------------- */
+
+    #toast {
+        position: fixed;
+        left: 50%;
+        bottom: 26px;
+        transform: translateX(-50%);
+        z-index: 60;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: center;
+        pointer-events: none;
+    }
+
+    #toast .note {
+        background: var(--raise);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 7px 14px;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+        max-width: 60vw;
+    }
+
+    #toast .note.bad { border-color: var(--bad); color: #f0c3c6; }
+    #toast .note.ok { border-color: var(--ok); }
 
     /* Footer ---------------------------------------------------------- */
 
@@ -397,6 +519,8 @@
 
     .peek .row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; padding: 7px 14px; border-bottom: 1px solid var(--line-soft); }
     .peek .row .k { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+    .peek .row .k .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .ghost.mini { padding: 0 6px; font-size: 11px; margin-left: 2px; vertical-align: middle; }
     .peek .row .v { word-break: break-word; white-space: pre-wrap; }
 
     /* Command palette -------------------------------------------------- */

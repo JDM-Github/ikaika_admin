@@ -41,6 +41,11 @@
     var peekEl = el('peek');
     var paletteEl = el('palette');
     var paletteOpen = el('palette-open');
+    var grantsEl = el('grants');
+    var addFilterBtn = el('add-filter');
+    var openViewsBtn = el('open-views');
+    var menuEl = el('menu');
+    var toastEl = el('toast');
     var loginForm = el('login-form');
     var idNoInput = el('id_no');
     var whoEl = el('who');
@@ -174,11 +179,16 @@
 
     // ---------------------------------------------------------------- http
 
-    async function getJson(url) {
+    async function send(method, url, body) {
         var headers = { Accept: 'application/json' };
         var bearer = token();
         if (bearer) headers.Authorization = 'Bearer ' + bearer;
-        var response = await fetch(url, { headers: headers });
+        var options = { method: method, headers: headers };
+        if (body !== undefined) {
+            headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(body);
+        }
+        var response = await fetch(url, options);
         var payload = null;
         try { payload = await response.json(); } catch (e) { payload = null; }
         if (!response.ok) {
@@ -188,6 +198,8 @@
         }
         return payload;
     }
+
+    function getJson(url) { return send('GET', url); }
 
     // ------------------------------------------------------------ elements
 
@@ -200,6 +212,16 @@
 
     function clear(node) {
         while (node.firstChild) node.removeChild(node.firstChild);
+    }
+
+    // A confirmation of something already on screen clears fast; a refusal has to be
+    // read, so it stays for a beat longer.
+    function toast(text, kind) {
+        var note = make('div', 'note' + (kind ? ' ' + kind : ''), text);
+        toastEl.appendChild(note);
+        window.setTimeout(function () {
+            if (note.parentNode) note.parentNode.removeChild(note);
+        }, kind === 'bad' ? 6000 : 2200);
     }
 
     function stateMessage(node, heading, detail) {
@@ -263,10 +285,21 @@
     // ---------------------------------------------------------------- rail
 
     async function loadNav(base) {
-        if (navCache[base]) return navCache[base];
+        if (navCache[base]) { renderGrants(navCache[base].grants); return navCache[base]; }
         var payload = await getJson(apiUrl(base, '_schema'));
         navCache[base] = payload;
+        renderGrants(payload.grants);
         return payload;
+    }
+
+    // Say what this account may do before it tries something and is refused.
+    function renderGrants(grants) {
+        if (!grants) { grantsEl.hidden = true; return; }
+        grantsEl.hidden = false;
+        grantsEl.textContent = grants.label + ' · ' + (grants.edit ? 'can edit' : 'read only');
+        grantsEl.title = grants.private
+            ? 'You can read personal columns and correct values. Every change is logged.'
+            : 'Personal columns are locked and the grid is read only for you.';
     }
 
     async function loadSchema(base, table) {
@@ -318,16 +351,20 @@
     function emptyCell() { return make('span', 'empty', '""'); }
 
     function renderChips(td, field, cell) {
-        if (!cell || !cell.chips) { td.appendChild(nilCell()); return; }
-        if (cell.chips.length === 0) { td.appendChild(nilCell()); return; }
+        if (!cell || !cell.chips || cell.chips.length === 0) { td.appendChild(nilCell()); return; }
+        var single = cell.kind === 'parent';
         cell.chips.forEach(function (chip) {
-            var node = make('span', 'chip', chip.label);
+            var node = make('span', 'chip' + (single ? ' one' : ''), chip.label);
             node.dataset.to = cell.to;
             node.dataset.rid = chip.id;
-            node.title = cell.to + ' #' + chip.id;
+            node.title = cell.to + ' #' + chip.id + ' · click to open, shift-click to filter by it';
             td.appendChild(node);
         });
-        if (cell.more > 0) td.appendChild(make('span', 'chip more', '+' + cell.more));
+        if (cell.more > 0) {
+            var more = make('span', 'chip more', '+' + cell.more);
+            more.title = cell.count + ' in all';
+            td.appendChild(more);
+        }
     }
 
     function renderValue(td, field, value) {
@@ -374,7 +411,16 @@
     }
 
     function renderCell(td, field, cell) {
-        if (field.type === 'link') { renderChips(td, field, cell); return; }
+        if (cell && cell.locked) {
+            var lock = make('span', 'locked', '••••');
+            lock.title = 'Only an administrator can read ' + field.label + '.';
+            td.appendChild(lock);
+            return;
+        }
+        if (field.type === 'link' || (field.type === 'reference' && cell && cell.chips)) {
+            renderChips(td, field, cell);
+            return;
+        }
 
         var value = cell ? cell.v : null;
         if (value === null || value === undefined) { td.appendChild(nilCell()); return; }
@@ -390,14 +436,25 @@
         th.style.width = width + 'px';
         var head = make('div', 'head');
         head.appendChild(make('span', null, field.label));
-        head.appendChild(make('span', 'type', field.type));
+        head.appendChild(make('span', 'type', field.locked ? 'locked' : field.type));
         var current = state.sort.split(':');
         if (current[0] === field.name) head.appendChild(make('span', 'arrow', current[1] === 'desc' ? '↓' : '↑'));
         th.appendChild(head);
+        th.dataset.col = field.name;
+        if (field.locked) th.classList.add('locked-head');
         if (field.sortable) th.dataset.sort = field.name;
         else th.style.cursor = 'default';
         th.title = field.name + (field.filled === null || field.filled === undefined ? '' : ' · ' + field.filled + ' filled');
         return th;
+    }
+
+    function bodyCell(fields, name, row, className) {
+        var field = fields[name] || { name: name, label: name, type: 'text' };
+        var td = make('td', className);
+        td.dataset.col = name;
+        if (field.editable) td.classList.add('editable');
+        renderCell(td, field, row[name]);
+        return td;
     }
 
     function renderGrid(payload, blueprint) {
@@ -435,20 +492,16 @@
             var tr = make('tr');
             var idCell = row.id ? row.id.v : null;
             if (idCell !== null && idCell !== undefined) tr.dataset.rid = idCell;
+            tr.dataset.index = String(index);
             if (state.row !== null && String(idCell) === String(state.row)) tr.className = 'on';
 
+            // Never editable, so it is the one cell guaranteed to open the record.
             var gutter = make('td', 'freeze-1 gutter', offset + index + 1);
+            gutter.title = 'Open this record';
             tr.appendChild(gutter);
 
-            var titleCell = make('td', 'freeze-2');
-            renderCell(titleCell, fields[title] || { name: title, type: 'text' }, row[title]);
-            tr.appendChild(titleCell);
-
-            rest.forEach(function (name) {
-                var td = make('td');
-                renderCell(td, fields[name] || { name: name, type: 'text' }, row[name]);
-                tr.appendChild(td);
-            });
+            tr.appendChild(bodyCell(fields, title, row, 'freeze-2'));
+            rest.forEach(function (name) { tr.appendChild(bodyCell(fields, name, row, null)); });
 
             tbody.appendChild(tr);
         });
@@ -463,11 +516,19 @@
         gridWrap.scrollTop = 0;
     }
 
-    function renderFilters() {
+    function renderFilters(blueprint) {
         clear(filtersEl);
+        var fields = blueprint ? fieldsByName(blueprint) : {};
         Object.keys(state.filters).forEach(function (column) {
+            var field = fields[column];
+            var split = state.filters[column].split(':');
+            var operator = split.shift();
+            var phrase = (operatorsFor(field || { type: 'text' }).filter(function (pair) {
+                return pair[0] === operator;
+            })[0] || [operator, operator])[1];
+
             var tag = make('span', 'tag');
-            tag.appendChild(make('span', null, column + ' ' + state.filters[column].replace(':', ' ')));
+            tag.appendChild(make('span', null, (field ? field.label : column) + ' ' + phrase + ' ' + split.join(':')));
             var drop = make('button', null, '×');
             drop.type = 'button';
             drop.dataset.drop = column;
@@ -528,7 +589,7 @@
             lastBlueprint = blueprint;
             tableLabel.textContent = payload.label;
             tableSub.textContent = state.base + ' · ' + payload.table + ' · ' + payload.columns.length + ' columns';
-            renderFilters();
+            renderFilters(blueprint);
             renderGrid(payload, blueprint);
             renderFooter(payload);
             renderRail();
@@ -572,9 +633,13 @@
 
             record.fields.forEach(function (field) {
                 var row = make('div', 'row');
-                row.appendChild(make('div', 'k', field.label));
+                var cell = record.data[field.name];
+                var key = make('div', 'k', field.label);
+                if (field.type === 'link' && cell && cell.count) key.appendChild(make('span', 'count', ' ' + cell.count));
+                row.appendChild(key);
                 var value = make('div', 'v');
-                renderCell(value, field, record.data[field.name]);
+                renderCell(value, field, cell);
+                if (field.type === 'link' && cell && cell.count) value.appendChild(reverseLink(field, record));
                 row.appendChild(value);
                 body.appendChild(row);
             });
@@ -582,6 +647,38 @@
             header.firstChild.textContent = 'Could not open that record';
             body.appendChild(make('div', 'state', error.message));
         }
+    }
+
+    /**
+     * The other end of a link, as a question. The chips say who is linked; this opens
+     * the linked table already narrowed to this record, which is the thing the chips
+     * cannot answer on their own.
+     */
+    function reverseLink(field, record) {
+        var go = make('button', 'ghost mini', 'Show all');
+        go.type = 'button';
+        go.title = 'Open ' + field.target + ' narrowed to this record';
+        go.addEventListener('click', async function (event) {
+            event.stopPropagation();
+            try {
+                var target = await loadSchema(state.base, field.target);
+                var back = (target.fields || []).filter(function (candidate) {
+                    return candidate.type === 'link'
+                        && candidate.target === record.table
+                        && candidate.via === field.via
+                        && candidate.variant === field.variant;
+                })[0];
+                if (!back) { toast('That link has no way back from ' + field.target + '.', 'bad'); return; }
+
+                var narrowed = {};
+                narrowed[back.name] = 'eq:' + record.id;
+                selectTable(state.base, field.target, narrowed);
+            } catch (error) {
+                toast(error.message, 'bad');
+            }
+        });
+
+        return go;
     }
 
     function openRow(id) {
@@ -593,6 +690,349 @@
             if (target) target.classList.add('on');
         }
         renderPeek();
+    }
+
+    // --------------------------------------------------------------- menus
+
+    function closeMenu() { clear(menuEl); }
+
+    function openMenu(anchor) {
+        closeMenu();
+        var box = make('div', 'menu');
+        menuEl.appendChild(box);
+        var edge = anchor.getBoundingClientRect();
+        box.style.top = (edge.bottom + 6) + 'px';
+        box.style.left = Math.max(8, Math.min(edge.left, window.innerWidth - box.offsetWidth - 8)) + 'px';
+        return box;
+    }
+
+    // What each type can sensibly be asked. A link is asked about its records, not its
+    // value, which is the whole difference between this and a column filter.
+    var OPERATORS = {
+        link: [['filled', 'has any'], ['empty', 'has none'], ['contains', 'linked name contains'], ['eq', 'linked record id is']],
+        reference: [['eq', 'is'], ['empty', 'is empty'], ['filled', 'is set']],
+        select: [['eq', 'is'], ['ne', 'is not'], ['in', 'is any of'], ['empty', 'is empty'], ['filled', 'is set']],
+        boolean: [['eq', 'is']],
+        date: [['eq', 'is'], ['gte', 'on or after'], ['lte', 'on or before'], ['empty', 'is empty'], ['filled', 'is set']],
+        number: [['eq', 'is'], ['ne', 'is not'], ['gte', 'at least'], ['lte', 'at most'], ['empty', 'is empty'], ['filled', 'is set']],
+        text: [['contains', 'contains'], ['starts', 'starts with'], ['eq', 'is'], ['ne', 'is not'], ['empty', 'is empty'], ['filled', 'is set']]
+    };
+
+    function operatorsFor(field) {
+        if (field.type === 'link') return OPERATORS.link;
+        if (field.type === 'reference') return OPERATORS.reference;
+        if (field.type === 'select') return OPERATORS.select;
+        if (field.type === 'boolean') return OPERATORS.boolean;
+        if (field.type === 'date' || field.type === 'datetime') return OPERATORS.date;
+        if (field.numeric) return OPERATORS.number;
+        return OPERATORS.text;
+    }
+
+    function option(select, value, label) {
+        var node = make('option', null, label);
+        node.value = value;
+        select.appendChild(node);
+        return node;
+    }
+
+    function showFilterMenu(anchor, preselect) {
+        if (!lastBlueprint) return;
+        var box = openMenu(anchor);
+        box.appendChild(make('h4', null, 'Narrow this table'));
+
+        var columnSelect = make('select');
+        var usable = (lastBlueprint.fields || []).filter(function (field) {
+            return !field.locked && field.type !== 'id' && field.type !== 'json';
+        });
+        usable.forEach(function (field) { option(columnSelect, field.name, field.label); });
+        if (preselect) columnSelect.value = preselect;
+        box.appendChild(columnSelect);
+
+        var operatorSelect = make('select');
+        box.appendChild(operatorSelect);
+
+        var valueWrap = make('div');
+        box.appendChild(valueWrap);
+
+        function fieldNow() {
+            return usable.filter(function (field) { return field.name === columnSelect.value; })[0];
+        }
+
+        function drawValue() {
+            clear(valueWrap);
+            var field = fieldNow();
+            var operator = operatorSelect.value;
+            if (!field || operator === 'empty' || operator === 'filled') return;
+
+            if (field.type === 'select' && field.options && field.options.length && operator !== 'in') {
+                var choices = make('select');
+                field.options.forEach(function (value) { option(choices, value, value); });
+                valueWrap.appendChild(choices);
+                return;
+            }
+
+            var input = make('input');
+            input.type = field.type === 'date' ? 'date' : 'text';
+            if (operator === 'in') input.placeholder = 'one | per | line';
+            else if (field.type === 'link') input.placeholder = operator === 'eq' ? 'record id' : 'part of the name';
+            valueWrap.appendChild(input);
+            input.focus();
+        }
+
+        function drawOperators() {
+            clear(operatorSelect);
+            var field = fieldNow();
+            if (!field) return;
+            operatorsFor(field).forEach(function (pair) { option(operatorSelect, pair[0], pair[1]); });
+            drawValue();
+        }
+
+        columnSelect.addEventListener('change', drawOperators);
+        operatorSelect.addEventListener('change', drawValue);
+        drawOperators();
+
+        var actions = make('div', 'actions');
+        var cancel = make('button', null, 'Cancel');
+        cancel.type = 'button';
+        cancel.addEventListener('click', closeMenu);
+        var apply = make('button', 'go', 'Apply');
+        apply.type = 'button';
+        apply.addEventListener('click', function () {
+            var operator = operatorSelect.value;
+            var control = valueWrap.firstChild;
+            var value = control ? String(control.value).trim() : '';
+            if (control && value === '') { control.focus(); return; }
+            state.filters[columnSelect.value] = operator + (control ? ':' + value : '');
+            state.page = 1;
+            closeMenu();
+            reload(true);
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(apply);
+        box.appendChild(actions);
+
+        columnSelect.focus();
+    }
+
+    async function showViewsMenu(anchor) {
+        if (!state.base || !state.table) return;
+        var box = openMenu(anchor);
+        box.appendChild(make('h4', null, 'Saved views'));
+        var list = make('div');
+        list.appendChild(make('div', 'none', 'Loading…'));
+        box.appendChild(list);
+
+        var name = make('input');
+        name.type = 'text';
+        name.placeholder = 'Name this view';
+        box.appendChild(name);
+
+        var grants = (navCache[state.base] || {}).grants;
+        var share = null;
+        if (grants && grants.share_views) {
+            var label = make('label');
+            share = make('input');
+            share.type = 'checkbox';
+            label.appendChild(share);
+            label.appendChild(make('span', null, 'Everyone can see it'));
+            box.appendChild(label);
+        }
+
+        var actions = make('div', 'actions');
+        var save = make('button', 'go', 'Save this view');
+        save.type = 'button';
+        save.addEventListener('click', async function () {
+            if (name.value.trim() === '') { name.focus(); return; }
+            try {
+                await send('POST', apiUrl(state.base, '_views', state.table), {
+                    name: name.value.trim(),
+                    query: viewQuery(),
+                    shared: share ? share.checked : false
+                });
+                closeMenu();
+                toast('Saved "' + name.value.trim() + '"', 'ok');
+            } catch (error) {
+                toast(error.message, 'bad');
+            }
+        });
+        actions.appendChild(save);
+        box.appendChild(actions);
+
+        try {
+            var payload = await getJson(apiUrl(state.base, '_views', state.table));
+            clear(list);
+            if (payload.views.length === 0) {
+                list.appendChild(make('div', 'none', 'None yet. The filters and sort on screen are what gets saved.'));
+            }
+            payload.views.forEach(function (view) {
+                var item = make('button', 'item');
+                item.type = 'button';
+                item.appendChild(make('span', 'name', view.name));
+                if (!view.mine) item.appendChild(make('span', 'who', view.owner_id_no || 'shared'));
+                else if (view.shared) item.appendChild(make('span', 'who', 'shared'));
+                item.addEventListener('click', function () { closeMenu(); applyView(view.query); });
+                list.appendChild(item);
+
+                if (!view.mine && !(grants && grants.share_views)) return;
+                var drop = make('span', 'drop', '×');
+                drop.title = 'Delete this view';
+                drop.addEventListener('click', async function (event) {
+                    event.stopPropagation();
+                    try {
+                        await send('DELETE', apiUrl(state.base, '_views', String(view.id)));
+                        item.parentNode.removeChild(item);
+                    } catch (error) {
+                        toast(error.message, 'bad');
+                    }
+                });
+                item.appendChild(drop);
+            });
+        } catch (error) {
+            clear(list);
+            list.appendChild(make('div', 'none', error.message));
+        }
+    }
+
+    // What a view is: the question, without the page it was left on.
+    function viewQuery() {
+        var p = new URLSearchParams();
+        if (state.cols === 'all') p.set('cols', 'all');
+        if (state.q) p.set('q', state.q);
+        if (state.sort) p.set('sort', state.sort);
+        Object.keys(state.filters).forEach(function (key) {
+            p.set('filter[' + key + ']', state.filters[key]);
+        });
+        return p.toString();
+    }
+
+    function applyView(query) {
+        var p = new URLSearchParams(query);
+        state.cols = p.get('cols') === 'all' ? 'all' : 'key';
+        state.q = p.get('q') || '';
+        state.sort = p.get('sort') || '';
+        state.page = 1;
+        state.filters = {};
+        p.forEach(function (value, key) {
+            var hit = /^filter\[(.+)\]$/.exec(key);
+            if (hit) state.filters[hit[1]] = value;
+        });
+        searchEl.value = state.q;
+        presetEl.querySelectorAll('button').forEach(function (node) {
+            node.classList.toggle('active', node.dataset.cols === state.cols);
+        });
+        reload(false);
+    }
+
+    // ------------------------------------------------------------- editing
+
+    function editorFor(field, value) {
+        if (field.type === 'boolean') {
+            var flag = make('select');
+            option(flag, '', '—');
+            option(flag, 'true', 'true');
+            option(flag, 'false', 'false');
+            flag.value = value === null || value === undefined ? '' : (Number(value) === 1 ? 'true' : 'false');
+            return flag;
+        }
+
+        if (field.type === 'select' && field.options && field.options.length) {
+            var choices = make('select');
+            option(choices, '', '—');
+            var known = false;
+            field.options.forEach(function (each) {
+                option(choices, each, each);
+                if (String(each) === String(value)) known = true;
+            });
+            // An existing value outside the sampled palette must not be silently lost.
+            if (!known && value !== null && value !== undefined && value !== '') option(choices, String(value), String(value));
+            choices.value = value === null || value === undefined ? '' : String(value);
+            return choices;
+        }
+
+        var input = make('input');
+        input.type = field.type === 'date' ? 'date' : 'text';
+        input.value = value === null || value === undefined ? '' : String(value);
+        return input;
+    }
+
+    function beginEdit(td) {
+        if (!lastBlueprint || !lastPayload || td.classList.contains('editing')) return;
+        var field = fieldsByName(lastBlueprint)[td.dataset.col];
+        if (!field || !field.editable) return;
+
+        var tr = td.closest('tr[data-rid]');
+        if (!tr) return;
+        var index = Number(tr.dataset.index);
+        var cell = lastPayload.data[index] ? lastPayload.data[index][field.name] : null;
+        var was = cell && cell.v !== undefined ? cell.v : null;
+
+        clear(td);
+        td.classList.add('editing');
+        var editor = editorFor(field, was);
+        td.appendChild(editor);
+        editor.focus();
+        if (editor.select) editor.select();
+
+        var settled = false;
+        function finish(save) {
+            if (settled) return;
+            settled = true;
+            var next = editor.value === '' ? null : editor.value;
+            if (!save || String(next) === String(was === null ? '' : was)) {
+                repaintRow(tr, index);
+                return;
+            }
+            commitEdit(td, tr, index, field, was, next);
+        }
+
+        editor.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+            if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+        });
+        editor.addEventListener('blur', function () { finish(true); });
+    }
+
+    function repaintRow(tr, index) {
+        var fields = fieldsByName(lastBlueprint);
+        var row = lastPayload.data[index] || {};
+        Array.prototype.forEach.call(tr.querySelectorAll('td[data-col]'), function (node) {
+            var field = fields[node.dataset.col];
+            if (!field) return;
+            clear(node);
+            node.classList.remove('editing', 'saving', 'num', 'mono');
+            node.title = '';
+            renderCell(node, field, row[node.dataset.col]);
+        });
+    }
+
+    async function commitEdit(td, tr, index, field, was, next) {
+        var changes = {};
+        var expect = {};
+        changes[field.name] = next;
+        expect[field.name] = was;
+
+        clear(td);
+        td.classList.remove('editing');
+        td.classList.add('saving');
+        td.appendChild(document.createTextNode(next === null ? '—' : String(next)));
+
+        try {
+            var result = await send('PATCH', apiUrl(state.base, '_grid', state.table, tr.dataset.rid), {
+                changes: changes,
+                expect: expect
+            });
+            Object.keys(result.data).forEach(function (name) {
+                lastPayload.data[index][name] = result.data[name];
+            });
+            td.classList.remove('saving');
+            repaintRow(tr, index);
+            if (result.action_id) toast('Saved. Logged as action ' + result.action_id + '.', 'ok');
+        } catch (error) {
+            td.classList.remove('saving');
+            repaintRow(tr, index);
+            toast(error.message, 'bad');
+            if (error.status === 409) reload(true);
+        }
     }
 
     // ------------------------------------------------------------- palette
@@ -687,7 +1127,7 @@
 
     // -------------------------------------------------------------- moving
 
-    function selectTable(base, table) {
+    function selectTable(base, table, filters) {
         var changedBase = base !== state.base;
         state.base = base;
         state.table = table;
@@ -695,7 +1135,7 @@
         state.q = '';
         state.sort = '';
         state.row = null;
-        state.filters = {};
+        state.filters = filters || {};
         searchEl.value = '';
         writeUrl(false);
         renderBases();
@@ -848,9 +1288,20 @@
     railFilter.addEventListener('input', renderRail);
 
     gridWrap.addEventListener('click', function (event) {
+        if (event.target.closest('td.editing')) return;
+
         var chip = event.target.closest('.chip[data-to]');
         if (chip) {
             event.stopPropagation();
+            var owner = chip.closest('td[data-col]');
+            // Shift asks the opposite question: not "what is this record" but "what
+            // else here is linked to it".
+            if (event.shiftKey && owner) {
+                state.filters[owner.dataset.col] = 'eq:' + chip.dataset.rid;
+                state.page = 1;
+                reload(true);
+                return;
+            }
             selectTable(state.base, chip.dataset.to);
             state.row = chip.dataset.rid;
             writeUrl(true);
@@ -867,18 +1318,45 @@
             return;
         }
 
-        var head = event.target.closest('th[data-sort]');
+        var head = event.target.closest('thead th');
         if (head) {
-            var column = head.dataset.sort;
-            var current = state.sort.split(':');
-            state.sort = current[0] === column && current[1] !== 'desc' ? column + ':desc' : column + ':asc';
-            state.page = 1;
-            reload(false);
+            if (head.dataset.sort) {
+                var column = head.dataset.sort;
+                var current = state.sort.split(':');
+                state.sort = current[0] === column && current[1] !== 'desc' ? column + ':desc' : column + ':asc';
+                state.page = 1;
+                reload(false);
+                return;
+            }
+            // A link column cannot be sorted, but it is the one most worth filtering.
+            var field = lastBlueprint ? fieldsByName(lastBlueprint)[head.dataset.col] : null;
+            if (field && field.type === 'link') showFilterMenu(head, field.name);
             return;
         }
 
+        // An editable cell belongs to the editor, not to the peek: a single click that
+        // opened a panel over the cell made the second click of a double land on it.
+        if (event.target.closest('td.editable')) return;
+
         var row = event.target.closest('tr[data-rid]');
         if (row) openRow(row.dataset.rid);
+    });
+
+    gridWrap.addEventListener('dblclick', function (event) {
+        var td = event.target.closest('td.editable');
+        if (td) {
+            event.stopPropagation();
+            beginEdit(td);
+        }
+    });
+
+    addFilterBtn.addEventListener('click', function () { showFilterMenu(addFilterBtn, null); });
+    openViewsBtn.addEventListener('click', function () { showViewsMenu(openViewsBtn); });
+
+    document.addEventListener('mousedown', function (event) {
+        if (!menuEl.firstChild) return;
+        if (event.target.closest('#menu, #add-filter, #open-views')) return;
+        closeMenu();
     });
 
     filtersEl.addEventListener('click', function (event) {
@@ -977,6 +1455,7 @@
             return;
         }
         if (event.key !== 'Escape') return;
+        if (menuEl.firstChild) { closeMenu(); return; }
         if (paletteEl.firstChild) { clear(paletteEl); return; }
         if (peekEl.firstChild) { openRow(null); return; }
         if (!consoleEl.hidden) consoleEl.hidden = true;
@@ -1029,8 +1508,10 @@
         writeSession(null);
         navCache = {};
         schemaCache = {};
+        renderGrants(null);
         clear(railEl);
         clear(peekEl);
+        closeMenu();
         stateMessage(gridWrap, 'Signed out', 'Sign in again to browse the databases.');
         countEl.textContent = '--';
     });
@@ -1055,7 +1536,14 @@
             await loadNav(state.base);
         } catch (error) {
             if (error.status === 401) { writeSession(null); return start(); }
+            renderGrants(null);
             stateMessage(railEl, 'Could not list tables', error.message);
+            stateMessage(
+                gridWrap,
+                error.status === 403 ? 'No workspace for this account' : 'Could not open ' + state.base,
+                error.message,
+            );
+            countEl.textContent = '--';
             return;
         }
 

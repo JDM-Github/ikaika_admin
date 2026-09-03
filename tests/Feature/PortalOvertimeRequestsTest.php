@@ -73,6 +73,14 @@ class PortalOvertimeRequestsTest extends TestCase
         $this->assertStringContainsString('Client deadline moved up', (string) $row->reason);
         $this->assertStringContainsString('REVIT MODELING', (string) $row->reason);
 
+        $listed = $this->withToken($token)->getJson(
+            '/api/development/portal/requests/overtime?from='.$date.'&to='.$date,
+        )->assertOk();
+        $this->assertSame('Client deadline moved up', $listed->json('data.0.remarks'));
+        $this->assertSame($this->projectLabel($project), $listed->json('data.0.projectLabel'));
+        $this->assertCount(2, $listed->json('data.0.entries'));
+        $this->assertSame('QC', $listed->json('data.0.entries.1.activityLabel'));
+
         $this->assertTrue(DB::connection('portal')->table('projects_requests')
             ->where('request_id', $row->id)
             ->where('project_id', $project->id)
@@ -228,7 +236,8 @@ class PortalOvertimeRequestsTest extends TestCase
         $this->assertSame([$mine], $list->json('data.*.requestedOn'));
         $this->assertEquals(2, $list->json('data.0.hours'));
         $this->assertSame('approved', $list->json('data.0.status'));
-        $this->assertSame(['id', 'createdOn', 'requestedOn', 'hours', 'remarks', 'status', 'approverRemarks'], array_keys($list->json('data.0')));
+        $this->assertSame('existing overtime', $list->json('data.0.remarks'));
+        $this->assertSame([], $list->json('data.0.entries'));
         $this->assertArrayNotHasKey('memberName', $list->json('data.0'));
     }
 
@@ -237,6 +246,110 @@ class PortalOvertimeRequestsTest extends TestCase
         $this->postJson('/api/development/portal/requests/overtime', ['requests' => []])
             ->assertStatus(401);
         $this->getJson('/api/development/portal/requests/overtime')->assertStatus(401);
+        $this->patchJson('/api/development/portal/requests/overtime/1', [])->assertStatus(401);
+        $this->postJson('/api/development/portal/requests/overtime/1/cancel')->assertStatus(401);
+    }
+
+    public function test_a_pending_overtime_can_be_edited_and_a_decided_one_cannot(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $date = $this->reportedDate($actor, 2, $project);
+        $id = $this->insertOvertime($actor, $date, 'Pending');
+        Cache::flush();
+        $token = $this->loginToken($actor);
+
+        $this->withToken($token)->patchJson('/api/development/portal/requests/overtime/'.$id, [
+            'requestDate' => $date,
+            'reason' => 'Deadline moved again',
+            'entries' => [[
+                'projectLabel' => $this->projectLabel($project),
+                'activityLabel' => 'QC',
+                'hoursRendered' => 3,
+                'elementChange' => 1,
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.requestedOn', $date)
+            ->assertJsonPath('data.remarks', 'Deadline moved again')
+            ->assertJsonPath('data.entries.0.activityLabel', 'QC')
+            ->assertJsonPath('data.hours', 3);
+
+        $this->assertTrue(Action::query()
+            ->where('resource', 'requests.overtime')
+            ->where('record_id', (string) $id)
+            ->where('action_type', CoreActionType::EDIT)
+            ->exists());
+
+        DB::connection('portal')->table('requests')->where('id', $id)->update(['status' => 'Approved']);
+        Cache::flush();
+
+        $this->withToken($token)->patchJson('/api/development/portal/requests/overtime/'.$id, [
+            'requestDate' => $date,
+            'reason' => 'Too late',
+            'entries' => [[
+                'projectLabel' => $this->projectLabel($project),
+                'activityLabel' => 'QC',
+                'hoursRendered' => 3,
+                'elementChange' => 0,
+            ]],
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Only a request nobody has decided on yet can be changed.');
+
+        $this->withToken($token)
+            ->postJson('/api/development/portal/requests/overtime/'.$id.'/cancel')
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Only a request nobody has decided on yet can be changed.');
+    }
+
+    public function test_a_pending_request_can_be_cancelled_and_the_day_comes_back(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $date = $this->reportedDate($actor, 2, $project);
+        $id = $this->insertOvertime($actor, $date, 'Pending');
+        Cache::flush();
+        $token = $this->loginToken($actor);
+
+        $this->withToken($token)
+            ->postJson('/api/development/portal/requests/overtime/'.$id.'/cancel')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'cancelled');
+
+        // The row stays: the history records what was asked for, not only what stood.
+        $this->assertSame('Cancelled', DB::connection('portal')->table('requests')
+            ->where('id', $id)->value('status'));
+
+        // And the day is free again, so it can be asked for a second time.
+        Cache::flush();
+        $this->withToken($token)->postJson('/api/development/portal/requests/overtime', [
+            'requests' => [$this->group($date, $project)],
+        ])->assertCreated();
+    }
+
+    public function test_somebody_elses_overtime_is_not_found_rather_than_forbidden(): void
+    {
+        $actor = $this->activeMember();
+        $other = $this->otherActiveMember($actor);
+        $date = Carbon::today()->subDays(2)->toDateString();
+        $id = $this->insertOvertime($other, $date, 'Pending');
+        $token = $this->loginToken($actor);
+
+        // Whose request it is is not this member's to learn.
+        $this->withToken($token)
+            ->postJson('/api/development/portal/requests/overtime/'.$id.'/cancel')
+            ->assertStatus(404);
+        $this->withToken($token)->patchJson('/api/development/portal/requests/overtime/'.$id, [
+            'requestDate' => $date,
+            'reason' => 'Deadline moved again',
+            'entries' => [[
+                'projectLabel' => '260005 IKAIKA Portal V2',
+                'activityLabel' => 'QC',
+                'hoursRendered' => 3,
+                'elementChange' => 1,
+            ]],
+        ])->assertStatus(404);
     }
 
     /**

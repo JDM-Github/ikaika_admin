@@ -45,6 +45,8 @@ final class PortalOvertimeRequests
 
     private const NEW_STATUS = 'Pending';
 
+    private const CANCELLED_STATUS = 'Cancelled';
+
     private const CORE_TARGET = 'portal.requests';
 
     private const CORE_RESOURCE = 'requests.overtime';
@@ -161,6 +163,153 @@ final class PortalOvertimeRequests
             'section' => 'requests',
             'resource' => 'overtime',
             'data' => $this->read($insertedIds),
+        ];
+    }
+
+    /**
+     * Rewrite one pending day. The builder reopens the same claim, so this is one group rather
+     * than the create envelope's list.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function replace(Employee $actor, string $id, Request $request): array
+    {
+        $row = $this->ownPendingRow($actor, $id);
+        $currentDate = $this->calendarDate($row->request_date ?? null);
+        $group = $this->validatedSingleGroup($request, $currentDate);
+
+        $employeeId = (int) $actor->getKey();
+        $this->assertDatesAreReported($employeeId, [$group['date']]);
+        $this->assertDatesAreFree($actor, [$group['date']], array_values(array_filter(
+            [$currentDate],
+            static fn (?string $date): bool => $date !== null,
+        )));
+
+        $projects = $this->ownProjectCatalog($employeeId);
+        $projectIds = $this->resolveProjects($group['entries'], $projects);
+        $hours = $this->totalHours($group['entries']);
+
+        $this->connection()->transaction(function () use ($row, $group, $projectIds, $hours): void {
+            $this->connection()->table('requests')->where('id', (int) $row->id)->update([
+                'request_date' => $group['date'],
+                'no_of_hours' => $hours,
+                'reason' => $this->composedReason($group['reason'], $group['entries']),
+            ]);
+            $this->connection()->table('projects_requests')->where('request_id', (int) $row->id)->delete();
+            foreach ($projectIds as $projectId) {
+                $this->connection()->table('projects_requests')->insert([
+                    'project_id' => $projectId,
+                    'request_id' => (int) $row->id,
+                ]);
+            }
+        });
+
+        $this->ledger->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            self::CORE_TARGET,
+            [
+                'id' => (string) (int) $row->id,
+                'requestedFor' => $group['date'],
+                'hours' => $hours,
+                'entries' => $group['entries'],
+                'reason' => $group['reason'],
+            ],
+            self::CORE_RESOURCE,
+            (string) (int) $row->id,
+            CoreRecycleKey::overtimeRequest($employeeId, $group['date']),
+            $employeeId,
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
+
+        $this->reports->bumpCache();
+        $this->bumpCache();
+
+        $presented = $this->presentOvertime($this->connection()
+            ->table('requests')
+            ->select([
+                'id',
+                'request_date',
+                'date_created',
+                'reason',
+                'status',
+                'approver_remarks',
+                'type',
+                'no_of_hours',
+                'original_work_day',
+                'offset_work_day',
+            ])
+            ->where('id', (int) $row->id)
+            ->first());
+        if ($presented === null) {
+            abort(500, 'The request was changed but could not be read back.');
+        }
+
+        return [
+            'section' => 'requests',
+            'resource' => 'overtime',
+            'data' => $presented,
+        ];
+    }
+
+    /**
+     * Withdraw an overtime day. The row stays and its status changes: the history is a record of
+     * what was asked for, and a cancelled request that vanished would read as one never filed.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function cancel(Employee $actor, string $id): array
+    {
+        $row = $this->ownPendingRow($actor, $id);
+        $day = $this->calendarDate($row->request_date ?? null) ?? '';
+        $employeeId = (int) $actor->getKey();
+
+        $this->connection()->table('requests')
+            ->where('id', (int) $row->id)
+            ->update(['status' => self::CANCELLED_STATUS]);
+
+        $this->ledger->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            self::CORE_TARGET,
+            [
+                'id' => (string) (int) $row->id,
+                'requestedFor' => $day,
+                'status' => self::CANCELLED_STATUS,
+            ],
+            self::CORE_RESOURCE,
+            (string) (int) $row->id,
+            CoreRecycleKey::overtimeRequest($employeeId, $day),
+            $employeeId,
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
+
+        // A cancelled day is free again, for this form and for the report forms both.
+        $this->bumpCache();
+        $this->reports->bumpCache();
+
+        $presented = $this->presentOvertime($this->connection()
+            ->table('requests')
+            ->select([
+                'id',
+                'request_date',
+                'date_created',
+                'reason',
+                'status',
+                'approver_remarks',
+                'type',
+                'no_of_hours',
+                'original_work_day',
+                'offset_work_day',
+            ])
+            ->where('id', (int) $row->id)
+            ->first());
+        if ($presented === null) {
+            abort(500, 'The request was cancelled but could not be read back.');
+        }
+
+        return [
+            'section' => 'requests',
+            'resource' => 'overtime',
+            'data' => $presented,
         ];
     }
 
@@ -342,14 +491,15 @@ final class PortalOvertimeRequests
 
     /**
      * @param  list<string>  $dates
+     * @param  list<string>  $ignore  Dates this request already occupies, so an edit of the same day is not a clash with itself.
      */
-    private function assertDatesAreFree(Employee $actor, array $dates): void
+    private function assertDatesAreFree(Employee $actor, array $dates, array $ignore = []): void
     {
         if ($dates === []) {
             return;
         }
 
-        $taken = $this->reports->overtimeDays($actor, min($dates), max($dates));
+        $taken = array_values(array_diff($this->reports->overtimeDays($actor, min($dates), max($dates)), $ignore));
         foreach ($dates as $date) {
             if (in_array($date, $taken, true)) {
                 abort(422, 'Overtime is already filed for '.$date.'.');
@@ -396,13 +546,31 @@ final class PortalOvertimeRequests
         return $groups;
     }
 
-    private function assertFilableDate(string $date): void
+    private function assertFilableDate(string $date, ?string $current = null): void
     {
+        if ($current !== null && $date === $current) {
+            return;
+        }
         $day = $this->timezone->day($date);
         $today = $this->timezone->today();
         if ($day->gt($today) || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
             abort(422, 'Overtime can only be filed for today or the last seven days.');
         }
+    }
+
+    /**
+     * @return array{date: string, reason: string, entries: list<array{projectLabel: string, activityLabel: string, hoursRendered: float, elementChange: float}>}
+     */
+    private function validatedSingleGroup(Request $request, ?string $currentDate): array
+    {
+        $date = $this->parseDate(trim((string) $request->input('requestDate', '')));
+        $this->assertFilableDate($date, $currentDate);
+
+        return [
+            'date' => $date,
+            'reason' => $this->validatedReason($request->input('reason')),
+            'entries' => $this->validatedEntryList($request->input('entries')),
+        ];
     }
 
     private function validatedReason(mixed $value): string
@@ -554,31 +722,97 @@ final class PortalOvertimeRequests
 
         $data = [];
         foreach ($rows as $row) {
-            $kind = PortalSubmittedReportPresenter::occupancy(
-                $row->type ?? null,
-                $row->no_of_hours ?? null,
-                $this->calendarDate($row->original_work_day ?? null),
-                $this->calendarDate($row->offset_work_day ?? null),
-            );
-            if ($kind !== PortalSubmittedReportPresenter::OCCUPANCY_OVERTIME) {
+            $presented = $this->presentOvertime($row);
+            if ($presented === null) {
                 continue;
             }
-            $requestedOn = $this->calendarDate($row->request_date ?? null);
-            if ($requestedOn === null) {
-                continue;
-            }
-            $data[] = [
-                'id' => (string) (int) $row->id,
-                'createdOn' => $this->calendarDate($row->date_created ?? null) ?? $requestedOn,
-                'requestedOn' => $requestedOn,
-                'hours' => round((float) ($row->no_of_hours ?? 0), 2),
-                'remarks' => $this->text($row->reason ?? null),
-                'status' => PortalSubmittedReportPresenter::requestStatus($row->status ?? null),
-                'approverRemarks' => $this->text($row->approver_remarks ?? null),
-            ];
+            $data[] = $presented;
         }
 
         return $data;
+    }
+
+    /**
+     * The member's own overtime row, still undecided. Somebody else's is a 404 rather than a 403:
+     * whose request it is is not this member's to learn.
+     */
+    private function ownPendingRow(Employee $actor, string $id): object
+    {
+        if (preg_match('/^\d{1,11}$/', trim($id)) !== 1) {
+            abort(404, 'That request was not found.');
+        }
+
+        $name = $this->memberName($actor);
+        $row = $this->connection()
+            ->table('requests')
+            ->select([
+                'id',
+                'request_date',
+                'status',
+                'type',
+                'no_of_hours',
+                'original_work_day',
+                'offset_work_day',
+            ])
+            ->where('id', (int) $id)
+            ->whereRaw('LOWER(TRIM(name)) = ?', [strtolower($name)])
+            ->first();
+
+        if ($row === null) {
+            abort(404, 'That request was not found.');
+        }
+
+        $kind = PortalSubmittedReportPresenter::occupancy(
+            $row->type ?? null,
+            $row->no_of_hours ?? null,
+            $this->calendarDate($row->original_work_day ?? null),
+            $this->calendarDate($row->offset_work_day ?? null),
+        );
+        if ($kind !== PortalSubmittedReportPresenter::OCCUPANCY_OVERTIME) {
+            abort(404, 'That request was not found.');
+        }
+
+        if (PortalSubmittedReportPresenter::requestStatus($row->status ?? null) !== 'pending') {
+            abort(422, 'Only a request nobody has decided on yet can be changed.');
+        }
+
+        return $row;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function presentOvertime(mixed $row): ?array
+    {
+        if (! is_object($row)) {
+            return null;
+        }
+        $kind = PortalSubmittedReportPresenter::occupancy(
+            $row->type ?? null,
+            $row->no_of_hours ?? null,
+            $this->calendarDate($row->original_work_day ?? null),
+            $this->calendarDate($row->offset_work_day ?? null),
+        );
+        if ($kind !== PortalSubmittedReportPresenter::OCCUPANCY_OVERTIME) {
+            return null;
+        }
+        $requestedOn = $this->calendarDate($row->request_date ?? null);
+        if ($requestedOn === null) {
+            return null;
+        }
+        $parsed = PortalSubmittedReportPresenter::splitComposedReason($this->text($row->reason ?? null));
+
+        return [
+            'id' => (string) (int) $row->id,
+            'createdOn' => $this->calendarDate($row->date_created ?? null) ?? $requestedOn,
+            'requestedOn' => $requestedOn,
+            'hours' => round((float) ($row->no_of_hours ?? 0), 2),
+            'remarks' => $parsed['remarks'],
+            'status' => PortalSubmittedReportPresenter::requestStatus($row->status ?? null),
+            'approverRemarks' => $this->text($row->approver_remarks ?? null),
+            'projectLabel' => $parsed['projectLabel'],
+            'entries' => $parsed['entries'],
+        ];
     }
 
     private function memberName(Employee $actor): string

@@ -28,6 +28,27 @@ class PortalSubmittedReportPresenterTest extends TestCase
         $this->assertSame('Unassigned', PortalSubmittedReportPresenter::earnCodeLabel(''));
     }
 
+    public function test_composed_reason_keeps_the_members_words_and_reads_the_entry_lines(): void
+    {
+        $parsed = PortalSubmittedReportPresenter::splitComposedReason(
+            "hm\n- 260005 IKAIKA Portal V2 / 5001- NAVISWORK APPLICATION DEVELOPMENT / 8h",
+        );
+
+        $this->assertSame('hm', $parsed['remarks']);
+        $this->assertSame('260005 IKAIKA Portal V2', $parsed['projectLabel']);
+        $this->assertSame([
+            [
+                'projectLabel' => '260005 IKAIKA Portal V2',
+                'activityLabel' => '5001- NAVISWORK APPLICATION DEVELOPMENT',
+                'hoursRendered' => 8.0,
+                'elementChange' => 0.0,
+            ],
+        ], $parsed['entries']);
+        $this->assertSame('Family outing', PortalSubmittedReportPresenter::splitComposedReason('Family outing')['remarks']);
+        $this->assertSame([], PortalSubmittedReportPresenter::splitComposedReason('Family outing')['entries']);
+        $this->assertNull(PortalSubmittedReportPresenter::splitComposedReason('   ')['remarks']);
+    }
+
     public function test_member_name_and_reason_trim_empty_values(): void
     {
         $this->assertSame('Jamie Pingol', PortalSubmittedReportPresenter::memberName('Jamie', 'Pingol'));

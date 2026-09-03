@@ -22,8 +22,17 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::post('requests/leave/{id}/cancel', [LeaveController::class, 'cancel'])
             ->where('id', '[0-9]+');
         Route::post('requests/overtime', [OvertimeController::class, 'store']);
+        Route::patch('requests/overtime/{id}', [OvertimeController::class, 'update'])
+            ->where('id', '[0-9]+');
+        Route::post('requests/overtime/{id}/cancel', [OvertimeController::class, 'cancel'])
+            ->where('id', '[0-9]+');
         Route::post('requests/offset', [OffsetController::class, 'store']);
+        Route::patch('requests/offset/{id}', [OffsetController::class, 'update'])
+            ->where('id', '[0-9]+');
+        Route::post('requests/offset/{id}/cancel', [OffsetController::class, 'cancel'])
+            ->where('id', '[0-9]+');
         Route::post('requests/reimbursement', [ReimbursementController::class, 'store']);
+        Route::post('requests/reimbursement/receipts', [ReimbursementController::class, 'storeReceipt']);
         Route::patch('requests/reimbursement/{id}', [ReimbursementController::class, 'update'])
             ->where('id', '[0-9]+');
         Route::post('requests/reimbursement/{id}/cancel', [ReimbursementController::class, 'cancel'])

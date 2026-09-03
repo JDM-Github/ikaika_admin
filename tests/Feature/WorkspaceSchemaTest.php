@@ -2,15 +2,16 @@
 
 namespace Tests\Feature;
 
-use App\Modules\Portal\Models\Employee;
 use App\Support\Workspace\WorkspaceFieldType;
 use App\Support\Workspace\WorkspaceIntrospector;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
+use Tests\Concerns\ActsAsPortalEmployee;
 use Tests\TestCase;
 
 class WorkspaceSchemaTest extends TestCase
 {
+    use ActsAsPortalEmployee;
     use DatabaseTransactions;
 
     /**
@@ -139,21 +140,5 @@ class WorkspaceSchemaTest extends TestCase
         }
 
         $this->fail('The rail did not list '.$name.'.');
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function authHeaders(): array
-    {
-        $employee = Employee::query()
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->whereNotNull('id_no')->where('id_no', '!=', '')->first();
-        $this->assertNotNull($employee);
-
-        $token = $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->json('token');
-        $this->assertIsString($token);
-
-        return ['Authorization' => 'Bearer '.$token];
     }
 }

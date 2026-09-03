@@ -7,9 +7,11 @@ use App\Modules\Portal\Models\Employee;
 use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class PortalReimbursementRequestsTest extends TestCase
@@ -209,6 +211,7 @@ class PortalReimbursementRequestsTest extends TestCase
     {
         $this->getJson('/api/development/portal/requests/reimbursement')->assertStatus(401);
         $this->postJson('/api/development/portal/requests/reimbursement', [])->assertStatus(401);
+        $this->post('/api/development/portal/requests/reimbursement/receipts')->assertStatus(401);
         $this->patchJson('/api/development/portal/requests/reimbursement/1', [])->assertStatus(401);
         $this->postJson('/api/development/portal/requests/reimbursement/1/cancel')->assertStatus(401);
     }
@@ -298,6 +301,75 @@ class PortalReimbursementRequestsTest extends TestCase
             'requestDate' => $date,
             'items' => [$this->item('Office Grocery', 2095.6, 1)],
         ])->assertStatus(404);
+    }
+
+    public function test_a_receipt_uploads_then_lands_on_the_filed_item(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::response([
+                'secure_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/grab.jpg',
+                'original_filename' => 'grab',
+                'bytes' => 1200,
+            ], 200),
+        ]);
+
+        $actor = $this->activeMember();
+        $date = Carbon::today()->toDateString();
+        $token = $this->loginToken($actor);
+        $file = UploadedFile::fake()->create('grab.jpg', 12, 'image/jpeg');
+
+        $uploaded = $this->withToken($token)->post(
+            '/api/development/portal/requests/reimbursement/receipts',
+            ['file' => $file],
+        )->assertCreated();
+
+        $receiptId = $uploaded->json('data.receiptId');
+        $this->assertIsString($receiptId);
+        $this->assertSame('grab.jpg', $uploaded->json('data.fileName'));
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/grab.jpg',
+            $uploaded->json('data.fileUrl'),
+        );
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/c_fill,h_96,w_96,f_auto,q_auto/v1/ikaika-portal/reimbursements/grab.jpg',
+            $uploaded->json('data.thumbUrl'),
+        );
+
+        $filed = $this->withToken($token)->postJson('/api/development/portal/requests/reimbursement', [
+            'requestDate' => $date,
+            'items' => [array_merge($this->item('Site visit transport', 850, 2), [
+                'receiptId' => $receiptId,
+            ])],
+        ])->assertCreated();
+
+        $itemId = (int) $filed->json('data.items.0.id');
+        $this->assertSame('grab.jpg', $filed->json('data.items.0.receiptName'));
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/grab.jpg',
+            $filed->json('data.items.0.receiptUrl'),
+        );
+        $this->assertTrue(DB::connection('portal')->table('attachments')
+            ->where('table_name', 'reimbursements')
+            ->where('record_id', $itemId)
+            ->where('field_name', 'receipts')
+            ->exists());
+    }
+
+    public function test_a_receipt_url_from_somewhere_else_is_refused(): void
+    {
+        $actor = $this->activeMember();
+        $token = $this->loginToken($actor);
+
+        $this->withToken($token)->postJson('/api/development/portal/requests/reimbursement', [
+            'requestDate' => Carbon::today()->toDateString(),
+            'items' => [array_merge($this->item('Snacks', 120, 1), [
+                'receiptUrl' => 'https://example.com/not-ours.pdf',
+                'receiptName' => 'not-ours.pdf',
+            ])],
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'That receipt is not one this form uploaded.');
     }
 
     /**

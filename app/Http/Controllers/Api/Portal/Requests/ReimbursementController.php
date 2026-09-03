@@ -32,6 +32,16 @@ class ReimbursementController extends Controller
         return response()->json($this->reimbursements->create($actor, $request), 201);
     }
 
+    public function storeReceipt(Request $request): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->reimbursements->storeReceipt($actor, $request), 201);
+    }
+
     public function update(Request $request, string $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');

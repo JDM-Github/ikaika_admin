@@ -245,7 +245,7 @@ final class WorkspaceIntrospector
         $stem = substr($column, 0, -3);
 
         foreach ($this->namedHalves($junction, $tables) as $half) {
-            if ($half === $stem || str_starts_with($half, $stem)) {
+            if ($half === $stem || str_starts_with($half, $stem) || $this->singular($half) === $stem) {
                 return $half;
             }
         }
@@ -253,6 +253,112 @@ final class WorkspaceIntrospector
         foreach ([$stem.'s', $stem.'es', $stem] as $candidate) {
             if (in_array($candidate, $tables, true)) {
                 return $candidate;
+            }
+        }
+
+        foreach ($tables as $candidate) {
+            if ($this->singular($candidate) === $stem) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Depluralise each segment, so earn_code_v2_id reaches earn_codes_v2. A trailing
+     * s on a middle segment is what defeats a whole-name plural rule.
+     */
+    private function singular(string $table): string
+    {
+        $parts = [];
+        foreach (explode('_', $table) as $part) {
+            $parts[] = strlen($part) > 1 && str_ends_with($part, 's') ? substr($part, 0, -1) : $part;
+        }
+
+        return implode('_', $parts);
+    }
+
+    /**
+     * One-to-many links: a child table carrying exactly one resolvable link back to a
+     * parent. bim_form_elements_included is an Airtable multipleSelects field turned
+     * into rows, so the parent needs it as a chip column although it is no junction.
+     *
+     * @return array<string, array{parent: string, column: string, label_column: ?string}>
+     */
+    public function childLinks(string $product): array
+    {
+        $tables = $this->tableNames($product);
+        $columns = $this->columns($product);
+        $junctions = $this->junctions($product);
+        $foreign = $this->foreignKeys($product);
+
+        $children = [];
+        foreach ($tables as $table) {
+            if (isset($junctions[$table])) {
+                continue;
+            }
+
+            $found = null;
+            $ambiguous = false;
+            foreach ($columns[$table] ?? [] as $column) {
+                if (! $this->isIntegerId($column)) {
+                    continue;
+                }
+
+                $parent = $this->linkTarget($table, $column['name'], $tables, $foreign[$table] ?? []);
+                if ($parent === null || $parent === $table || isset($junctions[$parent])) {
+                    continue;
+                }
+
+                if ($found !== null) {
+                    $ambiguous = true;
+
+                    break;
+                }
+
+                $found = ['parent' => $parent, 'column' => $column['name'], 'label_column' => null];
+            }
+
+            if ($ambiguous || $found === null) {
+                continue;
+            }
+
+            $found['label_column'] = $this->firstDescriptiveColumn($columns[$table] ?? [], $found['column']);
+            $children[$table] = $found;
+        }
+
+        return $children;
+    }
+
+    /**
+     * @param  array{name: string, data_type: string, column_type: string, max_length: ?int, numeric_scale: ?int, nullable: bool, key: string, extra: string}  $column
+     */
+    private function isIntegerId(array $column): bool
+    {
+        return str_ends_with($column['name'], '_id')
+            && $column['name'] !== 'airtable_record_id'
+            && ! str_contains(strtolower($column['extra']), 'auto_increment')
+            && in_array(strtolower($column['data_type']), ['int', 'integer', 'bigint', 'smallint', 'mediumint'], true);
+    }
+
+    /**
+     * What a chip for one child row should read as: its first text column that is not
+     * the link itself.
+     *
+     * @param  list<array{name: string, data_type: string, column_type: string, max_length: ?int, numeric_scale: ?int, nullable: bool, key: string, extra: string}>  $columns
+     */
+    private function firstDescriptiveColumn(array $columns, string $skip): ?string
+    {
+        foreach ($columns as $column) {
+            if ($column['name'] === $skip || $column['name'] === 'airtable_record_id') {
+                continue;
+            }
+            if (str_contains(strtolower($column['extra']), 'auto_increment')) {
+                continue;
+            }
+            if (in_array(strtolower($column['data_type']), ['char', 'varchar', 'text', 'tinytext', 'mediumtext', 'longtext'], true)) {
+                return $column['name'];
             }
         }
 
@@ -394,6 +500,21 @@ final class WorkspaceIntrospector
     }
 
     /**
+     * The auto-increment column a record is addressed by, or null when the table has
+     * none. Every Airtable-converted table has one; the junctions deliberately do not.
+     */
+    public function surrogateKey(string $product, string $table): ?string
+    {
+        foreach ($this->columns($product)[$table] ?? [] as $column) {
+            if (str_contains(strtolower($column['extra']), 'auto_increment')) {
+                return $column['name'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Backtick-quote an identifier. project_scope_t3_activities.procedure and
      * .level are reserved words, so every generated identifier goes through this.
      */
@@ -402,9 +523,19 @@ final class WorkspaceIntrospector
         return '`'.str_replace('`', '``', $identifier).'`';
     }
 
+    /**
+     * Bump the version every cached key is built from. Forgetting keys one by one is
+     * not possible here -- a probe key carries a hash of its column list -- and the
+     * file driver has no tags, so the version is the only handle there is.
+     */
     public static function flush(): void
     {
-        Cache::forget(self::CACHE_PREFIX.'version');
+        Cache::forever(self::CACHE_PREFIX.'version', self::version() + 1);
+    }
+
+    private static function version(): int
+    {
+        return (int) Cache::get(self::CACHE_PREFIX.'version', 1);
     }
 
     /**
@@ -417,6 +548,6 @@ final class WorkspaceIntrospector
     {
         $ttl = (int) config('workspace.cache_ttl', 300);
 
-        return Cache::remember(self::CACHE_PREFIX.$product.':'.$key, $ttl, $build);
+        return Cache::remember(self::CACHE_PREFIX.self::version().':'.$product.':'.$key, $ttl, $build);
     }
 }

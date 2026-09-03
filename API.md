@@ -71,6 +71,8 @@ Sectioned portal routes (Manage / Users, …) live **beside** the generic resour
 |---|---|---|
 | `POST` | `/api/staging/portal/auth/login` | None. Body `{ "id_no": "260701-0020" }` |
 | `GET` | `/api/staging/portal/auth/me` | `Authorization: Bearer {token}` |
+| `GET` | `/api/staging/portal/home` | Bearer. Dashboard for the signed-in member: this month's hours/reports, active project mix, recent reports, tracked projects |
+| `GET` | `/api/staging/portal/projects` | Bearer. View Projects board. Admin/Executive see all projects with `isAssigned`; members see only their own |
 | `GET` | `/api/staging/portal/manage/users` | Bearer + Admin or Executive |
 | `PATCH` | `/api/staging/portal/manage/users/{id}/role` | Bearer + Admin or Executive. Body `{ "role": "Admin" }`, `{ "role": "User" }`, or `{ "role": "ProjectAdmin" }` |
 | `GET` | `/api/staging/portal/reports/projects` | Bearer. The member's own projects plus the activity codes each job type allows |
@@ -85,8 +87,12 @@ Sectioned portal routes (Manage / Users, …) live **beside** the generic resour
 | `POST` | `/api/staging/portal/requests/leave/{id}/cancel` | Bearer. Withdraws own pending leave day. Status becomes Cancelled |
 | `GET` | `/api/staging/portal/requests/overtime` | Bearer. Own overtime |
 | `POST` | `/api/staging/portal/requests/overtime` | Bearer. Files own overtime. Body `{ requests[] }`. Only against a day already reported |
+| `PATCH` | `/api/staging/portal/requests/overtime/{id}` | Bearer. Rewrites one pending own overtime |
+| `POST` | `/api/staging/portal/requests/overtime/{id}/cancel` | Bearer. Withdraws own pending overtime. Status becomes Cancelled |
 | `GET` | `/api/staging/portal/requests/offset` | Bearer. Own offset |
 | `POST` | `/api/staging/portal/requests/offset` | Bearer. Files own offset. Body `{ requests[] }` |
+| `PATCH` | `/api/staging/portal/requests/offset/{id}` | Bearer. Rewrites one pending own offset |
+| `POST` | `/api/staging/portal/requests/offset/{id}/cancel` | Bearer. Withdraws own pending offset. Status becomes Cancelled |
 | `GET` | `/api/staging/portal/administration/recycle-bin` | Bearer. Own bin for members. `type=report\|request\|project`. Admin/Executive may send `scope=all` and `employee_id` |
 | `GET` | `/api/staging/portal/administration/recycle-bin/{id}` | Bearer. One deleted report's generated details. Members: own rows. Admin/Executive: any portal row |
 | `POST` | `/api/staging/portal/administration/recycle-bin/{id}/restore` | Bearer. Restore a recycled submitted report. Members: own rows. Admin/Executive: any portal row |
@@ -132,26 +138,60 @@ List query params: `page` (default 1), `per_page` (default 20, max 100), `q` (se
 
 ## Workspace browser (`_schema` + `_grid`)
 
-The page at `/` is an Airtable-style workspace over all three databases. It runs on four
-**read-only** endpoints. They introspect `information_schema` rather than the 13 Eloquent
-models, so every one of the 77 tables is browsable, not just the modelled ones.
+The page at `/` is an Airtable-style workspace over all three databases. It introspects
+`information_schema` rather than the 13 Eloquent models, so every one of the 77 tables is
+browsable, not just the modelled ones.
 
 | Method | Path | Auth | Behavior |
 |---|---|---|---|
-| `GET` | `/api/{channel}/{product}/_schema` | Bearer | Browsable tables with exact row counts |
+| `GET` | `/api/{channel}/{product}/_schema` | Bearer | Browsable tables with exact row counts, plus this actor's `grants` |
 | `GET` | `/api/{channel}/{product}/_schema/{table}` | Bearer | Every field, typed, plus column presets |
 | `GET` | `/api/{channel}/{product}/_grid/{table}` | Bearer | One page of typed cells |
 | `GET` | `/api/{channel}/{product}/_grid/{table}/{id}` | Bearer | One record, every field, every chip |
+| `PATCH` | `/api/{channel}/{product}/_grid/{table}/{id}` | Bearer, admin | Correct scalar values on one record |
+| `GET` | `/api/{channel}/{product}/_views/{table}` | Bearer | Saved views for this table |
+| `POST` | `/api/{channel}/{product}/_views/{table}` | Bearer | Save or replace one of your own views |
+| `DELETE` | `/api/{channel}/{product}/_views/{id}` | Bearer | Delete a view you own, or a shared one if admin |
 
-`{product}` is `core`, `portal` or `project-estimator`. Rate limited to 240 requests a
-minute per actor: one browser tab paging a grid is a burst of reads, not a write path.
+`{product}` is `core`, `portal` or `project-estimator`. Reads are limited to 240 requests a
+minute per actor and writes to 30: one browser tab paging a grid is a burst of reads, but a
+cell is edited by hand.
 
-**Junctions are link fields, not tables.** These databases were converted from Airtable, so
-26 of the portal's 48 tables are junctions. They never appear in `_schema`; they surface as
-`link__{target}` chip columns on both parents, which is what the Airtable base actually
-showed. A junction carrying a qualifier splits into one field per value, so the estimator's
-`employees_projects` becomes `link__employees__pm`, `link__employees__member` and
-`link__employees__support`. `GET .../_schema/employees_projects` is a `404`.
+**Access is three tiers, not one flag.** The workspace reaches every table in all three
+databases, so an ordinary member has no business in it -- the portal is their tool.
+
+| Tier | Browse | Personal columns | Edit | Share a view |
+|---|---|---|---|---|
+| Executive, Admin | yes | yes | yes | yes |
+| ProjectAdmin | yes | locked | no | private views only |
+| User | `403` | -- | -- | -- |
+
+`_schema` returns `grants` (`{tier, label, browse, edit, private, share_views}`) so the page
+states the boundary up front rather than only refusing on submit. Gating is done in the
+controller, not by the `portal.admin` middleware, which emails the whole admin roster on a
+refusal -- a mistyped table name is not an incident.
+
+**Relationships are fields, not tables.** These databases were converted from Airtable, so
+the shape of a relationship is buried in the table list. Four shapes are recovered:
+
+| Shape in SQL | Becomes | Example |
+|---|---|---|
+| Junction table (26 of the portal's 48) | `link__{target}` chips on both parents, `kind: junction` | `projects.link__clients` |
+| Junction with a qualifier column | one field per qualifier value | `link__employees__pm`, `__member`, `__support` |
+| Child table holding one link back | `link__{child}` chips on the parent, `kind: child` | `bim_form.link__bim_form_elements_included` |
+| A foreign key column | that same column, typed `reference`, `kind: parent` | `bim_form_elements_included.bim_form_id` |
+
+A junction never appears in `_schema`; `GET .../_schema/employees_projects` is a `404`. A
+reference is not a second column beside the integer -- it replaces it, so the column still
+sorts and filters as itself. Link targets resolve from declared foreign keys first, then by
+matching the junction name against the real table list, then by depluralising each segment,
+which is what reaches `earn_codes_v2` from `earn_code_v2_id`.
+
+**Filtering through a relationship.** A link column takes `eq:{target id}`, `contains:{part
+of the target title}`, `empty` and `filled`, compiled to a correlated `EXISTS`. That is how
+"every project this person is PM of" and "every project with no client" get asked. The chips
+say who is linked; without this the grid could show that and still not answer the obvious
+next question.
 
 **Grid query params**
 
@@ -162,18 +202,23 @@ showed. A junction carrying a qualifier splits into one field per value, so the 
 | `cols` | `key` | `key`, `all`, or a comma-separated list. A filtered or sorted column is added to a preset |
 | `q` | — | Searches the searchable columns of that table |
 | `sort` | identity column, ascending | `column:asc` or `column:desc`; an unknown column falls back rather than reaching SQL |
-| `filter[column]` | — | `eq:`, `ne:`, `contains:`, `starts:`, `gte:`, `lte:`, `empty`, `filled` |
+| `filter[column]` | — | `eq:`, `ne:`, `in:a\|b\|c`, `contains:`, `starts:`, `gte:`, `lte:`, `empty`, `filled`. `empty` and `filled` take no argument. On a link column: `eq:`, `contains:`, `empty`, `filled` |
 
 **Cell envelopes.** Every cell is `{"v": value}` so `NULL`, `""` and `0` stay distinguishable
 — Airtable renders the first two identically, which is a standing source of "the data is
 wrong" reports. A link cell is `{"chips": [{"id", "label"}], "more": 0, "to": "employees"}`;
 chips are resolved with one batched join per column, never one per row, and capped at
-`workspace.chips_per_cell` (3) on a grid, uncapped on a single record.
+`workspace.chips_per_cell` (3) on a grid, uncapped on a single record. The cell also carries
+`count` (the full number behind a `+N`) and `kind`. A cell the actor may not read is
+`{"locked": true}` -- present, so the grid is visibly withholding a column rather than
+appearing not to have one, but never carrying a value.
 
 **Redaction.** `password_hash`, `invite_code`, `remember_token` and anything matching
-`password` / `secret` / `bcrypt` are withheld from everyone, admin included. Government IDs,
-bank details, date of birth, home address and personal contact columns are admin-only and
-are dropped from the select list, so they never reach the response body at all.
+`password` / `secret` / `bcrypt` are absent for everyone, admin included -- not listed as a
+field, not selectable, not filterable. Government IDs, bank details, date of birth, home
+address and personal contact columns are admin-only: for a ProjectAdmin they are listed as
+`locked` fields but dropped from the `SELECT`, so no value, no shape probe and no filter or
+sort on them ever reaches SQL.
 
 ```json
 {
@@ -186,7 +231,10 @@ are dropped from the select list, so they never reach the response body at all.
     {
       "id": { "v": 1 },
       "project_name": { "v": "25401 GBC Derick" },
-      "link__employees__pm": { "chips": [{ "id": 4, "label": "220302-0003" }], "more": 0, "to": "employees" }
+      "link__employees__pm": {
+        "chips": [{ "id": 4, "label": "220302-0003" }],
+        "more": 0, "count": 1, "to": "employees", "kind": "junction"
+      }
     }
   ],
   "meta": {
@@ -201,9 +249,39 @@ are dropped from the select list, so they never reach the response body at all.
 `18 of 122 projects · filtered` instead of quietly showing a smaller number. `sql` is the
 exact statement behind the page, surfaced in the UI under `SQL`.
 
-**Writes are not exposed.** These databases are live production mirrors and the portal
-already owns curated write endpoints with a ledger and a recycle bin; the workspace would
-bypass both. The page carries a `Read only` badge to say so.
+### Editing a cell
+
+`PATCH .../_grid/{table}/{id}` takes `{"changes": {"status": "Closed"}, "expect": {"status":
+"Started"}}` and answers with the changed pairs, the refreshed record, and the `action_id` it
+was logged as.
+
+This is deliberately the narrowest edit worth having, because these are live production
+databases and the portal already owns the curated write endpoints:
+
+- **Scalars only.** A key, an `airtable_record_id`, a JSON column, a link and a reference are
+  all refused with `422`. Repointing a foreign key is a relational change, not a corrected
+  value, and belongs to the endpoint that owns the record.
+- **Every change is logged.** One `core.actions` row of type `edit` per request, carrying the
+  before and after of each column and the actor. An edit made here is as reviewable as one
+  made through the portal.
+- **`core` is never a write target.** It holds the ledger those writes go to. See
+  `workspace.writable_products`.
+- **`expect` is optimistic locking.** If the stored value is not what the editor last saw the
+  request is refused with `409` and nothing is written.
+- **Values are validated before MySQL sees them.** Length against the declared column, dates
+  through Carbon, emails and URLs through `filter_var`, and a non-nullable column cannot be
+  emptied -- a non-strict MySQL would otherwise truncate silently and show the editor a value
+  it never stored.
+- A value that did not actually move writes nothing and logs nothing.
+
+### Saved views
+
+A view is the grid query string plus a name, kept in `core.workspace_views`. Only `cols`,
+`sort`, `q`, `per_page` and `filter[...]` survive the save -- `page` is a scroll position, not
+a question. Nothing is interpreted on the way in: the grid re-validates every column and
+operator when the view is opened, exactly as it does for a hand-typed URL. Saving an existing
+name replaces it. A shared view is visible to everyone in the workspace and can only be
+created by an admin; anyone who can browse can keep 30 private ones per table.
 
 ---
 
@@ -385,6 +463,8 @@ Sidebar: **Requests → Overtime Request**. Laravel: `app/Http/Controllers/Api/P
 
 `GET /api/development/portal/requests/overtime`
 `POST /api/development/portal/requests/overtime`
+`PATCH /api/development/portal/requests/overtime/{id}`
+`POST /api/development/portal/requests/overtime/{id}/cancel`
 
 The signed-in member's own overtime. JWT required; **not** Admin-only. Ownership is the composed
 `first_name last_name`, the same key `leaveDays` and `offsetDays` already use.
@@ -432,18 +512,36 @@ employee id.
 
 User Requests reads this list through the GET above, not the generic `GET /portal/requests` dump.
 
+`PATCH /api/development/portal/requests/overtime/{id}`
+
+Rewrites one pending day the member owns. Body is one group
+`{ "requestDate", "reason", "entries" }` — the same shape as one item of POST, not a list. A
+decided request is `422`. The day's current date is not a clash with itself, so an edit that
+keeps it still saves. Response is `200` with the presented row.
+
+`POST /api/development/portal/requests/overtime/{id}/cancel`
+
+Withdraws one: the row **stays** and its status becomes `Cancelled`, because the history is a
+record of what was asked for and a request that vanished would read as one never filed. A
+cancelled day is free again, for this form and the report forms both. A decided request is `422`.
+Somebody else's row is `404` rather than `403`. Appends `action_type = edit` to **core.actions**.
+
 #### Requests / Offset — **live** (sectioned)
 
 Sidebar: **Requests → Offset Request**. Laravel: `app/Http/Controllers/Api/Portal/Requests/OffsetController.php`, `app/Support/Portal/PortalOffsetRequests.php`.
 
 `GET /api/development/portal/requests/offset`
 `POST /api/development/portal/requests/offset`
+`PATCH /api/development/portal/requests/offset/{id}`
+`POST /api/development/portal/requests/offset/{id}/cancel`
 
 The signed-in member's own offset. JWT required; **not** Admin-only. Ownership is the composed
 `first_name last_name`, the same key `leaveDays` and `offsetDays` already use.
 
 GET returns `data` (`id`, `createdOn`, `requestedOn` as the work day, `dayOffOn`, `hours`,
-`remarks`, `status`, `approverRemarks`) and `range`. No `memberName` on an own row. Occupancy
+`remarks`, `status`, `approverRemarks`, `projectLabel`, `entries`) and `range`. `remarks` is the
+member's own words; `entries` are the `- project / activity / Nh` lines that filing appends to
+`reason`. No `memberName` on an own row. Occupancy
 filters to offset rows only. Same `from` / `to` clamping as leave. Cached 30s per employee and
 range.
 
@@ -486,12 +584,26 @@ employee id.
 
 User Requests reads this list through the GET above, not the generic `GET /portal/requests` dump.
 
+`PATCH /api/development/portal/requests/offset/{id}`
+
+Rewrites one pending pair the member owns. Body is one group
+`{ "workDate", "dayOffDate", "reason", "entries" }` — the same shape as one item of POST, not a
+list. A decided request is `422`. The pair's current dates are not a clash with themselves, so an
+edit that keeps them still saves. Response is `200` with the presented row.
+
+`POST /api/development/portal/requests/offset/{id}/cancel`
+
+Withdraws one pair: the row **stays** and its status becomes `Cancelled`. Both days are free
+again, for this form and the report forms both. A decided request is `422`. Somebody else's row
+is `404` rather than `403`. Appends `action_type = edit` to **core.actions**.
+
 #### Requests / Reimbursement — **live** (sectioned)
 
 Sidebar: **Requests → Reimbursement Request**. Laravel: `app/Http/Controllers/Api/Portal/Requests/ReimbursementController.php`, `app/Support/Portal/PortalReimbursementRequests.php`.
 
 `GET /api/development/portal/requests/reimbursement`
 `POST /api/development/portal/requests/reimbursement`
+`POST /api/development/portal/requests/reimbursement/receipts`
 `PATCH /api/development/portal/requests/reimbursement/{id}`
 `POST /api/development/portal/requests/reimbursement/{id}/cancel`
 
@@ -515,14 +627,23 @@ string; the picker does not.
 there is no "today or later" rule. The only clamp is ten years back and a year ahead, so a typo
 cannot store year 0001. Dates are `YYYY-MM-DD`.
 
-Body: `{ "requestDate", "items": [{ "label", "cost", "quantity", "teamLabel", "purpose" }] }`.
+Body: `{ "requestDate", "items": [{ "label", "cost", "quantity", "teamLabel", "purpose", "receiptId", "receiptUrl", "receiptName", "receiptMime" }] }`.
 At most **20** items. `label` is required, at most 500 characters. `cost` is above zero.
 `quantity` is a whole number from 1 to 9999. `teamLabel` must be one of `teams`. `purpose` is
-optional, at most 500 characters. New rows are `status = Pending`. Receipts are not stored yet.
+optional, at most 500 characters. New rows are `status = Pending`.
+
+Receipts are images (JPEG, PNG, WebP, GIF, HEIC) or PDF, at most **8 MB**.
+`POST /requests/reimbursement/receipts` is `multipart/form-data` with `file`. It uploads to
+Cloudinary (credentials stay on the server) and returns
+`{ receiptId, fileName, fileUrl, mimeType, sizeBytes, thumbUrl }`. The id is held for an hour;
+file the claim with `receiptId` on the item before it expires. An already-stored receipt on an
+edit is sent back as `receiptUrl` + `receiptName` + `receiptMime` — only Cloudinary URLs from
+this cloud are accepted. Stored on `attachments` (`table_name = reimbursements`,
+`field_name = receipts`).
 
 GET returns `data` (`id`, `referenceCode`, `memberName`, `submittedOn` which is `reimb_date`,
 `status`, `approverRemarks`, `items` (`id`, `label`, `cost`, `quantity`, `teamLabel`, `purpose`,
-`receiptName`)), `teams`, and `range`. Seeded `Completed` claims read back as `approved` — that is
+`receiptName`, `receiptUrl`, `receiptMime`, `receiptThumbUrl`)), `teams`, and `range`. Seeded `Completed` claims read back as `approved` — that is
 how those rows mark a paid reimbursement, and the rest of the portal speaks approved / pending /
 rejected / cancelled. Cached 30s per employee and range. Default window is ten years back to a
 year ahead.

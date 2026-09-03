@@ -3,41 +3,54 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Modules\Portal\Models\Employee;
-use App\Support\Portal\PortalRole;
 use App\Support\Workspace\WorkspaceGrid;
+use App\Support\Workspace\WorkspaceWriter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class WorkspaceGridController extends Controller
 {
-    public function __construct(private readonly WorkspaceGrid $grid) {}
+    use ResolvesWorkspaceAccess;
+
+    public function __construct(
+        private readonly WorkspaceGrid $grid,
+        private readonly WorkspaceWriter $writer,
+    ) {}
 
     public function index(Request $request, string $product, string $table): JsonResponse
     {
-        $actor = $this->actor($request);
-
         return response()->json(
-            $this->grid->rows($product, $table, $request, PortalRole::isAdmin($actor->role, $actor->role_level)),
+            $this->grid->rows($product, $table, $request, $this->access($request)),
         );
     }
 
     public function show(Request $request, string $product, string $table, string $id): JsonResponse
     {
-        $actor = $this->actor($request);
-
         return response()->json(
-            $this->grid->record($product, $table, $id, PortalRole::isAdmin($actor->role, $actor->role_level)),
+            $this->grid->record($product, $table, $id, $this->access($request)),
         );
     }
 
-    private function actor(Request $request): Employee
+    /**
+     * Correct scalar values on one record. `expect` carries what the editor last saw,
+     * so a row someone else has moved on is refused rather than overwritten.
+     */
+    public function update(Request $request, string $product, string $table, string $id): JsonResponse
     {
-        $actor = $request->attributes->get('portalEmployee');
-        if (! $actor instanceof Employee) {
-            abort(401, 'Authentication is required.');
-        }
+        $access = $this->access($request);
 
-        return $actor;
+        $validated = $request->validate([
+            'changes' => ['required', 'array', 'min:1'],
+            'expect' => ['sometimes', 'array'],
+        ]);
+
+        return response()->json($this->writer->update(
+            $product,
+            $table,
+            $id,
+            (array) $validated['changes'],
+            (array) ($validated['expect'] ?? []),
+            $access,
+        ));
     }
 }

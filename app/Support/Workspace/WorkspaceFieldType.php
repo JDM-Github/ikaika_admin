@@ -46,6 +46,8 @@ final class WorkspaceFieldType
 
     public const LINK = 'link';
 
+    public const REFERENCE = 'reference';
+
     /**
      * Grid column width in pixels, by type. Deterministic so a table looks the same
      * for everyone -- there are no saved per-user widths to drift out of sync.
@@ -69,6 +71,7 @@ final class WorkspaceFieldType
         self::EMAIL => 200,
         self::JSON => 200,
         self::LINK => 200,
+        self::REFERENCE => 180,
     ];
 
     /**
@@ -80,20 +83,21 @@ final class WorkspaceFieldType
     private const RANK = [
         self::ID => 0,
         self::TITLE => 1,
-        self::LINK => 2,
-        self::SELECT => 3,
-        self::DATE => 4,
-        self::DATETIME => 5,
-        self::INTEGER => 6,
-        self::DECIMAL => 6,
-        self::PERCENT => 6,
-        self::BOOLEAN => 7,
-        self::EMAIL => 8,
-        self::URL => 8,
-        self::TEXT => 9,
-        self::JSON => 10,
-        self::LONGTEXT => 11,
-        self::EXTERNAL => 12,
+        self::REFERENCE => 2,
+        self::LINK => 3,
+        self::SELECT => 4,
+        self::DATE => 5,
+        self::DATETIME => 6,
+        self::INTEGER => 7,
+        self::DECIMAL => 7,
+        self::PERCENT => 7,
+        self::BOOLEAN => 8,
+        self::EMAIL => 9,
+        self::URL => 9,
+        self::TEXT => 10,
+        self::JSON => 11,
+        self::LONGTEXT => 12,
+        self::EXTERNAL => 13,
     ];
 
     /**
@@ -237,7 +241,21 @@ final class WorkspaceFieldType
 
     public static function rank(string $type): int
     {
-        return self::RANK[$type] ?? 9;
+        return self::RANK[$type] ?? self::RANK[self::TEXT];
+    }
+
+    /**
+     * Types a grid cell may write back. A reference is deliberately absent: repointing
+     * a foreign key is a relational change, not a corrected value, and belongs to the
+     * portal endpoint that owns the record.
+     */
+    public static function isEditable(string $type): bool
+    {
+        return in_array($type, [
+            self::TITLE, self::TEXT, self::LONGTEXT, self::SELECT,
+            self::INTEGER, self::DECIMAL, self::PERCENT, self::BOOLEAN,
+            self::DATE, self::DATETIME, self::EMAIL, self::URL,
+        ], true);
     }
 
     /**

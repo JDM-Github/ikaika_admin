@@ -23,7 +23,7 @@ final class WorkspaceGrid
     /**
      * @var list<string>
      */
-    private const OPERATORS = ['eq', 'ne', 'contains', 'starts', 'gte', 'lte', 'empty', 'filled'];
+    private const OPERATORS = ['eq', 'ne', 'in', 'contains', 'starts', 'gte', 'lte', 'empty', 'filled'];
 
     public function __construct(
         private readonly WorkspaceIntrospector $introspector,
@@ -33,9 +33,9 @@ final class WorkspaceGrid
     /**
      * @return array{product: string, table: string, columns: list<string>, data: list<array<string, mixed>>, meta: array<string, mixed>, sql: string}
      */
-    public function rows(string $product, string $table, Request $request, bool $isAdmin): array
+    public function rows(string $product, string $table, Request $request, WorkspaceAccess $access): array
     {
-        $blueprint = $this->schema->table($product, $table, $isAdmin);
+        $blueprint = $this->schema->table($product, $table, $access);
         $fields = $this->keyed($blueprint['fields']);
 
         $perPage = $this->perPage($request);
@@ -44,6 +44,8 @@ final class WorkspaceGrid
 
         $scalars = [];
         $links = [];
+        $references = [];
+        $locked = [];
         foreach ($columns as $column) {
             $field = $fields[$column] ?? null;
             if ($field === null) {
@@ -53,6 +55,14 @@ final class WorkspaceGrid
                 $links[] = $field;
 
                 continue;
+            }
+            if (($field['locked'] ?? false) === true) {
+                $locked[] = $column;
+
+                continue;
+            }
+            if ($field['type'] === WorkspaceFieldType::REFERENCE) {
+                $references[] = $field;
             }
             $scalars[] = $column;
         }
@@ -67,7 +77,7 @@ final class WorkspaceGrid
 
         $unfilteredTotal = (clone $query)->count();
 
-        $applied = $this->applyFilters($query, $request, $fields);
+        $applied = $this->applyFilters($query, $request, $fields, $product, $table, $key);
         $searched = $this->applySearch($query, $request, $fields);
         $total = (clone $query)->count();
 
@@ -88,11 +98,18 @@ final class WorkspaceGrid
             foreach ((array) $record as $column => $value) {
                 $row[$column] = ['v' => $value];
             }
+            foreach ($locked as $column) {
+                $row[$column] = ['locked' => true];
+            }
             $data[] = $row;
         }
 
         if ($links !== [] && $key !== null) {
             $this->attachChips($product, $links, $data, $key);
+        }
+
+        if ($references !== []) {
+            $this->attachReferences($product, $references, $data);
         }
 
         return [
@@ -122,9 +139,9 @@ final class WorkspaceGrid
      *
      * @return array{product: string, table: string, id: mixed, data: array<string, mixed>, fields: list<array<string, mixed>>}
      */
-    public function record(string $product, string $table, string $id, bool $isAdmin): array
+    public function record(string $product, string $table, string $id, WorkspaceAccess $access): array
     {
-        $blueprint = $this->schema->table($product, $table, $isAdmin);
+        $blueprint = $this->schema->table($product, $table, $access);
         $key = $this->identityColumn($blueprint);
 
         if ($key === null) {
@@ -133,11 +150,21 @@ final class WorkspaceGrid
 
         $scalars = [];
         $links = [];
+        $references = [];
+        $locked = [];
         foreach ($blueprint['fields'] as $field) {
             if ($field['type'] === WorkspaceFieldType::LINK) {
                 $links[] = $field;
 
                 continue;
+            }
+            if (($field['locked'] ?? false) === true) {
+                $locked[] = (string) $field['name'];
+
+                continue;
+            }
+            if ($field['type'] === WorkspaceFieldType::REFERENCE) {
+                $references[] = $field;
             }
             $scalars[] = $this->introspector->quote((string) $field['name']);
         }
@@ -156,16 +183,22 @@ final class WorkspaceGrid
         foreach ((array) $record as $column => $value) {
             $row[$column] = ['v' => $value];
         }
+        foreach ($locked as $column) {
+            $row[$column] = ['locked' => true];
+        }
 
         $rows = [$row];
         if ($links !== []) {
             $this->attachChips($product, $links, $rows, $key, chipLimit: 0);
         }
+        if ($references !== []) {
+            $this->attachReferences($product, $references, $rows);
+        }
 
         return [
             'product' => $product,
             'table' => $table,
-            'id' => $row[$key]['v'] ?? null,
+            'id' => $rows[0][$key]['v'] ?? null,
             'data' => $rows[0],
             'fields' => $blueprint['fields'],
         ];
@@ -194,40 +227,16 @@ final class WorkspaceGrid
             return;
         }
 
-        $connection = $this->introspector->connection($product);
-
         foreach ($links as $field) {
-            $junction = (string) $field['via'];
             $target = (string) $field['target'];
-            $near = (string) $field['near_column'];
-            $far = (string) $field['far_column'];
-
-            $targetKey = $this->targetKey($product, $target);
+            $targetKey = $this->introspector->surrogateKey($product, $target);
             if ($targetKey === null) {
                 continue;
             }
 
-            $parts = $this->schema->titleParts($product, $target);
-            $labelParts = [];
-            foreach ($parts as $part) {
-                $labelParts[] = 'coalesce(cast(t.'.$this->introspector->quote($part)." as char), '')";
-            }
-            $label = count($labelParts) === 1
-                ? $labelParts[0]
-                : 'concat_ws('.chr(39).' · '.chr(39).', '.implode(', ', $labelParts).')';
-
-            $query = $connection->table($junction.' as j')
-                ->join($target.' as t', 't.'.$targetKey, '=', 'j.'.$far)
-                ->whereIn('j.'.$near, $owners)
-                ->select($connection->raw(
-                    'j.'.$this->introspector->quote($near).' as owner, t.'.
-                    $this->introspector->quote($targetKey).' as rid, '.$label.' as label',
-                ))
-                ->limit(self::MAX_CHIP_ROWS);
-
-            if ($field['qualifier'] !== null && $field['variant'] !== null) {
-                $query->where('j.'.(string) $field['qualifier'], $field['variant']);
-            }
+            $query = $field['kind'] === WorkspaceLinks::CHILD
+                ? $this->childChipQuery($product, $field, $targetKey, $owners)
+                : $this->junctionChipQuery($product, $field, $targetKey, $owners);
 
             $grouped = [];
             foreach ($query->get() as $chip) {
@@ -246,18 +255,162 @@ final class WorkspaceGrid
                 $rows[$index][$name] = [
                     'chips' => $shown,
                     'more' => max(0, count($found) - count($shown)),
+                    'count' => count($found),
                     'to' => $target,
+                    'kind' => $field['kind'],
                 ];
             }
         }
     }
 
     /**
+     * @param  array<string, mixed>  $field
+     * @param  list<mixed>  $owners
+     */
+    private function junctionChipQuery(string $product, array $field, string $targetKey, array $owners): Builder
+    {
+        $connection = $this->introspector->connection($product);
+        $target = (string) $field['target'];
+        $near = (string) $field['near_column'];
+
+        $query = $connection->table((string) $field['via'].' as j')
+            ->join($target.' as t', 't.'.$targetKey, '=', 'j.'.(string) $field['far_column'])
+            ->whereIn('j.'.$near, $owners)
+            ->select($connection->raw(
+                'j.'.$this->introspector->quote($near).' as owner, t.'.
+                $this->introspector->quote($targetKey).' as rid, '.
+                $this->labelExpression($product, $target, 't').' as label',
+            ))
+            ->limit(self::MAX_CHIP_ROWS);
+
+        if ($field['qualifier'] !== null && $field['variant'] !== null) {
+            $query->where('j.'.(string) $field['qualifier'], $field['variant']);
+        }
+
+        return $query;
+    }
+
+    /**
+     * A child table needs no junction: the chips are its own rows, labelled by the one
+     * column that is not the link back.
+     *
+     * @param  array<string, mixed>  $field
+     * @param  list<mixed>  $owners
+     */
+    private function childChipQuery(string $product, array $field, string $targetKey, array $owners): Builder
+    {
+        $connection = $this->introspector->connection($product);
+        $near = (string) $field['far_column'];
+        $labelColumn = $field['label_column'];
+
+        $label = is_string($labelColumn)
+            ? 'coalesce(cast(t.'.$this->introspector->quote($labelColumn)." as char), '')"
+            : $this->labelExpression($product, (string) $field['target'], 't');
+
+        return $connection->table((string) $field['target'].' as t')
+            ->whereIn('t.'.$near, $owners)
+            ->select($connection->raw(
+                't.'.$this->introspector->quote($near).' as owner, t.'.
+                $this->introspector->quote($targetKey).' as rid, '.$label.' as label',
+            ))
+            ->limit(self::MAX_CHIP_ROWS);
+    }
+
+    /**
+     * Resolve the single record a foreign-key column points at, one query per target
+     * rather than one per row. Without this the cell is a bare integer and the reader
+     * has to know that project 47 is the Ayala tower.
+     *
+     * @param  list<array<string, mixed>>  $references
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function attachReferences(string $product, array $references, array &$rows): void
+    {
+        $connection = $this->introspector->connection($product);
+
+        foreach ($references as $field) {
+            $name = (string) $field['name'];
+            $target = (string) $field['target'];
+            $targetKey = (string) $field['far_column'];
+
+            $ids = [];
+            foreach ($rows as $row) {
+                $value = $row[$name]['v'] ?? null;
+                if ($value !== null && $value !== '') {
+                    $ids[(string) $value] = $value;
+                }
+            }
+
+            if ($ids === []) {
+                continue;
+            }
+
+            $found = $connection->table($target.' as t')
+                ->whereIn('t.'.$targetKey, array_values($ids))
+                ->select($connection->raw(
+                    't.'.$this->introspector->quote($targetKey).' as rid, '.
+                    $this->labelExpression($product, $target, 't').' as label',
+                ))
+                ->limit(self::MAX_CHIP_ROWS)
+                ->get();
+
+            $labels = [];
+            foreach ($found as $row) {
+                $labels[(string) $row->rid] = trim((string) $row->label) === ''
+                    ? (string) $row->rid
+                    : (string) $row->label;
+            }
+
+            foreach ($rows as $index => $row) {
+                $value = $row[$name]['v'] ?? null;
+                if ($value === null || $value === '') {
+                    continue;
+                }
+
+                $rows[$index][$name] = [
+                    'v' => $value,
+                    'chips' => [['id' => $value, 'label' => $labels[(string) $value] ?? (string) $value]],
+                    'more' => 0,
+                    'count' => 1,
+                    'to' => $target,
+                    'kind' => WorkspaceLinks::PARENT,
+                ];
+            }
+        }
+    }
+
+    /**
+     * How a chip for one row of $table reads. Several tables need more than one column
+     * -- a user report is only identifiable as a date plus who filed it.
+     */
+    private function labelExpression(string $product, string $table, string $alias): string
+    {
+        $parts = [];
+        foreach ($this->schema->titleParts($product, $table) as $part) {
+            $parts[] = 'coalesce(cast('.$alias.'.'.$this->introspector->quote($part)." as char), '')";
+        }
+
+        if ($parts === []) {
+            return "''";
+        }
+
+        return count($parts) === 1
+            ? $parts[0]
+            : 'concat_ws('.chr(39).' · '.chr(39).', '.implode(', ', $parts).')';
+    }
+
+    /**
      * @param  array<string, array<string, mixed>>  $fields
      * @return array<string, string>
      */
-    private function applyFilters(Builder $query, Request $request, array $fields): array
-    {
+    private function applyFilters(
+        Builder $query,
+        Request $request,
+        array $fields,
+        string $product,
+        string $table,
+        ?string $key,
+    ): array {
         $raw = $request->query('filter');
         if (! is_array($raw)) {
             return [];
@@ -270,15 +423,26 @@ final class WorkspaceGrid
             }
 
             $field = $fields[$column] ?? null;
-            if ($field === null || $field['type'] === WorkspaceFieldType::LINK) {
+            if ($field === null || ($field['locked'] ?? false) === true) {
                 continue;
             }
 
             [$operator, $value] = $this->splitExpression($expression);
 
+            if ($field['type'] === WorkspaceFieldType::LINK) {
+                if ($key === null || ! $this->applyLinkFilter($query, $field, $operator, $value, $product, $table, $key)) {
+                    continue;
+                }
+
+                $applied[$column] = $operator.':'.$value;
+
+                continue;
+            }
+
             match ($operator) {
                 'eq' => $query->where($column, '=', $value),
                 'ne' => $query->where($column, '!=', $value),
+                'in' => $query->whereIn($column, $this->splitList($value)),
                 'contains' => $query->where($column, 'like', '%'.$this->escapeLike($value).'%'),
                 'starts' => $query->where($column, 'like', $this->escapeLike($value).'%'),
                 'gte' => $query->where($column, '>=', $value),
@@ -294,6 +458,101 @@ final class WorkspaceGrid
         }
 
         return $applied;
+    }
+
+    /**
+     * Narrow a table by one of its relationships: every project this person is PM of,
+     * every record with no link at all. The chips already say who is linked; without
+     * this the grid can show that and still not answer the obvious next question.
+     *
+     * @param  array<string, mixed>  $field
+     */
+    private function applyLinkFilter(
+        Builder $query,
+        array $field,
+        string $operator,
+        string $value,
+        string $product,
+        string $table,
+        string $key,
+    ): bool {
+        if (! in_array($operator, ['eq', 'contains', 'empty', 'filled'], true)) {
+            return false;
+        }
+
+        $target = (string) $field['target'];
+        $targetKey = $this->introspector->surrogateKey($product, $target);
+        if ($targetKey === null) {
+            return false;
+        }
+
+        $build = function (Builder $sub) use ($field, $operator, $value, $product, $table, $key, $target, $targetKey): void {
+            $sub->selectRaw('1');
+
+            if ($field['kind'] === WorkspaceLinks::CHILD) {
+                $sub->from($target.' as t')->whereColumn('t.'.(string) $field['far_column'], $table.'.'.$key);
+            } else {
+                $sub->from((string) $field['via'].' as j')
+                    ->whereColumn('j.'.(string) $field['near_column'], $table.'.'.$key);
+
+                if ($field['qualifier'] !== null && $field['variant'] !== null) {
+                    $sub->where('j.'.(string) $field['qualifier'], $field['variant']);
+                }
+
+                if ($operator === 'eq') {
+                    $sub->where('j.'.(string) $field['far_column'], $value);
+
+                    return;
+                }
+
+                if ($operator === 'contains') {
+                    $sub->join($target.' as t', 't.'.$targetKey, '=', 'j.'.(string) $field['far_column']);
+                }
+            }
+
+            if ($operator === 'eq') {
+                $sub->where('t.'.$targetKey, $value);
+            }
+
+            if ($operator === 'contains') {
+                $like = '%'.$this->escapeLike($value).'%';
+                $parts = $this->schema->titleParts($product, $target);
+                $sub->where(function (Builder $inner) use ($parts, $like): void {
+                    foreach ($parts as $part) {
+                        $inner->orWhere('t.'.$part, 'like', $like);
+                    }
+                });
+            }
+        };
+
+        if ($operator === 'empty') {
+            $query->whereNotExists($build);
+
+            return true;
+        }
+
+        $query->whereExists($build);
+
+        return true;
+    }
+
+    /**
+     * Pipe-separated, because a select value here is quite capable of holding a comma
+     * -- "Design, Build" is a real type_of_job.
+     *
+     * @return list<string>
+     */
+    private function splitList(string $value): array
+    {
+        $values = [];
+        foreach (explode('|', $value) as $part) {
+            $part = trim($part);
+            if ($part !== '') {
+                $values[] = $part;
+            }
+        }
+
+        return $values;
     }
 
     /**
@@ -364,7 +623,11 @@ final class WorkspaceGrid
     {
         $position = strpos($expression, ':');
         if ($position === false) {
-            return ['eq', $expression];
+            // empty and filled take no argument, so they arrive with no colon to split
+            // on -- read as a value they would silently mean "= the word empty".
+            return in_array($expression, ['empty', 'filled'], true)
+                ? [$expression, '']
+                : ['eq', $expression];
         }
 
         $operator = substr($expression, 0, $position);
@@ -437,17 +700,6 @@ final class WorkspaceGrid
         foreach ($blueprint['fields'] as $field) {
             if ($field['type'] === WorkspaceFieldType::ID) {
                 return (string) $field['name'];
-            }
-        }
-
-        return null;
-    }
-
-    private function targetKey(string $product, string $target): ?string
-    {
-        foreach ($this->introspector->columns($product)[$target] ?? [] as $column) {
-            if (str_contains(strtolower($column['extra']), 'auto_increment')) {
-                return $column['name'];
             }
         }
 

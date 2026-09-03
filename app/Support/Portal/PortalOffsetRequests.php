@@ -47,6 +47,8 @@ final class PortalOffsetRequests
 
     private const NEW_STATUS = 'Pending';
 
+    private const CANCELLED_STATUS = 'Cancelled';
+
     private const CORE_TARGET = 'portal.requests';
 
     private const CORE_RESOURCE = 'requests.offset';
@@ -158,6 +160,161 @@ final class PortalOffsetRequests
             'section' => 'requests',
             'resource' => 'offset',
             'data' => $this->read($insertedIds),
+        ];
+    }
+
+    /**
+     * Rewrite one pending pair. The builder reopens the same exchange, so this is one group rather
+     * than the create envelope's list.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function replace(Employee $actor, string $id, Request $request): array
+    {
+        $row = $this->ownPendingRow($actor, $id);
+        $currentWork = $this->calendarDate($row->original_work_day ?? null)
+            ?? $this->calendarDate($row->request_date ?? null);
+        $currentDayOff = $this->calendarDate($row->offset_work_day ?? null);
+        $group = $this->validatedSingleGroup($request, $currentWork, $currentDayOff);
+
+        $employeeId = (int) $actor->getKey();
+        $this->assertDaysAreFree($actor, [$group], array_values(array_filter([
+            $currentWork,
+            $currentDayOff,
+        ], static fn (?string $date): bool => $date !== null)));
+
+        $projects = $this->ownProjectCatalog($employeeId);
+        $projectIds = $this->resolveProjects($group['entries'], $projects);
+        $hours = $this->totalHours($group['entries']);
+
+        $this->connection()->transaction(function () use ($row, $group, $projectIds, $hours): void {
+            $this->connection()->table('requests')->where('id', (int) $row->id)->update([
+                'request_date' => $group['workDate'],
+                'no_of_hours' => $hours,
+                'original_work_day' => $group['workDate'],
+                'offset_work_day' => $group['dayOffDate'],
+                'offset_hrs' => $hours,
+                'reason' => $this->composedReason($group['reason'], $group['entries']),
+            ]);
+            $this->connection()->table('projects_requests')->where('request_id', (int) $row->id)->delete();
+            foreach ($projectIds as $projectId) {
+                $this->connection()->table('projects_requests')->insert([
+                    'project_id' => $projectId,
+                    'request_id' => (int) $row->id,
+                ]);
+            }
+        });
+
+        $this->ledger->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            self::CORE_TARGET,
+            [
+                'id' => (string) (int) $row->id,
+                'workOn' => $group['workDate'],
+                'dayOffOn' => $group['dayOffDate'],
+                'hours' => $hours,
+                'entries' => $group['entries'],
+                'reason' => $group['reason'],
+            ],
+            self::CORE_RESOURCE,
+            (string) (int) $row->id,
+            CoreRecycleKey::offsetRequest($employeeId, $group['workDate']),
+            $employeeId,
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
+
+        $this->reports->bumpCache();
+        $this->bumpCache();
+
+        $presented = $this->presentOffset($this->connection()
+            ->table('requests')
+            ->select([
+                'id',
+                'request_date',
+                'date_created',
+                'reason',
+                'status',
+                'approver_remarks',
+                'type',
+                'no_of_hours',
+                'original_work_day',
+                'offset_work_day',
+            ])
+            ->where('id', (int) $row->id)
+            ->first());
+        if ($presented === null) {
+            abort(500, 'The request was changed but could not be read back.');
+        }
+
+        return [
+            'section' => 'requests',
+            'resource' => 'offset',
+            'data' => $presented,
+        ];
+    }
+
+    /**
+     * Withdraw an offset pair. The row stays and its status changes: the history is a record of
+     * what was asked for, and a cancelled request that vanished would read as one never filed.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function cancel(Employee $actor, string $id): array
+    {
+        $row = $this->ownPendingRow($actor, $id);
+        $day = $this->calendarDate($row->original_work_day ?? null)
+            ?? $this->calendarDate($row->request_date ?? null)
+            ?? '';
+        $employeeId = (int) $actor->getKey();
+
+        $this->connection()->table('requests')
+            ->where('id', (int) $row->id)
+            ->update(['status' => self::CANCELLED_STATUS]);
+
+        $this->ledger->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            self::CORE_TARGET,
+            [
+                'id' => (string) (int) $row->id,
+                'workOn' => $day,
+                'dayOffOn' => $this->calendarDate($row->offset_work_day ?? null),
+                'status' => self::CANCELLED_STATUS,
+            ],
+            self::CORE_RESOURCE,
+            (string) (int) $row->id,
+            CoreRecycleKey::offsetRequest($employeeId, $day),
+            $employeeId,
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
+
+        // A cancelled pair is free again, for this form and for the report forms both.
+        $this->bumpCache();
+        $this->reports->bumpCache();
+
+        $presented = $this->presentOffset($this->connection()
+            ->table('requests')
+            ->select([
+                'id',
+                'request_date',
+                'date_created',
+                'reason',
+                'status',
+                'approver_remarks',
+                'type',
+                'no_of_hours',
+                'original_work_day',
+                'offset_work_day',
+            ])
+            ->where('id', (int) $row->id)
+            ->first());
+        if ($presented === null) {
+            abort(500, 'The request was cancelled but could not be read back.');
+        }
+
+        return [
+            'section' => 'requests',
+            'resource' => 'offset',
+            'data' => $presented,
         ];
     }
 
@@ -323,8 +480,9 @@ final class PortalOffsetRequests
      * pickers already print: that day is not free to work or to take off.
      *
      * @param  list<array{workDate: string, dayOffDate: string, reason: string, entries: list<array<string, mixed>>}>  $groups
+     * @param  list<string>  $ignore  Dates this request already occupies, so an edit of the same pair is not a clash with itself.
      */
-    private function assertDaysAreFree(Employee $actor, array $groups): void
+    private function assertDaysAreFree(Employee $actor, array $groups, array $ignore = []): void
     {
         $dates = [];
         foreach ($groups as $group) {
@@ -338,7 +496,7 @@ final class PortalOffsetRequests
 
         $from = min($dates);
         $to = max($dates);
-        $taken = $this->reports->offsetDays($actor, $from, $to);
+        $taken = array_values(array_diff($this->reports->offsetDays($actor, $from, $to), $ignore));
         $leave = $this->reports->leaveDays($actor, $from, $to);
 
         foreach ($dates as $date) {
@@ -375,32 +533,65 @@ final class PortalOffsetRequests
             if (! is_array($item)) {
                 abort(422, 'Each day must be an object.');
             }
-            $workDate = $this->parseDate(trim((string) ($item['workDate'] ?? '')));
-            $dayOffDate = $this->parseDate(trim((string) ($item['dayOffDate'] ?? '')));
-            $this->assertWorkDate($workDate);
-            $this->assertDayOffDate($dayOffDate);
-            if ($workDate === $dayOffDate) {
-                abort(422, 'The day off has to be a different day from the day worked.');
-            }
-            foreach ([$workDate, $dayOffDate] as $date) {
-                if (in_array($date, $seen, true)) {
-                    abort(422, 'That filing lists the same day twice.');
-                }
-                $seen[] = $date;
-            }
-            $groups[] = [
-                'workDate' => $workDate,
-                'dayOffDate' => $dayOffDate,
-                'reason' => $this->validatedReason($item['reason'] ?? null),
-                'entries' => $this->validatedEntryList($item['entries'] ?? null),
-            ];
+            $groups[] = $this->validatedGroup($item, $seen);
         }
 
         return $groups;
     }
 
-    private function assertWorkDate(string $date): void
+    /**
+     * @return array{workDate: string, dayOffDate: string, reason: string, entries: list<array{projectLabel: string, activityLabel: string, hoursRendered: float, elementChange: float}>}
+     */
+    private function validatedSingleGroup(Request $request, ?string $currentWork, ?string $currentDayOff): array
     {
+        $seen = [];
+
+        return $this->validatedGroup([
+            'workDate' => $request->input('workDate'),
+            'dayOffDate' => $request->input('dayOffDate'),
+            'reason' => $request->input('reason'),
+            'entries' => $request->input('entries'),
+        ], $seen, $currentWork, $currentDayOff);
+    }
+
+    /**
+     * @param  array<mixed>  $item
+     * @param  list<string>  $seen
+     * @return array{workDate: string, dayOffDate: string, reason: string, entries: list<array{projectLabel: string, activityLabel: string, hoursRendered: float, elementChange: float}>}
+     */
+    private function validatedGroup(
+        array $item,
+        array &$seen,
+        ?string $currentWork = null,
+        ?string $currentDayOff = null,
+    ): array {
+        $workDate = $this->parseDate(trim((string) ($item['workDate'] ?? '')));
+        $dayOffDate = $this->parseDate(trim((string) ($item['dayOffDate'] ?? '')));
+        $this->assertWorkDate($workDate, $currentWork);
+        $this->assertDayOffDate($dayOffDate, $currentDayOff);
+        if ($workDate === $dayOffDate) {
+            abort(422, 'The day off has to be a different day from the day worked.');
+        }
+        foreach ([$workDate, $dayOffDate] as $date) {
+            if (in_array($date, $seen, true)) {
+                abort(422, 'That filing lists the same day twice.');
+            }
+            $seen[] = $date;
+        }
+
+        return [
+            'workDate' => $workDate,
+            'dayOffDate' => $dayOffDate,
+            'reason' => $this->validatedReason($item['reason'] ?? null),
+            'entries' => $this->validatedEntryList($item['entries'] ?? null),
+        ];
+    }
+
+    private function assertWorkDate(string $date, ?string $current = null): void
+    {
+        if ($current !== null && $date === $current) {
+            return;
+        }
         $day = $this->timezone->day($date);
         $today = $this->timezone->today();
         if ($day->gt($today) || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
@@ -408,8 +599,11 @@ final class PortalOffsetRequests
         }
     }
 
-    private function assertDayOffDate(string $date): void
+    private function assertDayOffDate(string $date, ?string $current = null): void
     {
+        if ($current !== null && $date === $current) {
+            return;
+        }
         $day = $this->timezone->day($date);
         $today = $this->timezone->today();
         if ($day->gt($today->copy()->addDays(self::DAY_OFF_LOOKAHEAD_DAYS))
@@ -570,34 +764,100 @@ final class PortalOffsetRequests
 
         $data = [];
         foreach ($rows as $row) {
-            $kind = PortalSubmittedReportPresenter::occupancy(
-                $row->type ?? null,
-                $row->no_of_hours ?? null,
-                $this->calendarDate($row->original_work_day ?? null),
-                $this->calendarDate($row->offset_work_day ?? null),
-            );
-            if ($kind !== PortalSubmittedReportPresenter::OCCUPANCY_OFFSET) {
+            $presented = $this->presentOffset($row);
+            if ($presented === null) {
                 continue;
             }
-            $requestedOn = $this->calendarDate($row->original_work_day ?? null)
-                ?? $this->calendarDate($row->request_date ?? null);
-            $dayOffOn = $this->calendarDate($row->offset_work_day ?? null);
-            if ($requestedOn === null || $dayOffOn === null) {
-                continue;
-            }
-            $data[] = [
-                'id' => (string) (int) $row->id,
-                'createdOn' => $this->calendarDate($row->date_created ?? null) ?? $requestedOn,
-                'requestedOn' => $requestedOn,
-                'dayOffOn' => $dayOffOn,
-                'hours' => round((float) ($row->no_of_hours ?? 0), 2),
-                'remarks' => $this->text($row->reason ?? null),
-                'status' => PortalSubmittedReportPresenter::requestStatus($row->status ?? null),
-                'approverRemarks' => $this->text($row->approver_remarks ?? null),
-            ];
+            $data[] = $presented;
         }
 
         return $data;
+    }
+
+    /**
+     * The member's own offset row, still undecided. Somebody else's is a 404 rather than a 403:
+     * whose request it is is not this member's to learn.
+     */
+    private function ownPendingRow(Employee $actor, string $id): object
+    {
+        if (preg_match('/^\d{1,11}$/', trim($id)) !== 1) {
+            abort(404, 'That request was not found.');
+        }
+
+        $name = $this->memberName($actor);
+        $row = $this->connection()
+            ->table('requests')
+            ->select([
+                'id',
+                'request_date',
+                'status',
+                'type',
+                'no_of_hours',
+                'original_work_day',
+                'offset_work_day',
+            ])
+            ->where('id', (int) $id)
+            ->whereRaw('LOWER(TRIM(name)) = ?', [strtolower($name)])
+            ->first();
+
+        if ($row === null) {
+            abort(404, 'That request was not found.');
+        }
+
+        $kind = PortalSubmittedReportPresenter::occupancy(
+            $row->type ?? null,
+            $row->no_of_hours ?? null,
+            $this->calendarDate($row->original_work_day ?? null),
+            $this->calendarDate($row->offset_work_day ?? null),
+        );
+        if ($kind !== PortalSubmittedReportPresenter::OCCUPANCY_OFFSET) {
+            abort(404, 'That request was not found.');
+        }
+
+        if (PortalSubmittedReportPresenter::requestStatus($row->status ?? null) !== 'pending') {
+            abort(422, 'Only a request nobody has decided on yet can be changed.');
+        }
+
+        return $row;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function presentOffset(mixed $row): ?array
+    {
+        if (! is_object($row)) {
+            return null;
+        }
+        $kind = PortalSubmittedReportPresenter::occupancy(
+            $row->type ?? null,
+            $row->no_of_hours ?? null,
+            $this->calendarDate($row->original_work_day ?? null),
+            $this->calendarDate($row->offset_work_day ?? null),
+        );
+        if ($kind !== PortalSubmittedReportPresenter::OCCUPANCY_OFFSET) {
+            return null;
+        }
+        $requestedOn = $this->calendarDate($row->original_work_day ?? null)
+            ?? $this->calendarDate($row->request_date ?? null);
+        $dayOffOn = $this->calendarDate($row->offset_work_day ?? null);
+        if ($requestedOn === null || $dayOffOn === null) {
+            return null;
+        }
+        $parsed = PortalSubmittedReportPresenter::splitComposedReason($this->text($row->reason ?? null));
+
+        return [
+            'id' => (string) (int) $row->id,
+            'createdOn' => $this->calendarDate($row->date_created ?? null) ?? $requestedOn,
+            'requestedOn' => $requestedOn,
+            'dayOffOn' => $dayOffOn,
+            'hours' => round((float) ($row->no_of_hours ?? 0), 2),
+            'remarks' => $parsed['remarks'],
+            'status' => PortalSubmittedReportPresenter::requestStatus($row->status ?? null),
+            'approverRemarks' => $this->text($row->approver_remarks ?? null),
+            'projectLabel' => $parsed['projectLabel'],
+            'entries' => $parsed['entries'],
+        ];
     }
 
     private function memberName(Employee $actor): string
