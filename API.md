@@ -72,6 +72,7 @@ Sectioned portal routes (Manage / Users, …) live **beside** the generic resour
 | `POST` | `/api/staging/portal/auth/login` | None. Body `{ "id_no": "260701-0020" }` |
 | `GET` | `/api/staging/portal/auth/me` | `Authorization: Bearer {token}` |
 | `GET` | `/api/staging/portal/home` | Bearer. Dashboard for the signed-in member: this month's hours/reports, active project mix, recent reports, tracked projects |
+| `GET` | `/api/staging/portal/user/logs` | Bearer. The signed-in member's own activity logs |
 | `GET` | `/api/staging/portal/projects` | Bearer. View Projects board. Admin/Executive see all projects with `isAssigned`; members see only their own |
 | `GET` | `/api/staging/portal/manage/users` | Bearer + Admin or Executive |
 | `PATCH` | `/api/staging/portal/manage/users/{id}/role` | Bearer + Admin or Executive. Body `{ "role": "Admin" }`, `{ "role": "User" }`, or `{ "role": "ProjectAdmin" }` |
@@ -288,6 +289,23 @@ created by an admin; anyone who can browse can keep 30 private ones per table.
 ## Portal models
 
 ### Live
+
+#### User / Logs — **live** (sectioned)
+
+`GET /api/development/portal/user/logs`
+
+The signed-in member's own activity stream. A member token is always scoped by the server to its
+`employee_id`; query parameters cannot request another person's logs.
+
+The list is paged with `page` (default `1`) and `per_page` (allow-listed `10` / `25` / `50` /
+`100`, default `25`). `q` searches every word across `action`, `resource`, `record_id`, and
+`message`. `action` accepts `INSERT`, `PATCH`, `DELETE`, or `POST`. `sort` accepts `date`,
+`action`, or `resource`; `dir` accepts `asc` or `desc`. Default order is newest first.
+
+Each row returns `id`, `action`, `resource`, `recordId`, `message`, `createdAt`, `dateLabel`,
+`timeLabel`, and `createdAtLabel`. `message` preserves `{UserName|You}` / `{UserName|Your}` for
+the frontend to resolve. `dateLabel` uses `Monday, September 7, 2026`; `createdAt` is UTC ISO
+8601. IP addresses, user agents, and sanitized audit payloads are never returned.
 
 #### Manage / Users — **live** (sectioned)
 

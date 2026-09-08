@@ -738,6 +738,48 @@ CREATE TABLE requests_earn_codes (
 
 
 -- ============================================================================
+-- PORTAL AUDIT — user tracking and in-app notifications
+-- logs: every member action the portal backend records (no tokens / secrets).
+-- notifications: inbox rows. link_path is the screen the UI opens on click;
+-- payload holds ids and other extras for that screen. read_at is null until read.
+-- ============================================================================
+
+CREATE TABLE logs (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id   INT          NOT NULL,
+    action        VARCHAR(64)  NOT NULL,
+    resource      VARCHAR(191) NOT NULL,
+    record_id     VARCHAR(191) NULL,
+    message       TEXT         NULL,
+    ip_address    VARCHAR(45)  NULL,
+    user_agent    VARCHAR(255) NULL,
+    payload       JSON         NULL,
+    created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_logs_employee_created (employee_id, created_at),
+    INDEX idx_logs_resource_created (resource, created_at),
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE notifications (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id   INT          NOT NULL,
+    actor_id      INT          NULL,
+    type          VARCHAR(64)  NOT NULL,
+    title         VARCHAR(255) NOT NULL,
+    message       TEXT         NOT NULL,
+    link_path     VARCHAR(500) NULL,
+    link_label    VARCHAR(100) NULL,
+    payload       JSON         NULL,
+    read_at       TIMESTAMP    NULL,
+    created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_notifications_inbox (employee_id, read_at, created_at),
+    INDEX idx_notifications_employee_created (employee_id, created_at),
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_id)    REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ============================================================================
 -- INDEXES for live portal reads
 -- user_reports.report_date is indexed in CREATE TABLE above
 -- (idx_user_reports_date). Existing databases: sql/portal/indexes.sql.

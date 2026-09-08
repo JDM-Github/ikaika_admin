@@ -3,10 +3,19 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\TestCase;
 
 class PortalAuthTest extends TestCase
 {
+    use DatabaseTransactions;
+
+    /**
+     * @var list<string>
+     */
+    protected array $connectionsToTransact = ['portal'];
+
     public function test_login_issues_a_jwt_for_an_active_employee_id_number(): void
     {
         $employee = Employee::query()->where('status', 'Active')->first();
@@ -35,6 +44,15 @@ class PortalAuthTest extends TestCase
         $this->assertSame((string) $employee->getKey(), $payload['sub']);
         $this->assertSame($employee->id_no, $payload['id_no']);
         $this->assertSame($employee->role, $payload['role']);
+
+        $log = PortalLog::query()
+            ->where('employee_id', $employee->getKey())
+            ->where('action', 'POST')
+            ->where('resource', 'auth.login')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertSame('{UserName|You} signed in to the portal', $log->message);
     }
 
     public function test_login_rejects_an_unknown_id_number(): void

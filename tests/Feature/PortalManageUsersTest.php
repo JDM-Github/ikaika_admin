@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Mail\PortalAccessAlertMail;
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
 use App\Support\Portal\PortalAccessDenied;
 use App\Support\Portal\PortalManageUserPresenter;
 use App\Support\Portal\PortalRole;
@@ -157,7 +158,8 @@ class PortalManageUsersTest extends TestCase
     public function test_an_admin_can_promote_a_member(): void
     {
         $member = $this->promotableMember();
-        $token = $this->tokenForAdmin();
+        $admin = $this->adminWhoIsNotExecutive();
+        $token = $this->loginToken($admin);
 
         $this->patchJson("/api/development/portal/manage/users/{$member->id}/role", [
             'role' => PortalRole::ADMIN,
@@ -169,6 +171,33 @@ class PortalManageUsersTest extends TestCase
             ->assertJsonPath('data.is_admin', true);
 
         $this->assertSame(PortalRole::ADMIN, $member->fresh()?->role);
+
+        $memberName = trim(trim((string) $member->first_name).' '.trim((string) $member->last_name));
+        $adminName = trim(trim((string) $admin->first_name).' '.trim((string) $admin->last_name));
+        if ($memberName === '') {
+            $memberName = 'Member';
+        }
+        if ($adminName === '') {
+            $adminName = 'Member';
+        }
+
+        $actorLog = PortalLog::query()
+            ->where('employee_id', $admin->id)
+            ->where('resource', 'manage.users')
+            ->where('record_id', (string) $member->id)
+            ->orderByDesc('id')
+            ->first();
+        $targetLog = PortalLog::query()
+            ->where('employee_id', $member->id)
+            ->where('resource', 'manage.users')
+            ->where('record_id', (string) $member->id)
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($actorLog);
+        $this->assertNotNull($targetLog);
+        $this->assertSame('PATCH', $actorLog->action);
+        $this->assertSame("{UserName|You} changed {$memberName}'s role to Admin", $actorLog->message);
+        $this->assertSame("{UserName|Your} role was changed to Admin by {$adminName}", $targetLog->message);
     }
 
     public function test_an_admin_can_set_project_admin(): void

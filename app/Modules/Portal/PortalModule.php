@@ -399,6 +399,25 @@ class PortalModule implements ProductModule
                     ],
                 ],
             ],
+            'user' => [
+                'label' => 'User',
+                'requires_admin' => false,
+                'resources' => [
+                    'logs' => [
+                        'label' => 'Logs',
+                        'path' => 'user/logs',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'user/logs',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
         ];
     }
 

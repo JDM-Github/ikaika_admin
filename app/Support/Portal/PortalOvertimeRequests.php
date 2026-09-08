@@ -55,6 +55,7 @@ final class PortalOvertimeRequests
         private readonly CoreLedger $ledger,
         private readonly PortalSubmittedReports $reports,
         private readonly PortalTimezone $timezone,
+        private readonly PortalAudit $audit,
     ) {}
 
     /**
@@ -149,6 +150,14 @@ final class PortalOvertimeRequests
                     $employeeId,
                     is_string($actor->id_no) ? $actor->id_no : null,
                 );
+                $this->audit->record(
+                    $actor,
+                    PortalLogAction::INSERT,
+                    self::CORE_RESOURCE,
+                    PortalActivityCopy::filedOvertime($group['date']),
+                    $id,
+                    $request,
+                );
             }
         } catch (Throwable $error) {
             $this->deleteRequests($insertedIds);
@@ -221,6 +230,15 @@ final class PortalOvertimeRequests
             is_string($actor->id_no) ? $actor->id_no : null,
         );
 
+        $this->audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::updatedOvertime($group['date']),
+            (string) (int) $row->id,
+            $request,
+        );
+
         $this->reports->bumpCache();
         $this->bumpCache();
 
@@ -280,6 +298,14 @@ final class PortalOvertimeRequests
             CoreRecycleKey::overtimeRequest($employeeId, $day),
             $employeeId,
             is_string($actor->id_no) ? $actor->id_no : null,
+        );
+
+        $this->audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::cancelledOvertime($day),
+            (string) (int) $row->id,
         );
 
         // A cancelled day is free again, for this form and for the report forms both.

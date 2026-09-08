@@ -45,6 +45,7 @@ final class PortalSubmittedReports
         private readonly CoreLedger $ledger,
         private readonly PortalRecycleBin $recycleBin,
         private readonly PortalTimezone $timezone,
+        private readonly PortalAudit $audit,
     ) {}
 
     /**
@@ -174,6 +175,14 @@ final class PortalSubmittedReports
             CoreRecycleKey::submittedReport($employeeId, $date, $kind),
             $employeeId,
             is_string($actor->id_no) ? $actor->id_no : null,
+        );
+        $this->audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::updatedReport($kind, $date),
+            $id,
+            $request,
         );
 
         $this->bumpCache();
@@ -310,6 +319,14 @@ final class PortalSubmittedReports
                     $employeeId,
                     is_string($actor->id_no) ? $actor->id_no : null,
                 );
+                $this->audit->record(
+                    $actor,
+                    PortalLogAction::INSERT,
+                    self::CORE_RESOURCE,
+                    PortalActivityCopy::addedReport($kind, $group['date']),
+                    $id,
+                    $request,
+                );
             }
         } catch (Throwable $error) {
             $this->deleteLines($insertedIds);
@@ -341,7 +358,7 @@ final class PortalSubmittedReports
         ];
     }
 
-    public function destroy(Employee $actor, string $id): void
+    public function destroy(Employee $actor, string $id, Request $request): void
     {
         [$date, $kind] = $this->parseGroupId($id);
         $this->assertMutableDate($date);
@@ -372,6 +389,15 @@ final class PortalSubmittedReports
             $this->ledger->revert($written['recycle_id'], $written['action_id']);
             throw $error;
         }
+
+        $this->audit->record(
+            $actor,
+            PortalLogAction::DELETE,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::deletedReport($kind, $date),
+            $id,
+            $request,
+        );
 
         $this->bumpCache();
         $this->recycleBin->bumpCache();
@@ -442,6 +468,13 @@ final class PortalSubmittedReports
                 (string) $row->record_id,
                 (int) $actor->getKey(),
                 is_string($actor->id_no) ? $actor->id_no : null,
+            );
+            $this->audit->record(
+                $actor,
+                PortalLogAction::INSERT,
+                self::CORE_RESOURCE,
+                PortalActivityCopy::restoredReport($kind, $date),
+                (string) $row->record_id,
             );
         } catch (Throwable $error) {
             $this->deleteLines($insertedIds);

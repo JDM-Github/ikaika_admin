@@ -4,15 +4,21 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalActivityCopy;
+use App\Support\Portal\PortalAudit;
 use App\Support\Portal\PortalEmployeePresenter;
 use App\Support\Portal\PortalJwt;
+use App\Support\Portal\PortalLogAction;
 use App\Support\Portal\PortalManageUserPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class PortalAuthController extends Controller
 {
-    public function __construct(private readonly PortalJwt $jwt) {}
+    public function __construct(
+        private readonly PortalJwt $jwt,
+        private readonly PortalAudit $audit,
+    ) {}
 
     public function login(Request $request): JsonResponse
     {
@@ -50,6 +56,15 @@ class PortalAuthController extends Controller
             'job_title' => $employee->job_title,
             'email' => $employee->email,
         ]);
+
+        $this->audit->record(
+            $employee,
+            PortalLogAction::POST,
+            'auth.login',
+            PortalActivityCopy::signedIn(),
+            (string) $employee->getKey(),
+            $request,
+        );
 
         return response()->json([
             'token' => $token,

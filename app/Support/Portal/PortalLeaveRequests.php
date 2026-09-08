@@ -64,6 +64,7 @@ final class PortalLeaveRequests
         private readonly CoreLedger $ledger,
         private readonly PortalSubmittedReports $reports,
         private readonly PortalTimezone $timezone,
+        private readonly PortalAudit $audit,
     ) {}
 
     /**
@@ -169,6 +170,15 @@ final class PortalLeaveRequests
             throw $error;
         }
 
+        $this->audit->record(
+            $actor,
+            PortalLogAction::INSERT,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::filedLeave($type, $dates[0] ?? '', $dates[array_key_last($dates)] ?? ''),
+            (string) ($insertedIds[0] ?? ''),
+            $request,
+        );
+
         $this->bumpCache();
         // Leave closes a day to the report forms, which read it off the submitted-days payload.
         $this->reports->bumpCache();
@@ -224,6 +234,15 @@ final class PortalLeaveRequests
             is_string($actor->id_no) ? $actor->id_no : null,
         );
 
+        $this->audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::updatedLeave($type, $day),
+            (string) (int) $row->id,
+            $request,
+        );
+
         $this->bumpCache();
         $this->reports->bumpCache();
 
@@ -264,7 +283,18 @@ final class PortalLeaveRequests
             is_string($actor->id_no) ? $actor->id_no : null,
         );
 
-        // A cancelled day is free again, for this form and for the report forms both.
+        $this->audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::cancelledLeave(
+                is_string($row->category ?? null) ? $row->category : 'leave',
+                $day,
+            ),
+            (string) (int) $row->id,
+        );
+
+        // A cancelled day is free again, for this form and the report forms both.
         $this->bumpCache();
         $this->reports->bumpCache();
 
@@ -293,6 +323,8 @@ final class PortalLeaveRequests
                 'request_date',
                 'status',
                 'type',
+                'category',
+                'reason',
                 'no_of_hours',
                 'original_work_day',
                 'offset_work_day',

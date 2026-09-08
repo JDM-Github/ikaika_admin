@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 /*
  * Portal channel routes. Folders match the playground / frontend sidebar:
  *   routes/portal/auth.php      Auth
+ *   routes/portal/user.php      User / Logs
  *   routes/portal/home.php      Home / Dashboard
  *   routes/portal/projects.php  View Projects
  *   routes/portal/manage.php    Manage / Users
@@ -16,6 +17,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('portal')->group(function (): void {
     require __DIR__.'/auth.php';
+    require __DIR__.'/user.php';
     require __DIR__.'/home.php';
     require __DIR__.'/projects.php';
     require __DIR__.'/manage.php';

@@ -43,6 +43,10 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(60)->by('home:'.$this->portalLimiterKey($request));
         });
 
+        RateLimiter::for('portal-user-logs', function (Request $request) {
+            return Limit::perMinute(60)->by('user-logs:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-projects', function (Request $request) {
             return Limit::perMinute(60)->by('projects:'.$this->portalLimiterKey($request));
         });

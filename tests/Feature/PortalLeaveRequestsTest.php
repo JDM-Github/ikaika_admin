@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -66,6 +67,22 @@ class PortalLeaveRequestsTest extends TestCase
                 ->where('action_type', CoreActionType::ADD)
                 ->exists());
         }
+
+        $from = Carbon::createFromFormat('Y-m-d', $start);
+        $to = Carbon::createFromFormat('Y-m-d', $end);
+        $this->assertNotFalse($from);
+        $this->assertNotFalse($to);
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'INSERT')
+            ->where('resource', 'requests.leave')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertSame(
+            '{UserName|You} filed a Sick Leave request from '.$from->format('l, F j, Y').' to '.$to->format('l, F j, Y'),
+            $log->message,
+        );
     }
 
     public function test_one_day_is_a_range_of_one(): void

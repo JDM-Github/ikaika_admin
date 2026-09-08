@@ -38,6 +38,8 @@ final class PortalManageUsers
         'access' => null,
     ];
 
+    public function __construct(private readonly PortalAudit $audit) {}
+
     /**
      * @return array{
      *     section: string,
@@ -113,6 +115,22 @@ final class PortalManageUsers
             $target->role = $role;
             $target->save();
             $this->bumpCache();
+            $this->audit->record(
+                $actor,
+                PortalLogAction::PATCH,
+                'manage.users',
+                PortalActivityCopy::changedSomeoneRole($target, $role),
+                (string) $target->getKey(),
+                $request,
+            );
+            $this->audit->record(
+                $target,
+                PortalLogAction::PATCH,
+                'manage.users',
+                PortalActivityCopy::ownRoleChanged($actor, $role),
+                (string) $target->getKey(),
+                $request,
+            );
             $target = $this->rosterQuery()->findOrFail($id);
         }
 

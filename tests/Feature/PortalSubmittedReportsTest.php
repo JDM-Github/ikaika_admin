@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Modules\Core\Models\Action;
 use App\Modules\Core\Models\Recycle;
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreRecycleKey;
 use App\Support\Portal\PortalSubmittedReportPresenter;
@@ -487,11 +488,25 @@ class PortalSubmittedReportsTest extends TestCase
         )->assertOk()->assertJsonPath('data.0.id', $today.'-daily');
 
         $action = Action::query()
-            ->where('record_id', $today.'-daily')
+            ->where('recycle_key', CoreRecycleKey::submittedReport((int) $actor->getKey(), $today, 'daily'))
             ->where('action_type', CoreActionType::ADD)
             ->first();
         $this->assertNotNull($action);
-        $this->assertSame(CoreRecycleKey::submittedReport((int) $actor->getKey(), $today, 'daily'), $action->recycle_key);
+        $this->assertSame($today.'-daily', $action->record_id);
+
+        $readable = Carbon::createFromFormat('Y-m-d', $today);
+        $this->assertNotFalse($readable);
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'INSERT')
+            ->where('resource', 'reports.submitted')
+            ->where('record_id', $today.'-daily')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertSame(
+            '{UserName|You} added a daily report for '.$readable->format('l, F j, Y'),
+            $log->message,
+        );
     }
 
     public function test_a_late_report_files_against_an_older_day_and_reads_back_as_late(): void

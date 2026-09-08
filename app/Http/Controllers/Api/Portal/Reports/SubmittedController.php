@@ -59,7 +59,7 @@ class SubmittedController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        $this->reports->destroy($actor, $id);
+        $this->reports->destroy($actor, $id, $request);
 
         return response()->json(null, 204);
     }

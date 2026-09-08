@@ -87,6 +87,7 @@ final class PortalReimbursementRequests
         private readonly CoreLedger $ledger,
         private readonly PortalTimezone $timezone,
         private readonly PortalCloudinary $cloudinary,
+        private readonly PortalAudit $audit,
     ) {}
 
     /**
@@ -183,6 +184,14 @@ final class PortalReimbursementRequests
                 $claimId,
                 $employeeId,
                 is_string($actor->id_no) ? $actor->id_no : null,
+            );
+            $this->audit->record(
+                $actor,
+                PortalLogAction::INSERT,
+                self::CORE_RESOURCE,
+                PortalActivityCopy::filedReimbursement($date),
+                $claimId,
+                $request,
             );
         } catch (Throwable $error) {
             $this->deleteClaims($insertedIds);
@@ -283,6 +292,15 @@ final class PortalReimbursementRequests
             is_string($actor->id_no) ? $actor->id_no : null,
         );
 
+        $this->audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::updatedReimbursement($date),
+            $claimId,
+            $request,
+        );
+
         $this->bumpCache();
         $this->forgetReceipts($actor, $items);
 
@@ -329,6 +347,14 @@ final class PortalReimbursementRequests
             CoreRecycleKey::reimbursementRequest($employeeId, $date, (int) $claimId),
             $employeeId,
             is_string($actor->id_no) ? $actor->id_no : null,
+        );
+
+        $this->audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::cancelledReimbursement($date),
+            $claimId,
         );
 
         $this->bumpCache();
