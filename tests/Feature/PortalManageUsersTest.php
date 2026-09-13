@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Mail\PortalAccessAlertMail;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
+use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Portal\PortalAccessDenied;
 use App\Support\Portal\PortalManageUserPresenter;
 use App\Support\Portal\PortalRole;
@@ -198,6 +199,15 @@ class PortalManageUsersTest extends TestCase
         $this->assertSame('PATCH', $actorLog->action);
         $this->assertSame("{UserName|You} changed {$memberName}'s role to Admin", $actorLog->message);
         $this->assertSame("{UserName|Your} role was changed to Admin by {$adminName}", $targetLog->message);
+
+        $inbox = PortalNotification::query()
+            ->where('employee_id', $member->id)
+            ->where('type', 'manage.users.role')
+            ->where('actor_id', $admin->id)
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($inbox);
+        $this->assertSame("Your portal role was changed to Admin by {$adminName}.", $inbox->message);
     }
 
     public function test_an_admin_can_set_project_admin(): void

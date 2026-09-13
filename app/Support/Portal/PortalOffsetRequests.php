@@ -58,6 +58,7 @@ final class PortalOffsetRequests
         private readonly PortalSubmittedReports $reports,
         private readonly PortalTimezone $timezone,
         private readonly PortalAudit $audit,
+        private readonly PortalCalendarEvents $calendar,
     ) {}
 
     /**
@@ -89,6 +90,7 @@ final class PortalOffsetRequests
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         Cache::forever(self::CACHE_VERSION_KEY, $current + 1);
+        $this->calendar->bumpCache();
     }
 
     /**
@@ -154,6 +156,20 @@ final class PortalOffsetRequests
                     PortalActivityCopy::filedOffset($group['workDate'], $group['dayOffDate']),
                     $id,
                     $request,
+                );
+                $this->audit->notifyManagers(
+                    $actor,
+                    PortalNotificationType::REQUEST_FILED_OFFSET,
+                    'New offset request',
+                    PortalActivityCopy::notifyFiled(
+                        PortalActivityCopy::displayName($actor),
+                        'offset request',
+                        $group['workDate'],
+                        $group['workDate'],
+                    ),
+                    PortalShellPath::MANAGE_REQUESTS,
+                    'Open queue',
+                    ['recordId' => $id],
                 );
             }
         } catch (Throwable $error) {
@@ -277,7 +293,7 @@ final class PortalOffsetRequests
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function cancel(Employee $actor, string $id): array
+    public function cancel(Employee $actor, string $id, Request $request): array
     {
         $row = $this->ownPendingRow($actor, $id);
         $day = $this->calendarDate($row->original_work_day ?? null)
@@ -314,6 +330,16 @@ final class PortalOffsetRequests
                 $this->calendarDate($row->offset_work_day ?? null) ?? $day,
             ),
             (string) (int) $row->id,
+            $request,
+        );
+        $this->audit->notifyManagers(
+            $actor,
+            PortalNotificationType::REQUEST_CANCELLED_OFFSET,
+            'Offset request cancelled',
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'offset request', $day),
+            PortalShellPath::MANAGE_REQUESTS,
+            'Open queue',
+            ['recordId' => (string) (int) $row->id],
         );
 
         // A cancelled pair is free again, for this form and for the report forms both.

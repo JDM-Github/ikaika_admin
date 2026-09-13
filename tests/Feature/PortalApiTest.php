@@ -49,9 +49,13 @@ class PortalApiTest extends TestCase
         $this->assertSame('Login', $portal['auth'][0]['label'] ?? null);
         $this->assertSame('POST', $portal['auth'][0]['method'] ?? null);
         $this->assertSame('/api/development/portal/auth/login', $portal['auth'][0]['url'] ?? null);
-        $this->assertSame('manage', $portal['sections'][0]['name'] ?? null);
-        $this->assertSame('Users', $portal['sections'][0]['resources'][0]['label'] ?? null);
-        $this->assertSame('PATCH', $portal['sections'][0]['resources'][0]['operations'][1]['method'] ?? null);
+        $this->assertSame('Microsoft login', $portal['auth'][1]['label'] ?? null);
+        $this->assertSame('POST', $portal['auth'][1]['method'] ?? null);
+        $this->assertSame('/api/development/portal/auth/login/microsoft', $portal['auth'][1]['url'] ?? null);
+        $manage = collect($portal['sections'])->firstWhere('name', 'manage');
+        $this->assertIsArray($manage);
+        $this->assertSame('Users', $manage['resources'][0]['label'] ?? null);
+        $this->assertSame('PATCH', $manage['resources'][0]['operations'][1]['method'] ?? null);
         $this->assertNotEmpty($portal['resources']);
     }
 

@@ -38,6 +38,8 @@ or the other way round.
 |---|---|---|
 | `X-Portal-Timezone` | `Asia/Manila` | IANA name. **Preferred** — it carries its own daylight-saving rules |
 | `X-Portal-Timezone-Offset` | `-480` | Minutes to add to local time to reach UTC, exactly JavaScript's `Date#getTimezoneOffset()`. Manila sends `-480`, New York `300` |
+| `X-Portal-Location` | `Parian, Calamba City` | Optional city/area label from the device or IP fallback; never coordinates |
+| `X-Portal-Location-Source` | `device` / `ip` | Optional validated source for the location label |
 
 Send both where you can: the name is used when it resolves, the offset stands in for a runtime
 whose Intl data cannot name the zone, and an unrecognised or out-of-range value falls back to the
@@ -70,12 +72,19 @@ Sectioned portal routes (Manage / Users, …) live **beside** the generic resour
 | Method | Staging path | Auth |
 |---|---|---|
 | `POST` | `/api/staging/portal/auth/login` | None. Body `{ "id_no": "260701-0020" }` |
+| `POST` | `/api/staging/portal/auth/login/microsoft` | None. Body `{ "code", "code_verifier", "redirect_uri" }` from PKCE. Optional `{ "id_token" }` |
 | `GET` | `/api/staging/portal/auth/me` | `Authorization: Bearer {token}` |
 | `GET` | `/api/staging/portal/home` | Bearer. Dashboard for the signed-in member: this month's hours/reports, active project mix, recent reports, tracked projects |
+| `GET` | `/api/staging/portal/calendar/holidays` | Bearer. Company holiday calendar from the estimator product |
+| `GET` | `/api/staging/portal/calendar/events` | Bearer. Event Calendar: holidays, live request dates, and member-created events |
+| `POST` | `/api/staging/portal/calendar/events` | Bearer. Creates a company or project event |
+| `GET` | `/api/staging/portal/calendar/event-options` | Bearer. Department and member pickers for Add Event |
 | `GET` | `/api/staging/portal/user/logs` | Bearer. The signed-in member's own activity logs |
 | `GET` | `/api/staging/portal/projects` | Bearer. View Projects board. Admin/Executive see all projects with `isAssigned`; members see only their own |
 | `GET` | `/api/staging/portal/manage/users` | Bearer + Admin or Executive |
 | `PATCH` | `/api/staging/portal/manage/users/{id}/role` | Bearer + Admin or Executive. Body `{ "role": "Admin" }`, `{ "role": "User" }`, or `{ "role": "ProjectAdmin" }` |
+| `GET` | `/api/staging/portal/manage/requests` | Bearer + Admin or Executive. Company-wide leave, overtime, offset, and claims |
+| `GET` | `/api/staging/portal/manage/reports` | Bearer + Admin or Executive. One member's submitted timesheets plus the user picker |
 | `GET` | `/api/staging/portal/reports/projects` | Bearer. The member's own projects plus the activity codes each job type allows |
 | `GET` | `/api/staging/portal/reports/submitted` | Bearer. Own timesheets only. `from` / `to` as YYYY-MM-DD, max 24 months |
 | `GET` | `/api/staging/portal/reports/submitted/days` | Bearer. Own filed days `{date, kind}` plus `leaveDays`, `overtimeDays`, and `offsetDays`. Same `from` / `to` window |
@@ -94,13 +103,13 @@ Sectioned portal routes (Manage / Users, …) live **beside** the generic resour
 | `POST` | `/api/staging/portal/requests/offset` | Bearer. Files own offset. Body `{ requests[] }` |
 | `PATCH` | `/api/staging/portal/requests/offset/{id}` | Bearer. Rewrites one pending own offset |
 | `POST` | `/api/staging/portal/requests/offset/{id}/cancel` | Bearer. Withdraws own pending offset. Status becomes Cancelled |
-| `GET` | `/api/staging/portal/administration/recycle-bin` | Bearer. Own bin for members. `type=report\|request\|project`. Admin/Executive may send `scope=all` and `employee_id` |
+| `GET` | `/api/staging/portal/administration/all-logs` | Bearer + Admin or Executive. Every member's activity logs |
 | `GET` | `/api/staging/portal/administration/recycle-bin/{id}` | Bearer. One deleted report's generated details. Members: own rows. Admin/Executive: any portal row |
 | `POST` | `/api/staging/portal/administration/recycle-bin/{id}/restore` | Bearer. Restore a recycled submitted report. Members: own rows. Admin/Executive: any portal row |
 | `GET` | `/api/staging/portal/{resource}` | Bearer |
 | `GET` | `/api/staging/portal/{resource}/{id}` | Bearer |
 
-Login only succeeds for an **Active** employee `id_no`. Response includes `token`, `token_type: Bearer`, `expires_in` (default 28800 seconds), and `employee`.
+Login only succeeds for an **Active** employee. ID login matches `id_no`. Microsoft login redeems the Azure authorization code on the server (`PORTAL_AZURE_REDIRECT_URI` must match exactly), validates the id_token (tenant JWKS, `aud` = `PORTAL_AZURE_CLIENT_ID`, `iss` = the tenant v2 issuer), and matches `employees.first_name` + `employees.last_name` against Azure `given_name` / `family_name` (or `name`). Both issue the same portal JWT. Response includes `token`, `token_type: Bearer`, `expires_in` (default 28800 seconds), and `employee`.
 
 The shell header weather is not a portal route. The app reads Open-Meteo for Manila and San Jose.
 
@@ -290,6 +299,51 @@ created by an admin; anyone who can browse can keep 30 private ones per table.
 
 ### Live
 
+#### Calendar / Holidays — **live** (sectioned)
+
+Sidebar: used by date pickers. Laravel: `app/Http/Controllers/Api/Portal/Calendar/HolidaysController.php`.
+
+`GET /api/development/portal/calendar/holidays`
+
+JWT required. Query `from` / `to` as `YYYY-MM-DD`. Default window is today back five years to five years ahead. Rows: `id`, `date`, `name`, `type` (`regular` / `special`). A missing estimator table degrades to an empty list. Cached 10 minutes. Rate limit 60/min.
+
+#### Calendar / Events — **live** (sectioned)
+
+Sidebar: **Event Calendar**. Laravel: `app/Http/Controllers/Api/Portal/Calendar/EventsController.php`.
+
+`GET /api/development/portal/calendar/events`
+
+JWT required; **not** Admin-only. Same `from` / `to` window as holidays. `data` is the Event Calendar feed: company holidays (`kind` `holiday`), live request dates (`kind` `leave` or `event`), and member-created rows (`kind` `event` or `project`). Consecutive leave days for the same member and type collapse to one row with `endsOn`, so the grid can draw a single bar across those days. Overtime uses `request_date`. Offset emits both `original_work_day` and `offset_work_day`. Reimbursement uses `reimb_date`. Cancelled and refused rows are omitted. Filing, editing, cancelling, or reviewing a request, or creating a calendar event, bumps this cache.
+
+Custom events are visible when `audience` is `everyone`, the signed-in member created the row, their `department` matches a chosen department, or they are named on `members`. The creator always sees their own event.
+
+Each row: `id`, `title`, `startsOn`, optional `endsOn` when a span lasts more than one day, `startsAt` (null for all-day), `kind` (`holiday` / `leave` / `event` / `project`), `detail`. Leave titles are `{name}: {leave type}`. Member-created ids are `calendar-{id}`. Do not return bank, tax, or identity documents. Cached 30s, keyed by member. Rate limit 60/min.
+
+`POST /api/development/portal/calendar/events`
+
+JWT required. Any signed-in member. Body:
+
+```json
+{
+  "title": "All hands",
+  "details": "Optional notes",
+  "startsOn": "2026-09-10",
+  "startsAt": "16:00",
+  "endsOn": "2026-09-10",
+  "endsAt": "17:00",
+  "category": "company_event",
+  "audience": "everyone",
+  "departments": [],
+  "memberIds": []
+}
+```
+
+`category` is `company_event` or `project` (maps to calendar `kind` `event` / `project`). `audience` is `everyone`, `department`, or `members`. `startsAt` / `endsAt` are `HH:mm` or omitted for all-day. `endsOn` defaults to `startsOn`. `department` requires at least one `departments` value from the options list. `members` requires at least one active `memberIds`. 201 `{ section, resource, data }` with the presenter row. 422 with `message` when a field is missing or not allowed. Rate limit 20/min. Writes an activity log and bump the events cache.
+
+`GET /api/development/portal/calendar/event-options`
+
+JWT required. Skinny pickers for the Add Event form: `data.departments` as `{value,label}` from active employees' departments, `data.members` as `{id,name}` (composed first/last, no email). Cached 30s. Rate limit 60/min.
+
 #### User / Logs — **live** (sectioned)
 
 `GET /api/development/portal/user/logs`
@@ -298,14 +352,30 @@ The signed-in member's own activity stream. A member token is always scoped by t
 `employee_id`; query parameters cannot request another person's logs.
 
 The list is paged with `page` (default `1`) and `per_page` (allow-listed `10` / `25` / `50` /
-`100`, default `25`). `q` searches every word across `action`, `resource`, `record_id`, and
-`message`. `action` accepts `INSERT`, `PATCH`, `DELETE`, or `POST`. `sort` accepts `date`,
-`action`, or `resource`; `dir` accepts `asc` or `desc`. Default order is newest first.
+`100`, default `25`). `q` searches every word across `action`, `resource`, `record_id`,
+`message`, and `ip_address`. `action` accepts `INSERT`, `PATCH`, `DELETE`, or `POST`.
+`resource` is a logged activity key that already exists on this member (for example
+`auth.login`). `ip` is an exact match against an IP that already appears on this member's
+rows. Date filters use the member timezone: `day` (`YYYY-MM-DD`) wins; otherwise `year`
+(`YYYY`) plus `month` (`01`–`12`) is that calendar month; `month` alone is every June (or
+whichever month) across years; `year` alone is that year. `sort` accepts `date`, `action`,
+or `resource`; `dir` accepts `asc` or `desc`. Default order is newest first.
 
-Each row returns `id`, `action`, `resource`, `recordId`, `message`, `createdAt`, `dateLabel`,
-`timeLabel`, and `createdAtLabel`. `message` preserves `{UserName|You}` / `{UserName|Your}` for
-the frontend to resolve. `dateLabel` uses `Monday, September 7, 2026`; `createdAt` is UTC ISO
-8601. IP addresses, user agents, and sanitized audit payloads are never returned.
+`filters` lists only values that exist on this member's logs: `actions`, `resources`,
+`ipAddresses`, `years`, `months` (`value`/`label`), and `days` (`value`/`label`). Facets
+ignore the current page and the other query filters so the toolbar does not offer INSERT
+or an IP that never appears.
+
+Each row returns `id`, `action`, `resource`, `recordId`, `message`, `ipAddress`, `deviceLabel`,
+`locationLabel`, `locationSource`, `createdAt`, `dateLabel`, `timeLabel`, and `createdAtLabel`. `message` preserves
+`{UserName|You}` / `{UserName|Your}` for the frontend to resolve. `dateLabel` uses
+`Monday, September 7, 2026`; `createdAt` is UTC ISO 8601. `ipAddress` is the request source
+observed by the server, and `deviceLabel` is a readable browser and platform summary derived from
+the stored user agent. `locationLabel` is the city/area reported by the device or the approximate
+IP lookup, and `locationSource` is `device` or `ip`. The raw user agent, coordinates, and sanitized
+audit payloads are never returned. IP-based locations are approximate. If permission is denied, the
+request is local/private, or lookup fails, both location fields are `null` and the UI should show
+`Location unavailable`.
 
 #### Manage / Users — **live** (sectioned)
 
@@ -321,6 +391,24 @@ Columns only: `id`, `id_no`, `first_name`, `last_name`, `email`, `department`, `
 Roles: `role_level` Executive is highest and **cannot be changed**. PATCH body `{ "role": "Admin" }`, `{ "role": "User" }`, or `{ "role": "ProjectAdmin" }`. Refuses self-demote, last admin, and assigning Executive. GET and PATCH require JWT plus Admin or Executive — frontend role edits do not bypass this.
 
 Signed-in users who are not Admin/Executive, and anyone who tries to change an Executive, get `403` with `message`, `warning`, and `notified`. Administrators are emailed (rate-limited 15 min per actor + method + path). Unauthenticated `401`s and policy refusals (self-demote, last admin) do not email. Cached 30s; writes bump the cache version. Rate limit 60/min reads, 20/min writes, keyed by employee id.
+
+#### Manage / Requests — **live** (sectioned)
+
+Sidebar: **Manage → Requests**. Laravel: `app/Http/Controllers/Api/Portal/Manage/RequestsController.php`.
+
+`GET /api/development/portal/manage/requests`
+
+Bearer plus Admin or Executive. Members receive `403`. Optional `from` / `to` as YYYY-MM-DD, same 24-month window as own leave (plus 12 months ahead). Response: `data` (queue rows), `leave`, `overtime`, `offset`, `reimbursements`, and `range`.
+
+Queue rows: `id`, `createdOn`, `requestedOn`, `kind` (`leave` / `overtime` / `offset` / `holiday-work`), `memberName`, `offsetFromOn`, `offsetToOn`, `projectLabel`, `activityLabel`, `earnCodeLabel`, `hours`, `elementChange`, `remarks`, `status`, `approverRemarks`. Typed lists match the own-request payloads plus `memberName`. Claims match own claims (`id`, `referenceCode`, `memberName`, `submittedOn`, `status`, `approverRemarks`, `items`) without receipt URLs. Do not return bank, tax, or identity documents. Cached 30s. Rate limit 60/min.
+
+#### Manage / Reports — **live** (sectioned)
+
+Sidebar: **Manage → Reports**. Laravel: `app/Http/Controllers/Api/Portal/Manage/ReportsController.php`.
+
+`GET /api/development/portal/manage/reports`
+
+Bearer plus Admin or Executive. Members receive `403`. Same calendar envelope as `GET /reports/submitted` (`data`, `counts`, `range`, `leaveDays`, `offsetDays`) for one member, plus `employees` (`value`, `label`) and `employeeId`. Omit `employee_id` to open the signed-in admin. Unknown ids are `404`. Does not file, edit, or delete another person's reports. Cached 30s per subject. Rate limit 60/min.
 
 #### Reports / Projects — **live** (sectioned)
 
@@ -697,6 +785,16 @@ Rows: `id`, `recordId`, `kind`, `submittedOn`, `title`, `resource`, `type`, `del
 POST restore re-inserts the snapshot into `user_reports` for the original owner (from the recycle key), records `action_type = add`, and drops the recycle row. The original `delete` action stays. If a live report already occupies that day and kind, restore is `422`. Restore is not limited to the seven-day edit window — anything still in the bin can come back. Writes bump both the recycle-bin and submitted-reports caches. Rate limit 60/min reads, 20/min writes, keyed by employee id.
 
 Estimator recycle rows (`product = project-estimator`) are not included. Cached 30s; a submitted-report DELETE or a restore bumps the version. Do not use generic `GET /core/recycle` from this screen.
+
+#### Administration / All Logs — **live** (sectioned)
+
+Sidebar: **Administration → All Logs**. Laravel: `app/Http/Controllers/Api/Portal/Administration/AllLogsController.php`.
+
+`GET /api/development/portal/administration/all-logs`
+
+Bearer plus Admin or Executive. Members receive `403`. The list is every portal log, paged like User / Logs: `page`, `per_page`, `q`, `action`, `resource`, `ip`, `year`, `month`, `day`, `sort` (`date` / `action` / `resource` / `employee`), `dir`. `employee_id` keeps rows for one member. `q` also matches first and last name.
+
+Each row adds `employeeId` and `employeeName`. `filters.users` is `{value,label}` for members who already have a log row — not the whole roster. Other facets are the same shape as User / Logs and come from every log, not the current page. Cached 30s on the same version as User / Logs. Rate limit 60/min.
 
 #### `employees` — **live**
 

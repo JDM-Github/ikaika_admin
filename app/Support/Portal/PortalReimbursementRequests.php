@@ -88,6 +88,7 @@ final class PortalReimbursementRequests
         private readonly PortalTimezone $timezone,
         private readonly PortalCloudinary $cloudinary,
         private readonly PortalAudit $audit,
+        private readonly PortalCalendarEvents $calendar,
     ) {}
 
     /**
@@ -121,6 +122,7 @@ final class PortalReimbursementRequests
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         Cache::forever(self::CACHE_VERSION_KEY, $current + 1);
+        $this->calendar->bumpCache();
     }
 
     /**
@@ -192,6 +194,20 @@ final class PortalReimbursementRequests
                 PortalActivityCopy::filedReimbursement($date),
                 $claimId,
                 $request,
+            );
+            $this->audit->notifyManagers(
+                $actor,
+                PortalNotificationType::REQUEST_FILED_REIMBURSEMENT,
+                'New reimbursement request',
+                PortalActivityCopy::notifyFiled(
+                    PortalActivityCopy::displayName($actor),
+                    'reimbursement request',
+                    $date,
+                    $date,
+                ),
+                PortalShellPath::MANAGE_REQUESTS,
+                'Open queue',
+                ['recordId' => $claimId],
             );
         } catch (Throwable $error) {
             $this->deleteClaims($insertedIds);
@@ -322,7 +338,7 @@ final class PortalReimbursementRequests
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function cancel(Employee $actor, string $id): array
+    public function cancel(Employee $actor, string $id, Request $request): array
     {
         $rows = $this->ownPendingClaim($actor, $id);
         $ids = array_map(static fn (object $row): int => (int) $row->id, $rows);
@@ -355,6 +371,16 @@ final class PortalReimbursementRequests
             self::CORE_RESOURCE,
             PortalActivityCopy::cancelledReimbursement($date),
             $claimId,
+            $request,
+        );
+        $this->audit->notifyManagers(
+            $actor,
+            PortalNotificationType::REQUEST_CANCELLED_REIMBURSEMENT,
+            'Reimbursement request cancelled',
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'reimbursement request', $date),
+            PortalShellPath::MANAGE_REQUESTS,
+            'Open queue',
+            ['recordId' => $claimId],
         );
 
         $this->bumpCache();

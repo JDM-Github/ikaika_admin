@@ -18,6 +18,12 @@ final class PortalAudit
 {
     public const LOG_CACHE_VERSION_KEY = 'portal:user:logs:version';
 
+    public const NOTIFICATION_CACHE_VERSION_KEY = 'portal:user:notifications:version';
+
+    public function __construct(
+        private readonly PortalLocationResolver $locationResolver,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $payload
      */
@@ -30,6 +36,8 @@ final class PortalAudit
         array $payload = [],
         ?string $ipAddress = null,
         ?string $userAgent = null,
+        ?string $locationLabel = null,
+        ?string $locationSource = null,
     ): int {
         $action = trim($action);
         $resource = trim($resource);
@@ -45,6 +53,8 @@ final class PortalAudit
         $log->message = $message;
         $log->ip_address = $ipAddress;
         $log->user_agent = $this->truncateUserAgent($userAgent);
+        $log->location_label = $locationLabel;
+        $log->location_source = $locationSource;
         $log->payload = $this->sanitizePayload($payload);
         $log->created_at = Carbon::now();
         $log->save();
@@ -65,6 +75,8 @@ final class PortalAudit
         ?Request $request = null,
         array $payload = [],
     ): int {
+        $location = $this->locationResolver->resolve($request);
+
         return $this->log(
             (int) $owner->getKey(),
             $action,
@@ -74,6 +86,8 @@ final class PortalAudit
             $payload,
             $request?->ip(),
             $request?->userAgent(),
+            $location['label'],
+            $location['source'],
         );
     }
 
@@ -114,6 +128,84 @@ final class PortalAudit
             $request,
             $payload,
         );
+
+        $this->notifyIfOther(
+            $requester,
+            $approver,
+            $resource.'.'.$verb,
+            $approved ? 'Request approved' : 'Request rejected',
+            'Your '.$subject.' has been '.$verb.' by '.$approverName.'.',
+            PortalShellPath::USER_REQUESTS,
+            'Open requests',
+            $recordId === null ? $payload : array_merge($payload, ['recordId' => $recordId]),
+        );
+    }
+
+    /**
+     * Inbox row for someone other than the actor. Same-person events stay in logs only.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function notifyIfOther(
+        Employee $recipient,
+        Employee $actor,
+        string $type,
+        string $title,
+        string $message,
+        ?string $linkPath = null,
+        ?string $linkLabel = null,
+        array $payload = [],
+    ): void {
+        if ((int) $recipient->getKey() === (int) $actor->getKey()) {
+            return;
+        }
+
+        $this->notify(
+            (int) $recipient->getKey(),
+            $type,
+            $title,
+            $message,
+            $linkPath,
+            $linkLabel,
+            $payload,
+            (int) $actor->getKey(),
+        );
+    }
+
+    /**
+     * Inbox rows for every active Admin and Executive except the actor.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function notifyManagers(
+        Employee $actor,
+        string $type,
+        string $title,
+        string $message,
+        ?string $linkPath = null,
+        ?string $linkLabel = null,
+        array $payload = [],
+    ): void {
+        $recipients = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->where(function ($query): void {
+                $query->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+                    ->orWhereRaw("LOWER(COALESCE(role, '')) = 'admin'");
+            })
+            ->get();
+
+        foreach ($recipients as $recipient) {
+            $this->notifyIfOther(
+                $recipient,
+                $actor,
+                $type,
+                $title,
+                $message,
+                $linkPath,
+                $linkLabel,
+                $payload,
+            );
+        }
     }
 
     /**
@@ -153,6 +245,7 @@ final class PortalAudit
         $notification->read_at = null;
         $notification->created_at = Carbon::now();
         $notification->save();
+        $this->bumpNotificationCache();
 
         return (int) $notification->id;
     }
@@ -174,8 +267,15 @@ final class PortalAudit
 
         $notification->read_at = Carbon::now();
         $notification->save();
+        $this->bumpNotificationCache();
 
         return true;
+    }
+
+    public function bumpNotificationCache(): void
+    {
+        $current = (int) Cache::get(self::NOTIFICATION_CACHE_VERSION_KEY, 1);
+        Cache::forever(self::NOTIFICATION_CACHE_VERSION_KEY, $current + 1);
     }
 
     /**

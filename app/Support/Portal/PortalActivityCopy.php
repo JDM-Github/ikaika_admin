@@ -89,6 +89,13 @@ final class PortalActivityCopy
         return self::YOU.' cancelled a '.self::leaveType($type).' request for '.self::date($date);
     }
 
+    public static function reviewedRequestStatuses(int $count): string
+    {
+        $label = $count === 1 ? '1 request status' : $count.' request statuses';
+
+        return self::YOU.' reviewed '.$label;
+    }
+
     public static function filedOvertime(string $date): string
     {
         return self::YOU.' filed an overtime request for '.self::date($date);
@@ -149,5 +156,38 @@ final class PortalActivityCopy
     public static function signedIn(): string
     {
         return self::YOU.' signed in to the portal';
+    }
+
+    public static function createdEvent(string $title, string $from, string $to): string
+    {
+        $trimmed = trim($title);
+        $label = $trimmed !== '' ? $trimmed : 'event';
+
+        return self::YOU.' added '.$label.' '.self::span($from, $to);
+    }
+
+    public static function notifyFiled(string $actorName, string $kind, string $from, string $to): string
+    {
+        return $actorName.' filed a '.$kind.' '.self::span($from, $to).'.';
+    }
+
+    public static function notifyCancelled(string $actorName, string $kind, string $date): string
+    {
+        return $actorName.' cancelled a '.$kind.' for '.self::date($date).'.';
+    }
+
+    public static function notifyDecided(string $kind, string $date, string $verb, string $by): string
+    {
+        return 'Your '.$kind.' for '.self::date($date).' was '.$verb.' by '.$by.'.';
+    }
+
+    public static function notifyRoleChanged(string $role, string $by): string
+    {
+        return 'Your portal role was changed to '.$role.' by '.$by.'.';
+    }
+
+    public static function notifyReportRestored(string $kind, string $date, string $by): string
+    {
+        return 'Your '.self::reportKind($kind).' for '.self::date($date).' was restored by '.$by.'.';
     }
 }

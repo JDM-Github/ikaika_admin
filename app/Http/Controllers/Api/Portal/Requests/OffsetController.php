@@ -49,6 +49,6 @@ class OffsetController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->offset->cancel($actor, $id));
+        return response()->json($this->offset->cancel($actor, $id, $request));
     }
 }

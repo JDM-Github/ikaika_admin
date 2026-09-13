@@ -67,6 +67,8 @@ return [
             'achievements_milestones' => 'project_name',
             'attachments' => ['table_name', 'field_name'],
             'new_employee_data' => ['first_name', 'last_name'],
+            'logs' => 'action',
+            'notifications' => 'title',
             'earn_codes' => 'description',
         ],
         'project-estimator' => [

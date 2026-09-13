@@ -8,6 +8,7 @@ use App\Support\Portal\PortalAudit;
 use App\Support\Portal\PortalLogAction;
 use App\Support\Portal\PortalTimezone;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
@@ -76,6 +77,19 @@ class PortalUserLogsTest extends TestCase
                 'requests.leave',
                 '{UserName|You} updated an owned request',
                 'owned-patch',
+                Request::create(
+                    '/api/development/portal/requests/leave/41',
+                    'PATCH',
+                    [],
+                    [],
+                    [],
+                    [
+                        'REMOTE_ADDR' => '203.0.113.17',
+                        'HTTP_USER_AGENT' => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.0.0 Mobile/15E148 Safari/604.1',
+                        'HTTP_X_PORTAL_LOCATION' => 'Parian, Calamba City',
+                        'HTTP_X_PORTAL_LOCATION_SOURCE' => 'ip',
+                    ],
+                ),
             );
             $audit->record(
                 $actor,
@@ -113,10 +127,16 @@ class PortalUserLogsTest extends TestCase
             $this->assertIsArray($row);
             $this->assertSame([
                 'id',
+                'employeeId',
+                'employeeName',
                 'action',
                 'resource',
                 'recordId',
                 'message',
+                'ipAddress',
+                'deviceLabel',
+                'locationLabel',
+                'locationSource',
                 'createdAt',
                 'dateLabel',
                 'timeLabel',
@@ -125,10 +145,13 @@ class PortalUserLogsTest extends TestCase
             $this->assertSame('PATCH', $row['action']);
             $this->assertSame('requests.leave', $row['resource']);
             $this->assertSame('{UserName|You} updated an owned request', $row['message']);
+            $this->assertSame('203.0.113.17', $row['ipAddress']);
+            $this->assertSame('Google Chrome on iPhone', $row['deviceLabel']);
+            $this->assertSame('Parian, Calamba City', $row['locationLabel']);
+            $this->assertSame('ip', $row['locationSource']);
             $this->assertSame('Monday, September 7, 2026', $row['dateLabel']);
             $this->assertSame('8:35 AM', $row['timeLabel']);
             $this->assertSame('Monday, September 7, 2026 at 8:35 AM', $row['createdAtLabel']);
-            $this->assertArrayNotHasKey('ipAddress', $row);
             $this->assertArrayNotHasKey('userAgent', $row);
             $this->assertArrayNotHasKey('payload', $row);
         } finally {
@@ -171,6 +194,126 @@ class PortalUserLogsTest extends TestCase
         $this->assertIsArray($data);
         $this->assertSame(['cache-check'], array_column($data, 'recordId'));
         $this->assertSame('PATCH', $data[0]['action']);
+    }
+
+    public function test_logs_filter_by_available_action_activity_ip_and_dates(): void
+    {
+        $actor = $this->activeMember();
+        $other = $this->otherActiveMember($actor);
+        $token = $this->loginToken($actor);
+        $audit = app(PortalAudit::class);
+
+        Carbon::setTestNow(Carbon::parse('2025-06-10 10:00:00', 'UTC'));
+        $juneRequest = Request::create(
+            '/api/development/portal/reports/submitted',
+            'POST',
+            [],
+            [],
+            [],
+            ['REMOTE_ADDR' => '203.0.113.10'],
+        );
+        $audit->record(
+            $actor,
+            PortalLogAction::INSERT,
+            'reports.submitted',
+            '{UserName|You} added a June report',
+            'june-2025',
+            $juneRequest,
+        );
+
+        Carbon::setTestNow(Carbon::parse('2026-06-18 11:00:00', 'UTC'));
+        $audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            'requests.leave',
+            '{UserName|You} updated a June leave',
+            'june-2026',
+            Request::create(
+                '/api/development/portal/requests/leave/1',
+                'PATCH',
+                [],
+                [],
+                [],
+                ['REMOTE_ADDR' => '203.0.113.11'],
+            ),
+        );
+
+        Carbon::setTestNow(Carbon::parse('2026-07-04 09:00:00', 'UTC'));
+        $audit->record(
+            $actor,
+            PortalLogAction::DELETE,
+            'reports.submitted',
+            '{UserName|You} deleted a July report',
+            'july-2026',
+        );
+
+        $audit->record(
+            $other,
+            PortalLogAction::POST,
+            'manage.users',
+            'OTHER-FACET',
+            'other-login',
+        );
+
+        Carbon::setTestNow();
+
+        $page = $this->withToken($token)
+            ->withHeaders([PortalTimezone::NAME_HEADER => 'UTC'])
+            ->getJson('/api/development/portal/user/logs?per_page=100')
+            ->assertOk();
+
+        $filters = $page->json('filters');
+        $this->assertIsArray($filters);
+        $this->assertContains('INSERT', $filters['actions']);
+        $this->assertContains('PATCH', $filters['actions']);
+        $this->assertContains('DELETE', $filters['actions']);
+        $this->assertContains('reports.submitted', $filters['resources']);
+        $this->assertContains('requests.leave', $filters['resources']);
+        $this->assertNotContains('manage.users', $filters['resources']);
+        $this->assertContains('203.0.113.10', $filters['ipAddresses']);
+        $this->assertContains('203.0.113.11', $filters['ipAddresses']);
+        $this->assertContains('2025', $filters['years']);
+        $this->assertContains('2026', $filters['years']);
+        $monthValues = array_column($filters['months'], 'value');
+        $this->assertContains('06', $monthValues);
+        $this->assertContains('07', $monthValues);
+        $this->assertContains('June', array_column($filters['months'], 'label'));
+
+        $june = $this->withToken($token)
+            ->withHeaders([PortalTimezone::NAME_HEADER => 'UTC'])
+            ->getJson('/api/development/portal/user/logs?month=6&per_page=100')
+            ->assertOk();
+        $juneIds = array_column($june->json('data'), 'recordId');
+        $this->assertContains('june-2025', $juneIds);
+        $this->assertContains('june-2026', $juneIds);
+        $this->assertNotContains('july-2026', $juneIds);
+        $this->assertNotContains('manage.users', $june->json('filters.resources'));
+
+        $day = $this->withToken($token)
+            ->withHeaders([PortalTimezone::NAME_HEADER => 'UTC'])
+            ->getJson('/api/development/portal/user/logs?day=2026-06-18&per_page=100')
+            ->assertOk();
+        $this->assertSame(['june-2026'], array_column($day->json('data'), 'recordId'));
+
+        $ip = $this->withToken($token)
+            ->withHeaders([PortalTimezone::NAME_HEADER => 'UTC'])
+            ->getJson('/api/development/portal/user/logs?ip=203.0.113.10&per_page=100')
+            ->assertOk();
+        $this->assertSame(['june-2025'], array_column($ip->json('data'), 'recordId'));
+
+        $activity = $this->withToken($token)
+            ->withHeaders([PortalTimezone::NAME_HEADER => 'UTC'])
+            ->getJson('/api/development/portal/user/logs?resource=requests.leave&per_page=100')
+            ->assertOk();
+        $this->assertSame(['june-2026'], array_column($activity->json('data'), 'recordId'));
+
+        $ignored = $this->withToken($token)
+            ->withHeaders([PortalTimezone::NAME_HEADER => 'UTC'])
+            ->getJson('/api/development/portal/user/logs?month=13&per_page=100')
+            ->assertOk();
+        $ignoredIds = array_column($ignored->json('data'), 'recordId');
+        $this->assertContains('july-2026', $ignoredIds);
+        $this->assertNotContains('other-login', $ignoredIds);
     }
 
     private function activeMember(): Employee

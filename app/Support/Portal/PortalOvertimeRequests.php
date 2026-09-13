@@ -56,6 +56,7 @@ final class PortalOvertimeRequests
         private readonly PortalSubmittedReports $reports,
         private readonly PortalTimezone $timezone,
         private readonly PortalAudit $audit,
+        private readonly PortalCalendarEvents $calendar,
     ) {}
 
     /**
@@ -87,6 +88,7 @@ final class PortalOvertimeRequests
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         Cache::forever(self::CACHE_VERSION_KEY, $current + 1);
+        $this->calendar->bumpCache();
     }
 
     /**
@@ -157,6 +159,20 @@ final class PortalOvertimeRequests
                     PortalActivityCopy::filedOvertime($group['date']),
                     $id,
                     $request,
+                );
+                $this->audit->notifyManagers(
+                    $actor,
+                    PortalNotificationType::REQUEST_FILED_OVERTIME,
+                    'New overtime request',
+                    PortalActivityCopy::notifyFiled(
+                        PortalActivityCopy::displayName($actor),
+                        'overtime request',
+                        $group['date'],
+                        $group['date'],
+                    ),
+                    PortalShellPath::MANAGE_REQUESTS,
+                    'Open queue',
+                    ['recordId' => $id],
                 );
             }
         } catch (Throwable $error) {
@@ -275,7 +291,7 @@ final class PortalOvertimeRequests
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function cancel(Employee $actor, string $id): array
+    public function cancel(Employee $actor, string $id, Request $request): array
     {
         $row = $this->ownPendingRow($actor, $id);
         $day = $this->calendarDate($row->request_date ?? null) ?? '';
@@ -306,6 +322,16 @@ final class PortalOvertimeRequests
             self::CORE_RESOURCE,
             PortalActivityCopy::cancelledOvertime($day),
             (string) (int) $row->id,
+            $request,
+        );
+        $this->audit->notifyManagers(
+            $actor,
+            PortalNotificationType::REQUEST_CANCELLED_OVERTIME,
+            'Overtime request cancelled',
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'overtime request', $day),
+            PortalShellPath::MANAGE_REQUESTS,
+            'Open queue',
+            ['recordId' => (string) (int) $row->id],
         );
 
         // A cancelled day is free again, for this form and for the report forms both.

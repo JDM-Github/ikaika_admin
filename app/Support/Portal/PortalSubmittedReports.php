@@ -72,6 +72,33 @@ final class PortalSubmittedReports
     }
 
     /**
+     * Manage / Reports: the same calendar as Submitted Reports, for one chosen member.
+     *
+     * @return array{
+     *     section: string,
+     *     resource: string,
+     *     data: list<array<string, mixed>>,
+     *     counts: array{reports: int, days: int, daily: int, late: int, hours: float},
+     *     range: array{from: string, to: string},
+     *     leaveDays: list<string>,
+     *     offsetDays: list<string>,
+     *     employees: list<array{value: string, label: string}>,
+     *     employeeId: string
+     * }
+     */
+    public function listManaged(Employee $actor, Request $request): array
+    {
+        $subject = $this->managedSubject($actor, $request);
+        $page = $this->list($subject, $request);
+        $page['section'] = 'manage';
+        $page['resource'] = 'reports';
+        $page['employees'] = $this->roster();
+        $page['employeeId'] = (string) $subject->getKey();
+
+        return $page;
+    }
+
+    /**
      * The days an overtime request already claims. Public because overtime is filed elsewhere but
      * decided by the same occupancy read, and duplicating that query would let the two drift.
      *
@@ -407,7 +434,7 @@ final class PortalSubmittedReports
      * Put a recycled submitted report back. Logs action_type add and drops the recycle
      * row. The original delete action stays — restore is an add, not an erase.
      */
-    public function restoreFromBin(Employee $actor, Recycle $row): void
+    public function restoreFromBin(Employee $actor, Recycle $row, Request $request): void
     {
         if ($row->product !== CoreLedger::PRODUCT_PORTAL) {
             abort(404, 'That item was not found.');
@@ -475,7 +502,21 @@ final class PortalSubmittedReports
                 self::CORE_RESOURCE,
                 PortalActivityCopy::restoredReport($kind, $date),
                 (string) $row->record_id,
+                $request,
             );
+            $owner = Employee::query()->find($ownerId);
+            if ($owner instanceof Employee) {
+                $this->audit->notifyIfOther(
+                    $owner,
+                    $actor,
+                    PortalNotificationType::BIN_RESTORED,
+                    'Report restored',
+                    PortalActivityCopy::notifyReportRestored($kind, $date, PortalActivityCopy::displayName($actor)),
+                    PortalShellPath::SUBMITTED_REPORTS,
+                    'Open reports',
+                    ['recordId' => (string) $row->record_id],
+                );
+            }
         } catch (Throwable $error) {
             $this->deleteLines($insertedIds);
             throw $error;
@@ -1658,5 +1699,52 @@ final class PortalSubmittedReports
     private function lookupKey(string $label): string
     {
         return strtolower(trim($label));
+    }
+
+    private function managedSubject(Employee $actor, Request $request): Employee
+    {
+        $raw = trim((string) $request->query('employee_id', ''));
+        if ($raw === '') {
+            return $actor;
+        }
+        if (preg_match('/^\d{1,11}$/', $raw) !== 1) {
+            abort(404, 'That member was not found.');
+        }
+
+        $subject = Employee::query()->find((int) $raw);
+        if (! $subject instanceof Employee) {
+            abort(404, 'That member was not found.');
+        }
+
+        return $subject;
+    }
+
+    /**
+     * Active members the picker can open. Skinny: an id and a display name, nothing else.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    private function roster(): array
+    {
+        $rows = Employee::query()
+            ->select(['id', 'first_name', 'last_name'])
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->orderBy('id')
+            ->get();
+
+        $employees = [];
+        foreach ($rows as $row) {
+            $employees[] = [
+                'value' => (string) $row->getKey(),
+                'label' => PortalSubmittedReportPresenter::memberName(
+                    is_string($row->first_name) ? $row->first_name : null,
+                    is_string($row->last_name) ? $row->last_name : null,
+                ),
+            ];
+        }
+
+        return $employees;
     }
 }

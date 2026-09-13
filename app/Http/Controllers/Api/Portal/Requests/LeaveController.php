@@ -49,6 +49,6 @@ class LeaveController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->leave->cancel($actor, $id));
+        return response()->json($this->leave->cancel($actor, $id, $request));
     }
 }

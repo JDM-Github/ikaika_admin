@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
+use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -83,6 +84,12 @@ class PortalLeaveRequestsTest extends TestCase
             '{UserName|You} filed a Sick Leave request from '.$from->format('l, F j, Y').' to '.$to->format('l, F j, Y'),
             $log->message,
         );
+
+        $managerInbox = PortalNotification::query()
+            ->where('type', 'requests.leave.filed')
+            ->where('actor_id', $actor->getKey())
+            ->count();
+        $this->assertGreaterThan(0, $managerInbox);
     }
 
     public function test_one_day_is_a_range_of_one(): void
@@ -317,6 +324,11 @@ class PortalLeaveRequestsTest extends TestCase
         // The row stays: the history records what was asked for, not only what stood.
         $this->assertSame('Cancelled', DB::connection('portal')->table('requests')
             ->where('id', $id)->value('status'));
+
+        $this->assertGreaterThan(0, PortalNotification::query()
+            ->where('type', 'requests.leave.cancelled')
+            ->where('actor_id', $actor->getKey())
+            ->count());
 
         // And the day is free again, so it can be asked for a second time.
         Cache::flush();

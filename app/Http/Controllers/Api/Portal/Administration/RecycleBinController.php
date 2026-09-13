@@ -44,7 +44,7 @@ class RecycleBinController extends Controller
         }
 
         $row = $this->recycleBin->itemForActor($actor, $id);
-        $this->reports->restoreFromBin($actor, $row);
+        $this->reports->restoreFromBin($actor, $row, $request);
 
         return response()->json(null, 204);
     }

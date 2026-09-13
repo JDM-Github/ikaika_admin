@@ -27,6 +27,8 @@ return new class extends Migration
                 $table->text('message')->nullable();
                 $table->string('ip_address', 45)->nullable();
                 $table->string('user_agent', 255)->nullable();
+                $table->string('location_label', 255)->nullable();
+                $table->string('location_source', 32)->nullable();
                 $table->json('payload')->nullable();
                 $table->timestamp('created_at')->useCurrent();
                 $table->index(['employee_id', 'created_at'], 'idx_logs_employee_created');

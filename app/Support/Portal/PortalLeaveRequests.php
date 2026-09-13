@@ -65,6 +65,7 @@ final class PortalLeaveRequests
         private readonly PortalSubmittedReports $reports,
         private readonly PortalTimezone $timezone,
         private readonly PortalAudit $audit,
+        private readonly PortalCalendarEvents $calendar,
     ) {}
 
     /**
@@ -102,6 +103,7 @@ final class PortalLeaveRequests
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         Cache::forever(self::CACHE_VERSION_KEY, $current + 1);
+        $this->calendar->bumpCache();
     }
 
     /**
@@ -177,6 +179,20 @@ final class PortalLeaveRequests
             PortalActivityCopy::filedLeave($type, $dates[0] ?? '', $dates[array_key_last($dates)] ?? ''),
             (string) ($insertedIds[0] ?? ''),
             $request,
+        );
+        $this->audit->notifyManagers(
+            $actor,
+            PortalNotificationType::REQUEST_FILED_LEAVE,
+            'New leave request',
+            PortalActivityCopy::notifyFiled(
+                PortalActivityCopy::displayName($actor),
+                'leave request',
+                $dates[0] ?? '',
+                $dates[array_key_last($dates)] ?? '',
+            ),
+            PortalShellPath::MANAGE_REQUESTS,
+            'Open queue',
+            ['recordId' => (string) ($insertedIds[0] ?? '')],
         );
 
         $this->bumpCache();
@@ -259,7 +275,7 @@ final class PortalLeaveRequests
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function cancel(Employee $actor, string $id): array
+    public function cancel(Employee $actor, string $id, Request $request): array
     {
         $row = $this->ownPendingRow($actor, $id);
         $day = $this->calendarDate($row->request_date ?? null) ?? '';
@@ -292,6 +308,16 @@ final class PortalLeaveRequests
                 $day,
             ),
             (string) (int) $row->id,
+            $request,
+        );
+        $this->audit->notifyManagers(
+            $actor,
+            PortalNotificationType::REQUEST_CANCELLED_LEAVE,
+            'Leave request cancelled',
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'leave request', $day),
+            PortalShellPath::MANAGE_REQUESTS,
+            'Open queue',
+            ['recordId' => (string) (int) $row->id],
         );
 
         // A cancelled day is free again, for this form and the report forms both.

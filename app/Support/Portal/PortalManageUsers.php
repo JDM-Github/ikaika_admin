@@ -131,6 +131,16 @@ final class PortalManageUsers
                 (string) $target->getKey(),
                 $request,
             );
+            $this->audit->notifyIfOther(
+                $target,
+                $actor,
+                PortalNotificationType::ROLE_CHANGED,
+                'Role changed',
+                PortalActivityCopy::notifyRoleChanged($role, PortalActivityCopy::displayName($actor)),
+                PortalShellPath::USER_MANAGEMENT,
+                'Open users',
+                ['recordId' => (string) $target->getKey()],
+            );
             $target = $this->rosterQuery()->findOrFail($id);
         }
 

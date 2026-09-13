@@ -106,6 +106,50 @@ class PortalModule implements ProductModule
                     ],
                 ],
             ],
+            'calendar' => [
+                'label' => 'Calendar',
+                'requires_admin' => false,
+                'resources' => [
+                    'holidays' => [
+                        'label' => 'Holidays',
+                        'path' => 'calendar/holidays',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'calendar/holidays',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
+                    'events' => [
+                        'label' => 'Events',
+                        'path' => 'calendar/events',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'calendar/events',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'calendar/events',
+                                'label' => 'Create',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'GET',
+                                'path' => 'calendar/event-options',
+                                'label' => 'Options',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
             'projects' => [
                 'label' => 'Projects',
                 'requires_admin' => false,
@@ -146,6 +190,32 @@ class PortalModule implements ProductModule
                                 'label' => 'Set role',
                                 'auth' => true,
                                 'body' => ['role' => 'Admin'],
+                            ],
+                        ],
+                    ],
+                    'requests' => [
+                        'label' => 'Requests',
+                        'path' => 'manage/requests',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'manage/requests',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
+                    'reports' => [
+                        'label' => 'Reports',
+                        'path' => 'manage/reports',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'manage/reports',
+                                'label' => 'List',
+                                'auth' => true,
                             ],
                         ],
                     ],
@@ -397,6 +467,19 @@ class PortalModule implements ProductModule
                             ],
                         ],
                     ],
+                    'all-logs' => [
+                        'label' => 'All Logs',
+                        'path' => 'administration/all-logs',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/all-logs',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
                 ],
             ],
             'user' => [
@@ -416,6 +499,31 @@ class PortalModule implements ProductModule
                             ],
                         ],
                     ],
+                    'notifications' => [
+                        'label' => 'Notifications',
+                        'path' => 'user/notifications',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'user/notifications',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'PATCH',
+                                'path' => 'user/notifications/{id}/read',
+                                'label' => 'Mark read',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'user/notifications/read-all',
+                                'label' => 'Mark all read',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
                 ],
             ],
         ];
@@ -429,6 +537,16 @@ class PortalModule implements ProductModule
                 'path' => 'auth/login',
                 'label' => 'Login',
                 'body' => ['id_no' => ''],
+            ],
+            [
+                'method' => 'POST',
+                'path' => 'auth/login/microsoft',
+                'label' => 'Microsoft login',
+                'body' => [
+                    'code' => '',
+                    'code_verifier' => '',
+                    'redirect_uri' => '',
+                ],
             ],
             [
                 'method' => 'GET',

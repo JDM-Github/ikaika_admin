@@ -75,7 +75,7 @@ CREATE TABLE employees (
     employment_status               VARCHAR(100),
     date_of_birth                   DATE,
     blood_type                      VARCHAR(50),
-    address                         VARCHAR(500),
+    address                         TEXT,
     personal_email                  VARCHAR(255),
     tax_identification_no           VARCHAR(100),
     philhealth_no                   VARCHAR(100),
@@ -119,7 +119,7 @@ CREATE TABLE new_employee_data (
     status                          VARCHAR(100),
     employment_status               VARCHAR(100),
     date_of_birth                   DATE,
-    address                         VARCHAR(500),
+    address                         TEXT,
     personal_email                  VARCHAR(255),
     tax_identification_no           VARCHAR(100),
     philhealth_no                   VARCHAR(100),
@@ -515,7 +515,7 @@ CREATE TABLE project_action_history (
     name                INT,
     action_name         VARCHAR(255),
     created_by          VARCHAR(255),
-    remarks             VARCHAR(500),
+    remarks             TEXT,
     created_at          TIMESTAMP NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -753,6 +753,8 @@ CREATE TABLE logs (
     message       TEXT         NULL,
     ip_address    VARCHAR(45)  NULL,
     user_agent    VARCHAR(255) NULL,
+    location_label  VARCHAR(255) NULL,
+    location_source VARCHAR(32) NULL,
     payload       JSON         NULL,
     created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_logs_employee_created (employee_id, created_at),
@@ -776,6 +778,48 @@ CREATE TABLE notifications (
     INDEX idx_notifications_employee_created (employee_id, created_at),
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
     FOREIGN KEY (actor_id)    REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ============================================================================
+-- EVENT CALENDAR — member-created company and project events
+-- audience everyone is visible to every signed-in member. department rows
+-- match employees.department. members rows name specific employee ids.
+-- The creator always sees their own event. Existing databases: the Laravel
+-- migration create_portal_calendar_events_tables.
+-- ============================================================================
+
+CREATE TABLE calendar_events (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    title        VARCHAR(255) NOT NULL,
+    details      TEXT         NULL,
+    starts_on    DATE         NOT NULL,
+    starts_at    TIME         NULL,
+    ends_on      DATE         NULL,
+    ends_at      TIME         NULL,
+    category     VARCHAR(32)  NOT NULL,
+    audience     VARCHAR(32)  NOT NULL,
+    created_by   INT          NOT NULL,
+    date_created DATETIME     NULL,
+    INDEX idx_calendar_events_starts_on (starts_on),
+    INDEX idx_calendar_events_created_by (created_by),
+    FOREIGN KEY (created_by) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE calendar_event_departments (
+    event_id   INT          NOT NULL,
+    department VARCHAR(100) NOT NULL,
+    PRIMARY KEY (event_id, department),
+    FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE calendar_event_members (
+    event_id    INT NOT NULL,
+    employee_id INT NOT NULL,
+    PRIMARY KEY (event_id, employee_id),
+    INDEX idx_calendar_event_members_employee (employee_id),
+    FOREIGN KEY (event_id)    REFERENCES calendar_events(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id)      ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 

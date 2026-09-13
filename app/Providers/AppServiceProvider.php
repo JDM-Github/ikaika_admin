@@ -39,12 +39,24 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(30)->by('workspace-write:'.$this->portalLimiterKey($request));
         });
 
+        RateLimiter::for('portal-auth', function (Request $request) {
+            return Limit::perMinute(10)->by('auth:'.(string) $request->ip());
+        });
+
         RateLimiter::for('portal-home', function (Request $request) {
             return Limit::perMinute(60)->by('home:'.$this->portalLimiterKey($request));
         });
 
         RateLimiter::for('portal-user-logs', function (Request $request) {
             return Limit::perMinute(60)->by('user-logs:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-user-notifications', function (Request $request) {
+            return Limit::perMinute(60)->by('user-notifications:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-user-notifications-write', function (Request $request) {
+            return Limit::perMinute(30)->by('user-notifications-write:'.$this->portalLimiterKey($request));
         });
 
         RateLimiter::for('portal-projects', function (Request $request) {
@@ -57,6 +69,18 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('portal-manage-users-write', function (Request $request) {
             return Limit::perMinute(20)->by('manage-users-write:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-manage-requests', function (Request $request) {
+            return Limit::perMinute(60)->by('manage-requests:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-manage-requests-write', function (Request $request) {
+            return Limit::perMinute(20)->by('manage-requests-write:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-manage-reports', function (Request $request) {
+            return Limit::perMinute(60)->by('manage-reports:'.$this->portalLimiterKey($request));
         });
 
         RateLimiter::for('portal-reports-submitted', function (Request $request) {
@@ -82,6 +106,22 @@ class AppServiceProvider extends ServiceProvider
         // Shared reference data that changes once a year, so the ceiling only has to stop a runaway.
         RateLimiter::for('portal-calendar-holidays', function (Request $request) {
             return Limit::perMinute(60)->by('calendar-holidays:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-calendar-events', function (Request $request) {
+            return Limit::perMinute(60)->by('calendar-events:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-calendar-events-write', function (Request $request) {
+            return Limit::perMinute(20)->by('calendar-events-write:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-calendar-event-options', function (Request $request) {
+            return Limit::perMinute(60)->by('calendar-event-options:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-administration-all-logs', function (Request $request) {
+            return Limit::perMinute(60)->by('administration-all-logs:'.$this->portalLimiterKey($request));
         });
 
         RateLimiter::for('portal-administration-recycle-bin', function (Request $request) {

@@ -41,4 +41,23 @@ return [
         'api_secret' => env('CLOUDINARY_API_SECRET'),
     ],
 
+    'ipwhois' => [
+        'base_url' => env('PORTAL_IPWHOIS_URL', 'https://ipwho.is'),
+        'lookup_private' => filter_var(
+            env('PORTAL_IP_LOOKUP_PRIVATE', env('APP_ENV') === 'local'),
+            FILTER_VALIDATE_BOOLEAN
+        ),
+    ],
+
+    'ipapi' => [
+        'base_url' => env('PORTAL_IP_GEOLOCATION_URL', 'https://ipapi.co'),
+    ],
+
+    'portal_azure' => [
+        'tenant_id' => env('PORTAL_AZURE_TENANT_ID'),
+        'client_id' => env('PORTAL_AZURE_CLIENT_ID'),
+        'client_secret' => env('PORTAL_AZURE_CLIENT_SECRET'),
+        'redirect_uri' => env('PORTAL_AZURE_REDIRECT_URI', 'http://localhost:8081'),
+    ],
+
 ];

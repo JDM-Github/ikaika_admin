@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Modules\Core\Models\Action;
 use App\Modules\Core\Models\Recycle;
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreLedger;
 use App\Support\Core\CoreRecycleKey;
@@ -426,6 +427,15 @@ class PortalRecycleBinTest extends TestCase
             $memberHeaders,
         )->assertOk();
         $this->assertContains($today.'-daily', collect($memberList->json('data'))->pluck('id')->all());
+
+        $inbox = PortalNotification::query()
+            ->where('employee_id', $member->getKey())
+            ->where('type', 'administration.recycle-bin.restored')
+            ->where('actor_id', $admin->getKey())
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($inbox);
+        $this->assertStringContainsString('was restored by', (string) $inbox->message);
 
         $added = Action::query()
             ->where('product', CoreLedger::PRODUCT_PORTAL)

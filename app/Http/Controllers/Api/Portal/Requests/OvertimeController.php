@@ -49,6 +49,6 @@ class OvertimeController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->overtime->cancel($actor, $id));
+        return response()->json($this->overtime->cancel($actor, $id, $request));
     }
 }

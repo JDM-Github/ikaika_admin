@@ -24,6 +24,7 @@
 --   Project Scope Source T3 (Activities) ...... 95 / 95  (identical to TEST)
 --   Project Scope Source T4 (Tasks) .......... 110 / 110 (identical to TEST)
 --   User Reports ......................... 4,432 / 4,432
+--   Logs / Notifications ..................... 0  (written at runtime by the portal)
 --
 -- Not populated (empty in the source base): BIM Form (0 real records),
 -- User Reports - Project Scope Progress (0 records).

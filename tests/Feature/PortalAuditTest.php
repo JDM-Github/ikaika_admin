@@ -8,6 +8,9 @@ use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Portal\PortalActivityCopy;
 use App\Support\Portal\PortalAudit;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
 use Tests\TestCase;
 
@@ -173,5 +176,175 @@ class PortalAuditTest extends TestCase
             "{UserName|You} approved {$requesterName}'s Sick Leave request for Monday, September 7, 2026",
             $approverLog->message,
         );
+
+        $inbox = PortalNotification::query()
+            ->where('employee_id', $requester->id)
+            ->where('type', 'requests.leave.approved')
+            ->where('actor_id', $approver->id)
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($inbox);
+        $this->assertSame('Request approved', $inbox->title);
+        $this->assertSame('/requests/user-requests', $inbox->link_path);
+        $this->assertSame(
+            "Your Sick Leave request for Monday, September 7, 2026 has been approved by {$approverName}.",
+            $inbox->message,
+        );
+    }
+
+    public function test_records_device_location_before_using_ip_geolocation(): void
+    {
+        $employee = Employee::query()->orderBy('id')->first();
+        $this->assertNotNull($employee);
+
+        $id = app(PortalAudit::class)->record(
+            $employee,
+            'PATCH',
+            'requests.leave',
+            'Updated a leave request',
+            'location-device',
+            Request::create(
+                '/api/development/portal/requests/leave/41',
+                'PATCH',
+                [],
+                [],
+                [],
+                [
+                    'REMOTE_ADDR' => '8.8.8.8',
+                    'HTTP_X_PORTAL_LOCATION' => 'Parian, Calamba City',
+                ],
+            ),
+        );
+
+        $row = PortalLog::query()->find($id);
+        $this->assertNotNull($row);
+        $this->assertSame('Parian, Calamba City', $row->location_label);
+        $this->assertSame('device', $row->location_source);
+    }
+
+    public function test_leaves_loopback_location_unavailable_without_an_ip_lookup(): void
+    {
+        $employee = Employee::query()->orderBy('id')->first();
+        $this->assertNotNull($employee);
+        config(['services.ipwhois.lookup_private' => false]);
+        Http::fake();
+
+        $id = app(PortalAudit::class)->record(
+            $employee,
+            'POST',
+            'auth.login',
+            'Signed in to the portal',
+            'location-loopback',
+            Request::create(
+                '/api/development/portal/auth/login',
+                'POST',
+                [],
+                [],
+                [],
+                ['REMOTE_ADDR' => '127.0.0.1'],
+            ),
+        );
+
+        $row = PortalLog::query()->find($id);
+        $this->assertNotNull($row);
+        $this->assertNull($row->location_label);
+        $this->assertNull($row->location_source);
+        Http::assertNothingSent();
+    }
+
+    public function test_resolves_loopback_through_the_server_egress_when_enabled(): void
+    {
+        $employee = Employee::query()->orderBy('id')->first();
+        $this->assertNotNull($employee);
+        Cache::forget('portal:location:ip:'.hash('sha256', 'egress'));
+        config(['services.ipwhois.lookup_private' => true]);
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), 'ipwho.is')) {
+                return Http::response([
+                    'success' => true,
+                    'city' => 'Calamba',
+                    'region' => 'Calabarzon (Region IV-A)',
+                    'country' => 'Philippines',
+                ]);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $id = app(PortalAudit::class)->record(
+            $employee,
+            'POST',
+            'auth.login',
+            'Signed in to the portal',
+            'location-egress',
+            Request::create(
+                '/api/development/portal/auth/login',
+                'POST',
+                [],
+                [],
+                [],
+                ['REMOTE_ADDR' => '127.0.0.1'],
+            ),
+        );
+
+        $row = PortalLog::query()->find($id);
+        $this->assertNotNull($row);
+        $this->assertSame('Calamba, Calabarzon (Region IV-A), Philippines', $row->location_label);
+        $this->assertSame('ip', $row->location_source);
+    }
+
+    public function test_caches_a_public_ip_location_and_fails_open(): void
+    {
+        $employee = Employee::query()->orderBy('id')->first();
+        $this->assertNotNull($employee);
+        $cacheKey = 'portal:location:ip:'.hash('sha256', '8.8.8.8');
+        Cache::forget($cacheKey);
+        Http::fake([
+            'https://ipwho.is/8.8.8.8' => Http::response([
+                'success' => true,
+                'city' => 'Calamba City',
+                'region' => 'Laguna',
+                'country' => 'Philippines',
+            ]),
+        ]);
+
+        $request = Request::create(
+            '/api/development/portal/requests/leave/41',
+            'PATCH',
+            [],
+            [],
+            [],
+            ['REMOTE_ADDR' => '8.8.8.8'],
+        );
+        $audit = app(PortalAudit::class);
+        $firstId = $audit->record($employee, 'PATCH', 'requests.leave', 'Updated a leave request', 'location-ip-1', $request);
+        $secondId = $audit->record($employee, 'PATCH', 'requests.leave', 'Updated a leave request', 'location-ip-2', $request);
+
+        $first = PortalLog::query()->find($firstId);
+        $second = PortalLog::query()->find($secondId);
+        $this->assertNotNull($first);
+        $this->assertNotNull($second);
+        $this->assertSame('Calamba City, Laguna, Philippines', $first->location_label);
+        $this->assertSame('ip', $first->location_source);
+        $this->assertSame($first->location_label, $second->location_label);
+        Http::assertSentCount(1);
+
+        Http::fake([
+            'https://ipwho.is/1.1.1.1' => Http::response([], 503),
+            'https://ipapi.co/1.1.1.1/json/' => Http::response([], 503),
+        ]);
+        $failedRequest = Request::create(
+            '/api/development/portal/requests/leave/41',
+            'PATCH',
+            [],
+            [],
+            [],
+            ['REMOTE_ADDR' => '1.1.1.1'],
+        );
+        $failedId = $audit->record($employee, 'PATCH', 'requests.leave', 'Updated a leave request', 'location-ip-failed', $failedRequest);
+        $failed = PortalLog::query()->find($failedId);
+        $this->assertNotNull($failed);
+        $this->assertNull($failed->location_label);
+        $this->assertNull($failed->location_source);
     }
 }
