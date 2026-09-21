@@ -35,10 +35,10 @@ class PortalSubmittedReportsTest extends TestCase
     {
         $this->getJson('/api/development/portal')
             ->assertOk()
-            ->assertJsonPath('sections.3.name', 'reports')
-            ->assertJsonPath('sections.3.resources.0.name', 'submitted')
-            ->assertJsonPath('sections.3.resources.0.url', '/api/development/portal/reports/submitted')
-            ->assertJsonPath('sections.3.requires_admin', false);
+            ->assertJsonPath('sections.4.name', 'reports')
+            ->assertJsonPath('sections.4.resources.0.name', 'submitted')
+            ->assertJsonPath('sections.4.resources.0.url', '/api/development/portal/reports/submitted')
+            ->assertJsonPath('sections.4.requires_admin', false);
     }
 
     public function test_a_member_reads_only_their_own_skinny_grouped_history(): void
@@ -50,28 +50,28 @@ class PortalSubmittedReportsTest extends TestCase
         $earn = $this->firstEarnCode();
 
         $this->insertLine($actor, [
-            'report_date' => '2026-08-20',
+            'report_date' => '2025-02-20',
             'hours_rendered' => 4,
             'change_in_elements' => 2,
             'remarks' => null,
             'late_submission' => null,
         ], $project, $activity, $earn);
         $this->insertLine($actor, [
-            'report_date' => '2026-08-20',
+            'report_date' => '2025-02-20',
             'hours_rendered' => 3.5,
             'change_in_elements' => 1,
             'remarks' => null,
             'late_submission' => null,
         ], $project, $activity, $earn);
         $this->insertLine($actor, [
-            'report_date' => '2026-08-19',
+            'report_date' => '2025-02-19',
             'hours_rendered' => 8,
             'change_in_elements' => 0,
             'remarks' => 'Power outage',
             'late_submission' => 'Yes',
         ], $project, $activity, $earn);
         $this->insertLine($other, [
-            'report_date' => '2026-08-20',
+            'report_date' => '2025-02-20',
             'hours_rendered' => 8,
             'change_in_elements' => 99,
             'remarks' => 'OTHER-EMPLOYEE-SECRET',
@@ -82,22 +82,22 @@ class PortalSubmittedReportsTest extends TestCase
         $headers = ['Authorization' => "Bearer {$token}"];
 
         $response = $this->getJson(
-            '/api/development/portal/reports/submitted?from=2026-08-01&to=2026-08-31&employee_id='.$other->id,
+            '/api/development/portal/reports/submitted?from=2025-02-01&to=2025-02-28&employee_id='.$other->id,
             $headers,
         );
 
         $response->assertOk()
             ->assertJsonPath('section', 'reports')
             ->assertJsonPath('resource', 'submitted')
-            ->assertJsonPath('range.from', '2026-08-01')
-            ->assertJsonPath('range.to', '2026-08-31');
+            ->assertJsonPath('range.from', '2025-02-01')
+            ->assertJsonPath('range.to', '2025-02-28');
 
         $data = $response->json('data');
         $this->assertIsArray($data);
         $this->assertCount(2, $data);
 
-        $daily = collect($data)->firstWhere('id', '2026-08-20-daily');
-        $late = collect($data)->firstWhere('id', '2026-08-19-late');
+        $daily = collect($data)->firstWhere('id', '2025-02-20-daily');
+        $late = collect($data)->firstWhere('id', '2025-02-19-late');
         $this->assertIsArray($daily);
         $this->assertIsArray($late);
         $this->assertSame('daily', $daily['kind']);
@@ -142,7 +142,7 @@ class PortalSubmittedReportsTest extends TestCase
         $earn = $this->firstEarnCode();
         for ($day = 10; $day <= 14; $day++) {
             $this->insertLine($actor, [
-                'report_date' => sprintf('2026-08-%02d', $day),
+                'report_date' => sprintf('2025-02-%02d', $day),
                 'hours_rendered' => 8,
             ], $project, $activity, $earn);
         }
@@ -154,7 +154,7 @@ class PortalSubmittedReportsTest extends TestCase
         });
 
         $this->getJson(
-            '/api/development/portal/reports/submitted?from=2026-08-01&to=2026-08-31',
+            '/api/development/portal/reports/submitted?from=2025-02-01&to=2025-02-28',
             ['Authorization' => "Bearer {$token}"],
         )->assertOk()->assertJsonPath('counts.reports', 5);
 

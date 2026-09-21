@@ -131,6 +131,19 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('portal-administration-recycle-bin-write', function (Request $request) {
             return Limit::perMinute(20)->by('administration-recycle-bin-write:'.$this->portalLimiterKey($request));
         });
+
+        RateLimiter::for('portal-administration-email', function (Request $request) {
+            return Limit::perMinute(60)->by('administration-email:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-administration-email-write', function (Request $request) {
+            return Limit::perMinute(20)->by('administration-email-write:'.$this->portalLimiterKey($request));
+        });
+
+        // Sending is heavier than any other write here: it reaches the mail transport once per recipient.
+        RateLimiter::for('portal-administration-email-send', function (Request $request) {
+            return Limit::perMinute(10)->by('administration-email-send:'.$this->portalLimiterKey($request));
+        });
     }
 
     private function portalLimiterKey(Request $request): string

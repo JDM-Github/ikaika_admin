@@ -480,6 +480,68 @@ class PortalModule implements ProductModule
                             ],
                         ],
                     ],
+                    'emails' => [
+                        'label' => 'Send Email',
+                        'path' => 'administration/emails',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/emails',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/emails/audiences',
+                                'label' => 'Audiences',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/emails/{id}',
+                                'label' => 'Show',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'administration/emails',
+                                'label' => 'Send',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
+                    'email-blocks' => [
+                        'label' => 'Email Templates',
+                        'path' => 'administration/email-blocks',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/email-blocks',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'administration/email-blocks',
+                                'label' => 'Create',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'PATCH',
+                                'path' => 'administration/email-blocks/{id}',
+                                'label' => 'Update',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'DELETE',
+                                'path' => 'administration/email-blocks/{id}',
+                                'label' => 'Delete',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
                 ],
             ],
             'user' => [

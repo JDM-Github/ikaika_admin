@@ -27,10 +27,10 @@ class PortalViewProjectsTest extends TestCase
     {
         $this->getJson('/api/development/portal')
             ->assertOk()
-            ->assertJsonPath('sections.1.name', 'projects')
-            ->assertJsonPath('sections.1.resources.0.name', 'board')
-            ->assertJsonPath('sections.1.resources.0.url', '/api/development/portal/projects')
-            ->assertJsonPath('sections.1.requires_admin', false);
+            ->assertJsonPath('sections.2.name', 'projects')
+            ->assertJsonPath('sections.2.resources.0.name', 'board')
+            ->assertJsonPath('sections.2.resources.0.url', '/api/development/portal/projects')
+            ->assertJsonPath('sections.2.requires_admin', false);
     }
 
     public function test_guest_cannot_read_the_board(): void

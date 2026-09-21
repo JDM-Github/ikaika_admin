@@ -31,9 +31,9 @@ class PortalManageReportsTest extends TestCase
     {
         $this->getJson('/api/development/portal')
             ->assertOk()
-            ->assertJsonPath('sections.2.name', 'manage')
-            ->assertJsonPath('sections.2.resources.2.name', 'reports')
-            ->assertJsonPath('sections.2.resources.2.url', '/api/development/portal/manage/reports');
+            ->assertJsonPath('sections.3.name', 'manage')
+            ->assertJsonPath('sections.3.resources.2.name', 'reports')
+            ->assertJsonPath('sections.3.resources.2.url', '/api/development/portal/manage/reports');
     }
 
     public function test_an_admin_reads_another_member_s_timesheets_and_the_roster(): void

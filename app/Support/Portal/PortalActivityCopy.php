@@ -190,4 +190,36 @@ final class PortalActivityCopy
     {
         return 'Your '.self::reportKind($kind).' for '.self::date($date).' was restored by '.$by.'.';
     }
+
+    public static function createdEmailBlock(string $name, string $kind): string
+    {
+        return self::YOU.' created the '.self::emailBlockKind($kind).' '.$name;
+    }
+
+    public static function updatedEmailBlock(string $name, string $kind): string
+    {
+        return self::YOU.' updated the '.self::emailBlockKind($kind).' '.$name;
+    }
+
+    public static function deletedEmailBlock(string $name, string $kind): string
+    {
+        return self::YOU.' deleted the '.self::emailBlockKind($kind).' '.$name;
+    }
+
+    public static function sentEmail(string $subject, int $count): string
+    {
+        $label = $count === 1 ? '1 member' : $count.' members';
+
+        return self::YOU.' sent "'.$subject.'" to '.$label;
+    }
+
+    public static function emailBlockKind(string $kind): string
+    {
+        return $kind === PortalEmail::KIND_FOOTER ? 'footer' : 'template';
+    }
+
+    public static function notifyEmailArrived(string $subject, string $by): string
+    {
+        return $by.' sent an email to the portal: '.$subject.'.';
+    }
 }

@@ -33,9 +33,9 @@ class PortalManageRequestsTest extends TestCase
     {
         $this->getJson('/api/development/portal')
             ->assertOk()
-            ->assertJsonPath('sections.2.name', 'manage')
-            ->assertJsonPath('sections.2.resources.1.name', 'requests')
-            ->assertJsonPath('sections.2.resources.1.url', '/api/development/portal/manage/requests');
+            ->assertJsonPath('sections.3.name', 'manage')
+            ->assertJsonPath('sections.3.resources.1.name', 'requests')
+            ->assertJsonPath('sections.3.resources.1.url', '/api/development/portal/manage/requests');
     }
 
     public function test_an_admin_reads_other_people_s_leave_on_the_queue(): void

@@ -796,6 +796,48 @@ Bearer plus Admin or Executive. Members receive `403`. The list is every portal 
 
 Each row adds `employeeId` and `employeeName`. `filters.users` is `{value,label}` for members who already have a log row — not the whole roster. Other facets are the same shape as User / Logs and come from every log, not the current page. Cached 30s on the same version as User / Logs. Rate limit 60/min.
 
+#### Administration / Send Email — **live** (sectioned)
+
+Sidebar: **Administration → Send Email**. Laravel: `app/Http/Controllers/Api/Portal/Administration/EmailMessagesController.php` and `EmailBlocksController.php`. Tables: `email_messages` (the outbox) and `email_blocks` (the reusable templates and footers). Every route is Admin or Executive; members receive `403`.
+
+```
+GET    /api/development/portal/administration/emails
+GET    /api/development/portal/administration/emails/audiences
+GET    /api/development/portal/administration/emails/{id}
+POST   /api/development/portal/administration/emails
+GET    /api/development/portal/administration/email-blocks
+POST   /api/development/portal/administration/email-blocks
+PATCH  /api/development/portal/administration/email-blocks/{id}
+DELETE /api/development/portal/administration/email-blocks/{id}
+```
+
+The outbox list takes `page` (default 1), `per_page` (allow-listed **10 / 25 / 50 / 100**, default **25**), `q` (subject or body), `category` (allow-listed `notice` / `event` / `complaint` / `other`), `sort` (`sent` / `subject` / `recipients` / `status`) and `dir` (`asc` / `desc`). Default order is newest sent first. Rows: `id`, `category`, `subject`, `audience`, `audienceFilter`, `recipientCount`, `sentCount`, `failedCount`, `status`, `sentById`, `sentByIdNo`, `sentByName`, `sentAt`. `status` is `sent` when every recipient was reached, `partial` when some were, `failed` when none were. `counts` is `{total, sent, partial, failed}` across the whole outbox, not the current page. No recipient address is ever returned.
+
+Show returns the list fields plus `body`, `footerId`, `footerBody`, and `failures` — `{employeeId, name, reason}` for recipients the mail server refused, capped at the first **25** with the reason trimmed to 191 characters.
+
+`GET .../audiences` is the composer's picker: `audiences` (`everyone` / `department` / `role` / `members` with a live `count`), `categories`, `departments`, `roles`, `members` (`id`, `name`, `department`), and `total`. Counts are the reach of each pick, so the composer can show the estimate before anything is sent.
+
+`POST .../emails` sends one email. Body:
+
+```json
+{
+  "category": "notice",
+  "subject": "We are closed on Friday",
+  "body": "The office is closed on Friday.",
+  "audience": "department",
+  "departments": ["Engineering"],
+  "roles": [],
+  "memberIds": [],
+  "footerId": 4
+}
+```
+
+`category`, a non-empty `subject` (255 max), a non-empty `body` (20000 max), and `audience` are required. Only the picks the audience uses are read — `departments` for `department`, `roles` for `role`, `memberIds` for `members`; an audience that reaches nobody is `422`. `footerId` is optional and must name a block of kind `footer`. Sending is synchronous: the row is opened before the first message and closed with its counts after, so a send that dies partway still leaves a `partial` record. Each recipient reached also gets an in-app notification (`New email`, type `email_sent`) carrying the subject. The send is logged as POST on `administration.email`, and both caches are bumped. Returns the new message as `data`, same detail shape as show.
+
+Blocks are the reusable half. A **template** needs a `category` and a `subject`; a **footer** must arrive with neither — sending either one on a footer is `422`. `name` is required, 191 max. The list takes `page`, `per_page`, `q` (name, subject, or body), `kind` (`template` / `footer`), `category`, `sort` (`name` / `category` / `updated`) and `dir`. Rows: `id`, `kind`, `name`, `category`, `subject`, `body`, `createdBy`, `createdAt`, `updatedAt`; `counts` is `{total, templates, footers}` across the whole library. Deleting a block leaves the messages already sent untouched: each message keeps the footer text it carried as `footerBody`, and only its `footerId` clears.
+
+Cached 30s per resource, each on its own version that every write bumps. Rate limit 60/min reads, 20/min block writes, 10/min sends, keyed by employee id.
+
 #### `employees` — **live**
 
 People. Sample: 20 rows.

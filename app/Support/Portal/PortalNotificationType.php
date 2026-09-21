@@ -26,4 +26,6 @@ final class PortalNotificationType
     public const ROLE_CHANGED = 'manage.users.role';
 
     public const BIN_RESTORED = 'administration.recycle-bin.restored';
+
+    public const EMAIL_SENT = 'administration.email.sent';
 }

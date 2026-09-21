@@ -99,6 +99,10 @@ class PortalApiTest extends TestCase
 
     public function test_disabled_estimator_is_not_served(): void
     {
+        // Pinned rather than inherited: a local .env that turns the placeholder on must not
+        // change what this asserts about a product that is off.
+        config(['products.catalog.project-estimator.enabled' => false]);
+
         $this->getJson('/api/development/project-estimator')
             ->assertStatus(503)
             ->assertJsonPath('message', 'Product [project-estimator] is registered but not enabled.');

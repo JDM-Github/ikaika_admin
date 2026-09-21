@@ -20,6 +20,9 @@ final class PortalAudit
 
     public const NOTIFICATION_CACHE_VERSION_KEY = 'portal:user:notifications:version';
 
+    // One statement per group this size, so an announcement to the whole roster stays a few inserts.
+    private const NOTIFICATION_INSERT_BATCH = 200;
+
     public function __construct(
         private readonly PortalLocationResolver $locationResolver,
     ) {}
@@ -248,6 +251,74 @@ final class PortalAudit
         $this->bumpNotificationCache();
 
         return (int) $notification->id;
+    }
+
+    /**
+     * One inbox row per member, for a notice that goes out to many at once. Rows are written
+     * in batches and the notification cache is bumped once, not once per recipient.
+     *
+     * @param  list<int>  $employeeIds
+     * @param  array<string, mixed>  $payload
+     * @return int
+     */
+    public function notifyEach(
+        array $employeeIds,
+        string $type,
+        string $title,
+        string $message,
+        ?string $linkPath = null,
+        ?string $linkLabel = null,
+        array $payload = [],
+        ?int $actorId = null,
+    ): int {
+        $recipients = [];
+        foreach ($employeeIds as $employeeId) {
+            if ($employeeId > 0) {
+                $recipients[$employeeId] = $employeeId;
+            }
+        }
+        $recipients = array_values($recipients);
+        if ($recipients === []) {
+            return 0;
+        }
+
+        $type = trim($type);
+        $title = trim($title);
+        $message = trim($message);
+        if ($type === '' || $title === '' || $message === '') {
+            throw new InvalidArgumentException('Notification type, title, and message are required.');
+        }
+
+        $linkPath = $linkPath === null ? null : trim($linkPath);
+        if ($linkPath === '') {
+            $linkPath = null;
+        }
+        $linkLabel = $linkLabel === null || trim($linkLabel) === '' ? null : trim($linkLabel);
+        $clean = $this->sanitizePayload($payload);
+        $createdAt = Carbon::now()->toDateTimeString();
+
+        $rows = [];
+        foreach ($recipients as $employeeId) {
+            $rows[] = [
+                'employee_id' => $employeeId,
+                'actor_id' => $actorId,
+                'type' => $type,
+                'title' => $title,
+                'message' => $message,
+                'link_path' => $linkPath,
+                'link_label' => $linkLabel,
+                'payload' => $clean === [] ? null : json_encode($clean),
+                'read_at' => null,
+                'created_at' => $createdAt,
+            ];
+        }
+
+        foreach (array_chunk($rows, self::NOTIFICATION_INSERT_BATCH) as $chunk) {
+            PortalNotification::query()->insert($chunk);
+        }
+        $this->bumpNotificationCache();
+
+        return count($rows);
     }
 
     public function markRead(int $notificationId, int $employeeId): bool
