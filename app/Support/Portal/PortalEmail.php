@@ -131,6 +131,7 @@ final class PortalEmail
             PortalActivityCopy::createdEmailBlock($name, $kind),
             (string) $id,
             $request,
+            ['kind' => $kind, 'name' => $name, 'category' => $category, 'subject' => $subject],
         );
         $this->bumpCache();
 
@@ -170,6 +171,7 @@ final class PortalEmail
             PortalActivityCopy::updatedEmailBlock($name, $kind),
             (string) $id,
             $request,
+            ['kind' => $kind, 'name' => $name, 'category' => $category, 'subject' => $subject],
         );
         $this->bumpCache();
 
@@ -198,6 +200,7 @@ final class PortalEmail
             PortalActivityCopy::deletedEmailBlock($name, $kind),
             (string) $id,
             $request,
+            ['kind' => $kind, 'name' => $name],
         );
         $this->bumpCache();
     }

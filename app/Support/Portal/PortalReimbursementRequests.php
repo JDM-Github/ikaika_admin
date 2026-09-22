@@ -194,6 +194,16 @@ final class PortalReimbursementRequests
                 PortalActivityCopy::filedReimbursement($date),
                 $claimId,
                 $request,
+                [
+                    'requestedFor' => $date,
+                    'items' => array_map(static fn (array $item): array => [
+                        'label' => $item['label'],
+                        'cost' => $item['cost'],
+                        'quantity' => $item['quantity'],
+                        'purpose' => $item['purpose'],
+                        'teamLabel' => $item['teamLabel'],
+                    ], $items),
+                ],
             );
             $this->audit->notifyManagers(
                 $actor,
@@ -315,6 +325,16 @@ final class PortalReimbursementRequests
             PortalActivityCopy::updatedReimbursement($date),
             $claimId,
             $request,
+            [
+                'requestedFor' => $date,
+                'items' => array_map(static fn (array $item): array => [
+                    'label' => $item['label'],
+                    'cost' => $item['cost'],
+                    'quantity' => $item['quantity'],
+                    'purpose' => $item['purpose'],
+                    'teamLabel' => $item['teamLabel'],
+                ], $items),
+            ],
         );
 
         $this->bumpCache();
@@ -372,6 +392,10 @@ final class PortalReimbursementRequests
             PortalActivityCopy::cancelledReimbursement($date),
             $claimId,
             $request,
+            [
+                'requestedFor' => $date,
+                'status' => self::CANCELLED_STATUS,
+            ],
         );
         $this->audit->notifyManagers(
             $actor,

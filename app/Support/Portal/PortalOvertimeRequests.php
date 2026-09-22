@@ -159,6 +159,12 @@ final class PortalOvertimeRequests
                     PortalActivityCopy::filedOvertime($group['date']),
                     $id,
                     $request,
+                    [
+                        'requestedFor' => $group['date'],
+                        'hours' => $this->totalHours($group['entries']),
+                        'entries' => $group['entries'],
+                        'reason' => $group['reason'],
+                    ],
                 );
                 $this->audit->notifyManagers(
                     $actor,
@@ -253,6 +259,12 @@ final class PortalOvertimeRequests
             PortalActivityCopy::updatedOvertime($group['date']),
             (string) (int) $row->id,
             $request,
+            [
+                'requestedFor' => $group['date'],
+                'hours' => $hours,
+                'entries' => $group['entries'],
+                'reason' => $group['reason'],
+            ],
         );
 
         $this->reports->bumpCache();
@@ -323,6 +335,10 @@ final class PortalOvertimeRequests
             PortalActivityCopy::cancelledOvertime($day),
             (string) (int) $row->id,
             $request,
+            [
+                'requestedFor' => $day,
+                'status' => self::CANCELLED_STATUS,
+            ],
         );
         $this->audit->notifyManagers(
             $actor,

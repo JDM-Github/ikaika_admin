@@ -184,6 +184,65 @@ final class PortalUserLogs
     }
 
     /**
+     * One of the actor's own log rows, payload included. Someone else's id is 404 -- a member
+     * reads their own stream only, the User / Logs rule List already enforces at the query level.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function show(Employee $actor, int $id): array
+    {
+        $employeeId = (int) $actor->getKey();
+        $version = (int) Cache::get(PortalAudit::LOG_CACHE_VERSION_KEY, 1);
+        $key = 'portal:user:logs:detail:'.$version.':'.$employeeId.':'.$id;
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($employeeId, $id): array {
+            $row = PortalLog::query()
+                ->where('id', $id)
+                ->where('employee_id', $employeeId)
+                ->first();
+            if (! $row instanceof PortalLog) {
+                abort(404, 'That log entry was not found.');
+            }
+
+            return [
+                'section' => 'user',
+                'resource' => 'logs',
+                'data' => PortalUserLogPresenter::detail($row, $this->timezone->zone()),
+            ];
+        });
+    }
+
+    /**
+     * Any portal log row, payload included. `AllLogsController` is already Admin/Executive only,
+     * so no further ownership check happens here.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function showAll(int $id): array
+    {
+        $version = (int) Cache::get(PortalAudit::LOG_CACHE_VERSION_KEY, 1);
+        $key = 'portal:administration:all-logs:detail:'.$version.':'.$id;
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($id): array {
+            $row = PortalLog::query()
+                ->select(array_map(static fn (string $column): string => 'logs.'.$column, PortalUserLogPresenter::columns()))
+                ->addSelect(['employees.first_name', 'employees.last_name', 'logs.payload'])
+                ->leftJoin('employees', 'employees.id', '=', 'logs.employee_id')
+                ->where('logs.id', $id)
+                ->first();
+            if (! $row instanceof PortalLog) {
+                abort(404, 'That log entry was not found.');
+            }
+
+            return [
+                'section' => 'administration',
+                'resource' => 'all-logs',
+                'data' => PortalUserLogPresenter::detail($row, $this->timezone->zone()),
+            ];
+        });
+    }
+
+    /**
      * @return array{
      *     section: string,
      *     resource: string,

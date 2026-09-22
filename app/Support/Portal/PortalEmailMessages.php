@@ -198,6 +198,15 @@ final class PortalEmailMessages
             PortalActivityCopy::sentEmail($subject, $sent),
             (string) $messageId,
             $request,
+            [
+                'category' => $category,
+                'subject' => $subject,
+                'audience' => $audience,
+                'audienceFilter' => $filter,
+                'recipientCount' => count($recipients),
+                'sent' => $sent,
+                'failed' => $failed,
+            ],
         );
         $this->bumpCache();
 

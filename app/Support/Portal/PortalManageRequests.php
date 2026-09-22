@@ -99,6 +99,7 @@ final class PortalManageRequests
             PortalActivityCopy::reviewedRequestStatuses($saved),
             null,
             $request,
+            ['changes' => $validated['changes']],
         );
 
         $this->bumpCache();
@@ -167,6 +168,12 @@ final class PortalManageRequests
             PortalActivityCopy::YOUR.' '.$subject.' has been '.$verb.' by '.PortalActivityCopy::displayName($actor),
             $applied['recordId'],
             $request,
+            [
+                'kind' => $applied['kind'],
+                'requestedFor' => $applied['date'],
+                'status' => $applied['status'],
+                'decidedBy' => PortalActivityCopy::displayName($actor),
+            ],
         );
         $this->audit->notifyIfOther(
             $owner,

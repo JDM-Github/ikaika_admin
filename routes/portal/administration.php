@@ -8,8 +8,10 @@ use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
-    Route::middleware(['portal.admin', 'throttle:portal-administration-all-logs'])
-        ->get('administration/all-logs', [AllLogsController::class, 'index']);
+    Route::middleware(['portal.admin', 'throttle:portal-administration-all-logs'])->group(function (): void {
+        Route::get('administration/all-logs', [AllLogsController::class, 'index']);
+        Route::get('administration/all-logs/{id}', [AllLogsController::class, 'show'])->whereNumber('id');
+    });
 
     Route::middleware('throttle:portal-administration-recycle-bin')->group(function (): void {
         Route::get('administration/recycle-bin', [RecycleBinController::class, 'index']);

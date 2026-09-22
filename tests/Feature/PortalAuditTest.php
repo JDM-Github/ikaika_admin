@@ -220,6 +220,113 @@ class PortalAuditTest extends TestCase
         $this->assertNotNull($row);
         $this->assertSame('Parian, Calamba City', $row->location_label);
         $this->assertSame('device', $row->location_source);
+        $this->assertNull($row->location_lat);
+        $this->assertNull($row->location_lng);
+    }
+
+    public function test_records_the_real_coordinate_that_produced_the_device_label(): void
+    {
+        $employee = Employee::query()->orderBy('id')->first();
+        $this->assertNotNull($employee);
+
+        $id = app(PortalAudit::class)->record(
+            $employee,
+            'PATCH',
+            'requests.leave',
+            'Updated a leave request',
+            'location-coordinate',
+            Request::create(
+                '/api/development/portal/requests/leave/41',
+                'PATCH',
+                [],
+                [],
+                [],
+                [
+                    'REMOTE_ADDR' => '8.8.8.8',
+                    'HTTP_X_PORTAL_LOCATION' => 'Parian, Calamba City',
+                    'HTTP_X_PORTAL_LOCATION_LAT' => '14.2117000',
+                    'HTTP_X_PORTAL_LOCATION_LNG' => '121.1642000',
+                ],
+            ),
+        );
+
+        $row = PortalLog::query()->find($id);
+        $this->assertNotNull($row);
+        $this->assertSame(14.2117, $row->location_lat);
+        $this->assertSame(121.1642, $row->location_lng);
+    }
+
+    public function test_refuses_a_coordinate_that_is_not_a_real_number_or_out_of_range(): void
+    {
+        $employee = Employee::query()->orderBy('id')->first();
+        $this->assertNotNull($employee);
+
+        $id = app(PortalAudit::class)->record(
+            $employee,
+            'PATCH',
+            'requests.leave',
+            'Updated a leave request',
+            'location-garbage',
+            Request::create(
+                '/api/development/portal/requests/leave/41',
+                'PATCH',
+                [],
+                [],
+                [],
+                [
+                    'REMOTE_ADDR' => '8.8.8.8',
+                    'HTTP_X_PORTAL_LOCATION' => 'Parian, Calamba City',
+                    'HTTP_X_PORTAL_LOCATION_LAT' => 'not-a-number',
+                    'HTTP_X_PORTAL_LOCATION_LNG' => '999',
+                ],
+            ),
+        );
+
+        $row = PortalLog::query()->find($id);
+        $this->assertNotNull($row);
+        $this->assertSame('Parian, Calamba City', $row->location_label);
+        $this->assertNull($row->location_lat);
+        $this->assertNull($row->location_lng);
+    }
+
+    public function test_never_attaches_a_coordinate_to_the_server_side_ip_fallback(): void
+    {
+        $employee = Employee::query()->orderBy('id')->first();
+        $this->assertNotNull($employee);
+        $cacheKey = 'portal:location:ip:'.hash('sha256', '203.0.113.9');
+        Cache::forget($cacheKey);
+        Http::fake([
+            'https://ipwho.is/203.0.113.9' => Http::response([
+                'success' => true,
+                'city' => 'Calamba City',
+                'region' => 'Laguna',
+                'country' => 'Philippines',
+            ]),
+        ]);
+
+        // No X-Portal-Location header at all -- this is the pure server-side IP guess, which
+        // never carries a device-verified coordinate no matter what the lookup API returns.
+        $id = app(PortalAudit::class)->record(
+            $employee,
+            'PATCH',
+            'requests.leave',
+            'Updated a leave request',
+            'location-ip-no-coordinate',
+            Request::create(
+                '/api/development/portal/requests/leave/41',
+                'PATCH',
+                [],
+                [],
+                [],
+                ['REMOTE_ADDR' => '203.0.113.9'],
+            ),
+        );
+
+        $row = PortalLog::query()->find($id);
+        $this->assertNotNull($row);
+        $this->assertSame('ip', $row->location_source);
+        $this->assertNull($row->location_lat);
+        $this->assertNull($row->location_lng);
     }
 
     public function test_leaves_loopback_location_unavailable_without_an_ip_lookup(): void

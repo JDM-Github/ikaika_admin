@@ -210,6 +210,12 @@ final class PortalSubmittedReports
             PortalActivityCopy::updatedReport($kind, $date),
             $id,
             $request,
+            [
+                'kind' => $kind,
+                'submittedOn' => $date,
+                'remarks' => $remarks,
+                'entries' => $entries,
+            ],
         );
 
         $this->bumpCache();
@@ -353,6 +359,12 @@ final class PortalSubmittedReports
                     PortalActivityCopy::addedReport($kind, $group['date']),
                     $id,
                     $request,
+                    [
+                        'kind' => $kind,
+                        'submittedOn' => $group['date'],
+                        'remarks' => $group['remarks'],
+                        'entries' => $group['entries'],
+                    ],
                 );
             }
         } catch (Throwable $error) {
@@ -399,12 +411,15 @@ final class PortalSubmittedReports
         $ids = $this->lineIds($existing);
         $this->assertSoleOwner($employeeId, $ids);
 
+        // Hoisted rather than inlined so the log below can carry the same entries Recycle Bin's
+        // own view already reads back from this snapshot.
+        $snapshot = $this->recycleSnapshot($actor, $id, $date, $kind, $existing);
         $written = $this->ledger->recycleDeleted(
             CoreLedger::PRODUCT_PORTAL,
             CoreRecycleKey::submittedReport($employeeId, $date, $kind),
             self::CORE_TARGET,
             $id,
-            $this->recycleSnapshot($actor, $id, $date, $kind, $existing),
+            $snapshot,
             self::CORE_RESOURCE,
             $employeeId,
             is_string($actor->id_no) ? $actor->id_no : null,
@@ -424,6 +439,12 @@ final class PortalSubmittedReports
             PortalActivityCopy::deletedReport($kind, $date),
             $id,
             $request,
+            [
+                'kind' => $kind,
+                'submittedOn' => $date,
+                'remarks' => $snapshot['report']['reason'] ?? null,
+                'entries' => $snapshot['report']['entries'] ?? [],
+            ],
         );
 
         $this->bumpCache();
@@ -503,6 +524,13 @@ final class PortalSubmittedReports
                 PortalActivityCopy::restoredReport($kind, $date),
                 (string) $row->record_id,
                 $request,
+                [
+                    'kind' => $kind,
+                    'submittedOn' => $date,
+                    'remarks' => $payload['report']['reason'] ?? null,
+                    'entries' => $payload['report']['entries'] ?? [],
+                    'restored' => true,
+                ],
             );
             $owner = Employee::query()->find($ownerId);
             if ($owner instanceof Employee) {

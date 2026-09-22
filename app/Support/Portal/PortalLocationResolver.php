@@ -12,21 +12,26 @@ final class PortalLocationResolver
     private const CACHE_TTL_SECONDS = 86400;
 
     /**
-     * @return array{label: ?string, source: ?string}
+     * @return array{label: ?string, source: ?string, lat: ?float, lng: ?float}
      */
     public function resolve(?Request $request): array
     {
         if ($request === null) {
-            return ['label' => null, 'source' => null];
+            return ['label' => null, 'source' => null, 'lat' => null, 'lng' => null];
         }
 
         $deviceLabel = $this->clean($request->header('X-Portal-Location'));
         if ($deviceLabel !== null) {
             $source = $this->clean($request->header('X-Portal-Location-Source'));
 
+            // A coordinate only ever travels with the device's own label -- there is no
+            // device-verified point to attach to a server-side IP guess, so the fallback below
+            // never carries one.
             return [
                 'label' => $deviceLabel,
                 'source' => $source === 'ip' ? 'ip' : 'device',
+                'lat' => $this->coordinate($request->header('X-Portal-Location-Lat'), 90.0),
+                'lng' => $this->coordinate($request->header('X-Portal-Location-Lng'), 180.0),
             ];
         }
 
@@ -42,7 +47,22 @@ final class PortalLocationResolver
         return [
             'label' => $ipLabel,
             'source' => $ipLabel === null ? null : 'ip',
+            'lat' => null,
+            'lng' => null,
         ];
+    }
+
+    // A malformed or out-of-range header is treated as absent, the same defensive posture
+    // clean() already applies to the label -- never trust a client-sent number outright.
+    private function coordinate(mixed $value, float $limit): ?float
+    {
+        if (! is_string($value) || trim($value) === '' || ! is_numeric($value)) {
+            return null;
+        }
+
+        $number = (float) $value;
+
+        return abs($number) <= $limit ? $number : null;
     }
 
     private function lookupPrivate(): bool

@@ -486,6 +486,17 @@ final class PortalCalendarEvents
             PortalActivityCopy::createdEvent($title, $startsOn, $endsOn),
             (string) $id,
             $request,
+            [
+                'title' => $title,
+                'startsOn' => $startsOn,
+                'startsAt' => $startsAt,
+                'endsOn' => $endsOn,
+                'endsAt' => $endsAt,
+                'category' => $category,
+                'audience' => $audience,
+                'departments' => $departments,
+                'memberIds' => $memberIds,
+            ],
         );
         $this->bumpCache();
 

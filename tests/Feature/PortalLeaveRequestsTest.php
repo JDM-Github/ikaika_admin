@@ -84,6 +84,10 @@ class PortalLeaveRequestsTest extends TestCase
             '{UserName|You} filed a Sick Leave request from '.$from->format('l, F j, Y').' to '.$to->format('l, F j, Y'),
             $log->message,
         );
+        $this->assertIsArray($log->payload);
+        $this->assertSame('02 Sick Leave', $log->payload['leaveType']);
+        $this->assertSame([$start, Carbon::parse($start)->addDay()->toDateString(), $end], $log->payload['requestedFor']);
+        $this->assertSame('Down with the flu', $log->payload['reason']);
 
         $managerInbox = PortalNotification::query()
             ->where('type', 'requests.leave.filed')
@@ -296,6 +300,18 @@ class PortalLeaveRequestsTest extends TestCase
             ->where('action_type', CoreActionType::EDIT)
             ->exists());
 
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'PATCH')
+            ->where('resource', 'requests.leave')
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame('03 Emergency Leave', $log->payload['leaveType']);
+        $this->assertSame($moved, $log->payload['requestedFor']);
+        $this->assertSame('Family matter', $log->payload['reason']);
+
         DB::connection('portal')->table('requests')->where('id', $id)->update(['status' => 'Approved']);
         Cache::flush();
 
@@ -324,6 +340,17 @@ class PortalLeaveRequestsTest extends TestCase
         // The row stays: the history records what was asked for, not only what stood.
         $this->assertSame('Cancelled', DB::connection('portal')->table('requests')
             ->where('id', $id)->value('status'));
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'PATCH')
+            ->where('resource', 'requests.leave')
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($date, $log->payload['requestedFor']);
+        $this->assertSame('Cancelled', $log->payload['status']);
 
         $this->assertGreaterThan(0, PortalNotification::query()
             ->where('type', 'requests.leave.cancelled')

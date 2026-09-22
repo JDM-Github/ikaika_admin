@@ -156,6 +156,13 @@ final class PortalOffsetRequests
                     PortalActivityCopy::filedOffset($group['workDate'], $group['dayOffDate']),
                     $id,
                     $request,
+                    [
+                        'workOn' => $group['workDate'],
+                        'dayOffOn' => $group['dayOffDate'],
+                        'hours' => $this->totalHours($group['entries']),
+                        'entries' => $group['entries'],
+                        'reason' => $group['reason'],
+                    ],
                 );
                 $this->audit->notifyManagers(
                     $actor,
@@ -255,6 +262,13 @@ final class PortalOffsetRequests
             PortalActivityCopy::updatedOffset($group['workDate'], $group['dayOffDate']),
             (string) (int) $row->id,
             $request,
+            [
+                'workOn' => $group['workDate'],
+                'dayOffOn' => $group['dayOffDate'],
+                'hours' => $hours,
+                'entries' => $group['entries'],
+                'reason' => $group['reason'],
+            ],
         );
 
         $this->reports->bumpCache();
@@ -331,6 +345,11 @@ final class PortalOffsetRequests
             ),
             (string) (int) $row->id,
             $request,
+            [
+                'workOn' => $day,
+                'dayOffOn' => $this->calendarDate($row->offset_work_day ?? null),
+                'status' => self::CANCELLED_STATUS,
+            ],
         );
         $this->audit->notifyManagers(
             $actor,

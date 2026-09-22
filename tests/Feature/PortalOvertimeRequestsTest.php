@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -91,6 +92,20 @@ class PortalOvertimeRequestsTest extends TestCase
             ->where('record_id', (string) $row->id)
             ->where('action_type', CoreActionType::ADD)
             ->exists());
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'INSERT')
+            ->where('resource', 'requests.overtime')
+            ->where('record_id', (string) $row->id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($date, $log->payload['requestedFor']);
+        $this->assertSame(3.5, $log->payload['hours']);
+        $this->assertSame('Client deadline moved up', $log->payload['reason']);
+        $this->assertCount(2, $log->payload['entries']);
+        $this->assertSame('QC', $log->payload['entries'][1]['activityLabel']);
     }
 
     public function test_overtime_is_refused_for_a_day_with_no_report(): void
@@ -281,6 +296,19 @@ class PortalOvertimeRequestsTest extends TestCase
             ->where('action_type', CoreActionType::EDIT)
             ->exists());
 
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'PATCH')
+            ->where('resource', 'requests.overtime')
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($date, $log->payload['requestedFor']);
+        // A whole-number float round-trips through the JSON column as an integer.
+        $this->assertSame(3, $log->payload['hours']);
+        $this->assertSame('Deadline moved again', $log->payload['reason']);
+
         DB::connection('portal')->table('requests')->where('id', $id)->update(['status' => 'Approved']);
         Cache::flush();
 
@@ -320,6 +348,17 @@ class PortalOvertimeRequestsTest extends TestCase
         // The row stays: the history records what was asked for, not only what stood.
         $this->assertSame('Cancelled', DB::connection('portal')->table('requests')
             ->where('id', $id)->value('status'));
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'PATCH')
+            ->where('resource', 'requests.overtime')
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($date, $log->payload['requestedFor']);
+        $this->assertSame('Cancelled', $log->payload['status']);
 
         // And the day is free again, so it can be asked for a second time.
         Cache::flush();

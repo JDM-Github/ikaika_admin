@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -95,6 +96,20 @@ class PortalOffsetRequestsTest extends TestCase
             ->where('record_id', (string) $row->id)
             ->where('action_type', CoreActionType::ADD)
             ->exists());
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'INSERT')
+            ->where('resource', 'requests.offset')
+            ->where('record_id', (string) $row->id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($work, $log->payload['workOn']);
+        $this->assertSame($dayOff, $log->payload['dayOffOn']);
+        $this->assertSame(8, $log->payload['hours']);
+        $this->assertSame('Saturday coverage', $log->payload['reason']);
+        $this->assertCount(2, $log->payload['entries']);
     }
 
     public function test_offset_is_refused_when_either_day_is_already_taken(): void
@@ -321,6 +336,18 @@ class PortalOffsetRequestsTest extends TestCase
             ->where('action_type', CoreActionType::EDIT)
             ->exists());
 
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'PATCH')
+            ->where('resource', 'requests.offset')
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($work, $log->payload['workOn']);
+        $this->assertSame($movedOff, $log->payload['dayOffOn']);
+        $this->assertSame('Coverage moved', $log->payload['reason']);
+
         DB::connection('portal')->table('requests')->where('id', $id)->update(['status' => 'Approved']);
         Cache::flush();
 
@@ -362,6 +389,17 @@ class PortalOffsetRequestsTest extends TestCase
         // The row stays: the history records what was asked for, not only what stood.
         $this->assertSame('Cancelled', DB::connection('portal')->table('requests')
             ->where('id', $id)->value('status'));
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'PATCH')
+            ->where('resource', 'requests.offset')
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($work, $log->payload['workOn']);
+        $this->assertSame('Cancelled', $log->payload['status']);
 
         // And both days are free again, so the same pair can be asked for a second time.
         Cache::flush();

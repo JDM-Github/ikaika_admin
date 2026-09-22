@@ -342,6 +342,17 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertNotNull($edited);
         $this->assertSame('edit', $edited->parameters['action_type'] ?? null);
         $this->assertSame('Adjusted hours', $edited->parameters['parameters']['remarks'] ?? null);
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'PATCH')
+            ->where('resource', 'reports.submitted')
+            ->where('record_id', $id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame('Adjusted hours', $log->payload['remarks']);
+        $this->assertSame(6.5, $log->payload['entries'][0]['hoursRendered']);
     }
 
     public function test_a_member_deletes_their_own_report_inside_the_seven_day_window(): void
@@ -392,6 +403,18 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertNotNull($deleted);
         $this->assertSame('delete', $deleted->parameters['action_type'] ?? null);
         $this->assertSame('portal', $deleted->parameters['product'] ?? null);
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'DELETE')
+            ->where('resource', 'reports.submitted')
+            ->where('record_id', $today.'-daily')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame('daily', $log->payload['kind']);
+        $this->assertSame($today, $log->payload['submittedOn']);
+        $this->assertNotEmpty($log->payload['entries']);
     }
 
     public function test_writes_outside_the_window_and_foreign_groups_are_refused(): void
@@ -507,6 +530,13 @@ class PortalSubmittedReportsTest extends TestCase
             '{UserName|You} added a daily report for '.$readable->format('l, F j, Y'),
             $log->message,
         );
+        $this->assertIsArray($log->payload);
+        $this->assertSame('daily', $log->payload['kind']);
+        $this->assertSame($today, $log->payload['submittedOn']);
+        $this->assertSame('Filed from the portal', $log->payload['remarks']);
+        $this->assertSame($projectLabel, $log->payload['entries'][0]['projectLabel']);
+        $this->assertSame($activityLabel, $log->payload['entries'][0]['activityLabel']);
+        $this->assertSame(5.5, $log->payload['entries'][0]['hoursRendered']);
     }
 
     public function test_a_late_report_files_against_an_older_day_and_reads_back_as_late(): void

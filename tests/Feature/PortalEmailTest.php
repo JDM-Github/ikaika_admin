@@ -93,6 +93,18 @@ class PortalEmailTest extends TestCase
         $this->assertCount(1, $listed);
         $this->assertSame('Holiday notice', $listed[0]['name']);
 
+        $createdLog = PortalLog::query()
+            ->where('resource', 'administration.email')
+            ->where('action', 'INSERT')
+            ->where('record_id', (string) $template['id'])
+            ->first();
+        $this->assertNotNull($createdLog);
+        $this->assertIsArray($createdLog->payload);
+        $this->assertSame('template', $createdLog->payload['kind']);
+        $this->assertSame('Holiday notice', $createdLog->payload['name']);
+        $this->assertSame('event', $createdLog->payload['category']);
+        $this->assertSame('Office closed on Monday', $createdLog->payload['subject']);
+
         $this->patchJson(self::BASE.'/administration/email-blocks/'.$template['id'], [
             'name' => 'Holiday notice',
             'category' => 'notice',
@@ -103,10 +115,29 @@ class PortalEmailTest extends TestCase
             ->assertJsonPath('data.category', 'notice')
             ->assertJsonPath('data.body', 'The office is closed for the holiday. Enjoy the long weekend.');
 
+        $updatedLog = PortalLog::query()
+            ->where('resource', 'administration.email')
+            ->where('action', 'PATCH')
+            ->where('record_id', (string) $template['id'])
+            ->first();
+        $this->assertNotNull($updatedLog);
+        $this->assertIsArray($updatedLog->payload);
+        $this->assertSame('notice', $updatedLog->payload['category']);
+
         $footerId = (int) EmailBlock::query()->where('kind', 'footer')->value('id');
         $this->deleteJson(self::BASE.'/administration/email-blocks/'.$footerId, [], $headers)
             ->assertNoContent();
         $this->assertNull(EmailBlock::query()->find($footerId));
+
+        $deletedLog = PortalLog::query()
+            ->where('resource', 'administration.email')
+            ->where('action', 'DELETE')
+            ->where('record_id', (string) $footerId)
+            ->first();
+        $this->assertNotNull($deletedLog);
+        $this->assertIsArray($deletedLog->payload);
+        $this->assertSame('footer', $deletedLog->payload['kind']);
+        $this->assertSame('Standard signature', $deletedLog->payload['name']);
     }
 
     public function test_a_block_write_is_validated(): void
@@ -208,10 +239,19 @@ class PortalEmailTest extends TestCase
             $expected,
             PortalNotification::query()->where('type', PortalNotificationType::EMAIL_SENT)->count(),
         );
-        $this->assertSame(1, PortalLog::query()
+        $log = PortalLog::query()
             ->where('resource', 'administration.email')
             ->where('action', 'POST')
-            ->count());
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame('notice', $log->payload['category']);
+        $this->assertSame('Portal maintenance tonight', $log->payload['subject']);
+        $this->assertSame('everyone', $log->payload['audience']);
+        $this->assertSame($expected, $log->payload['recipientCount']);
+        $this->assertSame($expected, $log->payload['sent']);
+        $this->assertSame(0, $log->payload['failed']);
+        $this->assertArrayNotHasKey('body', $log->payload);
     }
 
     public function test_it_sends_to_a_department_and_keeps_the_footer_it_used(): void
@@ -244,6 +284,18 @@ class PortalEmailTest extends TestCase
             ->json('data');
 
         Mail::assertSent(PortalEmailMail::class, $expected);
+
+        $log = PortalLog::query()
+            ->where('resource', 'administration.email')
+            ->where('action', 'POST')
+            ->where('record_id', (string) $sent['id'])
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame('complaint', $log->payload['category']);
+        $this->assertSame('department', $log->payload['audience']);
+        $this->assertSame(['Engineering'], $log->payload['audienceFilter']['departments']);
+        $this->assertSame($expected, $log->payload['recipientCount']);
 
         // Deleting the footer afterwards must not rewrite what was already sent.
         $this->deleteJson(self::BASE.'/administration/email-blocks/'.$footerId, [], $headers)

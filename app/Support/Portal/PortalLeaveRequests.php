@@ -179,6 +179,11 @@ final class PortalLeaveRequests
             PortalActivityCopy::filedLeave($type, $dates[0] ?? '', $dates[array_key_last($dates)] ?? ''),
             (string) ($insertedIds[0] ?? ''),
             $request,
+            [
+                'leaveType' => $type,
+                'requestedFor' => $dates,
+                'reason' => $reason,
+            ],
         );
         $this->audit->notifyManagers(
             $actor,
@@ -257,6 +262,11 @@ final class PortalLeaveRequests
             PortalActivityCopy::updatedLeave($type, $day),
             (string) (int) $row->id,
             $request,
+            [
+                'leaveType' => $type,
+                'requestedFor' => $day,
+                'reason' => $reason,
+            ],
         );
 
         $this->bumpCache();
@@ -309,6 +319,11 @@ final class PortalLeaveRequests
             ),
             (string) (int) $row->id,
             $request,
+            [
+                'leaveType' => is_string($row->category ?? null) ? $row->category : 'leave',
+                'requestedFor' => $day,
+                'status' => self::CANCELLED_STATUS,
+            ],
         );
         $this->audit->notifyManagers(
             $actor,

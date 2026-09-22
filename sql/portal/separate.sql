@@ -18,6 +18,8 @@ CREATE TABLE logs (
     user_agent    VARCHAR(255) NULL,
     location_label  VARCHAR(255) NULL,
     location_source VARCHAR(32) NULL,
+    location_lat    DECIMAL(10,7) NULL,
+    location_lng    DECIMAL(10,7) NULL,
     payload       JSON         NULL,
     created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_logs_employee_created (employee_id, created_at),

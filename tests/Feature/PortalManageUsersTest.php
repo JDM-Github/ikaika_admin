@@ -159,6 +159,7 @@ class PortalManageUsersTest extends TestCase
     public function test_an_admin_can_promote_a_member(): void
     {
         $member = $this->promotableMember();
+        $previousRole = $member->role;
         $admin = $this->adminWhoIsNotExecutive();
         $token = $this->loginToken($admin);
 
@@ -199,6 +200,12 @@ class PortalManageUsersTest extends TestCase
         $this->assertSame('PATCH', $actorLog->action);
         $this->assertSame("{UserName|You} changed {$memberName}'s role to Admin", $actorLog->message);
         $this->assertSame("{UserName|Your} role was changed to Admin by {$adminName}", $targetLog->message);
+        $this->assertIsArray($actorLog->payload);
+        $this->assertSame($previousRole, $actorLog->payload['previousRole']);
+        $this->assertSame(PortalRole::ADMIN, $actorLog->payload['newRole']);
+        $this->assertIsArray($targetLog->payload);
+        $this->assertSame($previousRole, $targetLog->payload['previousRole']);
+        $this->assertSame(PortalRole::ADMIN, $targetLog->payload['newRole']);
 
         $inbox = PortalNotification::query()
             ->where('employee_id', $member->id)

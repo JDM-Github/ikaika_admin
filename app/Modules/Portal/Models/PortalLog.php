@@ -22,6 +22,8 @@ class PortalLog extends ProductModel
         return [
             'employee_id' => 'integer',
             'payload' => 'array',
+            'location_lat' => 'float',
+            'location_lng' => 'float',
             'created_at' => 'datetime',
         ];
     }

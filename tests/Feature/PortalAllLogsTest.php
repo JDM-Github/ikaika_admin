@@ -116,6 +116,140 @@ class PortalAllLogsTest extends TestCase
         }
     }
 
+    public function test_an_admin_reads_any_members_log_detail_with_its_payload(): void
+    {
+        $admin = $this->adminWhoIsNotExecutive();
+        $member = $this->activeMember();
+        $token = $this->loginToken($admin);
+        $audit = app(PortalAudit::class);
+
+        $logId = $audit->record(
+            $member,
+            PortalLogAction::PATCH,
+            'requests.leave',
+            '{UserName|You} updated an owned request',
+            'all-logs-detail',
+            null,
+            ['leaveType' => 'Vacation Leave', 'requestedFor' => '2026-08-24', 'reason' => 'Family trip'],
+        );
+
+        $this->withToken($token)
+            ->getJson("/api/development/portal/administration/all-logs/{$logId}")
+            ->assertOk()
+            ->assertJsonPath('section', 'administration')
+            ->assertJsonPath('resource', 'all-logs')
+            ->assertJsonPath('data.recordId', 'all-logs-detail')
+            ->assertJsonPath('data.employeeId', (string) $member->getKey())
+            ->assertJsonPath('data.payload.leaveType', 'Vacation Leave')
+            ->assertJsonPath('data.payload.reason', 'Family trip');
+    }
+
+    public function test_a_member_cannot_read_a_log_detail_through_all_logs(): void
+    {
+        $member = $this->activeMember();
+        $token = $this->loginToken($member);
+        $audit = app(PortalAudit::class);
+        $logId = $audit->record(
+            $member,
+            PortalLogAction::INSERT,
+            'reports.submitted',
+            '{UserName|You} added a report',
+            'member-blocked',
+        );
+
+        $this->withToken($token)
+            ->getJson("/api/development/portal/administration/all-logs/{$logId}")
+            ->assertForbidden();
+    }
+
+    public function test_a_guest_cannot_read_a_log_detail_through_all_logs(): void
+    {
+        $member = $this->activeMember();
+        $audit = app(PortalAudit::class);
+        $logId = $audit->record(
+            $member,
+            PortalLogAction::INSERT,
+            'reports.submitted',
+            '{UserName|You} added a report',
+            'guest-blocked',
+        );
+
+        $this->getJson("/api/development/portal/administration/all-logs/{$logId}")
+            ->assertUnauthorized();
+    }
+
+    public function test_a_log_with_no_payload_returns_an_object_not_an_empty_array(): void
+    {
+        $member = $this->activeMember();
+        $token = $this->loginToken($this->adminWhoIsNotExecutive());
+        $audit = app(PortalAudit::class);
+        // No payload argument at all -- exactly what auth.login and every untouched call site write.
+        $logId = $audit->record(
+            $member,
+            PortalLogAction::POST,
+            'auth.login',
+            '{UserName|You} signed in to the portal',
+            (string) $member->getKey(),
+        );
+
+        $firstRead = $this->withToken($token)
+            ->getJson("/api/development/portal/administration/all-logs/{$logId}")
+            ->assertOk();
+        // Read again so this exercises a cache *hit*, not just the miss that populated it -- the
+        // file cache's unserialize breaks an object payload on the read path, not the write path,
+        // so a test that only reads once cannot catch it.
+        $secondRead = $this->withToken($token)
+            ->getJson("/api/development/portal/administration/all-logs/{$logId}")
+            ->assertOk();
+
+        // An empty PHP array has no keys to say map or list, so json_encode renders it as `[]`
+        // unless forced -- assert the raw body, since json_decode would silently hide the bug.
+        $this->assertStringContainsString('"payload":{}', $firstRead->getContent());
+        $this->assertStringContainsString('"payload":{}', $secondRead->getContent());
+    }
+
+    public function test_the_real_coordinate_surfaces_on_both_the_list_row_and_the_detail(): void
+    {
+        $member = $this->activeMember();
+        $token = $this->loginToken($this->adminWhoIsNotExecutive());
+        $audit = app(PortalAudit::class);
+
+        $logId = $audit->record(
+            $member,
+            PortalLogAction::PATCH,
+            'requests.leave',
+            '{UserName|You} updated an owned request',
+            'all-logs-pin',
+            Request::create(
+                '/api/development/portal/requests/leave/41',
+                'PATCH',
+                [],
+                [],
+                [],
+                [
+                    'REMOTE_ADDR' => '203.0.113.17',
+                    'HTTP_X_PORTAL_LOCATION' => 'Parian, Calamba City',
+                    'HTTP_X_PORTAL_LOCATION_LAT' => '14.2117',
+                    'HTTP_X_PORTAL_LOCATION_LNG' => '121.1642',
+                ],
+            ),
+        );
+
+        $listed = $this->withToken($token)
+            ->getJson('/api/development/portal/administration/all-logs?per_page=100')
+            ->assertOk();
+        $row = collect($listed->json('data'))->firstWhere('recordId', 'all-logs-pin');
+        $this->assertIsArray($row);
+        $this->assertSame(14.2117, $row['locationLat']);
+        $this->assertSame(121.1642, $row['locationLng']);
+
+        $this->withToken($token)
+            ->getJson("/api/development/portal/administration/all-logs/{$logId}")
+            ->assertOk()
+            ->assertJsonPath('data.locationLat', 14.2117)
+            ->assertJsonPath('data.locationLng', 121.1642);
+    }
+
     private function activeMember(): Employee
     {
         $employee = Employee::query()

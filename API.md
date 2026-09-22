@@ -38,8 +38,10 @@ or the other way round.
 |---|---|---|
 | `X-Portal-Timezone` | `Asia/Manila` | IANA name. **Preferred** — it carries its own daylight-saving rules |
 | `X-Portal-Timezone-Offset` | `-480` | Minutes to add to local time to reach UTC, exactly JavaScript's `Date#getTimezoneOffset()`. Manila sends `-480`, New York `300` |
-| `X-Portal-Location` | `Parian, Calamba City` | Optional city/area label from the device or IP fallback; never coordinates |
+| `X-Portal-Location` | `Parian, Calamba City` | Optional city/area label from the device or IP fallback |
 | `X-Portal-Location-Source` | `device` / `ip` | Optional validated source for the location label |
+| `X-Portal-Location-Lat` | `14.2117000` | Optional real device coordinate. Only honoured alongside `X-Portal-Location`, and only when it names `device` — there is no device-verified point to attach to an IP guess. Must parse as a finite number within ±90; anything else is dropped |
+| `X-Portal-Location-Lng` | `121.1642000` | Same rule as the latitude header, range ±180 |
 
 Send both where you can: the name is used when it resolves, the offset stands in for a runtime
 whose Intl data cannot name the zone, and an unrecognised or out-of-range value falls back to the
@@ -367,15 +369,34 @@ ignore the current page and the other query filters so the toolbar does not offe
 or an IP that never appears.
 
 Each row returns `id`, `action`, `resource`, `recordId`, `message`, `ipAddress`, `deviceLabel`,
-`locationLabel`, `locationSource`, `createdAt`, `dateLabel`, `timeLabel`, and `createdAtLabel`. `message` preserves
+`locationLabel`, `locationSource`, `locationLat`, `locationLng`, `createdAt`, `dateLabel`, `timeLabel`, and `createdAtLabel`. `message` preserves
 `{UserName|You}` / `{UserName|Your}` for the frontend to resolve. `dateLabel` uses
 `Monday, September 7, 2026`; `createdAt` is UTC ISO 8601. `ipAddress` is the request source
 observed by the server, and `deviceLabel` is a readable browser and platform summary derived from
 the stored user agent. `locationLabel` is the city/area reported by the device or the approximate
-IP lookup, and `locationSource` is `device` or `ip`. The raw user agent, coordinates, and sanitized
-audit payloads are never returned. IP-based locations are approximate. If permission is denied, the
-request is local/private, or lookup fails, both location fields are `null` and the UI should show
-`Location unavailable`.
+IP lookup, and `locationSource` is `device` or `ip`. `locationLat`/`locationLng` are the real device
+coordinate that produced the label — present only when the client sent `X-Portal-Location-Lat`/`Lng`
+alongside a `device`-sourced label, `null` otherwise (an IP-derived label never carries one). The
+raw user agent is never returned. The list row carries no `payload` — see `GET .../logs/{id}` below
+for that. IP-based locations are approximate. If permission is denied, the request is local/private,
+or lookup fails, both location fields are `null` and the UI should show `Location unavailable`.
+
+`GET /api/development/portal/user/logs/{id}`
+
+One of the signed-in member's own log rows, with everything `index` returns plus `payload`: the
+structured detail of what actually happened, in the same shape the resource's own screen already
+shows. A daily report's log carries `kind`, `submittedOn`, `remarks`, and `entries` (`projectLabel`,
+`activityLabel`, `earnCodeLabel`, `hoursRendered`, matching the Recycle Bin view of the same
+report). A leave request carries `leaveType`, `requestedFor`, `reason` (or `status` on a cancel). An
+overtime or offset request adds `hours`/`workOn`/`dayOffOn`. A reimbursement carries `items`
+(`label`, `cost`, `quantity`, `purpose`, `teamLabel`). A calendar event carries `title`, the four
+date/time fields, `category`, `audience`, `departments`, `memberIds`. An email block carries `kind`,
+`name`, `category`, `subject` — never `body`. A sent email carries `category`, `subject`,
+`audience`, `audienceFilter`, `recipientCount`, `sent`, `failed` — never the body or the recipient
+list. A manage-requests decision carries `changes` on the reviewer's own log and `kind` / `status` /
+`decidedBy` on the affected member's; a role change carries `previousRole` / `newRole`. Someone
+else's id is `404` — a member reads their own detail only, same rule as the list. Cached the same
+30 seconds as the list, on the same version.
 
 #### Manage / Users — **live** (sectioned)
 
@@ -795,6 +816,10 @@ Sidebar: **Administration → All Logs**. Laravel: `app/Http/Controllers/Api/Por
 Bearer plus Admin or Executive. Members receive `403`. The list is every portal log, paged like User / Logs: `page`, `per_page`, `q`, `action`, `resource`, `ip`, `year`, `month`, `day`, `sort` (`date` / `action` / `resource` / `employee`), `dir`. `employee_id` keeps rows for one member. `q` also matches first and last name.
 
 Each row adds `employeeId` and `employeeName`. `filters.users` is `{value,label}` for members who already have a log row — not the whole roster. Other facets are the same shape as User / Logs and come from every log, not the current page. Cached 30s on the same version as User / Logs. Rate limit 60/min.
+
+`GET /api/development/portal/administration/all-logs/{id}`
+
+Any portal log row — no ownership check, only the same Admin/Executive gate as `index`. Adds `employeeId`/`employeeName` and `payload` on top of the User / Logs `{id}` shape; see that entry for what `payload` carries per resource.
 
 #### Administration / Send Email — **live** (sectioned)
 

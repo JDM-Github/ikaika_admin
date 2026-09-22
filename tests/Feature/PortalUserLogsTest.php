@@ -137,6 +137,8 @@ class PortalUserLogsTest extends TestCase
                 'deviceLabel',
                 'locationLabel',
                 'locationSource',
+                'locationLat',
+                'locationLng',
                 'createdAt',
                 'dateLabel',
                 'timeLabel',
@@ -314,6 +316,161 @@ class PortalUserLogsTest extends TestCase
         $ignoredIds = array_column($ignored->json('data'), 'recordId');
         $this->assertContains('july-2026', $ignoredIds);
         $this->assertNotContains('other-login', $ignoredIds);
+    }
+
+    public function test_a_member_reads_their_own_log_detail_with_its_payload(): void
+    {
+        $actor = $this->activeMember();
+        $token = $this->loginToken($actor);
+        $audit = app(PortalAudit::class);
+
+        $logId = $audit->record(
+            $actor,
+            PortalLogAction::INSERT,
+            'reports.submitted',
+            '{UserName|You} added a daily report',
+            'detail-report',
+            null,
+            [
+                'kind' => 'daily',
+                'submittedOn' => '2026-08-24',
+                'remarks' => 'Site inspection',
+                'entries' => [
+                    [
+                        'id' => '1',
+                        'projectLabel' => 'IKAIKA Tower',
+                        'activityLabel' => 'Structural steel',
+                        'earnCodeLabel' => 'Regular',
+                        'hoursRendered' => 8.0,
+                        'elementChange' => 0.0,
+                    ],
+                ],
+            ],
+        );
+
+        $response = $this->withToken($token)
+            ->getJson("/api/development/portal/user/logs/{$logId}")
+            ->assertOk()
+            ->assertJsonPath('section', 'user')
+            ->assertJsonPath('resource', 'logs')
+            ->assertJsonPath('data.recordId', 'detail-report')
+            ->assertJsonPath('data.payload.kind', 'daily')
+            ->assertJsonPath('data.payload.submittedOn', '2026-08-24')
+            ->assertJsonPath('data.payload.remarks', 'Site inspection')
+            ->assertJsonPath('data.payload.entries.0.projectLabel', 'IKAIKA Tower')
+            // A whole-number float round-trips through the JSON column as an integer.
+            ->assertJsonPath('data.payload.entries.0.hoursRendered', 8);
+
+        $this->assertArrayHasKey('payload', $response->json('data'));
+    }
+
+    public function test_a_member_cannot_read_someone_elses_log_detail(): void
+    {
+        $actor = $this->activeMember();
+        $other = $this->otherActiveMember($actor);
+        $token = $this->loginToken($actor);
+        $audit = app(PortalAudit::class);
+
+        $logId = $audit->record(
+            $other,
+            PortalLogAction::INSERT,
+            'reports.submitted',
+            'OTHER-EMPLOYEE-SECRET',
+            'not-yours',
+        );
+
+        $response = $this->withToken($token)
+            ->getJson("/api/development/portal/user/logs/{$logId}")
+            ->assertNotFound();
+        $this->assertStringNotContainsString('OTHER-EMPLOYEE-SECRET', $response->getContent());
+    }
+
+    public function test_a_guest_cannot_read_a_log_detail(): void
+    {
+        $actor = $this->activeMember();
+        $audit = app(PortalAudit::class);
+        $logId = $audit->record(
+            $actor,
+            PortalLogAction::INSERT,
+            'reports.submitted',
+            '{UserName|You} added a report',
+            'guest-blocked',
+        );
+
+        $this->getJson("/api/development/portal/user/logs/{$logId}")
+            ->assertUnauthorized();
+    }
+
+    public function test_a_log_with_no_payload_returns_an_object_not_an_empty_array(): void
+    {
+        $actor = $this->activeMember();
+        $token = $this->loginToken($actor);
+        $audit = app(PortalAudit::class);
+        // No payload argument at all -- exactly what auth.login and every untouched call site write.
+        $logId = $audit->record(
+            $actor,
+            PortalLogAction::POST,
+            'auth.login',
+            '{UserName|You} signed in to the portal',
+            (string) $actor->getKey(),
+        );
+
+        $firstRead = $this->withToken($token)
+            ->getJson("/api/development/portal/user/logs/{$logId}")
+            ->assertOk();
+        // Read again so this exercises a cache *hit*, not just the miss that populated it -- the
+        // file cache's unserialize breaks an object payload on the read path, not the write path,
+        // so a test that only reads once cannot catch it.
+        $secondRead = $this->withToken($token)
+            ->getJson("/api/development/portal/user/logs/{$logId}")
+            ->assertOk();
+
+        // An empty PHP array has no keys to say map or list, so json_encode renders it as `[]`
+        // unless forced -- assert the raw body, since json_decode would silently hide the bug.
+        $this->assertStringContainsString('"payload":{}', $firstRead->getContent());
+        $this->assertStringContainsString('"payload":{}', $secondRead->getContent());
+    }
+
+    public function test_the_real_coordinate_surfaces_on_both_the_list_row_and_the_detail(): void
+    {
+        $actor = $this->activeMember();
+        $token = $this->loginToken($actor);
+        $audit = app(PortalAudit::class);
+
+        $logId = $audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            'requests.leave',
+            '{UserName|You} updated an owned request',
+            'location-pin',
+            Request::create(
+                '/api/development/portal/requests/leave/41',
+                'PATCH',
+                [],
+                [],
+                [],
+                [
+                    'REMOTE_ADDR' => '203.0.113.17',
+                    'HTTP_X_PORTAL_LOCATION' => 'Parian, Calamba City',
+                    'HTTP_X_PORTAL_LOCATION_LAT' => '14.2117',
+                    'HTTP_X_PORTAL_LOCATION_LNG' => '121.1642',
+                ],
+            ),
+        );
+
+        $listed = $this->withToken($token)
+            ->getJson('/api/development/portal/user/logs?per_page=100')
+            ->assertOk();
+        $row = collect($listed->json('data'))->firstWhere('recordId', 'location-pin');
+        $this->assertIsArray($row);
+        $this->assertSame(14.2117, $row['locationLat']);
+        $this->assertSame(121.1642, $row['locationLng']);
+
+        $this->withToken($token)
+            ->getJson("/api/development/portal/user/logs/{$logId}")
+            ->assertOk()
+            ->assertJsonPath('data.locationLat', 14.2117)
+            ->assertJsonPath('data.locationLng', 121.1642);
     }
 
     private function activeMember(): Employee

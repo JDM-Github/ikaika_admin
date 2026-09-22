@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
@@ -169,6 +170,22 @@ class PortalCalendarEventsTest extends TestCase
         $match = collect($listed->json('data'))->firstWhere('title', 'All hands');
         $this->assertIsArray($match);
         $this->assertSame('16:00', $match['startsAt']);
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'INSERT')
+            ->where('resource', 'calendar.events')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame('All hands', $log->payload['title']);
+        $this->assertSame($day, $log->payload['startsOn']);
+        $this->assertSame('16:00', $log->payload['startsAt']);
+        $this->assertSame($day, $log->payload['endsOn']);
+        $this->assertSame('17:00', $log->payload['endsAt']);
+        $this->assertSame('company_event', $log->payload['category']);
+        $this->assertSame('everyone', $log->payload['audience']);
     }
 
     public function test_a_project_event_uses_project_kind(): void

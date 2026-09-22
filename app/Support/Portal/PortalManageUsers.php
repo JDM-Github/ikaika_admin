@@ -112,6 +112,9 @@ final class PortalManageUsers
         $this->assertCanChange($request, $actor, $target, $role);
 
         if (PortalRole::normalize($target->role) !== PortalRole::normalize($role)) {
+            // Captured before the mutating assignment below: $target->role is overwritten in
+            // place, so the log's "what changed from" would otherwise already be gone.
+            $previousRole = $target->role;
             $target->role = $role;
             $target->save();
             $this->bumpCache();
@@ -122,6 +125,7 @@ final class PortalManageUsers
                 PortalActivityCopy::changedSomeoneRole($target, $role),
                 (string) $target->getKey(),
                 $request,
+                ['previousRole' => $previousRole, 'newRole' => $role],
             );
             $this->audit->record(
                 $target,
@@ -130,6 +134,7 @@ final class PortalManageUsers
                 PortalActivityCopy::ownRoleChanged($actor, $role),
                 (string) $target->getKey(),
                 $request,
+                ['previousRole' => $previousRole, 'newRole' => $role],
             );
             $this->audit->notifyIfOther(
                 $target,

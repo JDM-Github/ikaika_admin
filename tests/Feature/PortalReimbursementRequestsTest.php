@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -93,6 +94,20 @@ class PortalReimbursementRequestsTest extends TestCase
             ->where('record_id', $response->json('data.id'))
             ->where('action_type', CoreActionType::ADD)
             ->exists());
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'INSERT')
+            ->where('resource', 'requests.reimbursement')
+            ->where('record_id', $response->json('data.id'))
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($date, $log->payload['requestedFor']);
+        $this->assertCount(2, $log->payload['items']);
+        $this->assertSame('Office Grocery', $log->payload['items'][0]['label']);
+        // A whole-number float round-trips through the JSON column as an integer.
+        $this->assertSame(4, $log->payload['items'][1]['quantity']);
     }
 
     public function test_a_past_date_is_allowed_because_reimbursement_records_spending(): void
@@ -249,6 +264,18 @@ class PortalReimbursementRequestsTest extends TestCase
             ->where('action_type', CoreActionType::EDIT)
             ->exists());
 
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'PATCH')
+            ->where('resource', 'requests.reimbursement')
+            ->where('record_id', $id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($moved, $log->payload['requestedFor']);
+        $this->assertCount(1, $log->payload['items']);
+        $this->assertSame('Office Grocery', $log->payload['items'][0]['label']);
+
         DB::connection('portal')->table('reimbursements')->where('id', (int) $id)->update(['status' => 'Completed']);
         Cache::flush();
 
@@ -282,6 +309,17 @@ class PortalReimbursementRequestsTest extends TestCase
                 ->where('id', $itemId)
                 ->value('status'));
         }
+
+        $log = PortalLog::query()
+            ->where('employee_id', $actor->getKey())
+            ->where('action', 'PATCH')
+            ->where('resource', 'requests.reimbursement')
+            ->where('record_id', $id)
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame($date, $log->payload['requestedFor']);
+        $this->assertSame('Cancelled', $log->payload['status']);
     }
 
     public function test_somebody_elses_claim_is_not_found_rather_than_forbidden(): void

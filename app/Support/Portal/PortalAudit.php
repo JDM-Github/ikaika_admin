@@ -41,6 +41,8 @@ final class PortalAudit
         ?string $userAgent = null,
         ?string $locationLabel = null,
         ?string $locationSource = null,
+        ?float $locationLat = null,
+        ?float $locationLng = null,
     ): int {
         $action = trim($action);
         $resource = trim($resource);
@@ -58,6 +60,8 @@ final class PortalAudit
         $log->user_agent = $this->truncateUserAgent($userAgent);
         $log->location_label = $locationLabel;
         $log->location_source = $locationSource;
+        $log->location_lat = $locationLat;
+        $log->location_lng = $locationLng;
         $log->payload = $this->sanitizePayload($payload);
         $log->created_at = Carbon::now();
         $log->save();
@@ -91,6 +95,8 @@ final class PortalAudit
             $request?->userAgent(),
             $location['label'],
             $location['source'],
+            $location['lat'],
+            $location['lng'],
         );
     }
 

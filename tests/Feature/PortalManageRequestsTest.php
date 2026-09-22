@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Portal\PortalAccessDenied;
 use App\Support\Portal\PortalSubmittedReportPresenter;
@@ -114,6 +115,19 @@ class PortalManageRequestsTest extends TestCase
         $this->assertIsArray($saved);
         $this->assertSame('approved', $saved['status']);
         $this->assertSame('Coverage is in place.', $saved['approverRemarks']);
+
+        $log = PortalLog::query()
+            ->where('resource', 'manage.requests')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame([[
+            'id' => (string) $id,
+            'kind' => 'leave',
+            'status' => 'approved',
+            'approverRemarks' => 'Coverage is in place.',
+        ]], $log->payload['changes']);
     }
 
     public function test_each_owner_gets_an_inbox_row_when_their_request_is_reviewed(): void
@@ -167,6 +181,17 @@ class PortalManageRequestsTest extends TestCase
             $this->assertNotNull($row);
             $this->assertSame('/requests/user-requests', $row->link_path);
             $this->assertStringContainsString('was approved by', (string) $row->message);
+
+            $log = PortalLog::query()
+                ->where('employee_id', $owner->getKey())
+                ->where('resource', 'requests.leave')
+                ->orderByDesc('id')
+                ->first();
+            $this->assertNotNull($log);
+            $this->assertIsArray($log->payload);
+            $this->assertSame('leave', $log->payload['kind']);
+            $this->assertSame($date, $log->payload['requestedFor']);
+            $this->assertSame('approved', $log->payload['status']);
         }
     }
 
