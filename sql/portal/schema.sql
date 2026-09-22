@@ -372,8 +372,7 @@ CREATE TABLE user_reports (
     end_date                    DATE,
     project_test_summary        TEXT,
     project_test_summary_2      TEXT,
-    duration                    NUMERIC(10,2),
-    INDEX idx_user_reports_date (report_date)
+    duration                    NUMERIC(10,2)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
@@ -735,12 +734,3 @@ CREATE TABLE requests_earn_codes (
     FOREIGN KEY (request_id)   REFERENCES requests(id)   ON DELETE CASCADE,
     FOREIGN KEY (earn_code_id) REFERENCES earn_codes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-
--- ============================================================================
--- INDEXES for live portal reads
--- user_reports.report_date is indexed in CREATE TABLE above
--- (idx_user_reports_date). Existing databases: sql/portal/indexes.sql.
--- employees_user_reports already has PRIMARY (employee_id, user_report_id) plus
--- a FOREIGN KEY index on user_report_id. Do not add a second copy of that.
--- ============================================================================

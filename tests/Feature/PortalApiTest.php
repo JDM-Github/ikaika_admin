@@ -70,6 +70,17 @@ class PortalApiTest extends TestCase
             ->assertSee('data-product', false);
     }
 
+    public function test_playground_offers_a_placeholder_sync_to_airtable_control(): void
+    {
+        // The button is real markup, hidden until the actions table is open (see
+        // resources/views/playground/_script.blade.php) -- present-but-hidden is what a
+        // static render can assert; the client-side show/hide toggle has no PHP seam to test.
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('id="sync-airtable"', false)
+            ->assertSee('Sync to Airtable', false);
+    }
+
     public function test_portal_module_reads_the_portal_database(): void
     {
         $this->getJson('/api/development/portal')

@@ -555,6 +555,10 @@ final class PortalManageRequests
             ->orderByDesc('reimbursements.id')
             ->get();
 
+        $receiptFields = $this->reimbursements->receiptFieldsByItemId(
+            $rows->map(static fn (object $row): int => (int) $row->id)->all(),
+        );
+
         $groups = [];
         foreach ($rows as $row) {
             $groups[$this->claimKey($row)][] = $row;
@@ -562,7 +566,7 @@ final class PortalManageRequests
 
         $data = [];
         foreach ($groups as $group) {
-            $claim = $this->presentClaim($group);
+            $claim = $this->presentClaim($group, $receiptFields);
             if ($claim !== null) {
                 $data[] = $claim;
             }
@@ -573,9 +577,10 @@ final class PortalManageRequests
 
     /**
      * @param  list<object>  $rows
+     * @param  array<int, array{receiptName: ?string, receiptUrl: ?string, receiptMime: ?string, receiptThumbUrl: ?string}>  $receiptFields
      * @return array<string, mixed>|null
      */
-    private function presentClaim(array $rows): ?array
+    private function presentClaim(array $rows, array $receiptFields): ?array
     {
         if ($rows === []) {
             return null;
@@ -591,6 +596,7 @@ final class PortalManageRequests
         foreach ($rows as $row) {
             $itemId = (int) $row->id;
             $ids[] = $itemId;
+            $receipt = $receiptFields[$itemId] ?? null;
             $items[] = [
                 'id' => (string) $itemId,
                 'label' => $this->text($row->item ?? null) ?? 'Item',
@@ -598,10 +604,10 @@ final class PortalManageRequests
                 'quantity' => $this->quantity($row->qty ?? null),
                 'teamLabel' => $this->text($row->team ?? null),
                 'purpose' => $this->text($row->purpose ?? null),
-                'receiptName' => null,
-                'receiptUrl' => null,
-                'receiptMime' => null,
-                'receiptThumbUrl' => null,
+                'receiptName' => $receipt['receiptName'] ?? null,
+                'receiptUrl' => $receipt['receiptUrl'] ?? null,
+                'receiptMime' => $receipt['receiptMime'] ?? null,
+                'receiptThumbUrl' => $receipt['receiptThumbUrl'] ?? null,
             ];
             if ($approverRemarks === null) {
                 $approverRemarks = $this->text($row->approver_remarks ?? null);

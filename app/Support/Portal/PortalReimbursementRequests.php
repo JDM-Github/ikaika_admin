@@ -1011,6 +1011,37 @@ final class PortalReimbursementRequests
     }
 
     /**
+     * Receipt fields for a batch of line items, ready to drop straight into a presenter --
+     * the same shape ownClaims()/readClaim() build for the member's own list, exposed so
+     * PortalManageRequests can show the identical attachment on the admin queue.
+     *
+     * @param  list<int>  $ids
+     * @return array<int, array{receiptName: ?string, receiptUrl: ?string, receiptMime: ?string, receiptThumbUrl: ?string}>
+     */
+    public function receiptFieldsByItemId(array $ids): array
+    {
+        $receipts = $this->receiptsByItemId($ids);
+
+        $fields = [];
+        foreach ($ids as $itemId) {
+            $receipt = $receipts[$itemId] ?? null;
+            $fileUrl = $receipt === null ? null : $this->text($receipt->file_url ?? null);
+            $fileName = $receipt === null ? null : $this->text($receipt->file_name ?? null);
+            $mime = $receipt === null ? null : $this->text($receipt->mime_type ?? null);
+            $fields[$itemId] = [
+                'receiptName' => $fileName,
+                'receiptUrl' => $fileUrl,
+                'receiptMime' => $mime,
+                'receiptThumbUrl' => $fileUrl === null || $mime === null
+                    ? null
+                    : $this->cloudinary->thumbUrl($fileUrl, $mime),
+            ];
+        }
+
+        return $fields;
+    }
+
+    /**
      * @param  list<int>  $ids
      * @return array<int, object>
      */

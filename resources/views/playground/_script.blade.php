@@ -44,6 +44,7 @@
     var grantsEl = el('grants');
     var addFilterBtn = el('add-filter');
     var openViewsBtn = el('open-views');
+    var syncAirtableBtn = el('sync-airtable');
     var menuEl = el('menu');
     var toastEl = el('toast');
     var loginForm = el('login-form');
@@ -430,6 +431,14 @@
         renderValue(td, field, value);
     }
 
+    // A JSON column's own detail row: pretty-printed, not the flat single-line text the
+    // grid cell shows -- the whole point of opening a record is to actually read this.
+    function renderJsonDetail(container, raw) {
+        var pretty = String(raw);
+        try { pretty = JSON.stringify(JSON.parse(raw), null, 2); } catch (error) {}
+        container.appendChild(make('pre', 'mono json-detail', pretty));
+    }
+
     function headCell(field, width) {
         var th = make('th');
         th.style.minWidth = width + 'px';
@@ -589,6 +598,7 @@
             lastBlueprint = blueprint;
             tableLabel.textContent = payload.label;
             tableSub.textContent = state.base + ' · ' + payload.table + ' · ' + payload.columns.length + ' columns';
+            syncAirtableBtn.hidden = !(state.base === 'core' && state.table === 'actions');
             renderFilters(blueprint);
             renderGrid(payload, blueprint);
             renderFooter(payload);
@@ -638,7 +648,11 @@
                 if (field.type === 'link' && cell && cell.count) key.appendChild(make('span', 'count', ' ' + cell.count));
                 row.appendChild(key);
                 var value = make('div', 'v');
-                renderCell(value, field, cell);
+                if (field.type === 'json' && cell && cell.v !== null && cell.v !== undefined && cell.v !== '') {
+                    renderJsonDetail(value, cell.v);
+                } else {
+                    renderCell(value, field, cell);
+                }
                 if (field.type === 'link' && cell && cell.count) value.appendChild(reverseLink(field, record));
                 row.appendChild(value);
                 body.appendChild(row);
@@ -1133,7 +1147,9 @@
         state.table = table;
         state.page = 1;
         state.q = '';
-        state.sort = '';
+        // A history table reads newest-first by default; every other table keeps the
+        // grid's own default (its key, ascending) unless a click or a saved view says otherwise.
+        state.sort = (base === 'core' && table === 'actions') ? 'created_at:desc' : '';
         state.row = null;
         state.filters = filters || {};
         searchEl.value = '';
@@ -1268,6 +1284,7 @@
         state.page = 1;
         searchEl.value = '';
         clear(peekEl);
+        syncAirtableBtn.hidden = true;
         renderBases();
         writeUrl(false);
         stateMessage(gridWrap, 'Pick a table', 'Choose one from the rail on the left.');
@@ -1402,6 +1419,12 @@
         openConsole();
         statusEl.textContent = 'The statement behind this grid.';
         outEl.textContent = lastPayload.sql;
+    });
+
+    // Placeholder: the drain that would actually push these rows to Airtable is not
+    // built yet (ADMIN_MISSING.md §3). Says so rather than pretending to do something.
+    syncAirtableBtn.addEventListener('click', function () {
+        toast('Airtable sync is not built yet. This button does not do anything.', 'bad');
     });
 
     clearBtn.addEventListener('click', function () {

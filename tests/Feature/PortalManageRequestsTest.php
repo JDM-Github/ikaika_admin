@@ -223,6 +223,89 @@ class PortalManageRequestsTest extends TestCase
         $this->getJson('/api/development/portal/manage/requests')->assertUnauthorized();
     }
 
+    public function test_an_admin_sees_the_receipt_on_a_reimbursement_claim(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Grab to the site',
+            'cost' => 250.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Pending',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        DB::connection('portal')->table('attachments')->insert([
+            'table_name' => 'reimbursements',
+            'field_name' => 'receipts',
+            'record_id' => $itemId,
+            'file_url' => 'https://res.cloudinary.com/ikaika/image/upload/v1/receipts/grab.jpg',
+            'file_name' => 'grab.jpg',
+            'file_size_bytes' => 12345,
+            'mime_type' => 'image/jpeg',
+        ]);
+        $token = $this->tokenForAdmin();
+
+        $response = $this->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date, [
+            'Authorization' => "Bearer {$token}",
+        ])->assertOk();
+
+        $claim = collect($response->json('reimbursements'))
+            ->first(fn (array $claim): bool => collect($claim['items'])->contains('id', (string) $itemId));
+        $this->assertIsArray($claim);
+        $item = collect($claim['items'])->firstWhere('id', (string) $itemId);
+        $this->assertIsArray($item);
+        $this->assertSame('grab.jpg', $item['receiptName']);
+        $this->assertSame('https://res.cloudinary.com/ikaika/image/upload/v1/receipts/grab.jpg', $item['receiptUrl']);
+        $this->assertSame('image/jpeg', $item['receiptMime']);
+        $this->assertSame(
+            'https://res.cloudinary.com/ikaika/image/upload/c_fill,h_96,w_96,f_auto,q_auto/v1/receipts/grab.jpg',
+            $item['receiptThumbUrl'],
+        );
+    }
+
+    public function test_a_reimbursement_claim_with_no_attachment_reads_null_receipt_fields(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Parking',
+            'cost' => 50.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Pending',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        $token = $this->tokenForAdmin();
+
+        $response = $this->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date, [
+            'Authorization' => "Bearer {$token}",
+        ])->assertOk();
+
+        $claim = collect($response->json('reimbursements'))
+            ->first(fn (array $claim): bool => collect($claim['items'])->contains('id', (string) $itemId));
+        $item = collect($claim['items'])->firstWhere('id', (string) $itemId);
+        $this->assertIsArray($item);
+        $this->assertNull($item['receiptName']);
+        $this->assertNull($item['receiptUrl']);
+        $this->assertNull($item['receiptMime']);
+        $this->assertNull($item['receiptThumbUrl']);
+    }
+
     private function tokenForAdmin(): string
     {
         $employee = Employee::query()
