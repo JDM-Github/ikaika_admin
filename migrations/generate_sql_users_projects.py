@@ -297,31 +297,34 @@ def gen_attachments_for_table(records, table_sql_name, id_map, manifest, cloudin
 
 
 def gen_reimbursement_receipts(records, id_map, manifest, cloudinary_cache):
-    """The live app (PortalReimbursementRequests::RECEIPT_FIELD) reads exactly one
-    receipt per reimbursement row under field_name 'receipts' -- not the raw Airtable
-    field names, and not one row per attachment field. "Receipts (If Applicable)" wins
-    over "Reimbursement Receipt" when both are set, since that's the field actually
-    shown to members in the historical data."""
+    """The live app reads two distinct attachment kinds off one reimbursement row --
+    the employee's own proof of purchase, under field_name 'receipts'
+    (PortalReimbursementRequests::RECEIPT_FIELD), and the company's proof it paid the
+    claim back, under field_name 'payout_receipt' (PortalReimbursementRequests::
+    PAYOUT_RECEIPT_FIELD). Airtable keeps these as two separate fields --
+    "Receipts (If Applicable)" and "Reimbursement Receipt" -- and a claim can
+    genuinely carry both at once, so both are written here rather than collapsed
+    into a single row the way an earlier version of this function did."""
     rows = []
+    field_map = (
+        ("Receipts (If Applicable)", "receipts"),
+        ("Reimbursement Receipt", "payout_receipt"),
+    )
     for r in records:
         sid = id_map.get(r["id"])
         if sid is None:
             continue
         f = r.get("fields", {})
-        chosen = None
-        chosen_field = None
-        for field_name in ("Receipts (If Applicable)", "Reimbursement Receipt"):
-            atts = f.get(field_name)
-            if isinstance(atts, list) and atts:
-                chosen, chosen_field = atts[0], field_name
-                break
-        if chosen is None:
-            continue
-        file_url = resolve_file_url(chosen, r["id"], chosen_field, manifest, cloudinary_cache)
-        rows.append([
-            "reimbursements", sid, "receipts",
-            file_url, chosen.get("filename"), chosen.get("size"), chosen.get("type"),
-        ])
+        for airtable_field, field_name in field_map:
+            atts = f.get(airtable_field)
+            if not (isinstance(atts, list) and atts):
+                continue
+            att = atts[0]
+            file_url = resolve_file_url(att, r["id"], airtable_field, manifest, cloudinary_cache)
+            rows.append([
+                "reimbursements", sid, field_name,
+                file_url, att.get("filename"), att.get("size"), att.get("type"),
+            ])
     return rows
 
 

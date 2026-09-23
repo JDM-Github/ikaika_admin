@@ -8,9 +8,11 @@ use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Portal\PortalAccessDenied;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
@@ -221,6 +223,135 @@ class PortalManageRequestsTest extends TestCase
     public function test_the_queue_requires_a_bearer_token(): void
     {
         $this->getJson('/api/development/portal/manage/requests')->assertUnauthorized();
+    }
+
+    public function test_an_admin_attaches_a_payout_receipt_to_an_approved_claim(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::response([
+                'secure_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/payout.jpg',
+                'original_filename' => 'payout',
+                'bytes' => 900,
+            ], 200),
+        ]);
+
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Grab to the site',
+            'cost' => 250.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        $token = $this->tokenForAdmin();
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $uploaded = $this->withToken($token)->post(
+            "/api/development/portal/manage/requests/reimbursement/{$itemId}/payout-receipt",
+            ['file' => $file],
+        )->assertCreated();
+
+        $this->assertSame('payout.jpg', $uploaded->json('data.payoutReceiptName'));
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/payout.jpg',
+            $uploaded->json('data.payoutReceiptUrl'),
+        );
+
+        $response = $this->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date, [
+            'Authorization' => "Bearer {$token}",
+        ])->assertOk();
+        $claim = collect($response->json('reimbursements'))
+            ->first(fn (array $claim): bool => collect($claim['items'])->contains('id', (string) $itemId));
+        $this->assertIsArray($claim);
+        $item = collect($claim['items'])->firstWhere('id', (string) $itemId);
+        $this->assertIsArray($item);
+        $this->assertSame('payout.jpg', $item['payoutReceiptName']);
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/payout.jpg',
+            $item['payoutReceiptUrl'],
+        );
+        $this->assertTrue(DB::connection('portal')->table('attachments')
+            ->where('table_name', 'reimbursements')
+            ->where('record_id', $itemId)
+            ->where('field_name', 'payout_receipt')
+            ->exists());
+    }
+
+    public function test_a_payout_receipt_is_refused_on_a_claim_that_is_not_approved_yet(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Grab to the site',
+            'cost' => 250.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Pending',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        $token = $this->tokenForAdmin();
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $this->withToken($token)->post(
+            "/api/development/portal/manage/requests/reimbursement/{$itemId}/payout-receipt",
+            ['file' => $file],
+        )->assertStatus(422);
+    }
+
+    public function test_a_payout_receipt_is_refused_for_a_reimbursement_that_does_not_exist(): void
+    {
+        $token = $this->tokenForAdmin();
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $this->withToken($token)->post(
+            '/api/development/portal/manage/requests/reimbursement/999999/payout-receipt',
+            ['file' => $file],
+        )->assertStatus(404);
+    }
+
+    public function test_a_member_cannot_attach_a_payout_receipt(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Grab to the site',
+            'cost' => 250.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        $token = $this->tokenForMember();
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $this->withToken($token)->post(
+            "/api/development/portal/manage/requests/reimbursement/{$itemId}/payout-receipt",
+            ['file' => $file],
+        )->assertForbidden();
     }
 
     public function test_an_admin_sees_the_receipt_on_a_reimbursement_claim(): void

@@ -16,6 +16,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->get('manage/requests', [RequestsController::class, 'index']);
     Route::middleware(['portal.admin', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
+    Route::middleware(['portal.admin', 'throttle:portal-manage-requests-write'])
+        ->post('manage/requests/reimbursement/{id}/payout-receipt', [RequestsController::class, 'storePayoutReceipt'])
+        ->whereNumber('id');
     Route::middleware(['portal.admin', 'throttle:portal-manage-reports'])
         ->get('manage/reports', [ReportsController::class, 'index']);
 });

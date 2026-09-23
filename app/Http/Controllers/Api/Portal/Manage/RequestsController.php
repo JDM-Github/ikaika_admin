@@ -26,4 +26,9 @@ class RequestsController extends Controller
 
         return response()->json($this->requests->decide($actor, $request));
     }
+
+    public function storePayoutReceipt(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->requests->uploadPayoutReceipt($id, $request), 201);
+    }
 }

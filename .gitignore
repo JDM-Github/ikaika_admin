@@ -29,5 +29,5 @@ Thumbs.db
 graphify-out/
 msal_test/
 *.private.*
-export_test/
+migrations/export_*/
 migrations/*.sql

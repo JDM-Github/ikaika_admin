@@ -47,6 +47,8 @@ final class PortalReimbursementRequests
 
     private const RECEIPT_FIELD = 'receipts';
 
+    private const PAYOUT_RECEIPT_FIELD = 'payout_receipt';
+
     private const RECEIPT_TABLE = 'reimbursements';
 
     private const RECEIPT_CACHE_TTL_SECONDS = 3600;
@@ -573,9 +575,9 @@ final class PortalReimbursementRequests
             ->orderByDesc('reimbursements.id')
             ->get();
 
-        $receipts = $this->receiptsByItemId(
-            $rows->map(static fn (object $row): int => (int) $row->id)->all(),
-        );
+        $ids = $rows->map(static fn (object $row): int => (int) $row->id)->all();
+        $receipts = $this->attachmentsByRecordId($ids, self::RECEIPT_FIELD);
+        $payouts = $this->payoutReceiptFieldsByItemId($ids);
 
         $groups = [];
         foreach ($rows as $row) {
@@ -584,7 +586,7 @@ final class PortalReimbursementRequests
 
         $data = [];
         foreach ($groups as $group) {
-            $claim = $this->presentClaim($group, $actor, $receipts);
+            $claim = $this->presentClaim($group, $actor, $receipts, $payouts);
             if ($claim !== null) {
                 $data[] = $claim;
             }
@@ -623,15 +625,23 @@ final class PortalReimbursementRequests
             ->get()
             ->all();
 
-        return $this->presentClaim($rows, $actor, $this->receiptsByItemId($ids));
+        $ids = array_map(static fn (object $row): int => (int) $row->id, $rows);
+
+        return $this->presentClaim(
+            $rows,
+            $actor,
+            $this->attachmentsByRecordId($ids, self::RECEIPT_FIELD),
+            $this->payoutReceiptFieldsByItemId($ids),
+        );
     }
 
     /**
      * @param  list<object>  $rows
      * @param  array<int, object>  $receipts
+     * @param  array<int, array{payoutReceiptName: ?string, payoutReceiptUrl: ?string, payoutReceiptMime: ?string, payoutReceiptThumbUrl: ?string}>  $payouts
      * @return array<string, mixed>|null
      */
-    private function presentClaim(array $rows, Employee $actor, array $receipts): ?array
+    private function presentClaim(array $rows, Employee $actor, array $receipts, array $payouts = []): ?array
     {
         if ($rows === []) {
             return null;
@@ -646,6 +656,7 @@ final class PortalReimbursementRequests
         $ids = [];
         $items = [];
         $approverRemarks = null;
+        $statuses = [];
         foreach ($rows as $row) {
             $itemId = (int) $row->id;
             $ids[] = $itemId;
@@ -653,6 +664,9 @@ final class PortalReimbursementRequests
             $fileUrl = $receipt === null ? null : $this->text($receipt->file_url ?? null);
             $fileName = $receipt === null ? null : $this->text($receipt->file_name ?? null);
             $mime = $receipt === null ? null : $this->text($receipt->mime_type ?? null);
+            $itemStatus = $this->claimStatus($row->status ?? null);
+            $statuses[] = $itemStatus;
+            $payout = $payouts[$itemId] ?? null;
             $items[] = [
                 'id' => (string) $itemId,
                 'label' => $this->text($row->item ?? null) ?? 'Item',
@@ -660,12 +674,18 @@ final class PortalReimbursementRequests
                 'quantity' => $this->quantity($row->qty ?? null),
                 'teamLabel' => $this->text($row->team ?? null),
                 'purpose' => $this->text($row->purpose ?? null),
+                'status' => $itemStatus,
+                'approverRemarks' => $this->text($row->approver_remarks ?? null),
                 'receiptName' => $fileName,
                 'receiptUrl' => $fileUrl,
                 'receiptMime' => $mime,
                 'receiptThumbUrl' => $fileUrl === null || $mime === null
                     ? null
                     : $this->cloudinary->thumbUrl($fileUrl, $mime),
+                'payoutReceiptName' => $payout['payoutReceiptName'] ?? null,
+                'payoutReceiptUrl' => $payout['payoutReceiptUrl'] ?? null,
+                'payoutReceiptMime' => $payout['payoutReceiptMime'] ?? null,
+                'payoutReceiptThumbUrl' => $payout['payoutReceiptThumbUrl'] ?? null,
             ];
             if ($approverRemarks === null) {
                 $approverRemarks = $this->text($row->approver_remarks ?? null);
@@ -684,20 +704,38 @@ final class PortalReimbursementRequests
             ),
             'memberName' => $name,
             'submittedOn' => $submittedOn,
-            'status' => $this->claimStatus($first->status ?? null),
+            'status' => self::rolledUpStatus($statuses),
             'approverRemarks' => $approverRemarks,
             'items' => $items,
         ];
     }
 
     /**
-     * Rows that share a created stamp and a status were one application. Seeded Airtable rows
-     * only carry a date, so same-day items still group; a new filing writes a datetime so two
-     * submissions a minute apart stay two claims.
+     * The claim's own standing, for the pill a member reads and the status filter. Items are
+     * decided one at a time, so a claim is only settled once they agree; anything still pending
+     * holds the whole claim there, which is also what keeps a withdraw offered while it can help.
+     *
+     * @param  list<string>  $statuses
+     */
+    public static function rolledUpStatus(array $statuses): string
+    {
+        $distinct = array_values(array_unique($statuses));
+        if (count($distinct) === 1) {
+            return $distinct[0];
+        }
+
+        return in_array('pending', $distinct, true) ? 'pending' : 'approved';
+    }
+
+    /**
+     * Rows that share a created stamp were one application. Seeded Airtable rows only carry a
+     * date, so same-day items still group; a new filing writes a datetime so two submissions a
+     * minute apart stay two claims. Status is not part of it: an approver settles items one at a
+     * time, and a claim must not break into pieces as its items are decided.
      */
     private function claimKey(int $employeeId, object $row): string
     {
-        return $employeeId.'|'.$this->createdStamp($row->date_created ?? null).'|'.strtolower(trim((string) ($row->status ?? '')));
+        return $employeeId.'|'.$this->createdStamp($row->date_created ?? null);
     }
 
     private function createdStamp(mixed $value): string
@@ -1020,7 +1058,7 @@ final class PortalReimbursementRequests
      */
     public function receiptFieldsByItemId(array $ids): array
     {
-        $receipts = $this->receiptsByItemId($ids);
+        $receipts = $this->attachmentsByRecordId($ids, self::RECEIPT_FIELD);
 
         $fields = [];
         foreach ($ids as $itemId) {
@@ -1042,10 +1080,101 @@ final class PortalReimbursementRequests
     }
 
     /**
+     * The payout proof for a batch of line items -- one attachment per reimbursements row, the
+     * same grain as that row's own status and approver remarks, so a claim settled in parts can
+     * carry the proof of each part.
+     *
+     * @param  list<int>  $itemIds
+     * @return array<int, array{payoutReceiptName: ?string, payoutReceiptUrl: ?string, payoutReceiptMime: ?string, payoutReceiptThumbUrl: ?string}>
+     */
+    public function payoutReceiptFieldsByItemId(array $itemIds): array
+    {
+        $attachments = $this->attachmentsByRecordId($itemIds, self::PAYOUT_RECEIPT_FIELD);
+
+        $fields = [];
+        foreach ($itemIds as $itemId) {
+            $attachment = $attachments[$itemId] ?? null;
+            $fileUrl = $attachment === null ? null : $this->text($attachment->file_url ?? null);
+            $fileName = $attachment === null ? null : $this->text($attachment->file_name ?? null);
+            $mime = $attachment === null ? null : $this->text($attachment->mime_type ?? null);
+            $fields[$itemId] = [
+                'payoutReceiptName' => $fileName,
+                'payoutReceiptUrl' => $fileUrl,
+                'payoutReceiptMime' => $mime,
+                'payoutReceiptThumbUrl' => $fileUrl === null || $mime === null
+                    ? null
+                    : $this->cloudinary->thumbUrl($fileUrl, $mime),
+            ];
+        }
+
+        return $fields;
+    }
+
+    /**
+     * The company's proof it paid one line item back, attached by an admin once that item is
+     * approved -- a second attachment kind on the same reimbursements row, distinct from the
+     * employee's own purchase receipt (RECEIPT_FIELD). Not gated here by role: the route this backs
+     * is portal.admin-only, the same way PATCH manage/requests is, so the check belongs at the
+     * route, not duplicated here.
+     *
+     * @return array{payoutReceiptName: string, payoutReceiptUrl: string, payoutReceiptMime: string, payoutReceiptThumbUrl: ?string}
+     */
+    public function writePayoutReceipt(int $itemId, Request $request): array
+    {
+        $row = $this->connection()->table('reimbursements')
+            ->select(['id', 'status'])
+            ->where('id', $itemId)
+            ->first();
+        if ($row === null) {
+            abort(404, 'That reimbursement is not on the queue.');
+        }
+        if ($this->claimStatus($row->status ?? null) !== 'approved') {
+            abort(422, 'Only an approved item can have a payout receipt.');
+        }
+
+        $file = $request->file('file');
+        if (! $file instanceof UploadedFile || ! $file->isValid()) {
+            abort(422, 'Choose an image or PDF receipt.');
+        }
+        if ($file->getSize() > self::MAX_RECEIPT_BYTES) {
+            abort(422, 'A receipt cannot be larger than 8 MB.');
+        }
+        $mime = $file->getMimeType();
+        if (! is_string($mime) || ! in_array($mime, self::RECEIPT_MIMES, true)) {
+            abort(422, 'A receipt has to be a JPEG, PNG, WebP, GIF or PDF.');
+        }
+
+        $stored = $this->cloudinary->uploadReceipt($file);
+
+        $this->connection()->table('attachments')
+            ->where('table_name', self::RECEIPT_TABLE)
+            ->where('record_id', $itemId)
+            ->where('field_name', self::PAYOUT_RECEIPT_FIELD)
+            ->delete();
+        $this->connection()->table('attachments')->insert([
+            'table_name' => self::RECEIPT_TABLE,
+            'record_id' => $itemId,
+            'field_name' => self::PAYOUT_RECEIPT_FIELD,
+            'file_url' => $stored['fileUrl'],
+            'file_name' => $stored['fileName'],
+            'file_size_bytes' => $stored['sizeBytes'],
+            'mime_type' => $stored['mimeType'],
+        ]);
+        $this->bumpCache();
+
+        return [
+            'payoutReceiptName' => $stored['fileName'],
+            'payoutReceiptUrl' => $stored['fileUrl'],
+            'payoutReceiptMime' => $stored['mimeType'],
+            'payoutReceiptThumbUrl' => $this->cloudinary->thumbUrl($stored['fileUrl'], $stored['mimeType']),
+        ];
+    }
+
+    /**
      * @param  list<int>  $ids
      * @return array<int, object>
      */
-    private function receiptsByItemId(array $ids): array
+    private function attachmentsByRecordId(array $ids, string $fieldName): array
     {
         if ($ids === []) {
             return [];
@@ -1055,7 +1184,7 @@ final class PortalReimbursementRequests
             ->table('attachments')
             ->select(['record_id', 'file_url', 'file_name', 'file_size_bytes', 'mime_type'])
             ->where('table_name', self::RECEIPT_TABLE)
-            ->where('field_name', self::RECEIPT_FIELD)
+            ->where('field_name', $fieldName)
             ->whereIn('record_id', $ids)
             ->get();
 

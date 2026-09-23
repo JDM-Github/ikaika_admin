@@ -122,6 +122,27 @@ final class PortalManageRequests
     }
 
     /**
+     * The payout proof an admin attaches once a reimbursement line item is approved -- the
+     * company's evidence it paid that item back, distinct from the employee's own purchase
+     * receipt. Delegates the actual attachments-table write to PortalReimbursementRequests,
+     * which already owns that table, and bumps this class's own cache so the queue reflects
+     * it immediately rather than waiting out the TTL.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function uploadPayoutReceipt(int $itemId, Request $request): array
+    {
+        $fields = $this->reimbursements->writePayoutReceipt($itemId, $request);
+        $this->bumpCache();
+
+        return [
+            'section' => 'manage',
+            'resource' => 'requests',
+            'data' => $fields,
+        ];
+    }
+
+    /**
      * @param  array{id: string, kind: string, status: string, approverRemarks?: string|null}  $change
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
@@ -253,22 +274,20 @@ final class PortalManageRequests
             abort(404, 'That reimbursement is not on the queue.');
         }
 
-        $query = $this->connection()
-            ->table('reimbursements')
-            ->where('date_created', $seed->date_created);
         $name = $this->text($seed->employee_name_input ?? null);
-        if ($name === null) {
-            $query->where(function ($inner): void {
-                $inner->whereNull('employee_name_input')->orWhere('employee_name_input', '');
-            });
-        } else {
-            $query->where('employee_name_input', $seed->employee_name_input);
-        }
 
-        $updated = $query->update([
-            'status' => $status,
-            'approver_remarks' => $remarks,
-        ]);
+        /*
+         * One line item, not the whole claim. Every reimbursements row carries its own status and
+         * approver_remarks, and a claim of three items is three costs an approver settles one at a
+         * time -- deciding one of them used to rewrite its siblings, which is a decision nobody made.
+         */
+        $updated = $this->connection()
+            ->table('reimbursements')
+            ->where('id', $id)
+            ->update([
+                'status' => $status,
+                'approver_remarks' => $remarks,
+            ]);
         if ($updated === 0) {
             abort(404, 'That reimbursement is not on the queue.');
         }
@@ -555,9 +574,9 @@ final class PortalManageRequests
             ->orderByDesc('reimbursements.id')
             ->get();
 
-        $receiptFields = $this->reimbursements->receiptFieldsByItemId(
-            $rows->map(static fn (object $row): int => (int) $row->id)->all(),
-        );
+        $ids = $rows->map(static fn (object $row): int => (int) $row->id)->all();
+        $receiptFields = $this->reimbursements->receiptFieldsByItemId($ids);
+        $payoutFields = $this->reimbursements->payoutReceiptFieldsByItemId($ids);
 
         $groups = [];
         foreach ($rows as $row) {
@@ -566,7 +585,7 @@ final class PortalManageRequests
 
         $data = [];
         foreach ($groups as $group) {
-            $claim = $this->presentClaim($group, $receiptFields);
+            $claim = $this->presentClaim($group, $receiptFields, $payoutFields);
             if ($claim !== null) {
                 $data[] = $claim;
             }
@@ -578,9 +597,10 @@ final class PortalManageRequests
     /**
      * @param  list<object>  $rows
      * @param  array<int, array{receiptName: ?string, receiptUrl: ?string, receiptMime: ?string, receiptThumbUrl: ?string}>  $receiptFields
+     * @param  array<int, array{payoutReceiptName: ?string, payoutReceiptUrl: ?string, payoutReceiptMime: ?string, payoutReceiptThumbUrl: ?string}>  $payoutFields
      * @return array<string, mixed>|null
      */
-    private function presentClaim(array $rows, array $receiptFields): ?array
+    private function presentClaim(array $rows, array $receiptFields, array $payoutFields): ?array
     {
         if ($rows === []) {
             return null;
@@ -593,10 +613,14 @@ final class PortalManageRequests
         $ids = [];
         $items = [];
         $approverRemarks = null;
+        $statuses = [];
         foreach ($rows as $row) {
             $itemId = (int) $row->id;
             $ids[] = $itemId;
             $receipt = $receiptFields[$itemId] ?? null;
+            $payoutField = $payoutFields[$itemId] ?? null;
+            $itemStatus = $this->claimStatus($row->status ?? null);
+            $statuses[] = $itemStatus;
             $items[] = [
                 'id' => (string) $itemId,
                 'label' => $this->text($row->item ?? null) ?? 'Item',
@@ -604,10 +628,16 @@ final class PortalManageRequests
                 'quantity' => $this->quantity($row->qty ?? null),
                 'teamLabel' => $this->text($row->team ?? null),
                 'purpose' => $this->text($row->purpose ?? null),
+                'status' => $itemStatus,
+                'approverRemarks' => $this->text($row->approver_remarks ?? null),
                 'receiptName' => $receipt['receiptName'] ?? null,
                 'receiptUrl' => $receipt['receiptUrl'] ?? null,
                 'receiptMime' => $receipt['receiptMime'] ?? null,
                 'receiptThumbUrl' => $receipt['receiptThumbUrl'] ?? null,
+                'payoutReceiptName' => $payoutField['payoutReceiptName'] ?? null,
+                'payoutReceiptUrl' => $payoutField['payoutReceiptUrl'] ?? null,
+                'payoutReceiptMime' => $payoutField['payoutReceiptMime'] ?? null,
+                'payoutReceiptThumbUrl' => $payoutField['payoutReceiptThumbUrl'] ?? null,
             ];
             if ($approverRemarks === null) {
                 $approverRemarks = $this->text($row->approver_remarks ?? null);
@@ -629,18 +659,22 @@ final class PortalManageRequests
             ),
             'memberName' => $memberName,
             'submittedOn' => $submittedOn,
-            'status' => $this->claimStatus($first->status ?? null),
+            'status' => PortalReimbursementRequests::rolledUpStatus($statuses),
             'approverRemarks' => $approverRemarks,
             'items' => $items,
         ];
     }
 
+    /*
+     * Status is deliberately not part of the key. It is the line's own now, so keying on it would
+     * split one application into a separate claim per decision the moment its items disagree.
+     */
     private function claimKey(object $row): string
     {
         $employeeId = (int) ($row->employee_id ?? 0);
         $name = strtolower(trim((string) ($row->employee_name_input ?? '')));
 
-        return $employeeId.'|'.$name.'|'.$this->createdStamp($row->date_created ?? null).'|'.strtolower(trim((string) ($row->status ?? '')));
+        return $employeeId.'|'.$name.'|'.$this->createdStamp($row->date_created ?? null);
     }
 
     private function createdStamp(mixed $value): string
