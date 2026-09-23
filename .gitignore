@@ -48,3 +48,7 @@ msal_test/
 .ikaika_scripts_configs/.toolkit-update-check
 .ikaika_scripts_configs/.toolkit-update-skip
 .ikaika_scripts_configs/.readiness-check
+
+# The dependency fingerprint development-setup writes, so a pull that changes
+# nothing in composer.lock does not reinstall vendor/.
+.ikaika-install

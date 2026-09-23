@@ -33,6 +33,48 @@
     ]
   },
   "config": {
+    "commands": {
+      "development-setup": {
+        "description": "Prepares a freshly installed Windows machine to develop the Ikaika portal API: WampServer with PHP 8.4 and MySQL 8.0, Composer, the PHP extensions Laravel needs, and this repository's own dependencies",
+        "args": [
+          {
+            "flag": "Report",
+            "label": "-Report   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Grade everything and stop. Nothing is downloaded, installed or written.",
+            "default": ""
+          },
+          {
+            "flag": "Force",
+            "label": "-Force   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Run composer install even when composer.lock has not changed since the last run.",
+            "default": ""
+          },
+          {
+            "flag": "ToolsOnly",
+            "label": "-ToolsOnly   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Stop after the machine is ready, without touching this repository.",
+            "default": ""
+          },
+          {
+            "flag": "Elevated",
+            "label": "-Elevated   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "The machine-wide half alone: VC++ runtimes, WampServer, its add-ons, php.ini.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/development-setup -Report ${development-setup.args.Report} -Force ${development-setup.args.Force} -ToolsOnly ${development-setup.args.ToolsOnly} -Elevated ${development-setup.args.Elevated}"
+        ]
+      }
+    },
     "git": {
       "check-all": {
         "description": "Runs every check that would otherwise be a CI job, and can install itself as a pre-push hook so nothing lands unchecked",
