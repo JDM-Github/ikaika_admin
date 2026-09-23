@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Portal\Reports\FlaggedController;
 use App\Http\Controllers\Api\Portal\Reports\ProjectsController;
 use App\Http\Controllers\Api\Portal\Reports\SubmittedController;
 use App\Http\Middleware\AuthenticatePortalJwt;
@@ -13,6 +14,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         // Before the list route, so /days is not read as a submitted-report id.
         Route::get('reports/submitted/days', [SubmittedController::class, 'days']);
         Route::get('reports/submitted', [SubmittedController::class, 'index']);
+        // Same data source (PortalSubmittedReports), same throttle -- a filtered read, not a
+        // separate resource.
+        Route::get('reports/flagged', [FlaggedController::class, 'index']);
     });
 
     Route::middleware('throttle:portal-reports-submitted-write')->group(function (): void {

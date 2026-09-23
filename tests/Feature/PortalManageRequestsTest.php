@@ -8,9 +8,11 @@ use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Portal\PortalAccessDenied;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
@@ -130,6 +132,125 @@ class PortalManageRequestsTest extends TestCase
         ]], $log->payload['changes']);
     }
 
+    /*
+     * The decide-unit is the whole filing batch, not one row: two entries filed together
+     * (PortalSubmittedReports::create() flags every line of one submission alike) must move
+     * together, and is_flag itself -- the permanent "this was filed on a warning" fact -- must
+     * survive the decision untouched.
+     */
+    public function test_an_admin_approves_a_flagged_report_with_remarks_and_the_employee_is_notified(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $firstId = $this->insertFlaggedLine($member, $date);
+        $secondId = $this->insertFlaggedLine($member, $date);
+        $token = $this->tokenForAdmin();
+
+        $this->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [[
+                'id' => (string) $firstId,
+                'kind' => 'flag',
+                'status' => 'approved',
+                'approverRemarks' => 'Reviewed, looks fine.',
+            ]],
+        ], [
+            'Authorization' => "Bearer {$token}",
+        ])->assertOk()->assertJsonPath('saved', 1);
+
+        foreach ([$firstId, $secondId] as $id) {
+            $row = DB::connection('portal')->table('employees_user_reports')
+                ->where('user_report_id', $id)->first();
+            $this->assertNotNull($row);
+            $this->assertSame(1, (int) $row->is_flag);
+            $this->assertSame('Approved', $row->flag_status);
+            $this->assertSame('Reviewed, looks fine.', $row->flag_remarks);
+        }
+
+        $notification = PortalNotification::query()
+            ->where('employee_id', $member->getKey())
+            ->where('type', 'reports.flagged.approved')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($notification);
+        $this->assertStringContainsString('flagged report', (string) $notification->message);
+
+        $log = PortalLog::query()
+            ->where('employee_id', $member->getKey())
+            ->where('resource', 'reports.flagged')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame('flag', $log->payload['kind']);
+        $this->assertSame('approved', $log->payload['status']);
+    }
+
+    // Rejecting keeps it on the list -- only approving is supposed to clear a flagged report.
+    public function test_an_admin_rejects_a_flagged_report(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $id = $this->insertFlaggedLine($member, $date);
+
+        $this->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [[
+                'id' => (string) $id,
+                'kind' => 'flag',
+                'status' => 'rejected',
+                'approverRemarks' => 'Needs a closer look.',
+            ]],
+        ], [
+            'Authorization' => 'Bearer '.$this->tokenForAdmin(),
+        ])->assertOk()->assertJsonPath('saved', 1);
+
+        $row = DB::connection('portal')->table('employees_user_reports')
+            ->where('user_report_id', $id)->first();
+        $this->assertNotNull($row);
+        $this->assertSame('Rejected', $row->flag_status);
+    }
+
+    // The approver reads everybody's flagged reports, so unlike GET /reports/flagged (the
+    // member's own, name always null) this bundle names whose report each one is.
+    public function test_get_manage_requests_bundles_flagged_reports_with_real_names(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $id = $this->insertFlaggedLine($member, $date);
+        $unflagged = $this->insertFlaggedLine($member, $date, isFlag: false);
+
+        $response = $this->getJson(
+            '/api/development/portal/manage/requests?from='.$date.'&to='.$date,
+            ['Authorization' => 'Bearer '.$this->tokenForAdmin()],
+        )->assertOk();
+
+        $flaggedIds = collect($response->json('flaggedReports'))->pluck('id');
+        $this->assertContains((string) $id, $flaggedIds);
+        $this->assertNotContains((string) $unflagged, $flaggedIds);
+        $row = collect($response->json('flaggedReports'))->firstWhere('id', (string) $id);
+        $this->assertIsArray($row);
+        $this->assertSame($this->memberName($member), $row['memberName']);
+        $this->assertSame('pending', $row['status']);
+    }
+
+    // A report that was never flagged has nothing here to decide, the same way an id belonging
+    // to no reimbursement or no queued request is refused.
+    public function test_deciding_a_report_that_was_never_flagged_is_refused(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $id = $this->insertFlaggedLine($member, $date, isFlag: false);
+
+        $this->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [[
+                'id' => (string) $id,
+                'kind' => 'flag',
+                'status' => 'approved',
+            ]],
+        ], [
+            'Authorization' => 'Bearer '.$this->tokenForAdmin(),
+        ])->assertStatus(404);
+    }
+
     public function test_each_owner_gets_an_inbox_row_when_their_request_is_reviewed(): void
     {
         $owners = Employee::query()
@@ -223,6 +344,218 @@ class PortalManageRequestsTest extends TestCase
         $this->getJson('/api/development/portal/manage/requests')->assertUnauthorized();
     }
 
+    public function test_an_admin_attaches_a_payout_receipt_to_an_approved_claim(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::response([
+                'secure_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/payout.jpg',
+                'original_filename' => 'payout',
+                'bytes' => 900,
+            ], 200),
+        ]);
+
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Grab to the site',
+            'cost' => 250.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        $token = $this->tokenForAdmin();
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $uploaded = $this->withToken($token)->post(
+            "/api/development/portal/manage/requests/reimbursement/{$itemId}/payout-receipt",
+            ['file' => $file],
+        )->assertCreated();
+
+        $this->assertSame('payout.jpg', $uploaded->json('data.payoutReceiptName'));
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/payout.jpg',
+            $uploaded->json('data.payoutReceiptUrl'),
+        );
+
+        $response = $this->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date, [
+            'Authorization' => "Bearer {$token}",
+        ])->assertOk();
+        $claim = collect($response->json('reimbursements'))
+            ->first(fn (array $claim): bool => collect($claim['items'])->contains('id', (string) $itemId));
+        $this->assertIsArray($claim);
+        $item = collect($claim['items'])->firstWhere('id', (string) $itemId);
+        $this->assertIsArray($item);
+        $this->assertSame('payout.jpg', $item['payoutReceiptName']);
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/payout.jpg',
+            $item['payoutReceiptUrl'],
+        );
+        $this->assertTrue(DB::connection('portal')->table('attachments')
+            ->where('table_name', 'reimbursements')
+            ->where('record_id', $itemId)
+            ->where('field_name', 'payout_receipt')
+            ->exists());
+    }
+
+    public function test_a_payout_receipt_is_refused_on_a_claim_that_is_not_approved_yet(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Grab to the site',
+            'cost' => 250.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Pending',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        $token = $this->tokenForAdmin();
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $this->withToken($token)->post(
+            "/api/development/portal/manage/requests/reimbursement/{$itemId}/payout-receipt",
+            ['file' => $file],
+        )->assertStatus(422);
+    }
+
+    public function test_a_payout_receipt_is_refused_for_a_reimbursement_that_does_not_exist(): void
+    {
+        $token = $this->tokenForAdmin();
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $this->withToken($token)->post(
+            '/api/development/portal/manage/requests/reimbursement/999999/payout-receipt',
+            ['file' => $file],
+        )->assertStatus(404);
+    }
+
+    public function test_a_member_cannot_attach_a_payout_receipt(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Grab to the site',
+            'cost' => 250.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        $token = $this->tokenForMember();
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $this->withToken($token)->post(
+            "/api/development/portal/manage/requests/reimbursement/{$itemId}/payout-receipt",
+            ['file' => $file],
+        )->assertForbidden();
+    }
+
+    public function test_an_admin_sees_the_receipt_on_a_reimbursement_claim(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Grab to the site',
+            'cost' => 250.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Pending',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        DB::connection('portal')->table('attachments')->insert([
+            'table_name' => 'reimbursements',
+            'field_name' => 'receipts',
+            'record_id' => $itemId,
+            'file_url' => 'https://res.cloudinary.com/ikaika/image/upload/v1/receipts/grab.jpg',
+            'file_name' => 'grab.jpg',
+            'file_size_bytes' => 12345,
+            'mime_type' => 'image/jpeg',
+        ]);
+        $token = $this->tokenForAdmin();
+
+        $response = $this->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date, [
+            'Authorization' => "Bearer {$token}",
+        ])->assertOk();
+
+        $claim = collect($response->json('reimbursements'))
+            ->first(fn (array $claim): bool => collect($claim['items'])->contains('id', (string) $itemId));
+        $this->assertIsArray($claim);
+        $item = collect($claim['items'])->firstWhere('id', (string) $itemId);
+        $this->assertIsArray($item);
+        $this->assertSame('grab.jpg', $item['receiptName']);
+        $this->assertSame('https://res.cloudinary.com/ikaika/image/upload/v1/receipts/grab.jpg', $item['receiptUrl']);
+        $this->assertSame('image/jpeg', $item['receiptMime']);
+        $this->assertSame(
+            'https://res.cloudinary.com/ikaika/image/upload/c_fill,h_96,w_96,f_auto,q_auto/v1/receipts/grab.jpg',
+            $item['receiptThumbUrl'],
+        );
+    }
+
+    public function test_a_reimbursement_claim_with_no_attachment_reads_null_receipt_fields(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Parking',
+            'cost' => 50.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Pending',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+        $token = $this->tokenForAdmin();
+
+        $response = $this->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date, [
+            'Authorization' => "Bearer {$token}",
+        ])->assertOk();
+
+        $claim = collect($response->json('reimbursements'))
+            ->first(fn (array $claim): bool => collect($claim['items'])->contains('id', (string) $itemId));
+        $item = collect($claim['items'])->firstWhere('id', (string) $itemId);
+        $this->assertIsArray($item);
+        $this->assertNull($item['receiptName']);
+        $this->assertNull($item['receiptUrl']);
+        $this->assertNull($item['receiptMime']);
+        $this->assertNull($item['receiptThumbUrl']);
+    }
+
     private function tokenForAdmin(): string
     {
         $employee = Employee::query()
@@ -274,5 +607,25 @@ class PortalManageRequestsTest extends TestCase
             is_string($actor->first_name) ? $actor->first_name : null,
             is_string($actor->last_name) ? $actor->last_name : null,
         );
+    }
+
+    private function insertFlaggedLine(Employee $member, string $date, bool $isFlag = true): int
+    {
+        $id = (int) DB::connection('portal')->table('user_reports')->insertGetId([
+            'report_date' => $date,
+            'hours_rendered' => 8,
+            'change_in_elements' => 1,
+            'remarks' => 'Test entry',
+            'approval' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_user_reports')->insert([
+            'employee_id' => $member->getKey(),
+            'user_report_id' => $id,
+            'is_flag' => $isFlag,
+            'flag_status' => 'Pending',
+        ]);
+
+        return $id;
     }
 }

@@ -539,6 +539,241 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertSame(5.5, $log->payload['entries'][0]['hoursRendered']);
     }
 
+    public function test_a_daily_report_is_flagged_when_the_filer_has_an_active_warning(): void
+    {
+        $actor = $this->activeMember();
+        $this->insertWarning($actor, 'Active');
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $today = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [[
+                'reportDate' => $today,
+                'remarks' => 'Filed while on a warning',
+                'entries' => [[
+                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                        $project->project_number ?? null,
+                        $project->project_name ?? null,
+                    ),
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                        $activity->name ?? null,
+                        $activity->id_no ?? null,
+                    ),
+                    'hoursRendered' => 8,
+                    'elementChange' => 1,
+                ]],
+            ]],
+        ], $headers)->assertCreated();
+
+        $junction = DB::connection('portal')->table('employees_user_reports')
+            ->join('user_reports', 'user_reports.id', '=', 'employees_user_reports.user_report_id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->where('user_reports.report_date', $today)
+            ->first();
+        $this->assertNotNull($junction);
+        $this->assertSame(1, (int) $junction->is_flag);
+        $this->assertSame('Pending', $junction->flag_status);
+    }
+
+    public function test_a_daily_report_is_not_flagged_by_an_inactive_warning(): void
+    {
+        $actor = $this->activeMember();
+        // The seeded roster already carries real Active warnings on some members -- activeMember()
+        // itself resolves to one -- so this test cannot assume a clean slate; it makes one.
+        DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
+        $this->insertWarning($actor, 'Inactive');
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $today = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [[
+                'reportDate' => $today,
+                'remarks' => 'Filed with only a lapsed warning on file',
+                'entries' => [[
+                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                        $project->project_number ?? null,
+                        $project->project_name ?? null,
+                    ),
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                        $activity->name ?? null,
+                        $activity->id_no ?? null,
+                    ),
+                    'hoursRendered' => 8,
+                    'elementChange' => 1,
+                ]],
+            ]],
+        ], $headers)->assertCreated();
+
+        $junction = DB::connection('portal')->table('employees_user_reports')
+            ->join('user_reports', 'user_reports.id', '=', 'employees_user_reports.user_report_id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->where('user_reports.report_date', $today)
+            ->first();
+        $this->assertNotNull($junction);
+        $this->assertSame(0, (int) $junction->is_flag);
+    }
+
+    /*
+     * The flag is set once at filing time. Proven here by deactivating the warning between filing
+     * and editing: if the edit re-derived the flag instead of carrying it, this report would come
+     * back unflagged after the edit, which would be wrong -- the report was filed while the
+     * employee was on a warning, and that fact does not change because the warning later lapsed.
+     */
+    public function test_editing_a_flagged_report_keeps_its_flag_without_recomputing_it(): void
+    {
+        $actor = $this->activeMember();
+        // Deactivating only this warning has to be enough to prove the point below, so the actor
+        // must start with none of the seeded roster's own Active warnings still attached.
+        DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
+        $warningId = $this->insertWarning($actor, 'Active');
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $today = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $projectLabel = PortalSubmittedReportPresenter::projectLabel(
+            $project->project_number ?? null,
+            $project->project_name ?? null,
+        );
+        $activityLabel = PortalSubmittedReportPresenter::activityLabel(
+            $activity->name ?? null,
+            $activity->id_no ?? null,
+        );
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [[
+                'reportDate' => $today,
+                'remarks' => 'Filed while on a warning',
+                'entries' => [[
+                    'projectLabel' => $projectLabel,
+                    'activityLabel' => $activityLabel,
+                    'hoursRendered' => 8,
+                    'elementChange' => 1,
+                ]],
+            ]],
+        ], $headers)->assertCreated();
+
+        DB::connection('portal')->table('warnings')->where('id', $warningId)->update(['status' => 'Inactive']);
+
+        $this->patchJson('/api/development/portal/reports/submitted/'.$today.'-daily', [
+            'entries' => [[
+                'projectLabel' => $projectLabel,
+                'activityLabel' => $activityLabel,
+                'hoursRendered' => 6,
+                'elementChange' => 2,
+            ]],
+        ], $headers)->assertOk();
+
+        $junction = DB::connection('portal')->table('employees_user_reports')
+            ->join('user_reports', 'user_reports.id', '=', 'employees_user_reports.user_report_id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->where('user_reports.report_date', $today)
+            ->first();
+        $this->assertNotNull($junction);
+        $this->assertSame(1, (int) $junction->is_flag);
+    }
+
+    // The member's own view of Flag Reports: no name, since it can only ever be their own.
+    public function test_get_reports_flagged_returns_only_the_signed_in_member_s_own_flagged_reports(): void
+    {
+        $actor = $this->activeMember();
+        $other = $this->otherActiveMember($actor);
+        DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
+        $this->insertWarning($actor, 'Active');
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $today = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [[
+                'reportDate' => $today,
+                'remarks' => 'Filed while on a warning',
+                'entries' => [[
+                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                        $project->project_number ?? null,
+                        $project->project_name ?? null,
+                    ),
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                        $activity->name ?? null,
+                        $activity->id_no ?? null,
+                    ),
+                    'hoursRendered' => 8,
+                    'elementChange' => 1,
+                ]],
+            ]],
+        ], $headers)->assertCreated();
+        // A different member's unrelated report, flagged or not, must never leak into this read.
+        $this->insertLine($other, [
+            'report_date' => $today,
+            'remarks' => 'OTHER-EMPLOYEE-SECRET',
+        ], $project, $activity, $this->firstEarnCode());
+
+        $response = $this->getJson(
+            '/api/development/portal/reports/flagged?from='.$today.'&to='.$today,
+            $headers,
+        )->assertOk()
+            ->assertJsonPath('section', 'reports')
+            ->assertJsonPath('resource', 'flagged');
+
+        $data = $response->json('data');
+        $this->assertIsArray($data);
+        $this->assertCount(1, $data);
+        $row = $data[0];
+        $this->assertIsArray($row);
+        $this->assertNull($row['memberName']);
+        $this->assertIsString($row['id']);
+        $this->assertSame($today, $row['submittedOn']);
+        $this->assertSame('daily', $row['kind']);
+        $this->assertSame('pending', $row['status']);
+        $this->assertNull($row['approverRemarks']);
+        $this->assertStringNotContainsString('OTHER-EMPLOYEE-SECRET', $response->getContent());
+    }
+
+    // A report filed without an active warning is never flagged, so it never appears here.
+    public function test_get_reports_flagged_omits_a_report_that_was_never_flagged(): void
+    {
+        $actor = $this->activeMember();
+        DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $today = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [[
+                'reportDate' => $today,
+                'remarks' => 'Filed with no warning on file',
+                'entries' => [[
+                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                        $project->project_number ?? null,
+                        $project->project_name ?? null,
+                    ),
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                        $activity->name ?? null,
+                        $activity->id_no ?? null,
+                    ),
+                    'hoursRendered' => 8,
+                    'elementChange' => 1,
+                ]],
+            ]],
+        ], $headers)->assertCreated();
+
+        $this->getJson(
+            '/api/development/portal/reports/flagged?from='.$today.'&to='.$today,
+            $headers,
+        )->assertOk()->assertJsonPath('data', []);
+    }
+
     public function test_a_late_report_files_against_an_older_day_and_reads_back_as_late(): void
     {
         $actor = $this->activeMember();
@@ -915,6 +1150,22 @@ class PortalSubmittedReportsTest extends TestCase
     /**
      * @param  array<string, mixed>  $attributes
      */
+    private function insertWarning(Employee $employee, string $status): int
+    {
+        $warningId = (int) DB::connection('portal')->table('warnings')->insertGetId([
+            'warning_date' => Carbon::today()->toDateString(),
+            'description' => 'Test warning',
+            'status' => $status,
+            'violation_type' => 'N/A',
+        ]);
+        DB::connection('portal')->table('employees_warnings')->insert([
+            'employee_id' => $employee->getKey(),
+            'warning_id' => $warningId,
+        ]);
+
+        return $warningId;
+    }
+
     private function insertLine(
         Employee $employee,
         array $attributes,

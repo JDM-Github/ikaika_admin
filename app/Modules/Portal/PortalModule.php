@@ -480,6 +480,25 @@ class PortalModule implements ProductModule
                             ],
                         ],
                     ],
+                    'all-actions' => [
+                        'label' => 'All Actions',
+                        'path' => 'administration/all-actions',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/all-actions',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/all-actions/1',
+                                'label' => 'Show',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
                     'emails' => [
                         'label' => 'Send Email',
                         'path' => 'administration/emails',

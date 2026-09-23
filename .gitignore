@@ -28,3 +28,10 @@ Thumbs.db
 
 graphify-out/
 msal_test/
+*.private.*
+__pycache__/
+# Generated exports: raw Airtable JSON, downloaded bank certificates, SSS/PhilHealth/TIN
+# scans and employee photos, plus the SQL built from them. Never commit any of it.
+migrations/outputs/
+migrations/export_*/
+migrations/*.sql
