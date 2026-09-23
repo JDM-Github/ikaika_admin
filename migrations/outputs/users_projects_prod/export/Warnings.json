@@ -1,0 +1,227 @@
+{
+  "table_id": "tbl0I6oTDN0cuLpA3",
+  "table_name": "Warnings",
+  "records": [
+    {
+      "id": "rec4RkkV9L1vhA5JD",
+      "createdTime": "2025-09-29T10:25:39.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "rec5VZgpu4WHJjTZZ"
+        ],
+        "Employee Name": [
+          "Jamie Pingol"
+        ],
+        "Date": "2025-09-29",
+        "Date Created": "2025-09-29",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "rec5aPwzoVuB8XCbp",
+      "createdTime": "2025-09-29T10:25:40.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "recBCj3fWU4mWnLAD"
+        ],
+        "Employee Name": [
+          "Ernesto Gaddi"
+        ],
+        "Date": "2025-09-29",
+        "Date Created": "2025-09-29",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recIFOPIvmNVNi2lv",
+      "createdTime": "2025-09-29T10:24:37.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "rec8oa1hgPGMnSZmA"
+        ],
+        "Employee Name": [
+          "Raphael Dayao"
+        ],
+        "Date": "2025-09-29",
+        "Date Created": "2025-09-29",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recIPnjNUnWmmmlZd",
+      "createdTime": "2025-07-18T05:44:26.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "recJIFZ37Uu7Lqhfl"
+        ],
+        "Employee Name": [
+          "Joseph Cawit"
+        ],
+        "Date": "2025-07-18",
+        "Date Created": "2025-07-18",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recLiceM73nT3RKmr",
+      "createdTime": "2025-07-18T05:45:05.000Z",
+      "fields": {
+        "Status": "Inactive",
+        "Employee": [
+          "reclJa7CKe9y97FYC"
+        ],
+        "Employee Name": [
+          "Jhon Anthony Sejo"
+        ],
+        "Date": "2025-07-18",
+        "Date Created": "2025-07-18",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recPKo6hCF6XT3UIW",
+      "createdTime": "2025-07-18T05:42:53.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "recIq6nqSSlMbS48i"
+        ],
+        "Employee Name": [
+          "Fin Donasco"
+        ],
+        "Date": "2025-07-18",
+        "Date Created": "2025-07-18",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recdLPqx2pV6tlwJD",
+      "createdTime": "2025-07-18T05:44:09.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "recJkprOX9a9S49be"
+        ],
+        "Employee Name": [
+          "Audie Gantuangko"
+        ],
+        "Date": "2025-07-18",
+        "Date Created": "2025-07-18",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recdNBIX5B94LQbSW",
+      "createdTime": "2025-07-14T09:59:32.000Z",
+      "fields": {
+        "Status": "Inactive",
+        "Employee": [
+          "recwTHx1SGTZhDUj1"
+        ],
+        "Employee Name": [
+          "Ryan Resco"
+        ],
+        "Date": "2025-07-14",
+        "Date Created": "2025-07-14",
+        "Violation Type": "N/A",
+        "Description": "Attendance and Work Integrity problem\n"
+      }
+    },
+    {
+      "id": "recliYRp35zPBFsU3",
+      "createdTime": "2026-03-06T03:13:08.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "reczyTK081I42OCIp"
+        ],
+        "Employee Name": [
+          "Ivan Sabado"
+        ],
+        "Date": "2026-03-06",
+        "Date Created": "2026-03-06",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recnjgU1EA3VrJCVO",
+      "createdTime": "2026-02-11T06:07:33.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "recg10jSKk8j9hdGl"
+        ],
+        "Employee Name": [
+          "Kirf Andrew Pineda"
+        ],
+        "Date": "2026-02-11",
+        "Date Created": "2026-02-11",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recrkWiAtn9S29X77",
+      "createdTime": "2026-02-11T06:06:58.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "recjCpTwsAHVkzlym"
+        ],
+        "Employee Name": [
+          "Lejan Alejandro"
+        ],
+        "Date": "2026-02-11",
+        "Date Created": "2026-02-11",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recwd1Z1SVzPrLiFK",
+      "createdTime": "2025-07-18T05:45:16.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Employee Name": [
+          "Michael Kevin De Mesa"
+        ],
+        "Date": "2025-07-18",
+        "Date Created": "2025-07-18",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    },
+    {
+      "id": "recxtcQO4iGDeHonn",
+      "createdTime": "2026-02-11T06:07:20.000Z",
+      "fields": {
+        "Status": "Active",
+        "Employee": [
+          "recdGoHOlwjsgmZPN"
+        ],
+        "Employee Name": [
+          "Carlo Magtoto"
+        ],
+        "Date": "2026-02-11",
+        "Date Created": "2026-02-11",
+        "Violation Type": "N/A",
+        "Description": "This is not a warning, \ntemporary approval based report\n"
+      }
+    }
+  ]
+}

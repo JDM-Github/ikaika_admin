@@ -1,0 +1,150 @@
+{
+  "table_id": "tbly6jy78GWm9tilj",
+  "table_name": "Project Scope Source - T1 Processes",
+  "records": [
+    {
+      "id": "rec6pmjdnTOdsxfdp",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "SOP Name (from Process WBS)": "Scan-to-BIM",
+        "From field: Parent copy": "6100, 6200, 6300",
+        "Table 2": [
+          "rechyQ9amS9TSh5f2",
+          "recUglhLecFxshx8D",
+          "recHmcVeeNGeWjRu3"
+        ],
+        "Name": "Deliverables",
+        "Name (from Table 2)": "Model Export, Drawing Production, Documentation",
+        "WBS Code": "700",
+        "Process Index": "7",
+        "Process WBS": "SOP-001"
+      }
+    },
+    {
+      "id": "rec7ej8Q9QVoNiIF5",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "SOP Name (from Process WBS)": "Scan-to-BIM, Dusty CAD Production",
+        "Table 2": [
+          "recgeMxTgigOPR1cq",
+          "recILVRWwTYbNI1oN",
+          "reccD1NBfVfkBOuun"
+        ],
+        "Name": "Project Initiation",
+        "Name (from Table 2)": "Defining project goals, scope, deliverables, and success criteria, Assigning Team Roles & Responsibilities, Assigning Resources & Tools",
+        "WBS Code": "100",
+        "Process Index": "1",
+        "Process WBS": "SOP-001, SOP-002"
+      }
+    },
+    {
+      "id": "rec9GEXu8swBu8bIG",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "SOP Name (from Process WBS)": "Scan-to-BIM",
+        "From field: Parent copy": "5100, 5200, 5300",
+        "Table 2": [
+          "reciNZVNpcNbDC5LH",
+          "recjA14PtiJZHL2Q4",
+          "reccFRveuHm7FBHaW"
+        ],
+        "Name": "QA/QC",
+        "Name (from Table 2)": "Model Verification, Standards Compliance, Clash Detection",
+        "WBS Code": "600",
+        "Process Index": "6",
+        "Process WBS": "SOP-001"
+      }
+    },
+    {
+      "id": "recEmxE9lSdPH4RzM",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "SOP Name (from Process WBS)": "Scan-to-BIM",
+        "From field: Parent copy": "3100, 3200, 3300",
+        "Table 2": [
+          "recX1FbMCkYQFh0Fy",
+          "recKJVQ1HqHa74aUJ",
+          "recUZb1dS3d6SSMC8"
+        ],
+        "Name": "File Preparation",
+        "Name (from Table 2)": "Point Cloud Registration, Data Cleaning, Data Export",
+        "WBS Code": "400",
+        "Process Index": "4",
+        "Process WBS": "SOP-001"
+      }
+    },
+    {
+      "id": "recEuktBvU9ztBLE2",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "SOP Name (from Process WBS)": "Scan-to-BIM",
+        "From field: Parent copy": "7100, 7200, 7300",
+        "Table 2": [
+          "recf3zILG2RPrqZR9",
+          "recZc6SivaiMt608O",
+          "rec97sZ3nB84AEz4G"
+        ],
+        "Name": "Project Closeout",
+        "Name (from Table 2)": "Internal Review, Client Submission, Archiving",
+        "WBS Code": "800",
+        "Process Index": "8",
+        "Process WBS": "SOP-001"
+      }
+    },
+    {
+      "id": "recX3EKWIuBThIMrF",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "SOP Name (from Process WBS)": "Scan-to-BIM",
+        "From field: Parent copy": "4100, 4200, 4300, 4400",
+        "Table 2": [
+          "recMBdKcA8u1lhKXU",
+          "recsu0O3SDhYflmpi",
+          "recc5K3JzyTmWtPgH",
+          "rec3WRlExGyEB3mzz",
+          "recpDRbqZbuI014L8",
+          "recztsKrBXf5y5xA3",
+          "recy2NcIHAZTWoOSz",
+          "recU9ADDmVpv5wYkq",
+          "recbtIdDtFqP9dmXM"
+        ],
+        "Name": "BIM Modeling",
+        "Name (from Table 2)": "Model Setup, Architectural Revit Modeling, Structural Revit Modeling, Electrical Revit Modeling, Fire Protection Revit Modeling, Mechanical Pipe Revit Modeling, Duct Revit Modeling, Plumbing Revit Modeling, Misc Revit Modeling",
+        "WBS Code": "500",
+        "Process Index": "5",
+        "Process WBS": "SOP-001"
+      }
+    },
+    {
+      "id": "recbRMKDp7QKwZbGv",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Table 2": [
+          "recfUe5lNmnOT08yH"
+        ],
+        "Name": "Project Planning",
+        "Name (from Table 2)": "BIM Execution Planning",
+        "WBS Code": "200",
+        "Process Index": "2"
+      }
+    },
+    {
+      "id": "recm1uk28yjJX8lWe",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "SOP Name (from Process WBS)": "Scan-to-BIM",
+        "From field: Parent copy": "2100, 2200, 2300",
+        "Table 2": [
+          "rectqxwfgYIRHCD4r",
+          "recp7IsuedlNEIuEK",
+          "recMViX2jTrhLyjZQ"
+        ],
+        "Name": "Data Acquisition (Scanning)",
+        "Name (from Table 2)": "Site Preparation, Laser Scanning, Data Transfer",
+        "WBS Code": "300",
+        "Process Index": "3",
+        "Process WBS": "SOP-001"
+      }
+    }
+  ]
+}

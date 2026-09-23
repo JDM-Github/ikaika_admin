@@ -1,0 +1,2859 @@
+{
+  "table_id": "tblLS2KumEan1DTUw",
+  "table_name": "Reimbursements",
+  "records": [
+    {
+      "id": "rec1DgdEfzhB3BjfY",
+      "createdTime": "2026-08-04T07:23:18.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attISm7b0OruWDARH",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/-2-SVmHPDTPIby0WFo1vsQ/BUDzYd_H_ZVQXll0i7kmrdyJrQqAeeGaxpR6fFEptPyVwnUPeNBgz3Zo3450stno_6rCepeMUvPw6_AV9PVirc9633iqzaJZxOO0a8IWWIT1WcpOe5oD0YJ4tsR4jxxHvLcBU6VuNhk6Q04BJVhMr7jnyN8P6aM_8YwwM4FA5thcjQI1Rq9cskfs_A-Oku_2/kwBIeY719-yUxeYUxzGEATdAqC0y7ygN7jmKb3kU3Kc",
+            "filename": "photo_2026-08-04 Grocery 01.jpg",
+            "size": 137315,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/QatySAspPcGcvQfQkx5thA/JHcLh8t1CZNhhwt5wa10NRyzWI6ukQpcA3A7ysj9PdBI5ThaLdApRj1X36nj9N81vxMe92FPI92tetI5Gdo8iRxEfH_nzLjgHUQa-CmBVtuGOWOTz9pCCpAdtKqSQf1sTE1gRl9aqTCJmcyG1mZIOg/Ov5uFgE02ysPtx_yDCoMhedd5y-dHmQJ6UsISAuWO_Y",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/tOuD_evpEaN-fktcivgwgQ/SfQapCcOlleCxiqXPdO4-4lnMa7EucFGRRtqiConMCYscB_XpZHRdqcozYsuj-7eC0F6j4BebdQrHe0HH5rCD9hHiliYJ4w6Cb51F-PajNKCTDqhhqeJxkUatqMPXebpo3h4jaKZxbvKoktYl4qGBg/zGo6L5st2KeOhVCtTZp-CsXsFtFFw3WqN6tmICg_gnM",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/KEQtcSZ_osAZGNPCi8f7Xw/z4uFVI7OeTUlB3lUaxrrLu08qZFdZfkLQH_QbRzU8QQcrs9eIPxz5cT6WsWyGy94yzu404ZKwx5LBZnVc0ktgeYJHSgLZ9MPtnzc3VhmHKHGH4PLeKbE6pE-7hk4Msk6sfgdj96D2VWxFiCzFJZRWA/vAadCI9T6EfS-BBzSfZkiFcCrNtUc-dqDYmxpgVLdzI",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Office Grocery",
+        "Cost": 2095.6,
+        "Date": "2026-08-04",
+        "Purpose": "Office for grocery and maintenance",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 2095.6,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-08-04",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "rec1UowGq8Ra5hKMY",
+      "createdTime": "2026-04-13T09:47:48.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attK5rODNAq9nLp1z",
+            "width": 2268,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/wd2OJE_f_GZCTxmiENJnhA/-AvAsVZZ39SAYUiq3VvhFhLf-RHNaYiLY-x6zPExWt9ZIxNh_ArzHL50NS4zYqIi3BJZPaq3tttV5eP8jGge_rP-4IqPxYO1reYHVmWcX1p1MMLuQlH6_Nbo7mc45OrO52Bjvf1iZMynbOVf9zZY4iIMbaZ4TA-pkX72irG3wPQ/BqHfZXUmTVROr3wBojBtv4eIY4BHoLFvDRGJl_z_dUg",
+            "filename": "Receipt 040626.jpg",
+            "size": 4615657,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/Im_Bd2uXWulIrBrO1xOypg/FF6Tis58MdVE1L92lfV4yVpoxC78UH3chzI-jlAKWXkeoaF5SvygUq3huaRVMwZ1Pwxtl_7-fqYbbdTIaY3DtTXKHfLYlp2VR_jKB5iM987ykiUUX_fr8m4paudYGqs_6ACtqb8MrtXe5Ou9Prb6Ng/fw3OAyGnh-ooooXCfbvZubaSVjOuPN5knPD1EXYVTAg",
+                "width": 20,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/tLXKCxI0skuLCgSnRqxJkA/5fJgj5NegKWN-l0-oIuhN2iEzZtDbkSHhKkOg22P9fonpWi5lL8l64VcD-qw027xD3pnE0EVjEqkjWoa5ylkM06Kj3SrdeE68YSQc45yy47Df6KQ7zbKoCHzkODicTcoON-voocSc5mROZ8tqs0jQA/5i0Y_i4rkWCc_8u5-bteXZn6PHfMmHnvolHVepbGZ5A",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/JMeEwtuxL_TQYw7xqe_V_A/KVwsZ2LVQ05US8wRx6ZS0skuxJIrS2t_r4LCjZbPpT9DWB3dqD3yrRN_QqJ9n0pD2-SLyHHuB5KEfkHXYIuk8oJA0P5hkM9PUXDAyd6YIkqL2CCBO3oJtyFETJw5Qq8jj2aksw97TM3UrJeLn9IDqw/FZP3SiXRRRtHSbW7t9YGIbL1f1UQ1P_kg2DRaNFDQnc",
+                "width": 1688,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-04-06",
+        "Purpose": "Water refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-04-13",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "rec2LSGuMg4uSyJoL",
+      "createdTime": "2025-10-15T01:30:19.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "atttbTTz7BB46mZA4",
+            "width": 3024,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/RL8mobcudZxTTMYTJJsb8g/0AQp8TzjJLGreJikD7yA_gXlIFDX7--DUvIC3bUvL7CC79m8TLOVsidp-DNTcQ_qUtetoFgjhpX5QkzGoHWGY4I24k11jXOgXddcoTXCqUyIC8SaK1gcLItzp2SQmV-4gnixYkPeIiM0WcxL1pkS6jRQIz_xt4Ph7HHI3GZBYDk/VXayaFVCAcWlrIIBt38yQJY6XJjspKOhgK4xf_ErFog",
+            "filename": "IMG_8199.jpeg",
+            "size": 3726199,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/BTF4WH5C3p2TayhUwp0jbA/S_sia9oShEHRw0ANjk_ut9zPCHVWV17ds1a1GDu7Y1p20KmBEKkC__7QPlMR4bG-mQJIy8-FjLOj5FypnpvRfzT7xHiDbEX2rqpsfgltC5dcGZQ8BoHRtXKZY1GukEQjrbVThvH-RVh14ErYW7GIpw/y2w104Qvu--wzX0qJ9HEKUfwh3OtPpFXHA7uLpaaAKc",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/UnnTCVxyGNz_xTYc8hmmQQ/wePwkroTs2kKC9My5FlzCmG60bG0QFmXeycyXzCIadIXzOSzPs0ZU84oytsQcdYekUJCetaJQKnPJhuGaYvFVIxw1felm3xqoZXDoGAB_900853kuMfO1FtiAJwiopaAAc4CttFqaZQtPfxTuMHdxw/mAbg0hNH_8gQXzcr9VozAYqT7mZZLWAb5s3MP4FWP40",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/92zUIZbz36wTU0zgCtHaJA/_u6fTDHQOI9rhSbdeNi_EQEnwnUoW0vVmJLE1_cOMKPgeI0Eh6BwlcAp8Do1t0wkYrqvU-vKOYKl88qYsFIzKhZKeZheBuUcEDMUEBRS00GY-8gjO8OI6p5bHNCJajxAuTn7eNcWOeznZ6EsNGE9kw/5zWwWvGxwytU6vVh8Lw7Bp8PVln8sK4aTlYkVS3Zln4",
+                "width": 2250,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "rec8oa1hgPGMnSZmA"
+        ],
+        "Item": "Key duplicates",
+        "Cost": 225,
+        "Date": "2025-10-15",
+        "Purpose": "Key duplication for access on employees",
+        "Name (from Reimburse To)": [
+          "Raphael Dayao"
+        ],
+        "Total Cost": 225,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Raphael Dayao",
+        "Date Created": "2025-10-15",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "rec2ch7K4zoviJU6c",
+      "createdTime": "2026-08-04T07:17:09.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "atty3MIuLPw7zl0mD",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/QAyazBl-js4kJTnlsu7HPg/vtJpvTiKcZvdW54BE8Ml3nBNxFzJ8Ztnbe0Hp408zKrJ1AyM0rtfpFd8J4jABOjW4lmxoZ36KYPinJGiTDt0nwteD-FXdbvTkXpqv1ag6uqCbZtW-5G-D7ev2oXK3ca4kkZIrRQVVcYquoqrsjz5p33232v59t8i9aH48qBeDQQ/UgHNtPbVNCQS7g6gQxBdCyXkJAG2m9qxeyHzptOFWGA",
+            "filename": "photo_2026-07-30.jpg",
+            "size": 118826,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/uOyE4XSOmvQf5zthjbvnig/wR-_ugCTkVIaegWh85ixk--BOhqEcFupoo7eMan-MLoBzYOYT1Jc9wzBzhEU-l4xIAARApLai3bKKqcAXxABfhsQTM1IxlrU5zhL2DbxDvwnN-WM-76qfT2EZDHxbP_jmCg1j6sNbqx6hQxNx8ZhHA/yBJ98HkPfHZTnC06c2WNU9I0mK5LUwB1a2CoAqC0MLQ",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/i5m7ZkTrXt09On1bC1t3Lg/ANiG4cRD0LMD0EAU3OvK1_wnlRHSB8GMD-Vq8peWkx80mS3-GUOYZNIQ-9mlCfxGd2M23qfpPWZDREnfb_bL07c1wZcJpaFpbdzs5ciNhJfJaH5dSAMHoYglxSIFezZIUe_4SOsWakjX2g7H-fmc7Q/tRlT8jLd6UqMwRkS65oxdXp8BDTg6ps6ZIu-AtUJ66I",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/PUD3HuxU9BqxJre0mpD1NQ/DMnFO2wdlFyyDTshnguKpulfDhMeMU60LOewnwcR1gf6SZ9ykOnF_nJ_Nc0oon2f0Idoi-BMkF6IPzMGJux1X_tM6-rrEwrkU2nIS_qqzx2j_iE6FlK-46ft85ISX5hvGAxWim6Z0H3fnUimE-Jl4A/rACg_KXkFeJQnyHkRvvN76VwroEGFNYzF31SXDD5Z00",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "New Water Container",
+        "Cost": 250,
+        "Date": "2026-07-30",
+        "Purpose": "Additional Water for Office",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 250,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-08-04",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "rec4oI8YEcm5HMASk",
+      "createdTime": "2025-10-23T23:16:55.000Z",
+      "fields": {
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "4 Gallons of Mineral Water",
+        "Cost": 140,
+        "Date": "2025-10-24",
+        "Purpose": "Potable mineral water for Angeles Office",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2025-10-23",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "rec6du7BeVV24q9lo",
+      "createdTime": "2026-01-15T04:26:30.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "atteA7DHggaph5qqG",
+            "width": 1080,
+            "height": 2436,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/LfG27fTQqPJawNLmLJ6U9g/8kHo8tSMRxqlk_qJxoHjF0gRyAi85RqcGkX3B9Q0nJEHCb5zM2NpCC5RHb9uWgSv6RU9ME9DMNUJ-aNqchAgohxu3m3pHbmO6cviX3cr3uO-JvanXgAnPZcboiu_ADIC_vTrzNjZzlSuuUM6VEiTaSV8gYvGPkD29gsSAbO-Yw8c2DFPGT24ecTFqG2-l9Cb/leylvXC70A5lVWfFTRl69id83LMT6anCqQu-crzZS40",
+            "filename": "Screenshot_20260115-122428.jpg",
+            "size": 427104,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/xO6qUTmfHB_39DviMfy0ow/c8VKfqpO69B-qPCQuIzn2HKfJiZXLXvme9pi69Rp-FRWE1P9B4iEgM0phUS3ExG3uDpxFWZV68dPC3Ug1pwsJmwG78z01pWNH41A2784DJOVGUz63D1AOBFn1hl-EYPQF-j1a8VvD9yeySQQddYuCw/ey6OhhFBwCJiNMrZqVEf8YG0c3mEwgMmkU5lHlQ7Bko",
+                "width": 16,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/VzOWfseruwZwCvR_XOnvDA/H37O6C52FheNQQ-Wah28KewhUjsjShgJm4dEEv8WRJKil9GE-silBK3VTDFA5eZcAYyeuo-0gsl-gVE_Et-nRRjw4gt_wTQvV5dgWx8JuuD1AFi6dlqIEIfpLY89Gyn_6R7mFEQsnOwcQgb28EEenQ/WTxoEtYdn4KuoVmhATBDdsSkwJmtbXSBd6G7BZs0o4g",
+                "width": 512,
+                "height": 1155
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/YE9batIXmovDmlfcOnNSRg/3omNYZtAs9V8tLmvAvw-A939JCNw8Ka5ZyERrj-OKjCQ4_5l4NPtqtfkEVcHm0BNLTnscywAydRfC-v4GrhBNalWNQyoFZndO4LytjxPYOlZIdAXlVCbHhfzgPT0JNb9tdg2vP84Ti8VrpzTmtRkaw/n1S3hauD3SU3umqtJ3za_33_UJhL3th8HXEgUlF8oaA",
+                "width": 1080,
+                "height": 2436
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "reczyTK081I42OCIp"
+        ],
+        "Item": "Water dispenser faucet spare part",
+        "Cost": 93,
+        "Date": "2026-01-15",
+        "Purpose": "replacement for broken water dispenser faucet ",
+        "Name (from Reimburse To)": [
+          "Ivan Sabado"
+        ],
+        "Total Cost": 93,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Ivan Sabado",
+        "Date Created": "2026-01-15",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "rec7q2ESCpOeHgBz3",
+      "createdTime": "2026-07-03T07:52:04.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "att4MClbiomH7v5Xn",
+            "width": 1080,
+            "height": 2400,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/VtiPoK_aIDXtdISq4U8NYw/PcO5AbWOep92Y5tMAUIAe9gyQyN0t_fUVFlJ5ipdghyuC9DmOgv6EKOHs2PjNirNSHqCsS5yKrle-TN0jxuZfu5yMC5VY0hGJzbW6y79ziH7g5BnuYAzvx-8fEEXxC2VGIklLD_4_IpbMLupNTcJdkgIm_XgoBaw-jXf-28k0MM/FQjueB5Xy3da5nLipfyH0YMfM9Q5oPvzAfH9Hl7ytF4",
+            "filename": "Reimbursement.jpg",
+            "size": 408197,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/oI8fta6TGcl7jIrOavNHZg/b3_Osj8ztsBDUq3h4JjIikENfh2kGhacw_NC1tOl5HTtJM8QZdXjLYMaKGyQ-xY2WQq6VGm1oIfo6_dcK_FmC0sLbxLX5huCxtoYyJ9TydNLRc7w58wMXYdPqa31eCJalYrkik0qDqsCfUJWr28ePQ/zdRGPsOZd-2OZi-R9JdCcJ7SYrD-wcr-ELCCEs8Vhzo",
+                "width": 16,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/HfZ_C0Gr7nnqpC0y8fbhng/6o2Mkiew-aAAyDtLNk3OODNt7kLbJ21MKfMcnEbqlOMDCis-G7MtRPF4JppioJyIYOPzH0-_jYYVGIsx4nU5-c8JnbcwNKT5tXwPHBKCwz5I2zI29C8SE3CXL3izfNcf9FgDmHNrPqlADTUJnWm79w/mi_JXO4k4-4HC9ZSYVMBJrPpoWhTYYZfVnvH8zb4hpY",
+                "width": 512,
+                "height": 1138
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/uBfutb-POOZF2b-qeFQqfQ/SAkhpIO2Mo3hjiKVnNVlc0Mth1SYaWrlLkY-XMe1wMmAbiTaqCIcQH8omh7bYjSyVM0EfiC__qa3UgoUe5ayhmy2SMtVlu-trT_E88QxlwArjd7TLBPzGpAObaicyWhp8BjsrduUpq9A6-lRl9kk6w/O4KQvFTHYfeN_aYeNXlpNedKw-ptlvRFqgbECDdeOv0",
+                "width": 1080,
+                "height": 2400
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recBCj3fWU4mWnLAD"
+        ],
+        "Item": "Snacks and cleaning supplies",
+        "Cost": 1832,
+        "Date": "2026-07-03",
+        "Purpose": "Snacks and cleaning supplies",
+        "Name (from Reimburse To)": [
+          "Ernesto Gaddi"
+        ],
+        "Total Cost": 1832,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Ernesto Gaddi",
+        "Date Created": "2026-07-03",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "rec9CKgPFNU98UMey",
+      "createdTime": "2026-05-18T07:55:43.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attSzhK6HVjkRbNIx",
+            "width": 2268,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/dqxNNKRp5kt6cph4Iop5_A/-4_MmEj07bLRXyX85EmIt1H81llK2CG7-B_kNgcAyIfHI_oYDB7UVgVV8QBuxlIV87wOfn-bUeQaru5TXHqhCWIfGBY5McZktqRjASgUcGsEOItJSn3giyAX8phCr_r_KVMIJSPCi8LdHshgP0tPk4kS9ew8RcXwmsD8nZyFY08/o1inVrxxSjPpO0kVHmF7epafi0LWhcoJ2Ttgt-om5Hk",
+            "filename": "photo_2026-05-04.jpg",
+            "size": 4871841,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/nSMzHZYQXVxJn2GxZOCR7A/S2rkbRttecu2x7uAn_jtr3SFfnhJE9QBIsqmHTqMGoU7sKTFXzdDKc0-qN8nl7MGenvKcDEABmwQXqXkZ6CxAo8K6pbtgAc-Sw6JfcRsJBFNsWALdvJmaWpjzk9lvTLMiQSBxztV7g_ABRLRqqZi0g/ED105ucOKwFc3cQ3DArZ65SPR-W35xNDQ3MgwZSDOPI",
+                "width": 20,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/OACFxMW9R3gDlY4tI0QKFA/4G2BxaSwYlnoE_d0flq7jHTa7zsis2rWln6j0d-CFYsZ5-6dw_kbrgVZ85Hi079uLg7OORcwV-HK76J_qeT4dRumw0RzYIqBGMux65yW2cy1X1KQ2SSLvI5lUnontnuGX3mYUqywzyVggMhxpyXG7Q/XJJpJsW-T0kk8hbjBGUm-eHs7o8LnmrTSbb8HlWuKK8",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/BsuraOutXI1zIQRgBl4VeQ/90UjR2hPDMBwY_SHTXXZR1UfXkF-N95S3wKV4qCFebzYYKaotoGDicwPeB6jopJeiSKskA6freB3Oa5AlxwGbT-KUiF-cYXJprr7BjxgWKMra0GxfB0DjpcMZSnQA42ZUs2ucyY9ahnTTAC8Iy6q1w/oOCqBHa8TiBfztZAuDRMihs3vUlScB9hlnzD_JP72KQ",
+                "width": 1688,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-05-04",
+        "Purpose": "Water Dispenser Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-05-18",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recC10FANOc0spCWa",
+      "createdTime": "2026-06-05T02:44:57.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attIlL7EUKQAvR4ze",
+            "width": 892,
+            "height": 2012,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/3JPvR1CY-0P-xOBLz7AANg/Q7YEyMSjDGwa-WBk1VZ9eRpmaVW_L5Hf1CeTvshYPqKXpkZJpHmlwW_wOvyEAw5XVSwD9timHEZDh4cli7G0M44l0865pWwyurOW_Y1BZjBlOTUDBmNTxN_RLFiNaskgX2TenOsVqVEdI3ntBLAmnA/56oW7v9SbiMFMmlr4N3-kJkoBPjr5yzAAjpHJhWxDa0",
+            "filename": "Media.jpg",
+            "size": 151666,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/D-POTe-kl_8DJsaNtKqj0A/lBgJxfyQhMKpRKh_IWzNBSB3NHFjBehMKPKtc3GdswW0UKzbwyKkFCj8_j2gN2u2VU7CRNYUqwtH2fy3yMXa2jeVwgkdicv3je-YmH6r7nMTsSd4g0u_1bTfFP-gHJ8uohLrbasWo-P2m-WPVgCKtw/SA4gK2lfxMmwAXVmSS-hbI6GLR1qi3O2ZRtXMbTDaYM",
+                "width": 16,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/W7BbDPxFRCwNYhq3i9w14w/2qbewEVk3ARuSxu47F_rdA5C7FPaS7Okl6HtbrjGnZV-TH8HijMvGJwnIVs6rcSWxsaKlCTdGA1Kv9JLFB8myXzQgv5LfyVnwsPnvUrRJHiisPxf5RT_PnhM4tthlm0_1bps3RVkBtRVfi-mabMOzg/qacomxVDdY9MwkZLymFclTnYl8KAWIhsixssHPy66jc",
+                "width": 512,
+                "height": 1155
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/VmxTiUIVsMh5KpbxQRqTmA/BtqbM1ZKUxlyRLzSfEJHXzk66aIpDNiSmKXY2Q-B5UvpQqBzgxDuN3Jr9bqJXf5ijv59gLCBuPKAYOQOmqx6kPN4PqSs6qaK9_V_qEOc1g7JiDt0Aa4kqv_YksjjT9NZPjj57rTS_SFUvXeF306q8w/RRr6hzJowygqppPOTRyv2-_sRKEWEWCXrvrSbv0-ddo",
+                "width": 892,
+                "height": 2012
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "reczyTK081I42OCIp"
+        ],
+        "Item": "Mineral Water",
+        "Cost": 40,
+        "Date": "2026-06-05",
+        "Purpose": "Weekly Mineral Water Supply",
+        "Name (from Reimburse To)": [
+          "Ivan Sabado"
+        ],
+        "Total Cost": 160,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Ivan Sabado",
+        "Date Created": "2026-06-05",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recETQBdCMCeAJRlJ",
+      "createdTime": "2025-11-27T23:39:06.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attHSJmBaqKTo08Fj",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/-tLrrDLIdQbumayAp-dfDQ/WnE6rbM4Gx9l_E_X1nZyUbK2tXo_lilmpBoYHlWJ59hswF1CvCmoktBY1_yqJoq9c4RD5lgnHKjMIU59MxXd4eL_KY3c32ghVDzyKmsdew4oBxGNiJWqQkjp6x3DGjLVSSi13_4MrZY6x4GSS2vW1dH5-slRlm04n1-VPBFGoPFXxaGQPbdHOKmKA9HUUH7m/RjTv_2uldCAEJPtOMUiWDeNCSueirHlr0ZXrNY7A4Fo",
+            "filename": "photo_2025-11-28_07-37-33.jpg",
+            "size": 79424,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/85iDGKjzHGRVlx2cUFXs4g/9jwSr_mqrcY_9vH3iolTMmLgVrdgOj0Jia_uMIJBjbEmYe6_YhDgDjsGCx3cJiy6AJI0vA6Wxtc0z1KL4uRN4lthVMWkO0HtfuvvslGHFjiCbLRvXTdGHQQcgyuFVMzM7Q4FOmpdXiABRRNfM5yBGg/OkKsp1DCGuZvmXl7CrWCvWu0RU1e1rxF6Rd7Via8BVo",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/i8_PAdA4i4zRlsOWwpPQkw/XYro825GYdObI3k-ErEECHpAauM93aWqDbnzJYdJMTJf_allKczPZZ7mgvZxNmHIJ6MZ4u_BLqOPZSs09XCIUx-ahdUspVrvTIWSY_m4K1mMXGBuqVSN5xcQpeGhDi9JZ7oKd2ShYoZeX5WqUTIYvQ/nmgQYMmxshZ0eL6ddmCLGqaFe2zkWo8D19ewU1YLMGE",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/vsDX8lw5s2dk7zxQ8NggiQ/9LiW231ea5YqP2AyOZAALwRb2HYw2ipWhCT2GkbW-NVVbfks4n2suEpPSdIu3VQbwJx8GcsV0wfvBfslBFoQ0v1U_3pXwNAT92mEsQ-WVbxXIYHqQBSbZqcNa37vHmA-Fc6Pu0qTbCbLh0Z3heUIDg/c-yEK-I-rO7tLL0J3EyIZsYzm2FsCau0xyYvNrY8f5E",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 105,
+        "Date": "2025-11-28",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 105,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2025-11-27",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recF7hdTglPjmb8Ax",
+      "createdTime": "2025-10-15T00:18:32.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attIq6kU8WDGz6KI1",
+            "width": 3456,
+            "height": 4608,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/EIi-Uu3oUVHFVPkhZhiueQ/4LUOXq_diNA-oXiADrj06GgwwHxxPM4Sy4oF4LGjEQeYyAhOIvTKzo-gfG7Oh7v4MKx3pJsUJr0aqoK5eViy-6hJ_p4-1rtORpH46nj8gCgbn8KlozpaUn7FeYeO74WUhUuGtyGpCNgwGjGmzxLskgH3ZN0nF94qr2Aw32LQoP8/mXW1gxr1CPBmNSZr-LkVppPMJkuLHVdbvVwrnCK6vdE",
+            "filename": "IMG_20251015_080908.jpg",
+            "size": 2701657,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/VYD4Mgmdt9d82_YuSgPC0Q/FqdQ4TCh4vA1kdZmCro2P6G3F-57mfeS9uV-vb7HRi0JJw8nLs3bKCW59bSIZCDDJ3EagCaDo3JrnFqySF4c01VTx1P-xQfIrtPp4N-xqxHu9hbWYNM6KdDUnLFj2h2BsnhqVUfwYoT8u02ntlWdbQ/3Ck8DyKX4U0fTKIG6pdZNZyr9F2FkaxtUcGuJrsySho",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/RWCvaGmq664K1SD4ALkOiQ/hTFUfFspM1H-IE2LbWq0nvt9GCky15othbM9Cz4PSdU_LcrpCD8ufUmhhcTs4lAXfEEL7Q1WUnsmziTpbr2Ui1klb3ice3uwypqKd_4Cv00C_JggLfmdBePiwrHlwNZoZpwt50zH5gElTW30cjRPvQ/8yzSCK2o1s-Mj_yKhp2S1AXoo_SAQcbAaji3VNikUmo",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/GKO0ob2ZvpuXJv4hwV-pRw/06o_ZTBVHDakTWRzLrRJ1cyC-10nXDwjqzYejy8yKvMTPJEqDF594mKKMsSAcNNN5hUGGFLDrP60sz4ghMsVM0KvTI0m0mgmyEyMApChQx0HrqSEJNpiz-If6fK-qVqAyydZj8FJ7hk6ETa61vCgHw/_kdRDOLMeQDqqp6PjjLF1ayTj2FJyLDc-lY8hIUCDxs",
+                "width": 2250,
+                "height": 3000
+              }
+            }
+          },
+          {
+            "id": "att4XYIp1xngXrT6b",
+            "width": 4608,
+            "height": 3456,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/4PsIrjgVhm0u05gX13-XMw/HLyky8S-q2LJH4IE9aOi67E6Pm6PmcHGY-34jrEidy_36Wx7hrsS9DX3wg9GoRuWamPSABVrSWp1tvMarPyQ0lF1J0-GDwOIEoWsS8f4lLLQMLKsLcCtHEWyrT44wOOmhPFBxm_YMmEdX76zjdqqBEUGX0S2V-g8kFLarEy2RmA/Xgnra9g6A5gdpBV5BtACsMbr__WvAZota9mag6Q8eTY",
+            "filename": "IMG_20251015_080919.jpg",
+            "size": 3318646,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/i3zZ0ne4J4ZNfU0ANA1BWg/ojmIIldIKnwgTr_TdpovNGNn_xMUb5a2_X1VWb_1T6cFAxqQAw-ALMOmYa87YVxEA_SllHA4oOq-zgod-RSOLoWs_9MEo7IjRd8yD-wLh2t5E4WG-USeElZ6vruE_WiDPEl9AeVmuM08Nrgk9oFfRA/PUjVHyuvGM_D0BT4iHaGws5x0raGNVQrLJEQv8jnux0",
+                "width": 48,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/jIEhIu6YaHRlJ3hrLglmSA/SgrDHoBgr6kDTOA83SomumIDDYnu4KZMTKQHvp8HZSiPFqe8qH4VhwTP_E13_YBKEfkL3HCEuy3pznSsqumu-d_BNjc1NGvn3tjv3wI1F_KZRbLx1wjMW9Sp-PflyeGXPZbJ0EY8Zjh1_S5dfm4PIQ/puBIhrIC_64cRvX-o4TA68wz460ZtD7GPn6kFaOXWBk",
+                "width": 683,
+                "height": 512
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/oQPi7Am7Jn6tr6AdqN-X8g/Vxi9iHp273kBXNn0BUCq-igbFTlLGw5qs8hlKSCNH7TTAlB7PNvaKs-1VWRR1Ba6_dDCrpwAbXiKwplHJZeUf97jahHtZ-d2zYznIvShshyHyatzKG6Yh9_xtstWvqDUbyq7KKZLimNqJ0uTLQmLAw/QyQXjzyjol9AgDD2VC9weHYZL2fMw1X6jcKxbgP308c",
+                "width": 3000,
+                "height": 2250
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recBCj3fWU4mWnLAD"
+        ],
+        "Item": "Cleaning items for office",
+        "Cost": 296.75,
+        "Date": "2025-10-15",
+        "Purpose": "For maintenance of office. (Cleaning items)",
+        "Name (from Reimburse To)": [
+          "Ernesto Gaddi"
+        ],
+        "Total Cost": 296.75,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Ernesto ",
+        "Date Created": "2025-10-15",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recGnlV3EMikkZiXB",
+      "createdTime": "2025-11-27T07:46:42.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attJ7JRjxePxaH11O",
+            "width": 3000,
+            "height": 4000,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/28AdaPFz9SNu2kwG3KzzPQ/oi4ND8-A22hNg9oa5FgONhgVJ_ycndqAiGvHq4-eaUxzXvJ-EP_8T8w5bI6ZbUAurlANCR86X4o1P9ljSyo-_U8WH4XBLyR8q6w_VYQwHNXxeHufqkpxlrAnBO96gvu3fc70LqNYE8yANt7pCF2DZycsQzR12AIKeYTnQ3BtrgU/qbFczqsoDtnWQGmq1Pwwx2LL5C3tzUM9RH1FDlHXXs0",
+            "filename": "IMG20251127154526.jpg",
+            "size": 3240571,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/MPdhx9kfPFxEa5FVnlUc1A/MyzI-bGodUYutrhSa-XhhXgjG5wlfcf_l7XdzVw9mvpnyU8m5vRhwUHWcOpNJap5Mb-h6GUdhggg_PXUqmOQyAxUR8vrkviB6M3YKF9qwfbpbnvq2uPGT0wxH1CD9nec1e8EspbaNJ2t9Wrr8tNeuA/f5RVnrDVwStvapUWYosSIamnaL4-2RbJ-QeRVog-N1I",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/wEJcEZ99jrZvRNBsPwRWjg/7Lj9xgrEhVmyTd3LS619r4G9aYzLNR9fspxaYJqgqH2Tf6e3GF_cf2K1A8DJYM4dxF6nDPaYgupqHaF3y9SV304-cI6hCTUmTEwjA0zeGEQ9JDbDMTwyL3YJoCXWxNRvtrEIDxac8ciN2bcdzfGEug/lA6ZrsUK4fPAdJdwKYknYCpJCrWV2JmModrs0xGqRZQ",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/D0ci456A11pGrJzzSieMlA/K_rx8WZChRqjlXaSerl1jL_j8yHBF_uWnqkxyJsJWxTe6PJto_sRrjXEfUgaXJPnV7YNnauhrDRuhOqcV5qdVV0UfBxs_4MM7fQUljLVj_S4M0VboPlygHwOZAKzVdxIgLEWC1RbxY95OFmowsLuig/AUYUkiZDBNpj2VxROiUSIbfUbv7VL5jeDDWnqoUWmTo",
+                "width": 2250,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "rec5VZgpu4WHJjTZZ"
+        ],
+        "Item": "Key duplicate",
+        "Reimbursement Receipt": [
+          {
+            "id": "attL8NKbAmYpPdHRJ",
+            "width": 656,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/mVqBWsQTorDEl19eJeiwxA/zzRxoDrQbC4lz82LLXWSHLF0VBgXv9JFz7IKOTwEqkAYXMjvUW4kAmTq4LsHkQqMKeV_gpmiYaWjRg0kFMXwnHuTgp8CAsWz_2pnI0qDwmO5YlRP7apOKuO_oWGmhKjHtnGPBvo7ep6cdYsVh9yyE5IyCwaAcFZCmebbXCl5tI3Bt9fLp0zbLj87u0fRfy2J/eD2SJS2L2pCrd9sBEXElOPUrrK9Tje5zxW-EW6ewedA",
+            "filename": "2026-01-09-GCASH-JPINGOL.png",
+            "size": 103174,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/X5H5cEzuhC3beY2iWUaXYQ/2ErjA-2ERPxbxx3HL0UejZzCujkC0r-Eg_k8Ds-FrJqYo4qligb3exYPWmaPS3r9wrWOTw4xXTjDZWr6QuKfezYISN4TNh8GTdHXX0VdRBhYmSbmw5A1cg1jK8ik69UYeladAtuhfvwz7--9j3brOw/4hxd1dJmimMkyzXW3tQmLJq3YwUEDRegMCWcYAPOsUw",
+                "width": 18,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/wTWSqeSVn4DCJd5G-X2lEg/LLQasUc-vqQJ4OIv61pmaffTZyYEZx9a-Hoc6WgHYh4r4-3FdqxjSqmVwwCDdMFNqrL7FFzcj8fFe6kXKG7YH55MVqsivPLEXFvtP-6ibU8JLUvUa6Nh-66YjmUEVCUvlHgbVGrxoz7G2vhnNOMJSg/B5zh30Gyuh3VlYUarnKx-f1UthHBJk7TYfxJe2wZN0g",
+                "width": 512,
+                "height": 999
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/3fsxS6x3nsbugGs1O8g5HQ/Sa_Mybp-zoYh6TFUTG8ykHkUo_Dm_2x5efOkKfRMdgLk2FLpH9rrJDTgO7qfSmZTDYYst7rjHWNQTuSjqG1fU11XVg9ID4qTGX_CXLEdxFZT5dHciCacUP8SaogrQxOkIkK327E4s4KOtT46ycl78A/J4XZbahXFzCOBeJKb9YkM-Mrd1MasSXeEFL-vanUwJU",
+                "width": 656,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "Cost": 75,
+        "Date": "2025-11-27",
+        "Purpose": "So I don't have to borrow or wait for the others whenever I come early",
+        "Name (from Reimburse To)": [
+          "Jamie Pingol"
+        ],
+        "Total Cost": 75,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Jamie Pingol",
+        "Date Created": "2025-11-27",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recGoJE0QA1TW5KtJ",
+      "createdTime": "2026-02-12T01:09:59.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attUvW4toJgrN4M71",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/FbOyvlltGx5_NESWZEOVHQ/v7JURMuu7i-2MwN0g-yYEkonRA3cxCLPVEvrycWNAh04XAPn912d9E3csCrj0cD0meDy9gcpDlJYZQtp0wLGU4amr5O-qB4fwhM7yj61CWBzyR1ezm3ArmKfJsBcy9VSN8dLD0HD93y8nxTuG0MK9f9ApJTGsLM1RFdsICKt5cs/nhu13X3mFZMoE4UprlO_NTXSBhTTC8EOD5KVRDiBd-4",
+            "filename": "photo_2026-01-26.jpg",
+            "size": 116858,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/Gwwj3IB6ruxq5gbPELthzg/U4KH0WgbrkDDuaP58Hh31ucf82HY2zniZ4bJDzu6A48cICEUu_zW9jw1nZPPjrMUX7q2-zldOxh8i-pYAmzl5QCW3xq1DykYC3QgcIsWF3VnGqyCn65k1p46ysMgm6jhNK_3G3eqxtcJsiiPpq0Ulg/JlNKHFDWiSov8f89J8G2TIeD6rZ-PiZpjcpnA_nkxMM",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/JyvPULGE0dk398I7GETjyw/Seh0XGyDuuBcti5R921McL4qGWnjrKuffmVjR3QDgMZoG4GckQoTEkWgkfdJli8xRkRrilucLRkUySOlbWAR20yYiwJNLGbIinPNoMWG5Frfg0d8axmChi96TR4ywMrpWK0PnrKcdFqWRElPAw7bgg/NargT2gBrrq1GK44nVVBC8mWTUxk73PO0zi91HHQvcs",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/QJOxkunpATRRgeHwECkp6g/3FxSpBTqjWMz8HKEsXoi2EBIZ7dzGcq64v1dynZ5WXcqEp4WOlFbeDwpM8YGCcgEJ57srQMbe2Z_eqJEhB_6gGLJJKnbcI0ksBRzYbWIvyt-6OwZ9c5B2AIoXp5pfwot04QZOuhcf-eCEg8R2XGGYA/JL3dx0Cyz9nbh2p5-Zla8khyX7CeoTYMUUZ_7nuPrbU",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 140,
+        "Date": "2026-01-26",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-02-12",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recHSOhiDLH0NPHbz",
+      "createdTime": "2026-07-20T08:53:20.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attctTTwjOxP8XAB7",
+            "width": 1760,
+            "height": 2576,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/z1coo-DIl_bSpVrMrZwgfg/_lFfFSCeWNn16CKde4Q7qRNozAs9N5CVz3kNo6ggB3kAn52uaIWDPbEum1qVd-GsoneIYGlUuYh3LdFx88R16S64mnU0uuQmE6nI4nTNkpmcxFUHcOAAodNtk-A4QbeaIo79LJBEJVwvutUCCO4g9pZBPEIaZJMGGDQoKHJZ63E/qgikdHN9UlxcP37gxFLbo7TYFgrHSKkqc1suE6jzgR8",
+            "filename": "Media (9).jpg",
+            "size": 752543,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/tm4_UD3JFq0iLCBMUlwxTA/KC-8h1a5yfvvNQfxTly2viBzcfDzr6DVaProPk6zSiqeGm1V-JZsX8MDv2V7wbQmDUuriRTiIsoG8pvvekmetSXePvGPkHPoQGCoflvTU09f09SNGuwb0M2onmeGyXEy926EcnxXVpie8ai_wHLi-g/yJGIu9vnhnQBN188o062S_XyK0UN-pMECo03SOJLU40",
+                "width": 25,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/0ZyIHZOTbEQi4NXy5CoNJQ/s9yADEwFcWkJ27ky-4YgMYPqOAifHchNRvJMRLaOO5Y49Ym3DOe2aE-LXUqxGElv3E1hDwrmj24p3s-8VQRC93Qj3eOYTcryhTRXjJho_BsZ0tT2cbwH_wv-dPHP5Wr8Md3-xqnPCw-J3a4-mE9l2g/GAS0RQLqo0mli7GheLm4p0gJyOpMFIH8G1h4TaRNHmY",
+                "width": 512,
+                "height": 749
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/E65A9hZycUaApNzG4caM8g/spJZpbiEsDbxM4iN9YEFzxi2XrKmB-mckxwiENSSSdfWd_Fsi_KOuE1HEG4m2BLFLDqojUw1r48MRb_fdlLJYmRAAzDprfgCEhchPdeTJl2nA3_5T8s4jRex6yxczQjpWX97XrhYgERfvCs6tAEH5w/zqTIjW4G7QnEvc5JH1c5DY_uZtovrTRlAAwKc9fBrHw",
+                "width": 1760,
+                "height": 2576
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "reczyTK081I42OCIp"
+        ],
+        "Item": "2 Gang Outlet and 3 Gang Switch",
+        "Cost": 430,
+        "Date": "2026-07-20",
+        "Purpose": "Faulty electrical device replacements",
+        "Name (from Reimburse To)": [
+          "Ivan Sabado"
+        ],
+        "Total Cost": 430,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Ivan Sabado",
+        "Date Created": "2026-07-20",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recIu5egaa9uhmoV5",
+      "createdTime": "2026-07-23T05:22:36.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "atto5HuOgDzfQfIXI",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/wn5nhSoZSD66Tov-061jeQ/QnkJeyhx-ghEmvnKAW_1D6vtKAvL6Cmugi8hsfv_DLliyLCmrOOEGWHumMEYWm8oFz052WkLrBcy3tKwA6Nhz_rBZmX1jTb0yXGO8xwIcHTlKAxswlnLb8006PCUEJJXAz7dvu7iZDV4pOtKs3fz4VYoOHzse0y5y0jJ-5KXGTQ/c4wvCbXqTNlSanT0vkrZ55XidSTP4LMQDRIZj1JoZqE",
+            "filename": "photo_2026-06-18.jpg",
+            "size": 100739,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/bq9QGeC4romDoZ3RNok3gg/7W8dqC7H00IomBeOAPQEeutt8tmkO4Lm5h6YQHRgSgnKq7lNh4_B5DggM0KbBy_gkArQBoKyvPxyaYpZCeqEsZr_mSvWerNyhxQsAoym3Jlg0FI4RwO-ScmzZnwyCycnmTxhp0f9G3f1_lgixvwbgA/3x524yoSylxGYpOwYf0AbOQLUU-GP0nJdZA6ZMa4YHw",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/PMI8Z3d_3r0cJPzfHqH3kA/GUqjyGlXaGZPJsu5p-Lm-hup-iQZb0D964czmOkTJksFPD5AKqZxBrP90aac_tcT9FZo_96VhJFm8VcBHU0ZBh3HAZiw2n-kZqSHSQCUPLYXp6PBm3Lwnnn3iwJDFhuzpEcZlZW4j4bq6NrF6xYtKw/lSJ_TEbo88mTfiM4ycMC1EsJcoWuBfxooD7O9fFzv2Y",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/BIwjODvRIqNrG7Oebr6SVg/DAP9bx3alNFK4HyqWRyntBN6XLC8POt-jCCzTIMH_Ym_abHwvqaz9CA9iVxtOk1SlrAipGbyRPFwcLN9jXg-_itzfNfQKr-HhgHnBiwfic_KkWgQdBOBaH8_0V-LBiWsRd2iS7OrbytXhW-vhkpLYA/aHpU5AcPMqzZIxdinpAQHMrvyZKQry8IbjIhJr12ivI",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-06-18",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-07-23",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recLjo0qlxl84LEiA",
+      "createdTime": "2025-11-06T00:15:12.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attmtFMjCENoSY9oK",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/-ti5Ku3qnOWl9bBPrcn0_Q/I23D_Z9wfgxD-cQFn3RCyT9o2Sznns4FkFTC5VqSyY_Iz9CnuZc2AwmcQ4c8LuHTNDTu2wQMYFtaVJtxlFQP6QhZU7Q6zHBMpYUjH91ySMeDrcdUrxzlQlzMR9q8daQU5rDOHezF5M-8gZYI_Ho8nEXbhOZRzrGneNy98iRq2ec1DOC8f5oXHfq3RMLcFs6e/vP5RXKAq_JGnAw1NUeKOxnU-vUUPru48vFNDf4_bIJE",
+            "filename": "photo_2025-11-06_08-13-22.jpg",
+            "size": 97708,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/7ctkzt-7JHlMSpSdjwq7cA/WVe8Xh2kn4sVJlGLt8YZxcztPB7c3Hugn1gkTtlATfkB-ZYZVlVLeUowrgPozCBnIN3nxGSGigRnPD0Ev8iDfqMJqglO_VA0ABSALLWot3vd3PDowI20s-rna4ryO87Bir_MJMhCUL7JozHSJ28oxA/EJkgwQ54xdbPGkyl9By_MQwATY4LZASNFaj0EmFgFOk",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/qNKWmxHdXunOaao4aTePKA/V4dkbmq9RSGa9S-s_2KH0lfr8a_sso1Lw8kkwHvnuhn6MWQwT7cJzoxnQ6UJ-8r7afEz0FoC2AjC1sNf2tCi2fJMB6_m1Asz9tn4Vlov1eh22FK6u51lCKaXLvfR5DCTzLz90GiwgDMz9EZwNHIVgQ/K_ds6T4h3HjlNc4DyZTpkuAqPft1edPPXkdzLakIg5I",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/11I3DD6gXv-d3xm63ZMOgA/LZd4e3MNEaJY5C9ZOTc1Itk4P3Nnn0HtelsXLWnENjjyQWdFMAyzuEV9Ock-wua5NzADbgHYO5DYS27F33NXJkXSProQnQOkeDTbbe4JQ_D0DGii-C6kQ18SclyEYsv-DUmcvtTjtRgitszW8-7kBg/yAaqSLAozBDYqJ4o9Oqdn6J3gKaeOgbBhDDntLmZnNc",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water ReFill",
+        "Cost": 140,
+        "Date": "2025-11-06",
+        "Purpose": "Drinkable water for Angeles Office\n",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2025-11-06",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recN0Y99eeBnC8fdr",
+      "createdTime": "2026-01-16T05:19:15.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "att2jBWgX3LlLrlvu",
+            "width": 3024,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/UrK5hF6U_yErO2JAibZKGw/4NXF6JI5mVAWQu8YNb_TTltRND_rakhrh7aEwSeEOEBQAiPZPEKu3Nx18Y0s-nEJphV-W4YangaNnFiPGNyyCyE0UvM8Lx_Cgg63suS7mRaMWhR_qvO7Zcd2XndcFNYqZ7804ZIoVkbwCRHYfZdogLesqTpUWKpdOeiejgJVBrA/B8woZEj7frKvoe_6hjwmuIOTpWtVcMXsZuqoYkesb88",
+            "filename": "IMG_8803.jpeg",
+            "size": 3958634,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/aVLIMaNgA5X_YpQdb6hxrw/L7ySb43IuqqyIjryOoTLiIsirAVRzbkc3T5jqV8D7MOByS9i1abgjGBvtbuRXjELra6FBY87T2xxqvKzf6vUaE5FnOM4P0D5xjyMqgN-cXW-AYeFkFS66PX-FBX1A5NASOdIzzp4gWYorzYLzhQtvw/ohKeh0nu75khTrxpg6gQxN-rUSEmMr2YVS8-SunXN9A",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/ml6_adEehCnOYTBdOXjpmw/nmq7zMDlszCJbaE8ZhTtemUAdntLRSjHNij8Ea30FVFFoX0AW4M146aqYD1hXbRcucJTgPvG5Kgs-cn0rw93MqOUf-oF5C4OkvEWYcxEG1Sbc7ZepUuXZU9p15V_a7AaL25_Ix0Mt6Tum2ntC0FXlw/PqqFUKIjjQdy6U0qy2FH4YQDjjOnX86XACCapEh1yPw",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/mnpnTYN3jG66gAv3EiuvYQ/-KhFJSpIMkLhvh5JuBPZRL12MvhtU1aof96X9vJsFIEMeb8vOqnTwVa1-KCb9ueUqJor5dFecBOdCAOEl5x5k3KvFNS5MGMy0pesvVzjAOMV-_GyOUU71DdxZmRRXZDRKvjs5amgfG3BctpqTiYATg/JmgpPtnPa5BBiJ6pyhTHVOlbYZQZmUI5-7MPaj9rV4E",
+                "width": 2250,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "rec8oa1hgPGMnSZmA"
+        ],
+        "Item": "1 Ltr Alcohol, 12 pc Tissue Paper, 2 pc hand soap",
+        "Cost": 544,
+        "Date": "2026-01-16",
+        "Purpose": "Cleaning essentials for office",
+        "Name (from Reimburse To)": [
+          "Raphael Dayao"
+        ],
+        "Total Cost": 544,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Raphael Dayao",
+        "Date Created": "2026-01-16",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recOFGW03Q6mtjXuM",
+      "createdTime": "2025-09-23T09:31:03.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attANdxBmxP5ZM6m5",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/VPmCGc2GbugGcWYzBmTuKw/xEwH455xNWqbIj27PHDJniZwUNFiAlbmEOOXUPA4cj_lCZm0nLqAnDLTxLZ9ivE_O61tdVKojVkAjz7xPfGkYZsmxLljnhgsJDeqo6hNli0clEQItWkgluJSLk4CPKryBUYu10r2oxNT_opjVaOCQApe-LbYVTwCxTd1jVLUTn0/nedwtI7MQLh5Zy57KbHvX5zb-BjmObNqZM_aGHgzVgo",
+            "filename": "Water 092325.jpg",
+            "size": 136977,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/k-MibIJpdVPVzcktDDZViA/K2H0KrMTYcJcQBH-dmET9gPtwO2KxHEZzSYC84Uxy4GBCGMh-HACbfWO2WdtoNlr5bLSzI7mhMOgVlIGM0RtL4Y90FdTdW_NBUrJ5g38p4nljrPol_MmWApa6yL_DQCOWEJV56SZ7oaD457PKqsCWg/xr8FEJIKA2VRh2EOZH7YyCn5zSJ9nxSDWlpRflw6wUI",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/c1ueOQswEilDCVMg_CZWFw/jCKNd0hskqdeCT22-A64dMQ7_S5_Lpdfq0n_booe19dU1QPGkYF9HnCd9TurHyN2Ymhg7V8KcBhpgfEV9Xfytkpp6kWSlcoUorjHCDAXW6jL2wLTBO21idiTY6D6ACDocBTljnOa7CrxA6aJc4i_TQ/QMbQtbxtijitQh-EaGzSkTxoA-aNDj2lxowwDudrNuQ",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/JdRLYHoiMnU41AsurAQoMg/CnFWAUqiUjseAeD_rxr4M-lx4_Ch-bp6mj2xU9pKMKZOBgSFkqOxyBp_ASsbtMZIbetgu3Wai1OGkYtbPMQE4BX28FMC3Hd_c7Svr13_ZoByqMWFbuIUsA67uPIzOFTlri1tGhGfyTmQNEduLpV8bw/e4fcthhbksvQhnEAN5xXEmxQ0Yl9kSaoEt34TS4MlQY",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water (4) and Containers (2)",
+        "Cost": 470,
+        "Date": "2025-09-23",
+        "Purpose": "Mineral Water for office",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 470,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2025-09-23",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recQbZaQTAa39A29j",
+      "createdTime": "2026-02-12T01:13:11.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attMe5VIhRPXgl7AY",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/mIJK3P5IIUuKGa39bkun6g/ykoWxi1bMRDbiBe7081C_UFsxOW7KeEUhmprXRYLutSTj-kfMyCWKxlLUM3apIzT2Ho69cZeG04wBaimwqZDzbWRi7nrXj6EJVuO0Ns60sS8Aq2j-MpgMb6H-Kr1R4oNLR68Gcc_lo9RLRCKEffYyKiLmAS0djvKJYIpRifpRzA/uGlJ9CafJSmpTdz9RGNCzWSrAK92q28pqjUJ_7htPVg",
+            "filename": "photo_2026-02-10.jpg",
+            "size": 101277,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/j0en5GBTjBkCK8SNiPhF0w/QSc0vNDzPeBJ4MXWHI28lp4fI-uu8HsKa7oyi_MDY0SDSZtTyzwEqO4rJ2vp8ZuoKh7L7WZs3Bbm2H33bkGmle46CZIRsfkc2pcScKWqcAUlkotVZ1SvNQtxn4EbfWyiZoetUBSSmAktrGi0ljDFEA/2zzfEKpjgi92Deh1PrV7iC99-2A7IpRR99ea0ItvYek",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/AxjkWqpDZ1lBqXifYS4ZXQ/Ha_jmQqc0f2mdw14DLIKxjs477YJEa3zAur_T1S1a5YsvvMkfdcvoZFumjUiAOwuATEI8laboEtmZSuL3Jdp6mDTBtNCYuvvCC49fFTmy6BPyHuOk_Koe-j1AI1iGlsAOpjIshQpdvpyqn5Eff2vEg/RqNr0L2mv4-iGNjrhBUemlQ5CM_t3JBBfopWy-DZoNw",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/3urbv7Lk6BJvJvwADMKgMQ/zBFjLHGrIf7WGj19k6G9CJN9GVg_VNWKsTJ26WQ-5O3ip0cmndceJjjfNHubIKuupax-27MZqQnqFy4eojaa5ec_hx1ogr2ho9aiCEZ5yJm_kyMomZxoVnhnMUJNrJCUh4iwBPivk5SLvL9EUNmomw/7v0qKfOShusV_rm652R-ITOhiOW2fEjQ1_0tVgSnLbo",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 35,
+        "Date": "2026-02-10",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-02-12",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recQmc5qTL5OA6v1P",
+      "createdTime": "2026-03-19T06:18:58.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attKCEB2ydDxHscjv",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/YWfQzt321CALsuJrYXhV6w/ONCswjJFX8cVEcPwOmvE0F09QOT8abV7he5gDrDZwljTtKQWb0y7CbKOsr8ZFlxg9ChJzawZE3UmScsYYJVJFju0-KalcWykn-IfBcrA966Ti_hsqCTvnkge-YFhFTPdXizm88RgeIhOkCD8ZRgyuZzVK4q6FINW6SMC_YSmwHI/J2Ui0j4Bbgtn5qLHkUeqe8u7cPrgunCfjpiIIpeCVMI",
+            "filename": "photo_2026-02-26.jpg",
+            "size": 105181,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/xDw2sc8ecnQoKx7zEqhnkg/Cf2zOXMNn__PHxFbfnYiOtqL5PAO7yLXBWctAj9NDLD6tgd-Z3IEPWAIONHAMe927WikFvIElJevBQ19EFG7JZal4L8g8KlqkxDkoqbPakT3m3gqxkXEYqMsItgTGmrsO-qwPAeVUxP3uiHhsKa9Jg/IJtCTYUpfuF0JHvGN4aInFMNKGblOafP3JjZztBVA7I",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/xEkmfdiZgYg02OjrBW6F3w/oxMnWdr0UfWzx-jDllzwgMtWa-yPM2EvctEBLUJ6jmlq9SvmBd7m-TbMfz97DlWCSKcNokSxYDu1Yhp2yIwX4ke8dVk0obvNJtkuZ0ETFQB8CTHt0NidXXjcH3j3yUvz7vfKS9RmLfEHEZAGcecEkg/l-yb32I4PdBpSx5oedQIHbwjvOJqyhuE_u60FWweIv4",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/cXjl93tu9XZI48HnwD40gw/yP8VIcaY8mdVj4eqPOftkDgjR1McoP4OQRncs2a20312SY8Q5Tk1ozbTxZYjGPPe5pVeIOp3GTvfqwMAQyufOhqhpW9iVtD8MuzukFGSjgopFxhwSfm6YuXEz49guMy1kLzGQeJ9JoNOPNwulrRl8w/zXFiurdWntUshlzyVjgbskGqZTn4QnkbsX9hi74P7ZY",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 35,
+        "Date": "2026-02-26",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-03-19",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recRSK6t6mOyBbKll",
+      "createdTime": "2026-05-18T07:54:12.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attxWa9O7bnRSpQZc",
+            "width": 2268,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/mGZDJLV8cGgKbGR4dtBPPw/5msE_yxPf7cqfpU2-vEjuSPUucDkMe3fKD_J2Of37GO04mpvAGfXLi6Bd4pHN3rc8MZD1LEEQHspwaMxCQQv2n5iUPK6Fcw6BHuew7Sx-VRt4ta_EGyYrxSVXxaCfgQbkIsPFLs1KVDfxDJIyqnUWXKDQAvtjYKEJTUA4uvXq1o/HxIgE1uE99oOU_E3sy4jprzzqPqg1HR7_7o5psb_1-4",
+            "filename": "photo_2026-04-22.jpg",
+            "size": 4875723,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/JGXPAgb3_NAaRdlOUC43Qg/LL-fGrcO_mle0_amrKkQsY25zdEroEVTRW2wsInHA7ZS2SIOQWShsjrbtorkPMc6z9-F0saBFsvPW7UolnjsfGfImBs46lSPpc9_UNJ2d9C0Ab8rIoZ5HRiTN3kMONYNZDln2cqrqW6cAOFk2vO9VA/m5ztFD9FHgokLKp1XWcsT3eksk_uCyaI5DbKzJVsA-k",
+                "width": 20,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/IzwyLfA3KBf3ock2pVIW0Q/7NEr_VJfBPIXtV7j8RWWqkfgn4Z0omm_syF5eLVximljiKTOTRvU2GKqVpnwD81uz2_pY4cJedkNiuLfa8rTP518WRcsfqi5B7FTPc-fCeBxJUEvn_cdjtKPZQq3Yed7F2SPxxTHwcgKDHxf6TUHFA/2VRKdflB1lVZV8MEE4m1coevBHhclZwQaZ3mq8erjWk",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/Mvw_oOuNy-9NQUUddu-P3Q/BOG74BrYuzeu7qatqehF5P3swxN-XjF3hfNMiOZMgcXmHc5XhNkz6E-iMszl4ptw680Gy60ZgtASi5wOPt88x9pcBUYML99WMGTHlgz8l7LBK4cTdBRjzIFNG5Vv77MRo_w9-LQHZfBxxYd-7QOuwg/8X1tybg8iJPbPFshgNoWl6JITdFyqRZplwRrdtw5pSs",
+                "width": 1688,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 5,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-04-22",
+        "Purpose": "Water Dispenser Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 200,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-05-18",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recRuqw06uHAoVRHa",
+      "createdTime": "2025-12-23T06:54:28.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attLg4QPOMLZ7cFOg",
+            "width": 1152,
+            "height": 2048,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/UwNRATwk2ljE3B7sKu06jw/qHr0yK9ODnBVR2A94mN1TpmTNYx46ZJI3wSCqDq5lUVOHpRx1vooSRqmwRKewoEwqXCmuxjbW3GqMEEupprnLGgX6eV7oO94r3FHelEVZl23QfO_chOyFzWShFDtOsfRMobZdVppmvsHqrqqNDlNuWGugAu4EKIaYUYGrHjL4_A/xE2lGQux75mPAU98WERytIqH9Kmqgjq8xmeUvtRr8iI",
+            "filename": "photo_2025-12-09.jpg",
+            "size": 126216,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/NBYPofSbHg6Ev5NLukm7Ng/1uUmbYCOcrgM0eXWbhJtD6xR0uGniK8tT5xeq2MUMUg5-vtSe26kFm_3c8CvyUdr_OGqgHe_WMN57Lm4-7r-D2wMfroh-DDKUVf3nNK46APLLNR1aHLDsYCD7AwNbmE4CC6uDG351iUFKU6kFN5hnQ/fLFa5VjQjhFTiQH5HFghGVj-D0XelvQsWIUIIw4rk5E",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/_rgTf2E2zxcBVEl3ijng5g/pQeKknR48fZW4KKtaKSF_1SOSy7HxL4SXjLGyaLS_zeBYZHfrnTOacRgWU7XkZhXonTcl4d47KueLqEuEBaeP8pDi49LiIzILt3KDTI5tcXTxgzv6RAvN0ius3e0A-dvNhYdOZeSpxJ57ymWYDPf5g/Wrhgj9TP67l8Qb9VllZQHrWHrACi2FmUdFUHa4iAFTU",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/m4M_UjtOj5Orp8zdjKBKrg/ZAj4C30OQf3R7tPtNLAhZXD_JapvJtQAO4WUOc0uWJZkq-KMY0Sea9-wdgXpTe0DaNUfslLaCrMmsVE2GZVxV7TNGZmLM01SFdN3F5AFmlPWNSbWkRJdmeicbsxKXshoFpDR5aU285BLjj3TyOcCDg/6mmft6VzbQqwZDPgF8-TKSspinARtP1Ol-G8kLY2cdI",
+                "width": 1152,
+                "height": 2048
+              }
+            }
+          },
+          {
+            "id": "attxGYK9tCYYpJu17",
+            "width": 1152,
+            "height": 2048,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/fY2gsAEY21K_wiK4lufBHw/-grybqNf2bpXJwBnW-grZKCNpyzLIBjeFgaWta7FgS7Ka-_3L8l_KGjWfx3y-HpBjDOm5jxi69kZ7J7XXtK-YgpS6ry8vZfojpgewHBba1SAEIaqEkgLD6LNX59Ex-XuMyTm38ly_LKCjegs-WJZ_sA0zvuN85w6x5lWlY3E9W0/_82C3ZBC0zewTUVlS8KOxY9PmfP14uVtAO2zgt-fxq4",
+            "filename": "photo_2025-12-18.jpg",
+            "size": 113337,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/alGKSC1DgRRnG97Cjr9NsA/lyRfYtjYUaDlBjJvjKbe7_vDCydjCLwO_LNzXqaj_AIQluyKusRhv9ayU4YV-rQdDyH_sZvoaLSIE-SeOVaamy27CVkRTWuS3cffA9qkq3sciJh6MFTjnscu-qAE1aaNGucE4m_d8FBiweP-xjs4_Q/is94icOWp_eux2tSQ3NjoJmBfTWPsGny3HFWqjzveS0",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/N5SZtWuE3z2jyivzvj3Uhw/r7h_UilpfpedISZcqJca8NXmuH-a29Mwp_d_hCQBjMIAWfpQvT8SFrOeSAOxn5eVxZ8BMTEhMss1CvgMHoLl9B6FeuymojeexlFaSuQ-eFsqzcI_nQAev6WvdvQolN8ivbAD04q2juPDpK2Bhrvfgg/uLEYOcLuOE_cDS6VZuxZw81pqc4EkIkWJArXSwAdp4I",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/VADbSOW0KDkDnlbcineJWg/PmnUEBBt81QLNKRb_e43LEFbSfQ0Ic90rPj1v6_h3rzDdDFHG2tKbXH2MMgbCflV4LmaSLwIPdSKbFfGq0yQBHoss4hVX0EFzlm3Sq4xQqOOrZu0d12RHwHJ2w67_Wkjo7NNv6Qz4oTlzJuHDt7gpw/ymPv25hL1SBa_j0iergIUCAo2FwBUuypsjHyW2huFK8",
+                "width": 1152,
+                "height": 2048
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "7 Water Gallons",
+        "Cost": 245,
+        "Date": "2025-12-23",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 245,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2025-12-23",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recSqMzIoB8p3PsE5",
+      "createdTime": "2026-02-12T01:05:56.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attuUf4MR3qD7RvvM",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/wte1yWRUUt32KSH2YTswqQ/q6_koFFhgD3uO345dWMV1YcsZc-MFfimj99WFLvyvfR3ES_71gYrRtlKy6LW4INc-R7kkt0fv5msbqvWJuqXD3MkQ20k8yKXc4M8M7u_uYgcEkQ8wloDRt_ii5vs3xwivB_ulEyaQ_ixNYHIEBJG_bxJFBS1dp4M45VN_KRoP8k/cDHlnCupQzTmH8WxU98V-FPeVAMIcnVeN4fA1pwpG7E",
+            "filename": "photo_2026-01-12.jpg",
+            "size": 103220,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/4d-LLgz194VdjflXpX7zTQ/geKmDHOhqdKSZ-Z2ICISNLjLl9BlOzKAFK1a05fQ3iKs-xX-nZ-dDcVDF68oIiNDBAOFy28nMUAGvXuOhQyzgK4mSLEBj6-vqShCAdI_3-8QaJpbsd7qylpL1VsYfXqPeyBMtvz48uT0ouAzwFz7MQ/P4elYWDGyBCdO-mXb1tid6xWFeEfM6C7kcQOdnS4CJI",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/7Y0wyxRfD7fZsMQMONH4tg/S7-Lt4YlX8hOgaEXS3hSxH5WCsgIp6hUN-LQxwMnKQbITqxMeRcHdTIe7x1FAYx02suyYIhohEBNke3n01Su1KNx-Z19Xz0M2EVCU5m-Xk10m79Yre3UjcZ_LD1lY9vCgWrabhvSPiE8pKwmChcXgg/JGp-zZKlVvQRYGR4jhx8Nhm5cdM2nr6YIBhMu9ZAS4U",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/f4fpDT55EjFer-CZqygz0g/uiEG6qcVFyWBbiFeEhWGmBeRZBO3dB6xF4W0vq9mC07pHHRs2FwZ_JS1Rz4qrIwwpv-It2GNgQi6ltUA8IVf9KkW_kyZnRSyOaBDJC7hpLOqw8zxCR_7StxTBk2awz8_lvqQ5wKf-N_midhZsC2yTw/UUUClgCnU51qMbbEolowmJ_psVD1Zguv0ccgFbXUB6U",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill (Already reimbursed)",
+        "Cost": 105,
+        "Date": "2026-01-12",
+        "Purpose": "Water",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 105,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-02-12",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recTRxMicn5slIh7a",
+      "createdTime": "2026-07-02T10:33:08.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attxhNZySWV7k7H8V",
+            "width": 1080,
+            "height": 2436,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/TeTdJlFAYO1kYnZAXbb_sg/aPPHuV8qZuOrjTltfyyW0Ynk6MwFDgWp_S2HTAWGiXRb6uPRBZTWH9JtV_eC9VmYmqr9rkVG6rUBWXZ4QfaMP0b96feTbOZUx6Gr-s0eVaqRkkhJYzZgoQ2E67KdgS4hpoNshLhymhnZyLcX6NDE1ufZMlre4B-dRXfJLqKEfmM/Y1rKaVXK7fNEhNh9xL4DXlCqdTMDgBv5zCSDWGhooyM",
+            "filename": "Media (4).jpg",
+            "size": 196265,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/YklRNmbtNBcfu2MVp9BvEA/GZioJkzZbCn6MLV-621uojpywP5bc0F3g666kpgjkWwn2CcihXzspq1ysVDw0BMFLIVPKQQUb-lWKVSNIg2OMHBND72qhaZdqQkyGJ-GTEtTZ6PmFKyEAAEUnqhFu9sHerIFOEem1VskLaxetHdxFA/o1pl8DV3-_ozUiJpwRhXNZ6bydE1lVlPyo9S79-PeH8",
+                "width": 16,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/SDYGif1-SPql_KWDJCNoeQ/E-j-zml4fiALpENHOsa9vcew6BXwEk3qXwPYNlkZwKWAdl-56bhIPe-Xoj-7psAXbtP5pK6sPMdQNPyJmHf30SumfBhnA0_DYblhfaBtVc4XO-g0aTZJhEdoPSmdh4wDA-y-cETtgdgbiGWkYIYGAw/-LoWgZ6z3W3mOEZVFU4eNNBOU6VK89LJNZsJoU1L8fg",
+                "width": 512,
+                "height": 1155
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/jXkuDvHkRBeh4wxvWF_oKg/CtXkPAc68pX70boiboLvOfg5G7EHrKagR3zu1yRmG3l7evzeWabxaPxfqRX2lwXuBEa47o7thYEmHZr9g8XsH8HofiXwr3k5dia8k1BsvPlrU-rven4kcb8ju3RGiaw-mUzf8Cx3Zkz-2KJQvABf9w/dUlY3HP2k0vVPYGMt8zArKV_r25Eb5sMbK4QjMcD4AQ",
+                "width": 1080,
+                "height": 2436
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "reczyTK081I42OCIp"
+        ],
+        "Item": "Overtime Dinner for Ivan, Lejan, & Jamie",
+        "Cost": 572,
+        "Date": "2026-07-02",
+        "Purpose": "Dinner Reimbursement During Overtime for 1215 Welch Electrical Project",
+        "Name (from Reimburse To)": [
+          "Ivan Sabado"
+        ],
+        "Total Cost": 572,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Ivan Sabado",
+        "Date Created": "2026-07-02",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recUKHlBD3pERKAqK",
+      "createdTime": "2026-07-23T05:23:04.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "atthPNZ5MhPdlozLu",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/z6IlyEIl5EiXr8dllBs20A/YTTaElcV2k8QMgTt2fFCUCmD8q3mda2fjIA_E3vuPVHgB5epIee_mdC0qvSqu0MiFd49s8zdKd-Xers7FaG0TE-KDXVjdLKjXZq188p51y3cayDPj2Gqw0pSmKNwu1KbggffiUoRK3svhrqLYIPGJD79D4wOrwiUA7A_rNkJ_Lo/FRnuwCSahLT8cYYKJ_eKkUKEsnrgah3pdAHEq_YaGiY",
+            "filename": "photo_2026-06-26.jpg",
+            "size": 104119,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/qxf3UnzFUIuO159QL4YAsg/Q9gx3dZcvmMqfl1gZuJlGNXsQQs58bHPDw84VJjDHbNpOrkv7OB2pcyUruozdVbmTbd71dWTvLJXD7hrRtLLK0MmulR6FzBwVNyqJg-KUfcjA_N2aKVh-mfG9uruCnITF78ZPVuMX_IcdQBTIqvaEA/sgbjXJY79tNiKbgcYabsmQX75Mso6YMF8y8SjtBmjS0",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/YfSFGNOk2Xt16wfubqjUMg/QpqtxvuJkx8Mp30bdxCussKrYCaFUG3L0cYKcf0vjQYWEm1C_ZbKbe1-1ilq9B4PWRlhdrCW1G1odAHD3K3hKFwQNgl2g48oSYswYxc260z2YitovYyWqJVe0Rl54TD82qQvyP67gdvxBbxgs5qoAQ/utWd4cWkbS7PpxWfLJ8m3XBwT7uKrtjeG_V35YVDL4Q",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/JeQE6bh4bOzOR8C2SytSHQ/GjuAVnY3fVXu1Lv5gLAeGvzJUZeM9zrdHMTAexN-CwYCMdM2buMq3lnL7c4wtaL-5XIPG6RzTjyUmQ9jPKUEVaNAXlZ06KTw3Xf2dzVJ1qqWZpJG4oaDI6ulTxcT-OoqLwIwTKIiU_M4rioam6Ammg/7FoflXPzA1RZy-GASvOOByLFCaLirTXneMpnXZV2aPc",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-06-26",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-07-23",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recXqertXD9C02tOr",
+      "createdTime": "2026-07-23T05:23:34.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attIyLBzmUTYOJuoo",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/WIWj3pYKFga6QoxYcZkG2w/rzbwI4t5AaFmZOoWin8APF3TG3YpA5aFWSceoK_QQo2KSJVmQoG5hGZY4U0E7_qYOat51aRRow--1WfLAcUyWSw-JTPp_vwpJqyjuuBqRiFx5ymsXuY4YLt2bwTHdqriHf7dkwsZ4wynPtgVpZQzubGKDmZDv2COniwfBGlKaxg/IOxg72AOmhsl8IRoOuSfU3DIUebwVH3bzzxnRX3ffTM",
+            "filename": "photo_2026-07-08.jpg",
+            "size": 107084,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/hs3SWW353Dxs1kxTF7BGQQ/EMB9VOfYHKif1EMimx-DjG_1OAWPr3OZ2fm4gKMaDjS2m0rSCqsHaSX6OjhWVti12ONLwN3HBSVj6ozvplcHG8Dww2avuMgfwqJt7KNyJCBuv3Gr7zSjdKddUns7Rb--DtoDzlC9sPwwMO_X2_eDCw/RijsQAYRDN3rBXRteqq6b_pJLXH1163VJGRRAuFsok0",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/lex4MIQgcZG3nC-BF-uu3w/0FHT2b91zODBvdlr22OkBvziFoqXFWhnMUGcv_lC-WWGmrX-IG-JAoUqzLQrZJTRuLDnO3V9refuQYQc9MQZW2dleien67Zkmm8AuZ0dQUY3M0CCkJWEG8ARoNSleTA-jOkVAv5j6xCr3hmJjK5OQw/N-49vOXtQEMs_L1_pi7lNwBSJ_lUhohMvQXiNWYhPAE",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/IA98HqKxVhVa30Wc_Vec7g/8mM330OZRfIkdRoOWvu0usnq1tCJjpH1gw0VNFNypV2GZqaT2sIQIqcLCzawb3IlZsZihKght3dhfgb9H2rdISk8zEV4SXEymtbrG4B3O_nEkc6lI3O07BSfh_l09P1j0rix27OxpPL-ToGXlLEp_g/dGANdptFYeMDfyVnUbxyI_b1M_W7r-WsKQfzGWq-ZDI",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-07-08",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-07-23",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recZfvWbzdcEkyWFu",
+      "createdTime": "2026-07-02T10:32:21.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attIAZimLVYJ9QeTa",
+            "width": 1080,
+            "height": 2436,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/GtCHt3qh0aPWuUDcxodCqQ/nO6bihq5PbWFDZc-WIgmp2Zn-dFp7sVKhvRJzhvdmvzhfxfZXSU3XYvsfVQWFDsxRKmKClkivdBFKdZX1cv3NFtWkv7nf7YXWnIcyAOAOaVX_CHIDasof-hdZjgGLNHYblSsbUcJHd-g4DNCJ9XIoBBnFEqpF-J9oOF-8hdJPa8/PSYAZLYdnUFdqJo1XgaOZsrT72S4BaY2p-o-4hQ8HRU",
+            "filename": "Media (5).jpg",
+            "size": 166232,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/xk5X_w3_xLH10Z1Ddm3IEg/XqvTEzHO4tpr0DSxOFrkKTwTx7-yBbKkcMj5DEXtooEYtTYMJ9BucrzMsVIK-39YRzQmioajm2h4frTBmvIJNv1f1FOYUUqjNfN06KVU0b0ijMQrItsFPyiY5OzdpW_IN7lbld2NghCxEyTTQNqQGA/upE3ygEUx4mqEZ6Mt-VJ4rXr8iKXksAVDA9KjaRr4wQ",
+                "width": 16,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/e-Sxo9Bi-ULFOYiP1WoswQ/igZUDlPD072lWiYtFWAbtXbnhhWG1dFenZX9KJKL5NCuFFEsDyLBuTIbwgA_7lradvv7OfUqE6Ywo_o-gM2LTw9sR_fT6YSrrxwno2aHMKX-pCppHC39bOQ_ZCH_YJJBqD95mX5hCBhH-3RRgq5RBA/FESmZORoc1fB-ky6NiNQSDOuX8bSIy68PerSB0CTit8",
+                "width": 512,
+                "height": 1155
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/iOP9b7CmQtNqsP87pIGPAg/r7hq0onp30nYBFxJXuOBg8pXLjiYodizmc-ZuphShKNGg9e9FVepQAcfxt688aeUEywrXv28P0d6cmm_IqFczCpHYyZ_KwL9Plht0kAo1SMYjEn4lWfutuPy-A-P8j_e72TSyNdzEpdjG-UKB55AyQ/zSG5dltNCo5wiKSIkds7KXaAehD0iOoIxddFnUkiUvI",
+                "width": 1080,
+                "height": 2436
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "reczyTK081I42OCIp"
+        ],
+        "Item": "Over time Dinner for Ivan & Lejan",
+        "Cost": 417,
+        "Date": "2026-07-02",
+        "Purpose": "Dinner Reimbursement During Overtime for 1215 Welch Electrical Project",
+        "Name (from Reimburse To)": [
+          "Ivan Sabado"
+        ],
+        "Total Cost": 417,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Ivan Sabado",
+        "Date Created": "2026-07-02",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recbyXbGd60qJiNyo",
+      "createdTime": "2026-05-18T07:57:26.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attyQLspeYIkYS1Kt",
+            "width": 2268,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/cV60uuaBtpoR6znQz2DCQw/g7bPRpPJywuFkP37JYuNzWc6thexehO4lg2OPwVnkehRoQujUw2SjDVEWN1SCnx1sb5U2oDkaMq7495PvQm43XMi9E0KEcC0sT5iccnKDW_KOsLfsReZ6OGCdpNDc3owFrfonG4t7h5mIF8F62UQzpm3IbX24UbvNg0Ehp_5mCw/KhCGZtDq9o0PhqGJdTocmH1QEZEGP6vHjOwepI2ulZI",
+            "filename": "photo_2026-05-18.jpg",
+            "size": 4827340,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/9Ol9aXu5UprTCkAOTiW0hA/PPuD9EGM0bMiY8mGmOlwZRDK8fsrz-ulhC9pfXQ1OrqloJPls5t8sw1o4h1H9F2mzk-4hyOTrTD1MVQ-LT6ayIUjVKYEIlaqBBedo29sfLUadPD5m-M-pk93PDKJVW77t2QMzwB_GrlSsmMae5jfwQ/JDHrqBSZygGk3xIAXmygqLegIc9LXS_X1EkPeBf_NiU",
+                "width": 20,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/OecRTYqeGNpd6-1GXpNs3g/kp77ce_wxqe4NxjjGPahv0kuSyye-JGCqeYc786UFK8qtQGAWQ0RjrEg4JydSmsXB4HHDKl0t6BB3eBUAzsyEbut8OZvdFOAA4IEElACe4t7fg7k3ojIZAa8zzwGORFjFfuEgEyz0zm-ZmUQZT5PNw/GWGp9cmJDRTBylI2E6Z6wj0nlw3C5HTcIxYlAjj6-58",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/YQoctALMZQ3wRnAdTRJUvQ/nxDTEkC-deLS68gIrNjgykDqFh5JJ3TTyo6hSBBAcn2kXVXmeJGWkMR9kfesgisTmK4UtJnh5UbEJj_q8ScEJEO4dBe_4qtHK_cc1LC9QL3CFtMDDyPkDfdt20saQU5s-2LkXqYDsTfumz0GDn584w/xhJ6Og2TOQJc8nUfb4smN6nZk6YDzXOWLWaoLinlumo",
+                "width": 1688,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-05-18",
+        "Purpose": "Water Dispenser Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-05-18",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recc2cfW78psL0SFb",
+      "createdTime": "2026-02-12T01:12:43.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attwta6wMTNVSkVxP",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/HUE-KfxSW0HntLzi8Vb2hA/xLkExeF601neGgG9J_TfsiIeBL09B1rrFRCifR8kBx1cNo7kQXqpcYhzpfq0ub8GlZ89cAvM02l00cFYWJ1JoxhXKPzcoIZssS8S31vQN2SFaXVKXJwGxatJA497b_ljI-RuvjzlYHQznRxoHc04iDaZQ6hLkanR2L3sS9frHJY/UFla2WyMhChqUtD3bHrF6ggMDxQ0cS3PQa5duuHnYYU",
+            "filename": "photo_2026-02-03.jpg",
+            "size": 101798,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/AwYDuc7pMViAm6h83CMq4g/pYHfMvoVMKKhfGbebKSpHZt36XNna9OzptfdovYhgcxNObW6akPLN5GlA6Ervmx-xTFsV808oDsec9647r_17M1UxCUx-WpM1CIQXATM7h1d9dEqwr-LccJVAk880_ac3P0MCD4H8W9VCmqMxKUaNQ/QKQx9SwnVfMbe-MAHmSkYy-XVH9ZCS_fuRxrC_ZANl4",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/2q8YucadNZBthxJRASSBNQ/JY6lSJPULtW-QMpZ8dykI57I4mbltF_1vgQu_NNMYr1a43PGs3Eg0b003lrw1E2LTbM5zJX_vUq-KIwyzPAx4rgS-N_jXVrzEQwdB6MK50to_bwqm1u8fvi85RwuqjndP-LVMl0oQ1zXhv2ifbve2A/MSB09yREc-1bgpzJ05CAVHqE2Jk4D_ijzEPhGS3BebI",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/nV5MO-rxocLLoTVnsz_KQg/kAvxIEcGHFvhj9yD43mX88eusyErEJVSpr57wHd6sGTiBevipde7Bk6VLyE52y5TDWrNhw3P4kGXyNYzanTuNncHouEU77UvLwcsdJCq5VbzYKK54Pz2M7368Dw_0YQHn-E_wXShk8UnIW9Bi9J6mg/v_XH4KwaG8o-UX-sMNwk3sgJheaGdC54rqTdnj47ES4",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 35,
+        "Date": "2026-02-03",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-02-12",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "receFlZ9Dg9mvdDng",
+      "createdTime": "2026-04-13T09:44:44.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attXcsvu6nJqCsnfX",
+            "width": 450,
+            "height": 800,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/wxYKNckc_J82HQIzU_3sTg/HT_ifzPMgHjUMyP08knUo5_6mk0VEzXgHPP-kWGJnhjeaLtJenbhUkVtJ9frxC5zAu3Kq_RE3o2aCRmOyT24DZ-QiGvqAXktIY-HWEEUY1GoQGVhhU8Kv5V9KM4Bh8ZCaqkM-X7Dbx2z5j_Ezbd1tqJtae1QcGVqXfV-AxDXw5w/zskp1XJvbpKfQvXJU_ix_xe0ad2GXDgJi7GftnbGZRk",
+            "filename": "Receipt 031226.jpg",
+            "size": 54549,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/xpeFyRDyupsl-8xLRSzV8w/ymKV-TqrB1EKs4agcW4MDq5A4aw4tpKr5RupjfN1PFagpsI_cYpkApYV22Vod6wVl_dJ4dkQ8MK4v7OGU8VMDeDJbK3ho8siI6jpoS8cXqSF7eAM-BxfvzWkLUsLIG80n0Vhr6clVPVaCh4zubILTg/cf4JzfcSlJNDSrfb6-se2rJPKtdKlMloIy8_1D2hBNU",
+                "width": 20,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/X5Hi2s42fCynpptD5EI53Q/Cfxjasg88slPJ10vdVx1-BJue_EOJyzcidF8gNsZR9lT0x-VGXWJadeZ89WR3hEngRghJSXSlLhn_qIG1bIb8HYVjxJJ0hIqesUbqu5nm3-LCX6p_aix0Bp4jfbxUHuRg0mTrRZ9TFAi0yOJKzxH_g/KOoX-kzHB571LLHw1xYUJphfNYSlp15wZDmeAUfji_Y",
+                "width": 450,
+                "height": 800
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/MTdyidb3xgDyt64dDD-WRA/OhH0KJ0juBlGtdxY6KEA0MxLx-tRAXCGWJMY7eSoKvyGJ8xJb1IH--n_hA1F8qapuSQgoqG4wbDP4xLBSGphxicyeh19vrIepGs_Qv0d67gjbonXdjnSjW52Z2Hul4dY-lb7tUPqAZmIlsy1bpw3lw/L-ueGO7wd9yi2FDXgUhdDKc7gnRvonlDa4yK3lBeAAM",
+                "width": 450,
+                "height": 800
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-03-13",
+        "Purpose": "Water",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-04-13",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "receSFEOXrmN7eqGM",
+      "createdTime": "2026-01-09T06:42:16.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attiALeLscio9SWMo",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/lp_tgF5h33N_-JImeEx9qA/dMEBSUqi-UMu62fopPaoktszHjTIfLvXKOdyF8Gv-eckBFVYlUATMYAX4BmA6b7joHdTFTvOgf9_lRZEHc5TMipVH7XlxeNo4eCjIdzvPR6Si0vUDQq3EaAlUn4mwEliFNZjJniJ1ApJyy0NZmCApYWuAxdvV7U7fUvxvhnY3KLQnnwvLCpU4WZ3htOlFFgz/A3gjw23181cwxdlcY_HuPSGIza7poFwv3wmR7z--_bM",
+            "filename": "photo_2026-01-09_14-36-29.jpg",
+            "size": 89405,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/ci6BliGDroyY6zQfLgWfFg/N-kS0CxA1gEYhdd8sV8XR7Oskcn6G9vK0PijIyPW7fwfM88h0XqIvkCIiaWZRGZ0i9i_ZXcDD86enqgDa6d6jmBGXhWLi69zzSbP5GKosaGORfksj9yo_Xxwmt8LWcLoS5-xEgLB0FnuGQ8Dym8Ntg/K9xTAv2oE5IFB6P85rXFuAdRCRK3t5Z-d0uU894j3KY",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/XpkLS5g4JvS4b-rev5iSdQ/evb9li6sm6_wG0plde8kpGF83lyasovgXZShyEVes-Bj4W-FNNu45rBUYpkqQyc-Yj3msPFlqWhnfZBMAJjtWPNNMXk9CUDSDK4X52Cpl26K97uWtuzqmUoPqmCNnjLKhIskMU6vS5hSjwwHaWJC0w/eAyqiD5tg2C8fYQmzjZOL59XAHri8eQcqb5STbW68Ck",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/fhY26KllewlaOWkOjpooOA/CVpbux1b3Nw9CfFwkPOyggdQOnVgDzr7OYPgrm9NSqaQpHrV_XV-BT6LU4OT-1z9k23hge-yNIyGELBFCx1hZvHL94q4eUt8FpajVm6MDwlp4HmwOTg-c8hvWKLS5qOKnDYcaZxGGwkft6siGpLC4Q/APxWE_AYV2qPP1VlM9xUzQlf_wvVJFwmftwxmisAzGw",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Gallon",
+        "Cost": 35,
+        "Date": "2026-01-09",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-01-09",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "receV6GeUY4OFaj9A",
+      "createdTime": "2026-08-03T00:56:29.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attXpTl0ycaOAaKMB",
+            "width": 1275,
+            "height": 890,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/Q_Tzr2XPPL61e2e5npceLg/cNVHRgILow4hxn9KRNqQSW9ECmjwaR2Mp5PPBDkX2P5iIG318Pv9Os-OMVl74qP0Th2qFRdhsTwExh-uvn31i9fRmJYTTenOVO3n0vk_wC4vxnffeZ5lsxfKX_jqQzkwDm32ZgqNNZnl-GnwkOmlCyTch6XLFsl0zQBzU7q6IBg/kJl23Y28WGmXPELaRADfceZkaqHv530C-7L2gp4Whr8",
+            "filename": "48 Rolls Bathroom Tissue.png",
+            "size": 123508,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/2ErK9vNKgePKfbsYCj-4Kg/S_yaHfQDuYFLLdeT1QZX7aJp-qt6eFxbpXWvIuWDH7xtGvzpYfiib5v5usYGuRBCtnbe5CTwCHDxyMqmKUtWrUTdNmlclZoUXMK3MTGnGhkzYeB4vORkxLZVhVqUggPYs4XX4yWCsoG7KX79QT4zQg/hfcYrkUEmP_jxN60U9l-gc6AI5mZE8jcDjuwVW_xyHs",
+                "width": 52,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/uxhGRA-XbzR9oWHjEtDL7Q/Ee5xZBvOjPtjR0eGKJ94nEp8SopzsTi6XdagwCNhqidyh-eiC7nzzNxvjEYL7FqMsAyxPUBu5VoDDZVAHXMBxwpGxdgRAtWtiewBV19G9nErVJypahTPXoE6esaMuMUYm7MxzGZHbKznU3Fjw-4bqA/WGPueiFTOiK-AKNtmB9njqUhQgJq9tedOrA-ROI0UlQ",
+                "width": 733,
+                "height": 512
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/LIsACPe1kJb6iNgzDCoa7g/3Vfn9yEUdQ-M5lVQxhn6BdI3TaBtWPxpp-AYUc0TNRK3G7bHwN4RqwTojpR9h6a5HBXy085URM3-PUPYIHXV17vpPbmnDUZbK85ffkXvkNA0M5yfEx4AgFzgo2rz8y4BNvrvBY0EJKLbnqq9uczt0w/vdsbWkGJeC5CQHdUgv6M52hjyi0JPY_prRUZb6LCkSk",
+                "width": 1275,
+                "height": 890
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recdGoHOlwjsgmZPN"
+        ],
+        "Item": "48 Rolls of Toiler Paper",
+        "Cost": 416,
+        "Date": "2026-08-03",
+        "Purpose": "toilet essential (good for 3to 5 months)",
+        "Name (from Reimburse To)": [
+          "Carlo Magtoto"
+        ],
+        "Total Cost": 416,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Carlo Magtoto",
+        "Date Created": "2026-08-03",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recebkbIc5vjKozRV",
+      "createdTime": "2026-08-03T00:55:13.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attt298Bl2eMjS0RW",
+            "width": 1047,
+            "height": 849,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/vo-BQkHucUMf2zw77pIbVQ/YC9Yl--02LBOyBdeQ-FIa-aul79cV6Bl4_DoUASMCMhVk9gHZaWhRTBbjSJvYasx-AOOaug0ati6a6s0zpV2HSJiGNjVmsT-k-uAdMeA82T3weTIWmuDOqr2u99DlLZK8_XpG9OA_681X5kHlroNIT16BXLhG93oOMHNNo87RVk/rEgq59-s9gms97dndlbe-zVBnvz6OzVsd-n20BeqK04",
+            "filename": "6 Packs of Paper Towel.png",
+            "size": 116221,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/2H5AmgnGP0SenbEH2Q8IQg/TJpeGDF_nTAnrtoupJreCNJqWkDW9QcXdvYZAdIVeVt6m-99oSzFMBbZZwrYXOXvyT12m1fs6b9Ig17FzbiIf9wNLaZNWE7LSHZtUwN4ZcrBoJaHK3EfDnW3NkoSesVhHTU7CSi_ml58dUOEcTVbsQ/qCcuVTGcOeysOfXysnEsrqqhI-WXpL6XyG_VGimD7BE",
+                "width": 44,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/TZbALERFqxUOAhohIV8Otw/RHhJsJvZTRg5IwQwQoKw7bexJdlocZlsl0TjgUMjgA5XoSve5IDqriTNq4wvwT0TMYpbNVT0J_dSq9IpoaxrTpbXVb3nv35pTSdfteGyLEa8iownqwX1R_97TjcaLkWvrKlGhfVrmDjVlUWJO_YD2w/EEqKTCYL_98u5kMoQFqSzoMagRU0Ac-rRqZoQgFkhjM",
+                "width": 631,
+                "height": 512
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/_jS0Bac-6_kkE8atLMvvRg/6ip9CdPr1KP-9ejAUvqiRTv1zevykp_cHAF1XwGTOysmHKGdVxw7BX45dkKo5XEoC31mhGM1c5ecjqdeu5bwtj-UYykjOgmi_kF65yp-GDy6ql1SQ23YcFKVhAMu1oohZVvDrjFvog90GNjN_1Gs-A/oxH5J-PEz7nD1jROMNcT9VoKO1vh_2PRkxYC1Lxk0Jo",
+                "width": 1047,
+                "height": 849
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recdGoHOlwjsgmZPN"
+        ],
+        "Item": "6 Packs Paper Towel",
+        "Cost": 178,
+        "Date": "2026-08-03",
+        "Purpose": "cleaning, wiping for personal use",
+        "Name (from Reimburse To)": [
+          "Carlo Magtoto"
+        ],
+        "Total Cost": 178,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Carlo Magtoto",
+        "Date Created": "2026-08-03",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recfXu0BdaHAeTs53",
+      "createdTime": "2026-06-08T10:31:55.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attLXVecoxXHCg3I4",
+            "width": 1007,
+            "height": 867,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/dvGah5lYUSzlyaXd_0uimg/iUSu6tDoMTBRw5dk868cm7BpXgzO591obpyFf73V85agGHKtb2tQ5U682T_P2vKWlNrldrCC14Vn8uehJyo2lq9YGockkN8xMPiafp477OBjeBgRHx1d5axlNuG_2dFok0F6fLI1Gk4pwN5eD9y2Uh8tEG6wFWsmSB-OiwwNs1sUzmcct_cj-oUOGmYLp73D/cLaydeHaI3inXui5m_8yh7peequFNcaMwVGuhtoejaw",
+            "filename": "Tissue - Paper Towel (AC Office).png",
+            "size": 118282,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/uIpG6W-nJi5igmjuAeTZqA/gp7w8nz5tLM_5VA4zYjxKtAkGKmU6RrSFOxoFrK2zNf3q7BUK_B-f4mnMs7y2diCU8MeC9qq6uBy2MivSI0Sfk-gC1MQyxxpnECVYIpKrOZnVS9aryVB8QK2tzxP9Vb79aVPlurvbzeeh0szLe3zhA/EDGw1zHJmd9RSE173woi5zm3RtfrFfypcEJIKbBzkHo",
+                "width": 42,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/q10lDQSLLPXm_tx-8U-wVA/p7KyShm6tbiJ2AJISrMQgcyXTVMGzNPnpzXV_iKm-qT-Vh3gJtHOs5nyXhOiC623lDd8iUTc8hiyBsv4z7OX7OPbyFGbiYopcT5RsfB5pJS3bBB8F3wrCwujULeODkhyHXlCv5y53fsunO1zLAjJ-g/RGdWk0nQfRyl7NXI4BKp1Yu2ZlG2CuZ9ifFmP40fEAI",
+                "width": 595,
+                "height": 512
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/658IxjOmqPPhGS3WQe1ecg/gIwpbnUJdWUdPGDGj2OChptpn8CDZS5-TzHqt_XLXKNBFyIiT4Eftu6NKngOfPxwYSB8EGB2CjmZeKGb6yR4PQa1YCv2Z-6eRief7yB8rrz2rY_ORa7AUM4hbTi3RQIl6I1wq0V5_9T9s1wclrEw7A/IXLD-LhyBA4mGxjVCNOFe3G0ZqMD_Ytva_53tkZQOAI",
+                "width": 1007,
+                "height": 867
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recdGoHOlwjsgmZPN"
+        ],
+        "Item": "Paper Towel",
+        "Cost": 205,
+        "Date": "2026-06-08",
+        "Purpose": "Workplace Amenity",
+        "Name (from Reimburse To)": [
+          "Carlo Magtoto"
+        ],
+        "Total Cost": 205,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Carlo Magtoto",
+        "Date Created": "2026-06-08",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recgXRgHawIkwKWI5",
+      "createdTime": "2026-08-04T07:17:06.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attLCxfiIlEdHcnmC",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/MaMcD0fLKaBbNIKbe7IjZw/NlvaUewRR8vgiYgIvzFCUyX763pmbcYYFKtL9ur-qNqZ3E7ZJz1kxxkJR6RypnXqoP0DvoLU8IhlmhW7BNA2z2dsQ5mpUf-_FdkquD3uT1N46JeO39Ql6Id7cBuv4nlLBQxFjrcb9FneLz-VCndG3deLxIr4NrmzoXNY5f9YisI/4pRs1383TYW3e_RuLJ26n3IefCXQavDQJOy0dhV5LM0",
+            "filename": "photo_2026-07-30.jpg",
+            "size": 118826,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/W7zCtHWRMOdZ22MgW6Ya3A/URO8BMOo66WuMj7M2mN6JS1xWUFTtEAYT_CSFaBfB52pnxeA6TECQCIoL6Z1ex3Pdpkb_F8-cRiNMTBC8W7Z2HDU3fVye7KV09raTwG1Imrm70us5KDIMwyiUoanr4MQhhYXztr5ND8PHPKnLEv8Xw/I-NO_r5m53hWwodbGNMwNXhoo4ZgbGBZXwqIM79rQYI",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/yH5VY58vOHhpnXaCiBEmHA/bKe4lYGhIA8o0Q_yYbANLKv_Lwvawd2K5NsncgeqxumOTyqeXj_jxSEMyz3ztauTNlZRoNlLtd6-sadLhwZxwu5DtecBulmvkuOIemUigoADDw75XxP7zgF5PhFCjQqLah0WlI4xvWASuD-fvANcZg/sFMvJNECZ987-6CR_IUY1wR3Q6qaQANN5oJdyWvPIwg",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/h63btNtLSlE4PhZT1_gh9g/1wH5N741SKKMkLXFUe7hAOd_63BBirNjy_5kQPx24BYrt96ofMyhFBqgf7m1AcYfYSIb4CO4fPqSo48taKh2D61Py8ZlE1tTArvudHdcbns9XeI9SKYJKIYNPxUUk6nPZqZqocY5jrj9ti534FgX2w/8o9Yx4ANECQ8NDgTFvfTla7To4QofaNe3Sxd4fogiEI",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 5,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-07-30",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 200,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-08-04",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "rechO7flOmO62Yu9D",
+      "createdTime": "2025-12-02T05:08:50.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attazWXwX1ypMf6q3",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/2ntbVLZBdFWJLcDI9eN21g/mDEP9lQOmgG2PKdt3sOb6Po9zVzPymF6IQM9UQMGn6U0V5vdTLU3a6x-dG3xkeTcoL4s-eZ-ttWetH_ZjBZE8YT8s4-CnhoaGWPZmEj9BoMpn7V5W2Qf9YAXMnOwWO3yDNf6HaDkMEf7jEYDlLDqvbSocRZ30hSBUDMlJ-dY3CJ_U11MsIFMkRU9ziTLe0cG/tScdF129mYaLhIXcMkpxAajzu1PHaRmBL2gwvsxj5qw",
+            "filename": "photo_2025-12-02_13-07-46.jpg",
+            "size": 85361,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/cM_C__j0fevh40gv_imY3A/4AOM4nXvoHSjkN7k7NwYWvhVjQ0R0_wmL6s0XT7YZUcDSaaPQyszqy62IwHwMwd9NSxTub69U18xL4VNjnQevaERWVY6k5YTkEUD-TtHpzeRXgDnWpFpizhQkQb20vvqE0uPGscOU-WdHTTd3uycVA/lAnhcYg8lQcekkEt7EFJDV6xbVZ33aH7ycGXmkgJWP0",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/KUIjOhPwfjV7PYZj28If7g/2xDvVWzZbuDv_JKAcGKS9jWWebUEzMpO92e33WB5Vy3TZ24J3LfD3SPrrkWBJ58F5vKKJpoi2wDga-AtbTKG2q8TJCiXu1P0v5Hkeb2MqNT2GPPnKU_xHOavdyuKXcC0JvdiJ_r3pda0MxoUjm15-A/oLL1u5H3ONNTjznVwNejueFttA4NKvKdpu-tUGUR3w0",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/g4P7Dn_q2iggOzDSWscJgA/NZK4g5FWt2p4H9NQv6ijdwpSSkhieVzx9C17ITq4hgF1itoYU3GPILQ8LXb-1XkX3ExxfTF7xYYn-qIWJ_SDw4oP4MRyvalwxkLYhGejV4_dWUgAEk7bUAaTQ9tQr5dI2vD2pf_SofjELK7x4gbKsw/3dyLuTd_m6ctMl3bV7o7iC1D7TWCTNlPdgXKrLJF7nk",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 105,
+        "Date": "2025-11-28",
+        "Purpose": "Drinking Water",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 105,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2025-12-02",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recjIw0sLlHZnHv4M",
+      "createdTime": "2026-07-23T05:21:29.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attCb6xRYQhoTL0oH",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/oWJInqCY-N0isRp9xnhnZQ/k4rB3uO1siJbhwYxivuP9vR1u2ai9siOpcVaS1--HmiudAL5s7oNbQeZ3EMD-o2Ag1K3oOFGY_5KMhYcar35iKnBjXLDFWXoaLxCBWHmnXx_BSR6q3Aiz2SwLTg143KYNu9sBkrhSsCiRUp2Fofx4dvo8u1qimpn7AEW2kJibIo/eiNr4zDXBpDxqd11KvSJfgiMPdnodzRzV9g637mvMjE",
+            "filename": "photo_2026-05-25.jpg",
+            "size": 98719,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/yjerEU4-h3HN13zTPjtWCg/NUCOM3s0PKGdhASZYC3bmaSaKVvdqCfdCStBqwBlQt4qXvVB525cKbqaai2RtYPML2J5lYU5J935D68HFiWoijoLf3Z9t7QpivBjIfvRzkGAyZjikBP4mpML_SZlyceX53TASumkP8fDaevQ0luNeg/JOydl3ggfP51scSduvYvEip0pAYPvywA27LrX4XRGPY",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/nCxzqEUZ5m53bVs3kFf13A/IFrn9QVKemTYi6dTIGqnLisHCpL27P-yZpCRrOJ8ZqCWgTBJYU5_qCKYV1HHbw7PbaiMZg3DuXFDxXPVAvM3Wf9KVMbWCGailLmBnxeBDqmz4MguMUuqeHwq_5YSulG0TmMs8Gj_mS6HMIvsiJdINQ/yyBbo1kvODYKUHhuvj4pxxFoB96rJYAmtgJ5CeTJa2U",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/K4EZFkB_qae8aKL5YhpFjA/4OOOHTU2wJn3nxcLzDLYeXiTmMNY83iqjpLJmimdRoHpJWXmf07E0Y6yv3d31BVWmRi1vyGuppSpVRxS5muk2ENagC6xM6XP6lHG5w5uJwKdSx_5bi6K712gBsSeTKXtXfGLpaWl048VbJe597FgKg/Y82vvkLFP01Fmg_bQu_AgV9hEFQKENWVdvcfCqnnTfQ",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-05-25",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-07-23",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "reckpYC5DgelAMv7W",
+      "createdTime": "2025-10-15T07:46:21.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attLhzKzrtDmDYXME",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/WHhFDlwSuZdUWuIpGIBWVg/l2zKmj7VlCTF84g9gujzv6QLd1Eg2EzGAOtuAqEnK5lMC-Za28n9W_GY_oc7ELIQ68vTHcZ0yZLPhq6N8UBa1CZA_mNvXtloLLpJ1o8PIrsTB7W3L51lw8RkLtl69Q4Lupp8bkKIWrgOXAPyoxsvSZFwpY4N5yLIXwBWBU9tdN7Dq20n1l9lpDMtFnubIIr2/AhmiEkmxl-mLGGYEFyY9EvOqY96oUbeoIJXxK04pQAY",
+            "filename": "photo_2025-10-15_15-45-27.jpg",
+            "size": 91461,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/rpooTB_F4I8E66lghWD7Ug/aWHKY20mr1waHnmZzB2B0CFvvhtnbB69F_1_o99jT9oMSc3-EjtAci8P9t2-788b2n6uH7YrFJYj3UVW7h95wMFycNSoMJydLV32uBRxNkazUbT7upMIPlT2Izkmk28zrqMUF3aDiATIABXwBAMTzg/Rff84uc9kJagoCOnvKc-Gdlxd_L-Q0kA7RudWMBz9Ew",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/pNT96NkNDjE_MuPVTtIGjQ/_S3FCYbopMODe3wLfOJuN6NdwjHAuMC5eHNick4RaXlwp2nEST9r2ymuWWzJ1W1OOqvioeM0dCtVwmw0-G0C6ct5loVsqXxG_PNbrGGInT5soTQhyBYIONqUKdINn9UqZQJ9BC-MGGdVj28A7uUb_w/C93TFjeu52B4-0wIS6DmeBtmlTmlzF4wA5ysxeyaLr4",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/tQKL8OVZ2UoJ3fzqy5te0Q/la8UQfm_9jkV-6fS4ui6zgKDYvs55VfIZlnwAnDbnsuYmE3W5cDgVNsRUW9f_LFjmPH3aO7NhsuSdZ9oVx3KjyTzmtyDCPMrYypPfz5qWdfEGdY31yQDPpr1rJ_SgYcpwYPoxVEye8F-tr2ABffOeg/1rB5DaFn6znsBD-414XOlLGglnk3YsgzG2zKMtzAXak",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 105,
+        "Date": "2025-10-14",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 105,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "MICHAEL KEVIN DE MESA",
+        "Date Created": "2025-10-15",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "reclxvdb4XJyyHtNb",
+      "createdTime": "2026-07-23T05:20:58.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "att4rAegLjZF9Rt9U",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/Zq2r_wfTVq9nV0i9ZKIZag/j8tZUu94pDdL38sJjOAMxFjzKQMrCvEXIPofOkPeY6lX9xZzNaEvAOymoTEdZZk-cH846CgrzXGJzJr2EOXcGhI4nPA935l_Lvn8kNsje5Hj4SGhpDFdD47hCtTusQto22uh05knWQqGgwyU7jfwb8bzZRE917BHm5MIbe2GOlk/TzQz91vKgHZQ34eyUiCcqKr0Ha99qHP149ru9fU62Xk",
+            "filename": "photo_2026-05-11.jpg",
+            "size": 106171,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/prHBDd-3t0qEkVKX-4cYhw/cs52R4sSPTCLt3Q37z1DfW1b9v4dY4hk7UnNEdE9z-kHttH4qwvUG4rBIaRxqC3uoKGUX_tZJdr8_OVMWWAF-5HqkSxOlBZB2wWLAazKH1r9KWJGah7Yi7YTt6ZWV9x5Ys9gPc8Jz1PI2Z9_wX4fdQ/0o48V--QkgZTn6dzFzWVLBnatTyTAcfkNCPw7LIdkoY",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/k9iQtWA7twsu0NoJTSGYKQ/KNTNAkQXgQOi21iXODT3uj0F79YAfreuzO-m25ILZPwG6zmHIvUxvbDhS3vE7N0N1cOtf9DgSQdq7MQVGhoEcjGcqhZGDZdCU-hMAK0QKAcOsN1uNUYEY3yL3V0XkpGFOIxZ_S0h-8QiOVPFQ0UiuQ/z476TYGzWV3qn9y7HEgCwDWQnD6xSVVFsZ698cyCM_E",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/aSaIYBdi_aBJrStxZx9hbQ/eu3ex2LXgW-pwUQbVdtI7Yhafd62LRiZ2FAqzfLgUOG0Lt2yq0U-jxt5lDEaxZgC0U1A-aNlt8S03-auD_l5kD95o-PLkpTtnRFtXcYweSYYQarMOpOEaC5TxdS8cGy5rqxtniQJQ01vCRYF4qv-PA/G6bIC1IIV8Z8d6AhZLnZgVdcdl8pOgiA20HSk_Yc3ls",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-05-11",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-07-23",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recmWdEljQaGGCxJ7",
+      "createdTime": "2026-07-20T08:52:04.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attu61wF9A6dXBFSN",
+            "width": 576,
+            "height": 1848,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/wI2pqKuXUxLflPZQ4vRpkA/zsAzMJGH79wX71LezvIoVoF6uy-Ii_WIUZNFEQ6uegpuHsL_272adYkcvPEtJHuahnF9u40-FWpYqwonJtLu6o60ltsxMfr3NqX5zjyD2Kimb0MZJaon0N1CElsiL0kizQrePlOeLuMY-QWW0T9KyKyVuNvLKhE4YaI0b4jidZw/z3QxDNxOBYUvB7U_8DQyfUE28L7v6eBYghajXDDVnSY",
+            "filename": "Media (8).jpg",
+            "size": 160968,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/tPC1ZnLT3utj65akeDJrjA/zBncTqjbRdqajXO6m5I2u2UrC3WxvvDDkINV_cQLACwW_nb-7ytEZyTnadxH8SPVZfVRoa2VfvwdkVdhhz_jGiAJQFduN4uPJH1a2IfI8XZuh-XsdkAvlvL9Pm1NE_c3Mi0iR4kJU3k8Y3LlvM6acg/ToKRt88jLIqgiU6mSaSvPHBC-qzr1vMDLley_TEaz4U",
+                "width": 11,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/sfWUh43O3RlEVl0W-uupJw/I0bNhCIt4ArcTab2HZJUBKIX2Nt61oQvSW9jWWcHTkh93KUgPqDb-1i7NLZlomq-8xGc7auOyjz1uypWoecIJe2qpxGOp6F3ncDTt3mY9MdfnJBYW2vw7kJ9fZJ-APHN6xoD1LXPwk-RhF6m14dwRw/7icCh-rSqLRULqMEn574st6D21m1EOK676GI5K0ouvI",
+                "width": 512,
+                "height": 1643
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/MUN9bniFcWpyoOIlcGSLoA/jlZvPavfAXlwio_0mGnZ_iSraLCljgX7f339esClfeOMox1DTx5oOR6LPZqvIZFwUBNcU1mgphM0p8yVELA3MXY3NrdSks-fmX9E8JiV7y60e87c1WwRqWfpo01ic8qLDldH2ioZiV2q62sGtzOZaA/_97Ia9TcK0YwwXc1Xwz6Bioe9ovgAHbg7mqJx5J16o8",
+                "width": 576,
+                "height": 1848
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "reczyTK081I42OCIp"
+        ],
+        "Item": "Duct Tape and 4 Gang Adapter",
+        "Cost": 101,
+        "Date": "2026-07-20",
+        "Purpose": "for proper cable management",
+        "Name (from Reimburse To)": [
+          "Ivan Sabado"
+        ],
+        "Total Cost": 101,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Ivan Sabado",
+        "Date Created": "2026-07-20",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recmsThweIL2yEg7p",
+      "createdTime": "2026-04-13T10:01:39.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attxChRv5GBynghpX",
+            "width": 2268,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/gHNvw_2LRYWNRKZF-FOKlQ/6QwOkJfsVijgaYXwDVS49-nJUg_Hy2rcJT7wCeqd_E0bj5Zz7GqJO5VMCiUqNfPrb51LszHtOxGTM879qEu2LKkXL-sBZLDKGGdLB4jJls7dcbcfTt9wZrNhK-3MifxzHiudqeOfZf756U-0349lkyhETWAft2-ZHRelWi513pA/BdQogBrHxwm-QGYgzFVcHPBO4aPbUxIqf_1oN-Fvn8g",
+            "filename": "Image 040826 snacks.jpg",
+            "size": 4640668,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/WT-tYRIUaZJimVf3q_ukUA/KICt7CTWHiVkq63Jk4Lu8G1biXh-1YuIcZTrCYiJIVN4XHIwj0jtwIhosWmNSfQsAUv0QHuvRC-rxUG3qMI3zQMXzM0DADRqMYBzMVb24kHxQw_VXMFDmA7bEBKzR3NVdqloSTxPmbo-IpUv1t7jvg/3EKStwdxglkAaK6aTyqxgrF9hGc49XHdZLeUs3Z9_0M",
+                "width": 20,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/08CmDCPBSGgYjzKpWZepAg/Mwvi4QBMmKuHMBWJx6whg__uYTlkVg6z7BbvqWhiuV5oLq_jm6SD4YEW4BtR-l9F3iIeiSMmIZ4muzeEPHfwflO0Mf_Zk47Z_4rZUAM0sg_nReRehgM_AQMe79rI8rOpLJP1QI-r5LgZaMK2ghmPgA/5sX1EKZe2OtoOYcY8UFSroJ-58AAcxFmm26emamClHA",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/7LmrQcwOzm_fg5S0NEzJkA/x103W3hcbwulzCfs5Xbs6DG_VPXDmJVfuGjMX8_Aem2E7FpVtGCH1Lx9skq6CAcpSuvq1kEi1frR7EpNxLK8nI-Sl9w3p4ylMdQcpoDW5ss6zaLiLxWgf8jA__KjkctwllnOUGvBS-xVl9cpTWv68A/l9SGmqNhYPI5MyVErEkfPmbW0iIxV0UnHl-5IYLKU0M",
+                "width": 1688,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Snacks",
+        "Cost": 860,
+        "Date": "2026-04-08",
+        "Purpose": "Office snacks",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 860,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-04-13",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recnaUB1mFUsngZce",
+      "createdTime": "2026-06-03T02:43:36.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attHfStx2Sob5nemn",
+            "width": 930,
+            "height": 3612,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/wEa1RZr75IUN1jEbzGoOaA/Q_u1x2YjjenTwqv4qG0XXHF8kuHiWn2US86dKXFkLG_y390_cFYcg6xy96ZLP_aTxzkhdC1aKSbWOn8bSFvevuG-s5UZXDig9Nx2KAa45BkNb_bPH10VDQRFbosAuIcaVadEqUI3l3ws6U1cIK_rLN6sVn9vTiXKSZW2CCAKlJw/ppq288G3Peeh4d7NjLaQEbsYMk-rI-7ughqj5Dgwfsc",
+            "filename": "Month of June - Grocery.jpeg",
+            "size": 2187071,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/G1gLMFHM6JSIPqUbK4U55g/cSLs_6gTRhTMfVsyMms3DNEt_h5wjV-6y9vN8mfMP7vkR2jS9GnyvBbw5mJb6PuXN-I-xCdmmrprku7pBjCr3TOAFeRc_22E9SeREllka36GhoGo23HRW6A26jVRaWIg9ubCAlmyzNzHIICIcCNn0g/C19fv8bf3u3oi3bn7IswieyKp-vJV_slKRappSlwVwA",
+                "width": 9,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/4W4ylKOhTJZDvybUu3lkQA/WuOa3azONL1LloiQLMdWm5YNslx6XOz04tdYrvxBRr6YKJzXAr5LMIdX5S6SGsXc-0clXyo1Vj_QXoBPTLKMHVO7ln4VVKtvsHFpvCZfVwKp3GmlFDXCjzP9D2IDXsAkOkloV1xDq3Uj48yIll9kdA/8amoEXCSTutsKB97Oc7ZKiAErPSC9h7deufX2Wxrsc8",
+                "width": 512,
+                "height": 1989
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/k0ypnpiC-PopOEB3rFT5Xw/elOdmjh_-EKrUeAmMhrKYRUjzIvPOngb6jeyqk0KLY_weHXVvhj9NXO9r8DBgjmfu8S1z5dF5jaRAQR_7n-p-sVjbYEYxzZ8g5-h6J9g69otmKu5Hv64TOIt9mw6qHXVOBVQARVQQQnCcDg5vYUnew/AFjw1t2w4r-5w_Ksalm4Hs8gME3FO6RCiAZFz-8NBC8",
+                "width": 772,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recdGoHOlwjsgmZPN"
+        ],
+        "Item": "Monthly Grocery",
+        "Cost": 1644.25,
+        "Date": "2026-06-02",
+        "Purpose": "Monthly Grocery:\n- snacks\n- pantry stocks\n- toilet essentials",
+        "Name (from Reimburse To)": [
+          "Carlo Magtoto"
+        ],
+        "Total Cost": 1644.25,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Carlo Magtoto",
+        "Date Created": "2026-06-03",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recnyqegVpJuvOshu",
+      "createdTime": "2026-05-14T00:22:37.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "att0IXLiICwBURomK",
+            "width": 3024,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/XeIFjNWqPd3L7Y_m3feC-Q/sc3MdC4el6lXqQk3jIbpSN1W2hnfjtIGga4hOI-rlhUuao3TaVvHuks0C2mDnNih4guYq9ZGdiUFhtpIWjtHcf6QS8zQFyy3i645s__PNpzftLT87Q-iotqKGfOdPs5wiVybmve7DrkhlLCFUhoHzGgKVKipOGNHmcIUoS_Vx7c/9dgaQ_bw_b4iV-D3hhZeujirn0ba4IA6f9v2rj6BTrY",
+            "filename": "IMG_9610.jpeg",
+            "size": 3513149,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/ZJE_ygrlysEFYmiwyHZ5Fg/z13iAexPufSe4zAM3Q_bV-mmAiSlWcHdK6NwINKorGyzCtr9Ep7PWSvJ7PYUM4Unkq7ru7bCEN23bqwdYNxpzOcX22Y4bX7338kbvPs0eYAHWkzf8ALVeoI7TDujWx0O4ir8Rvtdaq96nHHNToK7Hw/HVgAHKxGngvKfH9YoP2-ba9DyB3D5aBMw4YLiiER69A",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/rOMZdQNdaMwO1x-nT1bCbw/6CAS4L5VJqxi68w3wM_dt8BghwJ2-14-KEkqc-meC46rE6-CPnCL0glQm6why1dLaJ8SByyNrG_yhw2GGI8q60Nuwdrn6-2A0_oGRvxpbmnZ65QU5bzHTq4qEATzm4GNWMn6Z_X_tJFYezWyua_7FA/q_B94wGrO08XA7Gs180cJDhXJG70Sz11DNW6DEQ5YfA",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/uQABj4zUlkVW0-InadcnBA/8oCUXLaIGFBlCQoJxAUMOZoZNn9EL7I1NGWuont26kRslkMbW44KbSrqlnR7CcxBSnBMbTkvcK_WUjmK-dM7HIcY2FFqR4xoeyWAkyXB6lRmS-6op-Ith-mqaK7dHltOdAz9M7T1zV1IQmialqNNvQ/Xtkk_3UCeoQnxpaeSLdAZO9_X_opN58HLFpGZpN0_kw",
+                "width": 2250,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "rec8oa1hgPGMnSZmA"
+        ],
+        "Item": "Cleaning Items, Disposables, and Snacks",
+        "Cost": 1516.5,
+        "Date": "2026-05-14",
+        "Purpose": "For office needs",
+        "Name (from Reimburse To)": [
+          "Raphael Dayao"
+        ],
+        "Total Cost": 1516.5,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Raphael Dayao",
+        "Date Created": "2026-05-14",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "reco3azMTsvGzNSY9",
+      "createdTime": "2026-07-23T05:24:00.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attWXs8ABDAKE1O74",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/9iDd-Sh6Mbs67tHUnSbe1Q/MSuTNg2rzQdYn6eCZI7HdsOY96VqszRFNstj1o3_BDnBEp6uQyy5cP8XH-dBeKHjSiL5QUDIrweTFBfrEPGEam1_gPp3EnrA8HmZBMOz8tvufHvSlZF_ZyDfzQV3r4Q53xKw3kvSfl-TfvKBNcgM9J17GSPsiLpbtP8wxv-CnkA/o1VliYAKJsBEN7ZjMU7HE807NlhUC22NGF9iPEPSmT8",
+            "filename": "photo_2026-07-22.jpg",
+            "size": 102562,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/AegsnTngInTeGh9V9aA99Q/mcLdxaJoCE1zD-Hhm7h_aYSUJrhO_PqI1ISiHsPxa5iww1Bu_SZEug-cD9jmtd9p_DVyNzsXfi844_yhgS_PDbDyzJ7qt4PYBgIsY-GV6pzDP-8ZT6Oh6nS5xDql0PNdBQ5lC2F41nB1VKu3w7YHyw/79llK0BvT712oPv98-UsTm4xUGuE-JrPxlcTmFPhXCE",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/jHXld6RKtwJF3ml1oXx7Cw/Pqiw9Dm_vTfKFRdUxtN46MZgr8nsWBK4noXDC7Gy1Nm1GnLC0EwnUJow-CnoKtWE1-dkzVZUtoyrWC92Otj5v82L7UpbAh2UVBbsIMqYjcol2SxxK3nMl8baTit7R_xuYwBEz7uPAyKGGysB7xgQaQ/y66ugYpN7qXRi6EmmcFiMnNR5Kq76hE0RnYO64-NewI",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/384SGcw66UkrUQRqF0v11g/enwW43kN4d3l2l4AqE0452vHI8P4l8EaRIcHL9ilqOU8eJ40wVmYIwrrcSj5pkL4AjWCWlnQQNtbAMosawxYGUDEBp3PfdJZfmb1c2PQdHmLXEKsE5cxU_HSbnUllfzDyXQXwtovzap1xoEstRvUug/7fkQ6IxFiebBN-NxFvZnP-LtNGlxtvwCWRO6DWYxIuQ",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-07-22",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-07-23",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recob2bv333704Yh1",
+      "createdTime": "2026-04-13T09:48:47.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attseqCBsGtyfp9fY",
+            "width": 2268,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/ZSSyJFVKeI9vjMIyPnsOag/FMfjQSAQAXTst5C5uywoVTWbzZRwOTJb_IfZ3E09gmLNJmw1JZF6XAc118UEndL0k6nV0dcXldEwCFKIM0xtS9dg0KhMjQEU8I7PUlYBvOWQsuLWP1EZVMn57UdlmaN0506fHqul1Sjr40ctXJdwD4tJg-3qc2WwL-klIcafXLA/AW3eYougdOjV0ohZzXUDv21a1g2z37s8cKZkX3McHYo",
+            "filename": "Receipt 041326.jpg",
+            "size": 4734007,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/sUKuO0-aFTmfaMeXnczz8g/ubG11gLZ8UqXiLtNEfPjnXskOJO6RjvD-GmLt2lELFAHBBngj9J10gYEEFfVEKmsg1Dg5CRDKpVih7K9TFBCL7VvBVLArY98oYmEXYf8xmsLCKhvtyEh3t2ioKOBfBlR-JBvtAFeL75xxv6nzBcwBg/FHUFTrzBc1wlg6G-muhtoj5XG7N1MtZjMYy7n7EnHLc",
+                "width": 20,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/HZYTobIbGOamiRXn7zCowA/gRg4pHWkm3dyDjnDETuDmAlVePHqvLZsbjNMc9o1LXnOda1TgKNvM9l5YODh8tQ0zb_Xh5Zezc6S3VWn-Npgpwg1cx3d4_AqYfyb5x5lgEsGO_dEauPs3PS2aL681qBj3rqYq9NMUWEx90Ix5cmPjw/rZM9yio0V_AllzAKhvnxKjPxHBoCpcvzEKfTx2juSYY",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/_5qSDpCJn5YJ5prpF2ComQ/alefIR2vAOJva7D2PXO1mVPuD8Yy3jNuD87yAKKWiTBuNW9zofLyFj4hbIId50p4mGF90o5oWX2YZpQSian6vzdkToHVzjdKm6DuujJkrWMtR0oxp3JRrdZPprXHQWDyMUrQUIwmkY5hxYbrk1rzZg/nZOfSIEvuNHlyX-Xqhrm82LMA3FRjgy_J4r5_r0JF6Y",
+                "width": 1688,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-04-13",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-04-13",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recqIeDf0WHjVvTj1",
+      "createdTime": "2025-11-13T23:19:56.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attd9XwkxvsZI15xA",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/DgNdZfyVn0BY2hUPBU1EOg/UwmgCqcmX02h1ZOYX0x8kP3g1ebqZ4MOrTTyhj0e0CV40jxUt2WKFWEr2zO8VQR-bVaM6EosudQA8d0npJivXAGQXAFW_19IU5MGxDTkid2nRfpdTy60MFWbjziN1yqNdA1yCQWi3YfG8beHiGRk7Fc-VYSOxtf7iP93QGagU44Z8s1tYCVqVfqUl5ECt6S_/FI_oaEbiflJXs-mGRE5IFFWcJIzQ17XJrMWI2ovf7LQ",
+            "filename": "photo_2025-11-14_07-17-53.jpg",
+            "size": 101711,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/BLskJM7hPkHSSaarf4oUZw/_O-SbJxl9tApBmEZdDgCIVZ5oMfV7xCk0bR2Nv6ScdEft3zM9UhulvgkZ2G0nqVyAnLOQtzNc_V8GO6cgR4Hm2IPZTnnRJ_kB2Y_YRxwtM39h92z1h44XaKXz3Kxgp2c9-7yV3N3baWuNPghDpOcnA/PDkG6aG6Y0RXnaQfsj78yWdetW92yBvxW5lWWmNJvDM",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/Osq0YBPvipgsE_4_cwJk0g/4n_cZShV3nG9BHAhxD6I3lMHhlfjs1qYY0QcWmRyd65vUHDTFM19LafD5uq-wTlejdN7lt_vVrWqbLzZQTN0UpWT6g29M9NwxhTYxRIJDi7huuGN_R7vQDmny7iupNNV6E72x9X6sZUVgpK6tM74MA/Q21g28eRhNpIpg5LB2jnYNg7y5Z57FCVks-OL_BAqrY",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/iz1s-W-91dhrcX7gYXyRcA/_wh20I5AL_rOLJHlAFp2BA_RaZjoWSlrOeMDnnBzrjF7sYeqU9slj2BiCjBLSTcei5xg0UU9Ne-vEpoU4Xcp3rDlwqRLKVui-GKWgvJNgGEcqg9C4UCooH2hC4uxebJEDeHdAtuzcA0L6dV9HE04iQ/zx5xNuml02dpSWiiZielh4STRcNbymP3UmdXfNoitsA",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 140,
+        "Date": "2025-11-14",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2025-11-13",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recqnGiZzvBsUuUh7",
+      "createdTime": "2026-03-19T06:19:44.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attIL8SPpuJofRv8l",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/nwGqrh6DPO20m44RwKxPOQ/kLaHfdVY4vO4fuSnKMAlaU_TKwEPaVz_avJ7-ftJoCX_XUrJcvabv9d17xXBxGJ0Z8Wlok-2QCerkOqT3goZ9DrNlXnXaqjIM-wPYCiFhI8mkiDQgvRRxL9Kfiryfj7acAzr0YV-LkEPZCJ5cGFaf-H9DgHJscUQwYpXMzlPkSo/KF5I6p4f6E8gxiA1_uPypR0Zm6kaz-7KWNNssJ4Eil0",
+            "filename": "photo_2026-03-05.jpg",
+            "size": 86952,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/ZEBmlCox-0WM3KQ1l44miA/ifLP8d0TBfAhXy4j1YJMCh8R_lmoM8KqVhOKT-s7u9QR7p6ItkKGN2FxIxmrj9yMM10WlHczUmHc8NcdfuJmE3zc-Ym2LKIRmMeCsSXTOmbHXMYlVjcTJHmqVazcSZ1DGc0Kj39wJsDDopQID2Atzg/iPl3MdeUb7wvaqL4g-G0qxy4tlDDnkG6b93Vff33Pv4",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/mJgCEIfJamQ9rKwN-AEGng/Ty4By6gyrvLFzpjh8QgliPP4_uyiAai3F9b0vYd771N_qYG8S8jjt9Ci1o0Bcp8eKKC_ck2bUqUOFTYxf6U8n582euA7RkrLUloNTN1gQbUkBi7JVeQx4O4sf7KfQCWW1Q7qf08s4gFTXEHA-IqUPw/2bk9C0-zeB_qzqCsEZQl3dgsjDOqcem5hKsYbPpfLFM",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/yWA2D9bqi9vrNpWAa9NxRw/YFBHYPzT2mipRgbQx-8JWXRJtJzlnst4odDzYtx4AuwKqcoA8DgrLYENuJzE63ggeV8woNewk4-6ElczDZ6tl-x3vSPQacigd1WcH6yk4IH3NGN-I5O3O2HAmTCOl5c8vFZcRrbz69QaFea9W8sMNg/wIWgKpBRmBazFMKKRBePrSHyr8UaCUXXWuTxPo41vI8",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 35,
+        "Date": "2026-03-05",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-03-19",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recsCcWNl5bfs83xR",
+      "createdTime": "2026-03-19T06:18:22.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attbAaQzjVdNNzXhY",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/44ASLEBsRHopDA7JsVJwIw/jVmEKhHPUpS7uzWBUCs5XSjjFcjizxmggxg_MTM1Bz7YILYO6no0fMIwAKIcHOmrEIiJ9b4bT8Ormp4RENsqzGbVgSmSwse9f36nSC0oZHysQYH_tgkCAJJdndOoXVfMZRF5OTDc2gR9jFGhV62XuwiypIesCGD8t_VY7dFz5aI/D_SQSsz-nmUk6R5RvqKEkNZ7kdCRuZWWDxVVgFOXHyk",
+            "filename": "photo_2026-02-17.jpg",
+            "size": 111504,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/ryjjZpDVZ8_EED88IJhZYA/UP6ESYJDbilVfikmECc20aN47w5U18hwlVff0HY8gBFP3EuzQktIO1uyby_l9zP-2OTU6lhs_rOmns8hGyj9n-CR-BW40SImrVhjDe5aM8Ckax79jZIqnjRhVshomwqQaEoIyEKwzFaSfGJYh-HLww/8dVgGlbivra9EcjoidDf2px9dkPGaH4vE5v4P6D5JHU",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/nvQsernj8FhjBpJ2eukOMA/uY0DpZU4QqfSuqorucs211hqI7hhkHMq0CBAbbIWUY6J8sOAts9csFsT_qdt9oO3Ejz9nUZoBZoXUmwXTKsUW-Q8D8GaqpgIXsWGFi8VtGJLUT3MxBhiF2yaoONqoM_W45Hhl-A83VuQ3CNx9xffEg/DX-wc1VZaBzN1q_CauvJjGl2EOV-JpcRWcJafvPoY4o",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/8Rz-I7qzvd7yWYXVtUMTwA/9TWNuiZ-zTHFYBbMcGoCf3-bY5W5gN_0jUOrv8vi-nfwdUXM0_clgr_W_2OH-X6fAGMo8gZ4hCJGuwPZSZNxRAS9h9k1rxOJehlp5ecfW7VVOPVIG5xJOJQXk37yyhVIVxJsLHoB-fARCjTpsB1nLQ/7U6UnyomxV_UdrHoFgC4TWpVh0ScDhT6Y1hWgT6lJyA",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 35,
+        "Date": "2026-02-17",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 140,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-03-19",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recsmHx0ZtgDWkoHy",
+      "createdTime": "2026-02-11T01:45:46.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "atteOU8izL85Utdq9",
+            "width": 1170,
+            "height": 1560,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/JrjXfgw9d83bArISv9VELA/CTNtSvjyGEgAhFV-g4hroXu5D1a_7pFMuH3FurwrCJ0EA5fXQHRfChBD2MPSUzN8Ga0brY6Gt-kD_FihAqSxdBB_t1P96deL_XhyfLgIkOdGAy5HDVyfLT7Xd9xh2Dmnkwe1-vONqX5NfBstDw2g1f4WupozBVHxoDNge9ZhbSNdCyziOaIp8GcIvFaWmX16RWw77aBY_Gt7tpl4b6TxzQ/FM0IpXciBZbvtTGZ7cR96PvWn52TxJHALsQeyA_wuSs",
+            "filename": "627961774_4180487452216855_2266833990738095356_n.jpg",
+            "size": 415358,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/vYZWL7QsJnNwbnW4wwca2A/KvS16-cHJPKNKKUTx2zymKDB7yE6deH0fe7F3suG6YzwI2GeUk_Ru60jDWXatKcquBhzcG5RWhExXvp1gUxgWox7sCwIJJL8CefW5i-9jI34t3NG9DmfDV5BhYwkMy8yiyT64l-K8foPj-9Md8eW7A/3k2ps6ecDS7O_wOwCUWx3VqFNf1ikKCLn3OuRMpmmK0",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/0QXyqdCJVv-AUwjKFrafzg/VQGtUvqZoVgkrbRpN8rXChCxKBp7uwBB4HCADY08IqvNPx6qxdKDgHFHdP8rtt0ommDi_bmRXKOuH0WNBvIFwhKWdGQN25USzlyDNDrDkR1zfTV3qhZwMf8XC_T9II7WPpQYI63BOFrX1VLr7QlCuw/wNHELLc0VJGBKu-XcyaRYLTkPgLJ2VPeog_BjMOrndI",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/bBLOPL6rzLzWe6qQDyIBqw/Uk8xUNWpXIFHOQackleO8o3zGCb8Hp6UtS11zpMk6XeAJjryJbVz1ejLgXuI-pxC4fx2tlyXmG_0LkRbeiwsTCzuoBXzwCtl9_pMJOfhhB1XaJQE4tXABeK9cd6jaJKUqiF3mo43eUFPdXxo2YWUYQ/us6dL3dQJS5Oxx6sDygd10_LldOFhIWL5nvNTFDoUMQ",
+                "width": 1170,
+                "height": 1560
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recdGoHOlwjsgmZPN"
+        ],
+        "Item": "10",
+        "Cost": 1275,
+        "Date": "2026-02-11",
+        "Purpose": "cleaning materials and for hygiene",
+        "Name (from Reimburse To)": [
+          "Carlo Magtoto"
+        ],
+        "Total Cost": 1275,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Carlo Magtoto",
+        "Date Created": "2026-02-11",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recsx1ClZECPm9MZ0",
+      "createdTime": "2026-04-13T10:01:08.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attVpzydGXAZdceYs",
+            "width": 2268,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/a6KqvJ9EJn5hhRDSyUJvUw/hxf9lliwt_K7SQzpu22B0Mw3Nx2Pez7h7uZGZwULIkhtpQB8H4FYyPL_3vPTfucsXZSjNc_hkU-Jzc8j_eg5S8YX-Rw5eSB64RFwK9VbIE7cGXCSmOGI4yrbxuIFF7sxXtzsRItzbvxQenRRedDTlGaUD4bVOHUFncjC0jc9zqM/8gUlEXyCo4yGaS0KKFHuVj4Bs41gbwa3WoWwO7jbMy4",
+            "filename": "Image 040826.jpg",
+            "size": 5131645,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/pI6dTvimGtgTo2_4xpa9jQ/M_uyWaFiPZnguXaeE-z6TM52N9cJH3pyzOED_UMintHppOqZ6XlBcUk7jIJo4Q5WE7FLUDhUUeibjjdyW1G8o8k9S_t5X5pj_7cowt2tITs3nZ8pjoIF0QZtQFZktkdVaSkrNY71TUC4Nj3MgLXU5g/tq7FYDEZ_Y0jEo4zveterl0lgFd5RvedXTFtdFAtOkQ",
+                "width": 20,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/Xm6HyGhPPEzwWFAzqi3ctw/gsnQ48vHA0eKIgqR_6ptF5WDoqEOybAL10HJtvZ-4tAVSuUlCHvLuiwH-5TpcjsIuR35tIXThrirZvoxPy7B5u5AdOkCGek5XIh8fnpe_Pmho1Nlo7C5RlegthTo004tTPD-KJlQ2kWGKdzR-lUlIg/Su-qrtiF_f-_ZNzkrsOJ74NxjXpeP9hXB9oP7WF5nhk",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/PhyK1V2QAHXvGY0tv8erfQ/OWQ41gnpwkn-CudvnN6AMZ29ntUGeYE12vCIrDqixFG89KdWK9npEYGvlZe3CNuzyc-vfilvG7bEAgIT9YYF1HdswfayadAnu58zDb5jNSoNt40BoBtm4nPdzFNJIWu1tfl79jrSksAw5MuBU7abYQ/yg8HAahgtEQV-Rl3opHyIUHOP2x5R9fKdCFn0xKnevE",
+                "width": 1688,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Cleaning and coffee",
+        "Cost": 3120,
+        "Date": "2026-04-08",
+        "Purpose": "Office supplies",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 3120,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-04-13",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "rectIHWo4YleQ7whF",
+      "createdTime": "2026-02-11T01:45:35.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attIJpfAqeolyFN0r",
+            "width": 1170,
+            "height": 1560,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/3PmdZ7XOh71RVq_s0AZZ7A/A1TO6vMjM5awrVw0xNxHc3zGWs4Zd542vkdSO7aN_0GPzNNmgnQV0-7rWQRfW-BfTGbzYufpUi3JxnNLunrcpGvEMEIyxHHqUZXKKUzsHjHN87dSeVwzs2a5nK83Lk67EJAuWkjTix8zGLW4gxcDjwNltAcaqjf0eYoEknkDg9vroXvEQfROW9geRIGOKkgTgRCJQu6cCE5Y57M_oB-vvQ/zvckjBd4pDzuYx578kZ4IwvZpQw8VaAU39p1WD4nL4s",
+            "filename": "629222917_1563131684912929_3817649619926381730_n.jpg",
+            "size": 374424,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/F0dGiEoaqtWzBSXTYKEEqA/5yaH1uckHsaVf7dLGgwAID_dvEskYWTP0cYW39fDVjCQ0z7UU4xcwqYl741a52fJGqymkLeta4VVUtr1EbCEFzQrHfuLeP3XOUGqqRIRVuJyc0bnktHrJDDnW9UAjZ2dcs3Zktm0FUDwOXcrdi6TMw/0X9jMt69mPJo_pZzWk1CWxZU0wKnWrc3v403GLcqXno",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/JgRHO5o3RCXtXxNnKJSr-Q/hpCe-P1yIg5vPwI5TEQCPZ1Aiyak8deMqXyO4uEmN-8dviFeeyFWOyvVBpT6KEzXckpuChpIuinwHCdLPEhB3Z2bkhpAwZZ07cp-F0tQrbPR0z98jcEoKr8JnZ2e4W07pJkbBLanjF_0FhIyNaV7WA/QA7zlRHH4Jxy8ChKO2-5MDZFk2oCqoWQZ_LwB1lxTXM",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/hoy_6XWzx56SR1XvP1Peig/sQ7SKmHdYlZntk6NAs_3Cqe1Gp5gIHL2I_vxcWHu0HFandULerOE_QWsNQDE7WNS3_IzrkLljDABfWLXDb76sr_Kigl4sy_c4WtiEt9v7EZvhReN6AKAgaqVQbdgdgExdOgO1ecYPsZLEB2UFritgg/rKH6qkE-h16p-Z6WNzl6R_RFpOzP3vKpuTFURM2u4O4",
+                "width": 1170,
+                "height": 1560
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recdGoHOlwjsgmZPN"
+        ],
+        "Item": "8",
+        "Cost": 639.85,
+        "Date": "2026-02-11",
+        "Purpose": "For cleaning - cleaning agents\nImmediate and disposable items",
+        "Name (from Reimburse To)": [
+          "Carlo Magtoto"
+        ],
+        "Total Cost": 639.85,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Carlo Magtoto",
+        "Date Created": "2026-02-11",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recurO86FTMNS5hHe",
+      "createdTime": "2026-06-10T02:23:01.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attnGoNL4IoGuncd5",
+            "width": 1648,
+            "height": 2432,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/f79XNMXvAIN1iKA9PF9ACw/o4IQon089CML6kh7mpWGViIC2EWXg1V-bexWnNZGukJOF6TIR_-Gv84kOgfIq-ezR7iIGl7J45RaXCiDAlNBqz6rhFqi-FqpwBbxWHn-7Tzs0QyDX8Z9hVPMgsMmslPRPtD4l_mYbrWrNFJe8Uv1KownGyofWu2wUpLWK-oRH6M/Fa8jXJRSZYqCiE74Ui0DGMboxBIoqg_Ew3PqvIF8uLE",
+            "filename": "Media (1).jpg",
+            "size": 431657,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/Lvdjehx7352gtMJ6Mi1XFQ/8wGPPnYqIqZd3dH7uYZk16SviKNZ-swFl7jkc3OYvDWsCNJA3JBXi8uxogDAt7l8hNNmXqFceJZDqmUuJOX8K-6S3jQ60y6PfZWGc36FFNgAPwjEXQSXuqRpHHm_Fhfh-SqQGnJWrR-XkKnRQBT2yw/dcI3stUsyb-XEj2Bj2Dy_2TLNb7FitWsfnUbCWOAX_Y",
+                "width": 24,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/pzBWQmVe631A6cM_9_tCzg/AR5YtFh37ju4AtNr0O5R3EXrssnkxihjMrFItEDC7xAK6SDtz2Sw9wnwpjSMvHFlBXsO8Xrnl7Hr7MNY1wqpHzYwPF4vYqk7DjG0U5uaJMhSTfdxeiLQjV3eydDbzTITykhPsLjznDRqJo9WIMO57Q/yaqKWi6X5jr07Mm0sTrWkvCvX7Nfn2Bar05Xul7TWVQ",
+                "width": 512,
+                "height": 756
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/dYjp0wX8BUXnYuZxYbzgbg/WkzOwf7zJaDhaRrzRxYZa0JV-P4Smb1I3QblIpgFouc9PqLJszTki-vMsv8StUN5nUqXmFKf2hQDPDgEPpxgL5x2MtC0R4__9l434AIxHQPvVRqBHpxmCy5W0zGbI4wG3Dl6pdThRNiT3vjPo_ckgw/12fQX4ZKuzi8ApZdcXv8MjDftXlikXS_LR6c1QSEVYA",
+                "width": 1648,
+                "height": 2432
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "reczyTK081I42OCIp"
+        ],
+        "Item": "Door Knob",
+        "Cost": 1090,
+        "Date": "2026-06-10",
+        "Purpose": "The existing doorknob was damaged due to an obstructed door path and prolonged use. It was replaced with a new doorknob, and an additional handle was installed to improve durability and extend its service life.",
+        "Name (from Reimburse To)": [
+          "Ivan Sabado"
+        ],
+        "Total Cost": 1090,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Ivan Sabado",
+        "Date Created": "2026-06-10",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recusqlgn9Knal6lW",
+      "createdTime": "2026-08-10T06:11:11.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attuCVuoJZmfmvXXS",
+            "width": 1536,
+            "height": 1024,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/bhz9lYklLkB7oqpitFk9Rg/qBbskP0C8rwwhjwF2EUIi5h33Udi70xbYpziDW4V982dqoP21Cg1izlQaXtLgGvuJrwm_x7aVbfJUoxvBXQAf1yAY02DcKvO8LI-F5NtyFkkDC_LqoQagyCkQT-h8mbYNAz8Wv3L9zkfGd1UAmFpdd66vhkAp2f7bcopk-QCIjk/inH8c26KSSRLBqNRIOh-PDKpTtUT4mnQaNIbAsTnZNw",
+            "filename": "hand-phone base.png",
+            "size": 215402,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/5DswRuWG7zLEjWAq8n8EeQ/4YeKuaxlGP_nk_ZuUvp8CgGGJXdYU45ltv30qPGr_LkgvQmPIe70CVjhLbfMP0K6Uwu4aSYp1IM6kQB-y3yZERHJyWQJ490XjvoEPd817JbL3v4LkqeG0c7jerhlIl0ZirME1NjvGBUITvHPE--rhw/PRL6PBCkCg8NSNZsdN41kWfVbJi_FpSzpwPZ31YTzW8",
+                "width": 54,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/-uLsdqk8vb8MWcwMAt8VDQ/iP1QD0iNtgUcc9s9Pthu1FZhcV2kHYaEUfsxtEN_yB4EL7uf_RmLlgGoAknOINGZp7UYPpr7yJXnib6Y1hoSKCBJJ_QnG7gkeP3PBJNy9vIRlJPALOnk-PxWYRzc-nvs5X8YGHBN1h8JTTRJBl6ueA/swRJhNwkRaHLtqPyYH78ibblKveZPYl_nJM19jBCT1s",
+                "width": 768,
+                "height": 512
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/WM71zWDrV7eVf8fOUpxYRQ/0MMG9CLySzgbSH1Wca60bBfS4UmfHg8NiNjXTt0jxBxYxwLNj1bEYYKE5tkVqmKK1UNj6l6P9FQEmhxWtGQKt3j29HbabwOQBoMa18FEyDxptSjO61cQRO0pGALYf7b-Y0V1adKlMc1zbtsicLaeew/OGeIvs825IfxXTxZad7VhELZEDyXDL6ExQKi-jLpj4E",
+                "width": 1536,
+                "height": 1024
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recgdpbU3MJxqYNzb"
+        ],
+        "Item": "test",
+        "Cost": 999,
+        "Date": "2026-08-10",
+        "Purpose": "test reimbursement for integration to transaction tracker",
+        "Name (from Reimburse To)": [
+          "Nathaniel Tanglao"
+        ],
+        "Total Cost": 999,
+        "Status": "Pending",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Nathaniel Tanglao",
+        "Approver Remarks": "test",
+        "Date Created": "2026-08-10",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recw5KBL9atYgpZ4T",
+      "createdTime": "2026-06-08T10:31:53.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attAEM0s68zQNMJI1",
+            "width": 1047,
+            "height": 897,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/46Xey948dTmr9y5OlRGnVw/Q8i78ZHG9ib2mdNP4lIqoKp2vKNC-VR13N6H9VfdS3Ak1po1sjqk7tic9g0cj6qegPovGagtBdBaxoF1oBTqQAXtfKZBW82LWom67rfgnVzpajTp_Y6DbylcHOESyUsgZSiLGxYpCjMi-jWBvV2-m6KkN1Yrn6DFi9CNXSTGTho/LvW9RPMSJbPYmctaAbZCy32a_dLkT4Rz8noJin2LapY",
+            "filename": "Air Freshener (AC Office).png",
+            "size": 120067,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/K4aiT-KGNSVY8xROGXZZaw/5eKgJt1SjPsAJZnjnO3kNNi0GxTfEsXjbnyMLoHKkGJzlGQXpZ6--UCytDwAyCLE6xl0ngXjQhxDoO_isI6G90EFQHLCKQXuHlwirRG45xdxxpZ1xsYetBUVGB_JX2RQ5fYP6muYX7-kKc_hnBC02Q/sjUdvOb8R9r3T-5v8kKC69WBaAvSkeNTchuEFtJ23zg",
+                "width": 42,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/4zmPSoFdPIkgjmmzffCcTg/nmYYO-e4SnFHZ-t5PUQU_jBRnFZbB9r0mZwPJvCzEBDQjTYqoxcgdwW-Xzp7GKuLswoHAYcijz1bVmPyrOGb9Kesp3XHpMp5DiOKSCu8jr3sTi0YbQdeuESetEgF7_mqZToDg3uosFyR9XyM5rYwsw/9Gho_6UNLVwkaqHwKtvxJAcr93lzWV4GrZXikgovGmc",
+                "width": 598,
+                "height": 512
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/HWtvTmSi8z27g9oyKPpzIQ/i7v_IT4F_ObchTWer5Pbg8vjQd32wxmPpkbqc2E4Tkgvzh3lIb-rzsImKgEVgrwca_PqHjANdYFm9GRhPmoGQ3kMVpVhpI0b5z9MPdxO_SqZ5aPs5LdIGB_0OFyyP--pqC8FOv5RwUg_5Iof7BA7EQ/NwYtz_4LkqMa0lcRiGHpgGGgEfd0-YBhg7LnidhObNw",
+                "width": 1047,
+                "height": 897
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recdGoHOlwjsgmZPN"
+        ],
+        "Item": "Air Freshener",
+        "Cost": 139,
+        "Date": "2026-06-08",
+        "Purpose": "Workplace Amenity",
+        "Name (from Reimburse To)": [
+          "Carlo Magtoto"
+        ],
+        "Total Cost": 139,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Carlo Magtoto",
+        "Date Created": "2026-06-08",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recxn9nA9GTj35gWt",
+      "createdTime": "2026-04-13T09:45:46.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "attC8cs5yDN5w3Y8z",
+            "width": 2268,
+            "height": 4032,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/WvVtJurFRGnwcZO8YQjY2g/vD7ICPktQ5RkL74mY7-3jUS15P7NC9s6R8drvQxRYiLvWJdIFpeLDC7-eMvcAVE8xuYyk_wRrth6M2jnjABlnrfdbx0alBtubkhvd-4p5CIBYLeVluNfwyKqf2Vxel5VdeykQl4WmqCe-tkixmJkkU-MeStUCL2dPJze-wmwOso/ENOFIblnZDcEwTWn3BK7jC_XXdwX4FdQvqUjcyggfPU",
+            "filename": "Receipt 032526.jpg",
+            "size": 4845338,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/yqiQJqsW_vm-jRSdSluy5A/nY8M-rn-k8YFEHCC3xMYHi9tyYKVE9sxgn4exRLIYit7o2cHdRnLuFM9dtvetE1OWl6NYzVW0lz7YfUkn1diaVGcxyfNq4dlauHR8pE8HvdbQe4JKSutwL3I4e3g4R6sDLOos1InZ9iD7HlzII9RjA/CZGwVGSkop7Z58nQbr8appkkfgDSdYMiSh67TFj2sXw",
+                "width": 20,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/MfbW8O1xjvG33PV2Yl1WrA/aNPMGl0f0e2S987db2BnkToXKIfwUfxUV1bU16kZYq5RGRZ11HdR5n9ihUnpMWMzS36QPjTveMv_3nofWFdzqeY1SeSey1Nhsxnpm1xa42fjD3tAMkr5Z6uigUZ_yTpqd4q4BbS-W4jBRxWHLKPneg/T9mWozAfU5mttmbmhoTfda9SY4XAAeCF4Ky4k26bMmw",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/DQoyef451W19r9p4GImG9A/GPz5KBWWKQZlWLGyBuTjbGQoFeF2oGJi49wU4DVwyjvyU0E1V5ze8GqRzXFL3zwZtu0yXuLW-S4Gqoj3gwfEsBKXbpYmCsKwWc15KNc_lr3Xi4jIi_9oAONUpc0PF9TIPTQ9IIQBA1QdY2rdU6EbAQ/cSKrVS6uAiaYzqE1HKAT6XclxKHKjrVXw8uic0u544Y",
+                "width": 1688,
+                "height": 3000
+              }
+            }
+          }
+        ],
+        "QTY": 4,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 40,
+        "Date": "2026-03-25",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 160,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-04-13",
+        "Team": "Angeles Pampanga Office"
+      }
+    },
+    {
+      "id": "recyA8e4MiaT7i9zB",
+      "createdTime": "2026-02-12T01:06:37.000Z",
+      "fields": {
+        "Receipts (If Applicable)": [
+          {
+            "id": "atthh9muHeSj1j91I",
+            "width": 720,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/YGyvOg9Grq26GLI9To4jpg/VeAUCLH6ImvyWUDojZ4q6GlpJHxyn-L5OZfOvto1_9SJYXIMhuECxQgI9lu6dEKzDcQmknKorXIz8SzgF7MYVbfZhBdkpmHDxoR31YkjeEwevpxwDteoilWIfAsDk-moI0t2Y8X_RShJreaQ7_Dft1agVaLsmJBrxxmsytVtTnc/uhqjY6M1hb_0KPSpN5Hlqw1jiLE8PQ9L3yi8GW4CfPo",
+            "filename": "photo_2026-01-19.jpg",
+            "size": 121950,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/OgdwukCsb_GHisqvuTFWJg/2prtcamNjMd3jAgPOZdGijHPb63J8rKfV8NoKSNYzKFttZZicU9PN-wNKjYQdXL86dTBV_ERnlEMU1dcOaA66NchqCWrYgO2lWx_23HkLsgglQFQ3w1XivuTIZ8ZsLoAEqpXByqFdLVBr5VC81Wq4g/Q-qQjAF8TzejsxnkmWDLUAiseWUCqnmlLL1nOvF45UM",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/IHgBRXG8bNdplBdBHe0Wtw/efjFFYmHWPgo523TuFNsLJttieuE7mhf9-fWUuUQhq4TT-PRIoA4BmgnBbOkQKqlN61fbausgca3BWlcgPwIzJetI3UvCSTu2fUJSaxTSuKVC34Fx6L3tmPHzXX7v0Yh0Fh4FTzSFFF2OALnnGDJbA/OF24scfZQKdw7F1I2Ltl2qLlEVR-055kbSkk2q5EsTY",
+                "width": 512,
+                "height": 910
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790078400000/GSM_C8RO5tHidvyLvuD0bA/rERcibGtW5fG8R4vsGJM8L5H5h2hbxgd4Mx2aJOHMxHV7b5njSn-8rEnJ0Ube1hsRiKW-RWIrr7Y8dbzMtJePmsusSR0H70BbMEXARrp0kyBHJ54evAKX6iUIQDM4Xgm0QJfQfUl8bKwCWESvnVR0Q/LqUv7Z66_8vQMcqb9RlhBrdnISUOx9OSSGAUhz8S-50",
+                "width": 720,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "QTY": 1,
+        "Reimburse To": [
+          "recA5y4NpdJHkvnwD"
+        ],
+        "Item": "Water Refill",
+        "Cost": 305,
+        "Date": "2026-01-19",
+        "Purpose": "Water Refill",
+        "Name (from Reimburse To)": [
+          "Michael Kevin De Mesa"
+        ],
+        "Total Cost": 305,
+        "Status": "Completed",
+        "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)": "Michael Kevin De Mesa",
+        "Date Created": "2026-02-12",
+        "Team": "Angeles Pampanga Office"
+      }
+    }
+  ]
+}

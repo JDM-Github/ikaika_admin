@@ -1,0 +1,4390 @@
+{
+  "table_id": "tblKpuFbcyc6YfmH1",
+  "table_name": "Transactions",
+  "records": [
+    {
+      "id": "rec06upNCyXjgIIao",
+      "createdTime": "2026-06-30T06:42:11.000Z",
+      "fields": {
+        "Amount": 571.74,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:42:34.000Z",
+        "Transaction Name": "Expense - Envelope Transfer copy copy copy",
+        "Envelope": [
+          "recEETyxGpQrObQGk"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:42:11.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "rec0NvWOgtUH0DWbf",
+      "createdTime": "2026-02-02T10:20:54.000Z",
+      "fields": {
+        "Amount": 1090,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recNgf0NWyk2zbxfH"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:20:54.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Tokyo Tokyo",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rec0j8NoQYAT9C6zY",
+      "createdTime": "2026-04-14T10:27:16.000Z",
+      "fields": {
+        "Amount": 1570,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-16T06:32:00.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "ETH Switch for Angele Office Room A",
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "empty",
+          "value": null,
+          "isStale": true
+        },
+        "Created Time": "2026-04-14T10:27:16.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Receipt": [
+          {
+            "id": "attdDMHWVGLlCSEHk",
+            "width": 993,
+            "height": 702,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/-ltulA829951ELGiks184g/jLPH5XsN4zDp0Qc1zKDs9RJgyZow_IuLVUDunpJbE7J45VPGHvumvrId8SpCaNM5iIJ8dwjQ_URpZD1PsGPJ85oPW0k5E26ZG4eKOLd3zs7tXSqrT_ZK8WKuGbjvA_DX8RmnmPi2-kprmT1T_U-qTQ/gdW5Bq-rhG9ux0tyrNsn6DMWhZqGPvRgcpw0O8SLseE",
+            "filename": "image.png",
+            "size": 123416,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/bUNvtIgvPrHclELHV6E6-Q/EaUlJhIT-eHZIqeQqNAuc1lp26Q_I4L3ZkSCnprr2p847sgndgKM42CeQcjoNR2xchMbge42JEhROcsUh81EZBCxQ6R9ZlpkqX1bPuOOTPYOpUxK4SwfAdgQ6y-ZYd9XbccpfDFDa5_sdCoGQyKPkw/fhwWXmdIfGVDep1Eov9GDPYoeyLCmB780j8p09M8e3Y",
+                "width": 51,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/SJaEAUdBk2XQjO7tnxeykg/HVEcf5TNiLRl8keMVmDwI_aGZoAOUuZym4euYeuKLD2caQm0yw1ykWwlHH2cp4WiJ-ufONS0dnjJEy710_TvITa46AfRn6kW0wjsLTkT_znGWnIyoAjQiYa6DX7SrRw-AZdxfvI9WheRuMSxgy4T3g/VauOc1dxf_QR7yuxxglN2D_ax5nUR7k0sEFRluAsJLc",
+                "width": 724,
+                "height": 512
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/PF1B8M9mIWHMA-w3WP6yRA/o5wnfCUoqe6Xu7VHetjU-ovxKUnSjvg7PFmqhVTw85poh6yfeiJtHjLTMTZ2HxR4yyL86oklqwuChaw1AZ_HTbhCM2FNbobApLm_Feu4EUSfmltIA1ZTRbpGdZeJiihZbaeVEOZNE-wcZz4E-Yf6DQ/KnqGi8wKS1l3tRMkSdZDGSh1Bri1O8UCWu8SWrF1fSA",
+                "width": 993,
+                "height": 702
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "Lazada"
+      }
+    },
+    {
+      "id": "rec0zZdbQZWtH0Yr6",
+      "createdTime": "2026-06-30T06:49:02.000Z",
+      "fields": {
+        "Amount": 15000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:50:23.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "rec7UY9tuuwlThJkr"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:49:02.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "rec1tGO0yzB9Qfb7b",
+      "createdTime": "2026-02-02T10:19:37.000Z",
+      "fields": {
+        "Amount": 540,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:38:32.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:19:37.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Michael",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rec26xk6VP7qfuE9G",
+      "createdTime": "2026-02-02T10:18:27.000Z",
+      "fields": {
+        "Amount": 1914,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:38:42.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:18:27.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Carlo",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rec2Tao2Zp9JHfYAr",
+      "createdTime": "2026-06-20T08:29:09.000Z",
+      "fields": {
+        "Amount": 1599,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:33:15.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-06-20T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-20T08:29:09.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Converge"
+      }
+    },
+    {
+      "id": "rec2adFr2aaexEa1a",
+      "createdTime": "2026-02-02T10:28:15.000Z",
+      "fields": {
+        "Amount": 304,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:28:15.000Z",
+        "Payor/Payee": "Steven",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "rec2osDGBiu3kqemG",
+      "createdTime": "2026-02-02T10:33:45.000Z",
+      "fields": {
+        "Amount": 654.76,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "recxhMfCI5vqrqfYB"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:33:45.000Z",
+        "Payor/Payee": "Steven",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "rec32q2mBUXB5k2lC",
+      "createdTime": "2026-06-10T03:45:38.000Z",
+      "fields": {
+        "Amount": 1427.26,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:33:11.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Description": "Claude Code AI for coding task",
+        "Date": "2026-05-18T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-10T03:45:38.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Claude"
+      }
+    },
+    {
+      "id": "rec3TrlwnFqDnaM8P",
+      "createdTime": "2026-02-02T10:24:02.000Z",
+      "fields": {
+        "Amount": 2500,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "recZQkGBDH30R3Wmi"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:24:02.000Z",
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "rec3ds5b5hBszuqZH",
+      "createdTime": "2026-06-30T06:13:07.000Z",
+      "fields": {
+        "Amount": 690,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:39:36.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-06-16T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:13:07.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Reimburse to Michael & Ivan"
+      }
+    },
+    {
+      "id": "rec3ePg9gUXkhzht1",
+      "createdTime": "2026-04-14T18:04:46.000Z",
+      "fields": {
+        "Amount": 1699,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:33:05.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-04-15T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-14T18:04:46.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PLDT"
+      }
+    },
+    {
+      "id": "rec3jhTwjDaHHXBPy",
+      "createdTime": "2026-06-30T06:33:48.000Z",
+      "fields": {
+        "Amount": 93,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:38:56.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:33:48.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Reimburse to Ivan"
+      }
+    },
+    {
+      "id": "rec40mhEX2n4GmoVK",
+      "createdTime": "2026-02-02T10:09:00.000Z",
+      "fields": {
+        "Amount": 2714,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recNgf0NWyk2zbxfH"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:09:00.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "KFC",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "rec4VzboWPB58kNfg",
+      "createdTime": "2026-02-02T10:05:06.000Z",
+      "fields": {
+        "Amount": 1600,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:31:47.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-01-27T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:05:06.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Converge",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "rec51HqyzFsPjTsGL",
+      "createdTime": "2026-05-18T08:10:41.000Z",
+      "fields": {
+        "Amount": 1699,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:33:12.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-05-18T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-05-18T08:10:41.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PLDT"
+      }
+    },
+    {
+      "id": "rec55NIgPn1uq0Mf2",
+      "createdTime": "2026-06-30T06:52:25.000Z",
+      "fields": {
+        "Amount": 1268.96,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:53:23.000Z",
+        "Transaction Name": "Expense - Account Transfer",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:52:25.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ]
+      }
+    },
+    {
+      "id": "rec5GXvOlOAEuQgHl",
+      "createdTime": "2026-04-14T10:19:54.000Z",
+      "fields": {
+        "Amount": 102418,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-29T15:05:45.000Z",
+        "Budget Code Name": [
+          "BGT-002-20260408"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "Steven transfered to Nath to Complete transaction to PC Config\n",
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-14T10:19:54.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "rec1VJvJx6epTRR3T"
+        ],
+        "Payor/Payee": "Steven"
+      }
+    },
+    {
+      "id": "rec5XZC0tEuEceQ9Q",
+      "createdTime": "2026-02-02T10:22:37.000Z",
+      "fields": {
+        "Amount": 2999.77,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:22:37.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Shell",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rec5YEDpcifhW4S4d",
+      "createdTime": "2026-01-26T12:47:36.000Z",
+      "fields": {
+        "Amount": 18010,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-26T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-26T12:47:36.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PC Configure",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "rec5zLNhmjKsTp8JW",
+      "createdTime": "2026-06-30T06:40:44.000Z",
+      "fields": {
+        "Amount": 485.62,
+        "Type": "Credit",
+        "Last Modified Time": "2026-06-30T06:41:09.000Z",
+        "Transaction Name": "Credit - Envelope Transfer copy copy copy",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:40:44.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "rec6wugjgIlQlGUbY",
+      "createdTime": "2026-02-02T10:34:04.000Z",
+      "fields": {
+        "Amount": 654.76,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "recegXSiuDSuNpgHu"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:34:04.000Z",
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "rec7ARBayTwceK8Pv",
+      "createdTime": "2026-01-20T13:14:25.000Z",
+      "fields": {
+        "Amount": 18300,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recegXSiuDSuNpgHu"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:14:25.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rec7DjacyMHYaoi7d",
+      "createdTime": "2026-01-20T13:16:27.000Z",
+      "fields": {
+        "Amount": 7000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:16:27.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rec7YSllvx1exJa09",
+      "createdTime": "2026-04-14T10:25:54.000Z",
+      "fields": {
+        "Amount": 15295,
+        "Type": "Expense",
+        "Last Modified Time": "2026-04-14T10:26:48.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "Monitors for Kirf Andrew Pineda",
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-14T10:25:54.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Lazada"
+      }
+    },
+    {
+      "id": "rec84aWZme8AZZbhT",
+      "createdTime": "2026-06-30T06:51:03.000Z",
+      "fields": {
+        "Amount": 4000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:51:48.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "rec7UY9tuuwlThJkr"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:51:03.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "rec8b4bp36K5lpMVz",
+      "createdTime": "2026-01-20T13:07:48.000Z",
+      "fields": {
+        "Amount": 349250,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:07:48.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Receipt": [
+          {
+            "id": "attpX7BGQK0sM0yl5",
+            "width": 1280,
+            "height": 270,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/WDCBTXtnqXQzsjgT1OpEAw/d45Ua4wzpHdqxfKJbnKfUmo6zibOhgmY8gx3ypr_rJz8CdX11SVthRw1UnIbeEkqrrcp9AyyRtTXAVk7UW5tgJw7M12n6h9SZyvWK0SLjctsYUl7ks5KrE0Cd535cGFau6yOqg7TR4a2b4Ga5P5UL47bUCJto8pbO2tz1xzCjeWjdr3i5uABhdXJt5Oak3a-/1fT790JnmZwTh_tMcL7UYHtrp0WO2A9DajO4xo5sykM",
+            "filename": "photo_2026-01-22_11-49-37.jpg",
+            "size": 26392,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/x4FmIInpdVcV_w0lTOiahQ/bQPF6cos3CQAqKQWxuWs_sEXX9vwCoid4jfpyPy_nklUxG5x1pkzm_SmfcW2BM-HwcUcINEBvEN_Nr3-aPjdNncaKIb4F4zNPZnLeonyEDMXXfla3rOQ8QLBYzpzupdu01EROhu963sziHsFUT4pQA/CNLIcUrss-OaUGwNncPwyKlJ6d7FtzoJhf_k3HygMy8",
+                "width": 171,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/Ht9F5RfpXLXh_AcyIHaxUg/J3uHnpqn6W13ZV6oi8Pk5uJi1fyBIoZiwH9mI9Y471T37bBoHwg6pYD_FQroesqH-qvst-6zjqxjUdV8nh1J5lBjUAaeOIYAqWqK5HRyE2VBIwtlQRLfnBQfRg77RWd5Yupbw_3loiKHlooVBJIMSw/lhj0IIbht-Wsk7LRkITu6BwXSJH5YVONBovJhXC3b1k",
+                "width": 1280,
+                "height": 270
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/xlJxfbhRsw3XiC5qnpcQyA/YVq4W9CkZNGRCuwp_VJjTQV_xj5OhZTE5PZ-Meqa5GGe9giRHSuEnjXEWbUd2U3ByRna8hc0zFpGLamnj-Q5z6ekoP_9y3DxufFYej1wFQEPM8Wo0-oamLyhqwV8JdRTCLCe0t2Zk3ZuLucb458AzA/UsdAkzwu8BM3ArVOR2E2YA3-BJvboSs-Io1GhDxrk70",
+                "width": 1280,
+                "height": 270
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "Steven",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rec8qi7oC4PHvOlWN",
+      "createdTime": "2026-06-30T06:23:32.000Z",
+      "fields": {
+        "Amount": 3500,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:40:42.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recGmH3hw0DJPSPaM"
+        ],
+        "Date": "2026-04-20T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:23:32.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Reimburse to Michael"
+      }
+    },
+    {
+      "id": "rec99W17A962i7HAg",
+      "createdTime": "2026-01-20T12:40:40.000Z",
+      "fields": {
+        "Amount": 11994,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-30T10:38:23.000Z",
+        "Budget Code Name": [
+          "BGT-001-20251223"
+        ],
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2025-12-23T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T12:40:40.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Budget Code": [
+          "recKPuWUKADyO4gQH"
+        ],
+        "Payor/Payee": "Steven",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rec9oe5V8squAlmTM",
+      "createdTime": "2026-06-30T06:20:51.000Z",
+      "fields": {
+        "Amount": 5300,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-29T14:56:45.000Z",
+        "Budget Code Name": [
+          "BGT-002-20260408"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recEETyxGpQrObQGk"
+        ],
+        "Date": "2026-04-08T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:20:51.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Budget Code": [
+          "rec1VJvJx6epTRR3T"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recAcfq9hGcQGHlut",
+      "createdTime": "2026-06-30T10:54:29.000Z",
+      "fields": {
+        "Amount": 200,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T10:54:58.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recYx58fQZas8Wbkw"
+        ],
+        "Description": "transportation",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T10:54:29.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ]
+      }
+    },
+    {
+      "id": "recB8J7pvUmgppYcb",
+      "createdTime": "2026-06-30T06:02:10.000Z",
+      "fields": {
+        "Amount": 19788,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T14:23:52.000Z",
+        "Budget Code Name": [
+          "BGT-004-20260630"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recYx58fQZas8Wbkw"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:02:10.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recTOF2D4lrdVdEiZ"
+        ]
+      }
+    },
+    {
+      "id": "recB8eHY5DHuPAcuT",
+      "createdTime": "2026-01-26T12:48:55.000Z",
+      "fields": {
+        "Amount": 2650,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUUTcjpJWwWBi4t"
+        ],
+        "Description": "Shipping of Workstation to Kirf Andrew",
+        "Date": "2026-01-22T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-26T12:48:55.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "LBC",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recBB2ORL55B0Waoe",
+      "createdTime": "2026-02-02T10:17:38.000Z",
+      "fields": {
+        "Amount": 393150,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:17:38.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "PC Configure",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recBPbefkJVA9tJW8",
+      "createdTime": "2026-04-14T10:23:41.000Z",
+      "fields": {
+        "Amount": 15235,
+        "Type": "Expense",
+        "Last Modified Time": "2026-04-14T10:25:25.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "Monitors for Fin",
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-14T10:23:41.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Lazada"
+      }
+    },
+    {
+      "id": "recBReSBkPjvqYn0N",
+      "createdTime": "2026-02-02T10:31:36.000Z",
+      "fields": {
+        "Amount": 44.99,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "reckiPec0YbzQ6juK"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:31:36.000Z",
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recBS4eO2ThrEB6XX",
+      "createdTime": "2026-06-30T06:25:07.000Z",
+      "fields": {
+        "Amount": 1448.31,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:26:22.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recjpVbjVdgFLHRLs"
+        ],
+        "Date": "2026-04-14T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:25:07.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Shell"
+      }
+    },
+    {
+      "id": "recBUVGSjGp2S6Ltn",
+      "createdTime": "2026-02-02T10:32:09.000Z",
+      "fields": {
+        "Amount": 309.24,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:32:09.000Z",
+        "Payor/Payee": "Steven",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recBeCTBhQSOqd4Yp",
+      "createdTime": "2026-01-26T01:54:17.000Z",
+      "fields": {
+        "Amount": 50010,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-26T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-26T01:54:17.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Receipt": [
+          {
+            "id": "attCtTMtx1Miz3jTr",
+            "width": 886,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/jWn-aHPrrdwYi2EIeDMosQ/4IOQ_oNIa8uKhIbJzR9qmGFDWRXDKPPBeMsjZjDNkkNDtrbJhK8n5Z5o2gCt94SbWQWblK9EJftu2dGIG4-xG9B0_rPloZvaqzFoCC82tQIhDdIo_CX-ENiO_H1HmzlJLMMAagSDRVH366jeJS4AhXmJyddwIM_WFN-B1GNdOartfIB5w6SLJ7YiSrUjAyIx/_FUHSOYM52Xw8kek6o9WdcvwDZKEvU8PhoEUoubGeJM",
+            "filename": "photo_2026-01-26_09-52-19.jpg",
+            "size": 64167,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/8IQZPk5pHqfQ2yzstJxHpg/JjLbgtHbGUtNCqm92ViS8xhNu7eW8EY0QtiyzS7v7b-uL18HdqzzoEnfDEhlFUIQJh-TmkBxEn3imTledGXWoN4bu4zO1HOyGzI-Cm9Ns-K1tolRPEEy_jdGEjlaaFHIVfZPeTWyo87CUQwgTb3ABg/BPfoGiEAp4L_i8ASqKBFYacNHT8eJwLqvju9DReaBAw",
+                "width": 25,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/t7YSxk3qqgBdq7y9r9PTOg/7zHM9FfPBP5xXDcZV93NInqt_GAJ9pyGHr8vht6bNuvUHCzspijqnnVEPN6yiozPSHLAYtJNMVn8Ol3jNs_kSBpgQCQKcOLscsLxw3bnJFENEJPpQiJaxeTzlBR5CrPW8xMbf5YnufVThMpbYdSUMw/1-rsOB8qRwf6Jucxwi37xplD4n7RgWQWnf5CVGvgLtk",
+                "width": 512,
+                "height": 740
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/29U0ON_CqZu_FTCmiVsEJA/TlMJmJZDnS_S0TpayxMd_Gvo2QltpLdpLXCVa4WtaOtRspMazfOEc8mqbCz4BP81nQjJzfIhCcxfpryUCQol7deaIbKIvSYSWWOCccWfo_w_jxelGKMIaAWazdeyOzLip3orzoNpnBmzkNAvVMgz_w/Fe3Kxq96Lqa_-p1r8Xh4ZNnuWdPDaD2AeJxq7A2L2x4",
+                "width": 886,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "PC Configure",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recBuJbyX1lAhcsc0",
+      "createdTime": "2026-06-30T06:38:27.000Z",
+      "fields": {
+        "Amount": 485.62,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:41:06.000Z",
+        "Transaction Name": "Expense - Envelope Transfer copy copy",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:38:27.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recCbqCTSII0QeeCn",
+      "createdTime": "2026-02-02T10:52:12.000Z",
+      "fields": {
+        "Amount": 194000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit - Account Transfer",
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:52:12.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recCfW5JW93CvrhOK",
+      "createdTime": "2026-06-30T10:19:02.000Z",
+      "fields": {
+        "Amount": 1742.72,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T14:13:14.000Z",
+        "Budget Code Name": [
+          "BGT-003-20260630"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recBmgWNP1KeZU5Iy"
+        ],
+        "Description": "2 keyboards",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T10:19:02.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recfQSwt4QAft5pph"
+        ],
+        "Payor/Payee": "AULA"
+      }
+    },
+    {
+      "id": "recDUrotXgv4mmYE4",
+      "createdTime": "2026-02-02T10:26:22.000Z",
+      "fields": {
+        "Amount": 38582.99,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "recUUTcjpJWwWBi4t"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:26:22.000Z",
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recDcemTTc2b5Tz52",
+      "createdTime": "2026-06-30T06:55:29.000Z",
+      "fields": {
+        "Amount": 155295,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T14:07:59.000Z",
+        "Transaction Name": "Credit - Account Transfer",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:55:29.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ]
+      }
+    },
+    {
+      "id": "recDzX5u2A07Dkaze",
+      "createdTime": "2026-07-28T15:24:22.000Z",
+      "fields": {
+        "Amount": 12590,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T15:29:03.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "reciCC9iatAfHzG0P"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T15:24:22.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recE326Z5BzVRCoEQ",
+      "createdTime": "2026-06-30T06:30:13.000Z",
+      "fields": {
+        "Amount": 4500,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-29T15:04:50.000Z",
+        "Budget Code Name": [
+          "BGT-002-20260408"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recNgf0NWyk2zbxfH"
+        ],
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:30:13.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Budget Code": [
+          "rec1VJvJx6epTRR3T"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recESYeALGKJBrqo1",
+      "createdTime": "2026-01-20T13:12:50.000Z",
+      "fields": {
+        "Amount": 177633.5,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:12:50.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recEjzIwW1EwQqRqy",
+      "createdTime": "2026-07-28T15:29:40.000Z",
+      "fields": {
+        "Amount": 13811,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T15:30:14.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rect61EoHlb5Df2I8"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T15:29:40.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recFnFPbOvMThTaaA",
+      "createdTime": "2026-08-05T02:22:47.000Z",
+      "fields": {
+        "Amount": 768,
+        "Type": "Expense",
+        "Last Modified Time": "2026-08-05T02:24:40.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recrEjx9mlKBP29jW"
+        ],
+        "Date": "2026-07-31T10:20:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-08-05T02:22:47.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Receipt": [
+          {
+            "id": "att0VljfaVXTpkb7m",
+            "width": 960,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/mngsu0IpVBJaPEhpmajhHQ/OjOGbZ1AeU_18KtBm5ksBDU5MevquzFif-mL47SZa1gxGO6rYDzQLc_bYfyJCe-RUCM__MAgLVnMqECPXRdt2pimBzFh8XGK-uU6W8ew7tTly8FoSrfQHfZGV8GyZaEcfWWdkTndUnFJ1eBYPkKLkw/6s_8J3olkSDRx5WAcC33rDCQw3MZd6CBMVeQrC77QXg",
+            "filename": "image.png",
+            "size": 1130472,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/vPwutbPxjS0HUAKre43Y7A/koRwxQrWu55_IxcxgV5CSM-_tRFDfS6efGpya3W6lJRjffvcDVkKEjcTCe1MLoLwgF7mNrROSx4CQpJcGEa2PBD8MH-Jo_clqqOFo0CD3rTveYxzYEwMaoxSQ7plUREUJgUNRB08gAJUtJ8ZLJGW-g/PVbBthpF_QcaB5j2K9ExAOKpHoRkXOdkDj8t7XVGXbY",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/JpTnY_QRb9A3x6JcKtzApg/4ZAVAK5-DGpdpVAbv4WD4PCIYSIdC0YL-r9d9nNVqxAokgu0fPVyA7zVuovBdU_lqC1a29TEiHREfNGZWSPvCXQ4DsLXyAp79YuBN1h6k3BOdUmUQyji2TyYuXkmGo4OtYxdExiM-NRKwowZKP1RDA/7V9uTUNb6WL1WFBxsRaZcJWKlIIxHp3ASOHrWFJMFhU",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/avWU5bvcGwGOAhC4bR_GrA/DAQiGiqQFeeDvVR6zOBCpZZg2wyGhwL1TCTshcgn4wU69TzJRcZw5EEEB1CvEGxzXpRtv0O3eJNN1oWv6aCUMFxvhjES0aEmzvhizyi2U7eXcOs88wtKD9xvWC1Kzw7MmCbWCpqZFMLdOK_zkZmOzw/uEeVobzL6Iz2VUk4qBn7OZS9rDgXyG8JxXR-rySkkew",
+                "width": 960,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "Jollibee",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recFxrwBK7Qd4NXp8",
+      "createdTime": "2026-04-10T02:36:57.000Z",
+      "fields": {
+        "Amount": 50010,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-16T06:26:52.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "Downpayment for the laptop and Desktop",
+        "Date": "2026-04-10T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "empty",
+          "value": null,
+          "isStale": true
+        },
+        "Created Time": "2026-04-10T02:36:57.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Receipt": [
+          {
+            "id": "atty70vjeEmdpV5MH",
+            "width": 394,
+            "height": 882,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/m_tEjkaJIdKqvCoVrE_IEg/QWjqiL3XU0sTPifcQGQ73SQ4SmCYkJaxhpuvwdAAKsEuLenQz4jJnfeutfbUvhN2_zpTwBr8wT4bPpBU_4bBZckAtdgkWDRAlmVvVi4cU3hIt10OxfVN_0zFPhUnpxk8oAd3RH8aN6Uf29CfWWLMQQ/HANMmoQYgFZ1qS8YxeD27tAoZ9wJIqdLvoOwNEtIjA0",
+            "filename": "image.png",
+            "size": 108878,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/EguN53Rls7flHmfdsm4HcA/1pHutqvJpwqLsK-EOivfgxXBCgjeLgbFcsZE0achp1MSW61OPhVj7KLavRAKUbuFSCUO5Na9_5e8v5rW6BUgzmQTQG7WHxF5Gad-sMsKf0oioWctlfYOSaRKEx-pRXnmGzUZK9Fp4eRNGiiRm8QsNQ/S5VJmZI0eVpp5lsLPBuFtd2ZhuW-nbhDjBeg9xa87tY",
+                "width": 16,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/boAt9wT3GJ5Dh2nIeDt42A/_b_ZHuO4Hv0cosINyulkzs2r2JKmS2GGOoCLckJU_rlNglOEvmRsn5fdKTmu4hXRJC07amQfJ2Uxuq7KtEmeolzckThbqtP_J234w-zuZzN6KLLhRlUMBa-10cycDLsQQ61SIgSkiJvZkDpIbnq37g/zz-OarNeF9X9rU7slGhql0NAiPgGQ3tLUDJsR5c1fEI",
+                "width": 394,
+                "height": 882
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/aunI43SkOO3cGDZQl2chTQ/FqZ8l_zkzEhFbaurHOgtCiXr0bwLvfc2bhnDn2T1CnueXhHUgdeTgDEwqkXqKG0LINxo8iyBQBGptDDFnYiP0XPewuuDAvZ9c5KzRGjik4mHiXSlP83y0ovfEogmGu1--8cDGe50fj6aBJXlH5kKdg/pzvOKoIpuYZZ1b_AP7f5BzqYHNie2NK1W3D_5gwVQuY",
+                "width": 394,
+                "height": 882
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "PC Configure"
+      }
+    },
+    {
+      "id": "recHkBIxr4IsiEdL4",
+      "createdTime": "2026-06-30T06:12:02.000Z",
+      "fields": {
+        "Amount": 1998.25,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:39:40.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-06-16T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:12:02.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Reimburse to Carlo"
+      }
+    },
+    {
+      "id": "recIdJN6BtCbYHQ1b",
+      "createdTime": "2026-02-02T10:13:01.000Z",
+      "fields": {
+        "Amount": 77,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-31T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:13:01.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Lazada",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recJRB0Ng1mHnFMrU",
+      "createdTime": "2026-02-02T10:21:38.000Z",
+      "fields": {
+        "Amount": 1013,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:21:38.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Autosweep",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recJbXvEFwOUl9dsM",
+      "createdTime": "2026-06-30T06:47:21.000Z",
+      "fields": {
+        "Amount": 19000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-06-30T06:49:33.000Z",
+        "Transaction Name": "Credit - Account Transfer",
+        "Envelope": [
+          "rec7UY9tuuwlThJkr"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:47:21.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recK6Zm00HHghFgok",
+      "createdTime": "2026-06-30T06:32:07.000Z",
+      "fields": {
+        "Amount": 1000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:32:26.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recjpVbjVdgFLHRLs"
+        ],
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:32:07.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "MPT Drivehup"
+      }
+    },
+    {
+      "id": "recKVEP3CLjNLIVBa",
+      "createdTime": "2026-06-30T06:53:31.000Z",
+      "fields": {
+        "Amount": 155295,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T13:26:41.000Z",
+        "Budget Code Name": [
+          "BGT-003-20260630"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recBmgWNP1KeZU5Iy"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:53:31.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recfQSwt4QAft5pph"
+        ]
+      }
+    },
+    {
+      "id": "recKwWlvQ9HoWaigN",
+      "createdTime": "2026-06-30T06:31:19.000Z",
+      "fields": {
+        "Amount": 2000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:32:06.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recjpVbjVdgFLHRLs"
+        ],
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:31:19.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Autosweep"
+      }
+    },
+    {
+      "id": "recLagvRhKNPrftoP",
+      "createdTime": "2026-07-28T15:29:13.000Z",
+      "fields": {
+        "Amount": 1000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T15:29:32.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recyDz8UbrKux7Xj0"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T15:29:13.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recMlFvjmjZoEePEI",
+      "createdTime": "2026-01-20T13:16:10.000Z",
+      "fields": {
+        "Amount": 88200,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recUUTcjpJWwWBi4t"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:16:10.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recMwhssXZ51fU3BF",
+      "createdTime": "2026-01-20T14:10:57.000Z",
+      "fields": {
+        "Amount": 6900,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "reckiPec0YbzQ6juK"
+        ],
+        "Description": "Downpayment for the Office Chairs\n",
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T14:10:57.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Haimobilia",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recN7yfwJVgppnTbB",
+      "createdTime": "2026-06-30T06:15:12.000Z",
+      "fields": {
+        "Amount": 4623.99,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:20:36.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recEETyxGpQrObQGk"
+        ],
+        "Date": "2026-04-23T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:15:12.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Tiktok"
+      }
+    },
+    {
+      "id": "recNI1pE5zjwdVYx9",
+      "createdTime": "2026-01-20T13:15:48.000Z",
+      "fields": {
+        "Amount": 2500,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recZQkGBDH30R3Wmi"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:15:48.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recNw34DrDVegPAqB",
+      "createdTime": "2026-07-28T15:26:06.000Z",
+      "fields": {
+        "Amount": 4893,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T15:28:51.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recdSRMTVoyr55LQu"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T15:26:06.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recNxr5P8RRjAjJhF",
+      "createdTime": "2026-03-21T15:22:26.000Z",
+      "fields": {
+        "Amount": 1699,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:32:08.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-03-21T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-03-21T15:22:26.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PLDT"
+      }
+    },
+    {
+      "id": "recONJ5bcIQF0hV6F",
+      "createdTime": "2026-01-20T13:16:54.000Z",
+      "fields": {
+        "Amount": 3500,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recNgf0NWyk2zbxfH"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:16:54.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recOPhylDorNX96ET",
+      "createdTime": "2026-06-30T10:12:38.000Z",
+      "fields": {
+        "Amount": 7647.33,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T14:13:13.000Z",
+        "Budget Code Name": [
+          "BGT-003-20260630"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recBmgWNP1KeZU5Iy"
+        ],
+        "Description": "KVM Switch",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T10:12:38.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recfQSwt4QAft5pph"
+        ],
+        "Payor/Payee": "UGREEN"
+      }
+    },
+    {
+      "id": "recOmdIviOgUZkkd1",
+      "createdTime": "2026-06-30T06:54:31.000Z",
+      "fields": {
+        "Amount": 155295,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T14:08:00.000Z",
+        "Transaction Name": "Expense - Account Transfer",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:54:31.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recPxWCIRwpxc762f",
+      "createdTime": "2026-06-30T06:30:53.000Z",
+      "fields": {
+        "Amount": 5071.74,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:31:16.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recNgf0NWyk2zbxfH"
+        ],
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:30:53.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Grumpy Joe"
+      }
+    },
+    {
+      "id": "recQB6c5saniU6nn6",
+      "createdTime": "2026-02-02T10:04:22.000Z",
+      "fields": {
+        "Amount": 1600,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:31:28.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2025-12-25T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:04:22.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Converge",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recQGtmUfJ6DmCJa7",
+      "createdTime": "2026-02-27T02:34:27.000Z",
+      "fields": {
+        "Amount": 1905.42,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:32:01.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-02-27T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-27T02:34:27.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PLDT"
+      }
+    },
+    {
+      "id": "recQMWOHABT42lUPv",
+      "createdTime": "2026-06-30T10:15:01.000Z",
+      "fields": {
+        "Amount": 27709.67,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T14:13:13.000Z",
+        "Budget Code Name": [
+          "BGT-003-20260630"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recBmgWNP1KeZU5Iy"
+        ],
+        "Description": "4 Monitors",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T10:15:01.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recfQSwt4QAft5pph"
+        ],
+        "Payor/Payee": "Itech Philippines"
+      }
+    },
+    {
+      "id": "recQY40l924podKrX",
+      "createdTime": "2026-02-02T10:02:46.000Z",
+      "fields": {
+        "Amount": 9832,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recegXSiuDSuNpgHu"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:02:46.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Haimobilia",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recQfF0wPBz0HOxPM",
+      "createdTime": "2026-07-15T12:24:18.000Z",
+      "fields": {
+        "Amount": 1599,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T14:41:34.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recYx58fQZas8Wbkw"
+        ],
+        "Date": "2026-07-15T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-15T12:24:18.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Converge"
+      }
+    },
+    {
+      "id": "recSr383gqZAVMD0f",
+      "createdTime": "2026-02-02T10:18:48.000Z",
+      "fields": {
+        "Amount": 544,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:38:49.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:18:48.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Raphael",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recSsJ2CCtvcdkS8Q",
+      "createdTime": "2026-04-14T18:04:17.000Z",
+      "fields": {
+        "Amount": 1599,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:33:06.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-04-15T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-14T18:04:17.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Converge"
+      }
+    },
+    {
+      "id": "recTRviKVuWgHAm5A",
+      "createdTime": "2026-04-14T10:28:18.000Z",
+      "fields": {
+        "Amount": 426,
+        "Type": "Expense",
+        "Last Modified Time": "2026-04-14T10:32:12.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recjpVbjVdgFLHRLs"
+        ],
+        "Description": "Nath's Travel Expense to Malolos Bulacan",
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-14T10:28:18.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "N/A"
+      }
+    },
+    {
+      "id": "recTWC3QOWfjuL2t3",
+      "createdTime": "2026-02-02T10:22:02.000Z",
+      "fields": {
+        "Amount": 513,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:22:02.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Autosweep",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recTwd4ciM4qr4vcs",
+      "createdTime": "2026-07-15T12:23:39.000Z",
+      "fields": {
+        "Amount": 1699,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-16T06:46:29.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recYx58fQZas8Wbkw"
+        ],
+        "Date": "2026-07-15T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-15T12:23:39.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Receipt": [
+          {
+            "id": "attJZRVxUp0VJmIbO",
+            "width": 841,
+            "height": 448,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/mdI3SNczjx5BGq25J_i-Ew/0_yBVfqq9EMBKuVJdw9rmG4YPVC02CxQ3IqdPrf_ecEsGQ4SKjA0ii8oUqsu0JmpwHli5adS2vieibAnbCYE4cWtWnvb9LRMUR7P-QuQQpiZsLDDa23reEAnnNm8VwWn4CuKx0EvnnzgUYgikiAMbQ/e1X7p5OfPXNd33hbUsQo2JxPvLOphETXa9gRdckcgF0",
+            "filename": "image.png",
+            "size": 87037,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/HUMtn17cpUEG3AdN6EGZQQ/xuAi1pkhEqMmqHcmeG7FU3KJQYd79SD5EFrzH3BKphZ-7y0eNxElxlWEM-3xgjZfWJyHZ6HCwIg0ZWsQ8frXJBqWOuQyXXEEY8SNacdpEntyesI_LjMHZ778dvnSKW7vNhBev3oelOp_9NsuGaE1kQ/Tyq-n8GXfhQXzMuIbpirnOEFHfSDUFlC6fpTjRDypWQ",
+                "width": 68,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/cFKeL7N5bk7glUZqgYbs-Q/S8cBk_oKq7OhLyDWWFuNlir_UhljQ9fx_mfKftnQ6qCoOqwFq08P2BxGSnKv3Pvqmdnk5Hh6R2ISQb2LXkZYfbAGU6rt54cjnlnAiiUXHK8BlskTq6UF7pELVeulpzy5ULvtgLbRrYlxhEwpy7wiJw/596pbDxc01k-3cSTTqf2V6q1Mf3Od6WrZk9hwvOig-Y",
+                "width": 841,
+                "height": 448
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/gBidpchmjcl9fJBSv29xag/hxGi8ZXJLZIu2qB_D2-pHiRB7mA7IB2_vPy-YVQhudiZr4l3MKp1xx5hxaFZQzEr5aukCmuz794igrJIee08g87F1a25ojtIyrC_iOn7B10UY18E0WMHcpBYQrC22fK1TdKBvANJGnIx85mBqzQoiA/2FULVpFqSMq1r0mU46E6jKgZDXZUQJWDeXiM6jkBQYE",
+                "width": 841,
+                "height": 448
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "PLDT"
+      }
+    },
+    {
+      "id": "recU93Z49Yn7tJJLQ",
+      "createdTime": "2026-06-30T10:43:35.000Z",
+      "fields": {
+        "Amount": 14202,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T10:44:15.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recZjWwPKxw0fu2Er"
+        ],
+        "Description": "2 Monitor replacement for Joseph Cawit",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T10:43:35.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Itech Philippines"
+      }
+    },
+    {
+      "id": "recUQZpPWGZbKiPxN",
+      "createdTime": "2026-02-02T10:08:14.000Z",
+      "fields": {
+        "Amount": 816,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:08:14.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recUu44Po6dInreg0",
+      "createdTime": "2026-02-02T10:28:42.000Z",
+      "fields": {
+        "Amount": 304,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "recNgf0NWyk2zbxfH"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:28:42.000Z",
+        "Payor/Payee": "Steven",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recUy17323iOcXfsF",
+      "createdTime": "2026-06-30T06:46:51.000Z",
+      "fields": {
+        "Amount": 19000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T10:33:59.000Z",
+        "Transaction Name": "Expense - Account Transfer",
+        "Description": "Transferred to Ben",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:46:51.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ]
+      }
+    },
+    {
+      "id": "recVohcS24086Kcs8",
+      "createdTime": "2026-06-30T06:12:36.000Z",
+      "fields": {
+        "Amount": 2241.75,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:37:34.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "recjpVbjVdgFLHRLs"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:12:36.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recVrScvcP5aQPkiI",
+      "createdTime": "2026-01-20T13:29:36.000Z",
+      "fields": {
+        "Amount": 50000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Account Transfer",
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:29:36.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Receipt": [
+          {
+            "id": "attwCCcxhkMeWhspT",
+            "width": 1243,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/csTa1lZPz_DWWZHBUGW_Dw/laoo20uT1qU9hZOE96bUavEJ0jmhpZg6rWp1C_W1BSpHfUD69xp1MRQLoANuveZU_IPN65bhnUXbdHh7u2y-hGEhNXUQDju3_TxRG0zWA951nofcRj_q-pZSaX3Xa8zmEidl7xWIb-8O2gm6SIJiEA/Gkj7EQ1Ejna2fpRsAPLbVI8oWDjkIzNpZlXyw_mZntE",
+            "filename": "image.png",
+            "size": 272816,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/an7BZb5SklXZFxVnjy15rQ/sx_D95CBXUP-G99p_a-eShLzztvPsWdLLtrz68RFhX-Ir0u8MMFfxtWcscJqmeW7QCqrSezawe8BAJ7ra-UNgiqtaiaJEBBOYZSRVQ6YlC4-eXAO_KmPCarMGxybgkZb5zLZSh7OxLWEpR7zHvJjmQ/DMFf7MU2tIQGwkOsjfY-cT9lxLcdazClGVffoDnnLfw",
+                "width": 35,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/Q58oyX4y4Cyjad79GND8rw/36g8f7GnvDlICW6qd6dGcPdWR8UMQQRaIRR3JobJglEL7RsoL0foyHV4VnbbszQcFsvkzUwqGMrvOCl5JUOzUI363gq-VTdf505MCkS1WsAUSeUsO67a4u3BZgd0rB9MDpLqvmuoq0oF86uFL2padA/Gc7k3-d75jikmpOKv8kY73Vhz276UaSGNYLrolOLOz0",
+                "width": 512,
+                "height": 527
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/AOSBQ97SWqk-Ng4PiGeaIA/upXcfHvfL9ha3ZdDD3k1du5OjcCIDvRocFzm6JSS4G2jvGpIIPeYT3dSKVJXJzGcOmu7fs4wQ_6eWhfpkRdBG30_tqWBBPIPBGTbx_fFw4bVv-p9J_GGBFxqTPXzl6XHJxSLyCRIQd4YdndZW1HTPA/HaqNuclLIPpXfc4mCSdg0HY8OAH5aJjxDy0Bex3LKQc",
+                "width": 1243,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recWsHnIpGQNRpUDZ",
+      "createdTime": "2026-06-30T06:24:01.000Z",
+      "fields": {
+        "Amount": 3000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:40:37.000Z",
+        "Transaction Name": "Expense copy",
+        "Envelope": [
+          "recGmH3hw0DJPSPaM"
+        ],
+        "Date": "2026-04-20T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:24:01.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Reimburse to Michael"
+      }
+    },
+    {
+      "id": "recXpafHDDcbAtjfT",
+      "createdTime": "2026-02-02T10:31:14.000Z",
+      "fields": {
+        "Amount": 44.99,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:31:14.000Z",
+        "Payor/Payee": "Steven",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recXrWUWmyu6v1NKg",
+      "createdTime": "2026-01-20T13:03:02.000Z",
+      "fields": {
+        "Amount": 5000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-30T10:40:26.000Z",
+        "Budget Code Name": [
+          "BGT-001-20251223"
+        ],
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recGmH3hw0DJPSPaM"
+        ],
+        "Date": "2025-12-23T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:03:02.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Budget Code": [
+          "recKPuWUKADyO4gQH"
+        ],
+        "Payor/Payee": "Steven",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recYCDIsZirXf6Bzt",
+      "createdTime": "2026-02-02T10:20:31.000Z",
+      "fields": {
+        "Amount": 900,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:20:31.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "PC Configure",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recYWkLkxeXln4pEp",
+      "createdTime": "2026-06-30T06:13:35.000Z",
+      "fields": {
+        "Amount": 1100,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:39:29.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-06-16T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:13:35.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Reimburse to Ivan"
+      }
+    },
+    {
+      "id": "recYerApAhwtisrnK",
+      "createdTime": "2026-01-21T08:34:46.000Z",
+      "fields": {
+        "Amount": 9832,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recegXSiuDSuNpgHu"
+        ],
+        "Description": "Downpayment for the Office Table",
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-21T08:34:46.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Haimobilia",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recYm7LlVezhQbqUP",
+      "createdTime": "2026-02-02T11:43:10.000Z",
+      "fields": {
+        "Amount": 4180.93,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense - Account Transfer",
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T11:43:10.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Steven",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recZAcAAq6r6fjWdF",
+      "createdTime": "2026-06-30T06:36:15.000Z",
+      "fields": {
+        "Amount": 2241.75,
+        "Type": "Credit",
+        "Last Modified Time": "2026-06-30T06:37:36.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "recEyFW1gRI6yze6N"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:36:15.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recZQB3lkviMyu76A",
+      "createdTime": "2026-05-05T13:27:25.000Z",
+      "fields": {
+        "Amount": 1380.71,
+        "Type": "Expense",
+        "Last Modified Time": "2026-05-05T13:28:17.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "Claude subscription for faster code generation",
+        "Date": "2026-05-05T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-05-05T13:27:25.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Claude"
+      }
+    },
+    {
+      "id": "recZZsPlaKzFr2aY7",
+      "createdTime": "2026-08-05T02:24:43.000Z",
+      "fields": {
+        "Amount": 1000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-08-05T02:25:02.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recmD6IaDXDufCpKd"
+        ],
+        "Date": "2026-07-31T10:20:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-08-05T02:24:43.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Toll"
+      }
+    },
+    {
+      "id": "recZvxlJuXIzOrsrw",
+      "createdTime": "2026-05-05T13:28:34.000Z",
+      "fields": {
+        "Amount": 1380.71,
+        "Type": "Expense",
+        "Last Modified Time": "2026-05-05T13:28:59.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "Claude subscription for faster code generation",
+        "Date": "2026-03-01T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-05-05T13:28:34.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Claude"
+      }
+    },
+    {
+      "id": "reca7k4I2fgeUHPr5",
+      "createdTime": "2026-02-02T10:27:05.000Z",
+      "fields": {
+        "Amount": 38582.99,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:27:05.000Z",
+        "Payor/Payee": "Steven",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recaE8y6jZ1G9UWQp",
+      "createdTime": "2026-06-30T06:38:29.000Z",
+      "fields": {
+        "Amount": 7083.94,
+        "Type": "Credit",
+        "Last Modified Time": "2026-06-30T06:40:08.000Z",
+        "Transaction Name": "Credit - Envelope Transfer copy copy",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:38:29.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recauZuD0jjbPxasO",
+      "createdTime": "2026-04-14T10:26:34.000Z",
+      "fields": {
+        "Amount": 5716.31,
+        "Type": "Expense",
+        "Last Modified Time": "2026-04-14T10:27:15.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "Peripherals for HR Desktop",
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-14T10:26:34.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Lazada"
+      }
+    },
+    {
+      "id": "recbN55TQ3cB7FbCD",
+      "createdTime": "2026-02-02T10:12:00.000Z",
+      "fields": {
+        "Amount": 867.6,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-31T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:12:00.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Lazada",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recbOvebrAz8l4pT3",
+      "createdTime": "2026-02-02T11:43:43.000Z",
+      "fields": {
+        "Amount": 4180.93,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit - Account Transfer",
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T11:43:43.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recbR59WSe7UrCJGN",
+      "createdTime": "2026-07-28T15:07:31.000Z",
+      "fields": {
+        "Amount": 4400,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T15:10:49.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recdSRMTVoyr55LQu"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T15:07:31.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recbimzKd97pU7l5A",
+      "createdTime": "2026-07-28T15:06:38.000Z",
+      "fields": {
+        "Amount": 15000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T15:10:30.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "reciCC9iatAfHzG0P"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T15:06:38.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "reccPrFW6QeZWgBtC",
+      "createdTime": "2026-06-30T06:32:27.000Z",
+      "fields": {
+        "Amount": 3980,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:39:09.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:32:27.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "reccWvjoIoHl09rxW",
+      "createdTime": "2026-02-02T10:12:22.000Z",
+      "fields": {
+        "Amount": 4978.89,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-31T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:12:22.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Lazada",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "reccuaAUauMrIZUuI",
+      "createdTime": "2026-02-02T10:44:55.000Z",
+      "fields": {
+        "Amount": 9600,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-30T10:35:21.000Z",
+        "Budget Code Name": [
+          "BGT-001-20251223"
+        ],
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2025-12-23T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:44:55.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recKPuWUKADyO4gQH"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recdfneOhCHTU4rvU",
+      "createdTime": "2026-06-30T10:43:36.000Z",
+      "fields": {
+        "Amount": 1404.83,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T14:13:15.000Z",
+        "Budget Code Name": [
+          "BGT-003-20260630"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recBmgWNP1KeZU5Iy"
+        ],
+        "Description": "Claude subscription for Kin",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T10:43:36.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recfQSwt4QAft5pph"
+        ],
+        "Payor/Payee": "Claude"
+      }
+    },
+    {
+      "id": "recdk6bFWRHnMGdiN",
+      "createdTime": "2026-02-02T10:33:19.000Z",
+      "fields": {
+        "Amount": 309.24,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "recegXSiuDSuNpgHu"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:33:19.000Z",
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "receMXozNbEgO8YR1",
+      "createdTime": "2026-08-05T02:25:03.000Z",
+      "fields": {
+        "Amount": 2000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-08-05T02:26:51.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recmD6IaDXDufCpKd"
+        ],
+        "Date": "2026-07-31T10:20:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-08-05T02:25:03.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Receipt": [
+          {
+            "id": "attNLjLsgpJeeBMng",
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/pBJVaIXy6NsF1940h6V-0g/rXgR8qhzldWszHn_INtD-JeQmyiyVX6AQYXrYBo-yma-4-p0_gERJaCMJlTtmm5mpbHCptd33yvqpsEEz4Cu3UhI2RHn_Sgy7IIVBFYhHcTfKAZA5T9iho-ksnGmuAHWUcOeqPUHidjR4mrDscwrDLYGONHcTA8XyfIhejUjZAmxuDXBfv2JMkjkb6YlQpAE/QtxoJWeSppUhEKSwoDxSZ2ZOD297HsouT5oQcHpITVg",
+            "filename": "AR_AR000094146262_20260805_102634.pdf",
+            "size": 35601,
+            "type": "application/pdf",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/zz7FTinNygznFlyksvBDTg/2Ksic4Apte3eCAa4Q6ZwyvGhST33ZkWRaTcrgNNFuJLdt8pgR0ABYMd6HZWyQpDADP6LFNvkw5AtUJjFkAAZHQ6bAUsVGyVBFFzyU2TfaJZTCsy3cLUJuTGQodKpVUq-deYUU-x0RaKnGic5fRkaAg/OX0nel2LosOy6avH1YGTF1i7HlLBuwSwQr30W4BR0oo",
+                "width": 18,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/KZAsm9noWvN3gxg3x0FpPw/YVEhCh3yPNhUhc7JPyvDvbJrX48raNkjQAdvu6Wx2nwwyhxRWt5u-QOjY0aLPt-8uktX-AOn5zuvbblmp-xr0y3XUY_7H4htLUc1zvBrylDlbiPVnsnpCsIWuRU9OA3pwEJuoRb5pLrGWOTTO77yrg/Zj_sAeuMIvI8vXC-2Nui6TnyNH-CpEBHwR3zVajOXcA",
+                "width": 512,
+                "height": 998
+              }
+            }
+          },
+          {
+            "id": "attwBzrgNsPtRTgri",
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/pQ4iEHWC7byJbATrVjogGA/_EXnn8PNHdcig-6-xldjnAVCsZW0jCLJBMsp3I0oWbEnbnmX4zeu7Tv1a_kOrCznttTZFjxmb_QzrLwv41U0Tw0i8Q-w1Xl4X2eBHOblNmOqYG-h2NRdTbf4NVgM0CQAlbJvk-H_TGxcCJXWGy1xkp_1_UhFRY4hI7ensMun2h5cYtkP5QRi9oOJEMirrDTv/WPwMQLnWKxaYLz0VVO_c2Y2CBxxb38zgUicQLHlQ3wA",
+            "filename": "AR_AR000094145556_20260805_102623.pdf",
+            "size": 35792,
+            "type": "application/pdf",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/pqu107TTXHHxtNOmxUL6sA/2wcKSzPX7qzZowsIwwYYyPSnwEHSY9f0Meb6MWGMSsZvjybNd25vGcfeKBMav9fgEo6a4_cFRiWD6VUzXuSnDlHrrYDCSdu6Av-rW_6HFspdCdGigEY10jHT7pgeSlJ9fbYjFtJpUIHKA2JOk8qfDQ/qCn0enXLwamEqh5Wwf3CZ3XUEkdFA3pRCtQ3kmRiJVs",
+                "width": 18,
+                "height": 35
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/s2Bev32bAFHhQprl7TTUlA/T_arwQDZsC9c-xMyZa3_VwvZ-tihmjT-u96VZnrMTjxt5-Zep2AznOLna53EsOu0-Af4xJaRZ7Z18Ctr_3feOWsKFPYz0sUDS2jHfK_GAvbLwjDesXBstrX8Lsg6drRo244tck2VjNdzja3YKGvEJg/nkeKljgOMP8Ljpzk3l7BkTDKhjW3btB5CkdAUNfpCvk",
+                "width": 512,
+                "height": 998
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "Toll"
+      }
+    },
+    {
+      "id": "receWQH8Hjx3VmPd6",
+      "createdTime": "2026-02-02T10:20:06.000Z",
+      "fields": {
+        "Amount": 1900,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:40:32.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recGmH3hw0DJPSPaM"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:20:06.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Ernesto",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "receqSQFkqfzCoGGf",
+      "createdTime": "2026-04-08T06:34:44.000Z",
+      "fields": {
+        "Amount": 229425,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-29T14:56:01.000Z",
+        "Budget Code Name": [
+          "BGT-002-20260408"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Date": "2026-04-08T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-08T06:34:44.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "rec1VJvJx6epTRR3T"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recf1pRc3ORfEcBEs",
+      "createdTime": "2026-06-30T10:12:02.000Z",
+      "fields": {
+        "Amount": 269790,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T14:13:12.000Z",
+        "Budget Code Name": [
+          "BGT-003-20260630"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recBmgWNP1KeZU5Iy"
+        ],
+        "Description": "2 Lenovo Legion 7 AIX10",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T10:12:02.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recfQSwt4QAft5pph"
+        ],
+        "Payor/Payee": "PC WISE"
+      }
+    },
+    {
+      "id": "recfks67o6msGspxA",
+      "createdTime": "2026-07-28T15:08:31.000Z",
+      "fields": {
+        "Amount": 13820,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T15:11:04.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "rect61EoHlb5Df2I8"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T15:08:31.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recfyjj62kAENlrid",
+      "createdTime": "2026-06-30T06:14:05.000Z",
+      "fields": {
+        "Amount": 520,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:39:16.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-05-27T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:14:05.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Reimburse to Michael"
+      }
+    },
+    {
+      "id": "recg6CFsr9HrVDfUM",
+      "createdTime": "2026-02-02T10:51:49.000Z",
+      "fields": {
+        "Amount": 194000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense - Account Transfer",
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:51:49.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Steven",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recgDGg0XxLOnyY8v",
+      "createdTime": "2026-07-28T14:57:12.000Z",
+      "fields": {
+        "Amount": 144995,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T15:06:35.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recrger13zmFizKCP"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T14:57:12.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recgE2YbUlMJHisma",
+      "createdTime": "2026-07-28T15:07:51.000Z",
+      "fields": {
+        "Amount": 1000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T15:10:57.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recyDz8UbrKux7Xj0"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T15:07:51.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recgulPHYvZcPZXUH",
+      "createdTime": "2026-06-30T06:14:38.000Z",
+      "fields": {
+        "Amount": 1516.5,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:39:21.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-05-27T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:14:38.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Reimburse to Raphael"
+      }
+    },
+    {
+      "id": "rech39YxFtExaoJIB",
+      "createdTime": "2026-01-22T03:47:18.000Z",
+      "fields": {
+        "Amount": 50010,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-21T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-22T03:47:18.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Receipt": [
+          {
+            "id": "attNxrkMInpXanIei",
+            "width": 803,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/1-gx3-SgUAyew6LTH2yLyQ/8W7wZgju7rWFvO1UeZGUlQHW6KoFRQJQwFBunpkBUnGNgUIGMn-wBLRLRQcV1eY8-9KJ5pA8Nu3KsCdPRjMG4pB1tjm7tJfynKty_VFMrF8cSqScXNiIJ53UCibAF_15i3oU7MYyewfnsMGXiqORxqD3Qtmw10xSz5epS04HLr5Gc2oxUJ6LypsZmLzQ00-a/neqDnO1-bjATuBhbJJOui4Z-fmPIiku69394jaJ-mUM",
+            "filename": "photo_2026-01-21_18-47-33.jpg",
+            "size": 66377,
+            "type": "image/jpeg",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/527jLk-KR9SsNrwKTSwA9Q/F1kHG-7ycfAwU-33YsAXJtPahrZ9AYPkbDCM2heRcZ63usVU-OzB5Gw6zbI9npI1mjuTy2i6mNdD4y4ieAURIlk7in0Vbvd4wvzwIRgMwrfSwz0zTM4HRRdWwWhpL-iaJ_aXpzOVjtNy-d1Ekyqvfg/0SD_KgFs84r4eVI9kHTagOeXylk8-skcrav6Dkk_joQ",
+                "width": 23,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/8gePt4iXlj4EePDh_9BrtQ/_Mp7gCNBSBFUXUcNBvZrX6NjPGDJNlI-jNw46MPAowb--fpzL5nlyGpkCGBaEkyn1EQ81Y_LZT1sqPp4qGw-TFvX8WkGHwtAicGzkZyajnRMfKdGnoZ55la_Jlr9VlxMWrcwsx4W4KEcneDB4WwqVw/V6tfJCOKCsA3Fizax0Aa86giiuyia7kRa4wt5Gro6As",
+                "width": 512,
+                "height": 816
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/DuI0QiOeQ-s6ezzGgLw5qA/BLUnquM_9yNBIoKmU8kXyAD5wxzm0o2z87TiA16jo7JulGhM1G9CDEjADZpgg3oChlr2wNwPv3-wSW324pvZuYfDbvVQIUAgm9PVXeewvkIMptv339O849vo7CLsuYG9HgQ67OufxZQmQWi7Qp5--g/Qzx4VRqQwWvNE_6MyV2Km8hicly8YE5gEwWZqdmBVxQ",
+                "width": 803,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "PC Configure",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rechJwItdcEswOJ29",
+      "createdTime": "2026-03-21T15:21:44.000Z",
+      "fields": {
+        "Amount": 1599,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:32:09.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-03-21T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-03-21T15:21:44.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Converge"
+      }
+    },
+    {
+      "id": "rechZNxtupJXJzc8l",
+      "createdTime": "2026-06-30T06:11:57.000Z",
+      "fields": {
+        "Amount": 15200,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T14:23:55.000Z",
+        "Budget Code Name": [
+          "BGT-004-20260630"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recZjWwPKxw0fu2Er"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:11:57.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recTOF2D4lrdVdEiZ"
+        ]
+      }
+    },
+    {
+      "id": "reciB2OgmooMlkBJj",
+      "createdTime": "2026-04-30T06:13:24.000Z",
+      "fields": {
+        "Amount": 20595,
+        "Type": "Expense",
+        "Last Modified Time": "2026-04-30T06:14:07.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "2TB SSD Upgrade for Nath's Laptop",
+        "Date": "2026-04-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-30T06:13:24.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PC Wise"
+      }
+    },
+    {
+      "id": "recildJBfdHx93pC2",
+      "createdTime": "2026-06-30T06:50:25.000Z",
+      "fields": {
+        "Amount": 15000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-06-30T06:50:48.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "recEyFW1gRI6yze6N"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:50:25.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recjnWBtgIeWyTOLn",
+      "createdTime": "2026-01-20T13:04:24.000Z",
+      "fields": {
+        "Amount": 13000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T12:01:34.000Z",
+        "Budget Code Name": [
+          "BGT-001-20251223"
+        ],
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "recxhMfCI5vqrqfYB"
+        ],
+        "Date": "2025-12-23T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:04:24.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Budget Code": [
+          "recKPuWUKADyO4gQH"
+        ],
+        "Payor/Payee": "Steven",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "reckOekJ0B7CHZn0Y",
+      "createdTime": "2026-02-02T10:29:24.000Z",
+      "fields": {
+        "Amount": 1267.01,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense - Envelope Transfer",
+        "Envelope": [
+          "recUUTcjpJWwWBi4t"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:29:24.000Z",
+        "Payor/Payee": "Steven",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recl5iAdgXrV1f45I",
+      "createdTime": "2026-01-20T13:14:53.000Z",
+      "fields": {
+        "Amount": 12088,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "reckiPec0YbzQ6juK"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:14:53.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "reclWdyD4QlozUmx0",
+      "createdTime": "2026-06-30T10:42:52.000Z",
+      "fields": {
+        "Amount": 1266.01,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T10:43:34.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recZjWwPKxw0fu2Er"
+        ],
+        "Description": "USB Type C to Dual Monitor Converter",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T10:42:52.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Hagibis"
+      }
+    },
+    {
+      "id": "recler0j6VJG9dykf",
+      "createdTime": "2026-02-02T10:16:19.000Z",
+      "fields": {
+        "Amount": 1000,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:16:19.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "MPT DriveHub",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recls0lBTCfFpW5Pi",
+      "createdTime": "2026-02-27T02:33:00.000Z",
+      "fields": {
+        "Amount": 1600,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:32:05.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-02-27T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-27T02:33:00.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Converge"
+      }
+    },
+    {
+      "id": "recm30SFNxYa35H9z",
+      "createdTime": "2026-06-30T06:27:47.000Z",
+      "fields": {
+        "Amount": 17600,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-29T15:04:33.000Z",
+        "Budget Code Name": [
+          "BGT-002-20260408"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recjpVbjVdgFLHRLs"
+        ],
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:27:47.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Budget Code": [
+          "rec1VJvJx6epTRR3T"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recm4fs95jHHbrjrr",
+      "createdTime": "2026-06-30T10:33:13.000Z",
+      "fields": {
+        "Amount": 19000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T14:22:31.000Z",
+        "Budget Code Name": [
+          "BGT-004-20260630"
+        ],
+        "Transaction Name": "Credit",
+        "Description": "For AC and Office maintenance",
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T10:33:13.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Budget Code": [
+          "recTOF2D4lrdVdEiZ"
+        ]
+      }
+    },
+    {
+      "id": "recm8ofFqs7KtwsI8",
+      "createdTime": "2026-07-28T15:09:55.000Z",
+      "fields": {
+        "Amount": 144995,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-28T15:23:46.000Z",
+        "Budget Code Name": [
+          "BGT-005-20260717"
+        ],
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recrger13zmFizKCP"
+        ],
+        "Date": "2026-07-17T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-07-28T15:09:55.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Receipt": [
+          {
+            "id": "attPtPiWYaxbiJI2f",
+            "width": 1152,
+            "height": 2049,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/Iwbu7ACj50wkgNL0SmZXqw/OEzrOaaofsBcv6-JyXk_05oJB6SCE7F_f5e5w-UKzkTkUNLNETEPrq97Yf7H070YFOEBFvkhVDrV-nNlT9R3zKXI0st2uYFiv1rNhsifx3DJN7qd5lwYMM1_ipSP0m90nixH7zkY4izILXjZMSc7xA/CycM4R6d8sjr1pcgJNVZ8MZCUO-k2_M3R-ObpIzHyb4",
+            "filename": "image.png",
+            "size": 1481958,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/ogzzXgG337SYwaEIlBwk7A/M8wuago_okAfbSXgya_E_UpgecLJXMto2LYAJ-AHJ44EvcleTXwGrGOnWpCcNgXvABilwkyO8tT11mGUmXaWvgtHFztkiP0cy024ZVi2aUAfHr2BDfsLos4vjLsA5izY1Zw_Thxs82R9E9hHHlD59Q/I_AKmtW5ltoM9yqrksQIlvtaT4v0sNRced2RMXY8sQk",
+                "width": 20,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/vFkQy46-bJKu__aTN18zfA/_pQuSmmxobTc-PELMRjXQEP4Ep-emonuCjsnyKAuAY_QFsLoAhPEAodoxoqukW0oNWGJ5PyfpKDD0RFkFYciocrceJ2deSTmJmUM-my7UiK0ZPBmRIEL54aKP6FiRFmkNXLItpsfcuz6au42sLroMA/ZCK4XH-BpHMejyS8UuzaOkfd_C-J--4GMlIDMxcy-eE",
+                "width": 512,
+                "height": 911
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/YKXn6L2Yz_qEMHMv8uqrPQ/6QZqTP23arREfyc0kkodCIAq5BtVvFjf5mcYURdjD2pSsf4aIt6t4QDPxCQrgeBm1ckfLjLyZ22uRFNrv86BwwTr-V711HBOVjz281lWlMQLw6IsCq2ZVSY6kbeucgnIJgHx4-lgVbNk8rd-hnHvGg/y3ViMZwWxF9PzVEEZrQwZr8pSW_C0TzW0vA5MsnkL8o",
+                "width": 1152,
+                "height": 2049
+              }
+            }
+          }
+        ],
+        "Budget Code": [
+          "recM2bBgZTFESrFUP"
+        ],
+        "Payor/Payee": "IKAIKA"
+      }
+    },
+    {
+      "id": "recmC811AgWOGLa3U",
+      "createdTime": "2026-08-05T02:23:37.000Z",
+      "fields": {
+        "Amount": 4758.6,
+        "Type": "Expense",
+        "Last Modified Time": "2026-08-05T02:24:41.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recmD6IaDXDufCpKd"
+        ],
+        "Date": "2026-07-31T10:20:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-08-05T02:23:37.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Receipt": [
+          {
+            "id": "att0QAcqguNP2dTmd",
+            "width": 960,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/DCFUZdXP0OcWZPrlefJ7xg/kzSh_2HzaglpF4f05ubGgcTf5Hyr0MBs5wiGpCFv93ZLSj6k4jhZ6x4F6qXgAE160eVy3fmMErfEUciH0MJEmjdeHrGks8l8Dxv0kEenyVGqvvwsWalO9WIbH0GWoCLaRoVz2KXLZ6V5NZYVv7xhxA/UhP42cMqkXkP4FwPS-TIY4bScwUugF9X4QGlR7qezm4",
+            "filename": "image.png",
+            "size": 1816492,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/pijm0A2WCray9FtX3Y57hA/pwipbYu0L22I_F7yTpsnCrBz64GlPIcBLOJF-oDj8AExqqp32RLRRAf_X7l7Ca_7_wW0sTGigi7WOC7A1mQDqDOBK7IDmB7bHWEWagC0Hu3XSzCWglHnTS6pQtXu47sy6lmg_0Tis67cj1OImeZnrQ/GU-an70vZe2jbZicCbLcyXYQKxFu_CMjkvI0FLAGPNk",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/D7iAFwZ1hPisVfsIdJc2GQ/Fb2QbTXNln0Ln1roYnnf-SUW7bYroMcsv4xWS7MqDRJ3tFpFAImVzxt4XCrX-VXronabg9cBHIlnW3g_PDHlObDvJA9E1wc3luZjp_-H09f8Yel-Q57aHFOF8yBCqQFRM7kJSO3QegJHSZHAmQW0Ng/wLPJ0obh0dQbmqhpuCmE6M0L2zu-hDuO2smWONcj-1Y",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/BSx1Mmt2y6aLzdKTNNC1Gg/bEvt5I1vhCJalvutPB8H-y4lRQLnxbgdAjLUswy-25CHlIIaAPCfHLF02xn3STFIMrFi04_oFLZM0hXIaqzJbX3xrziurgiCL4RxvnZZLA-Sae3EHy37nFL-nI5JEVi_BryIt0EvOc2mUv9CWF61yw/2fw-Lo_aAjJIwW1G9tHmydmjK-rNGe2m7C4MBPKwJ1k",
+                "width": 960,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "Shell",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recmFDqLjt5SHTfNV",
+      "createdTime": "2026-04-14T10:21:56.000Z",
+      "fields": {
+        "Amount": 218950,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-24T13:13:07.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "Total Payment to PC Config",
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-04-14T10:21:56.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PC Configure"
+      }
+    },
+    {
+      "id": "recmIsJzHvdr2hfb6",
+      "createdTime": "2026-01-20T13:13:04.000Z",
+      "fields": {
+        "Amount": 12600,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-30T10:31:38.000Z",
+        "Transaction Name": "Funds Received",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:13:04.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recnDEfJFnhm26n8t",
+      "createdTime": "2026-06-30T06:42:15.000Z",
+      "fields": {
+        "Amount": 571.74,
+        "Type": "Credit",
+        "Last Modified Time": "2026-06-30T06:42:41.000Z",
+        "Transaction Name": "Credit - Envelope Transfer copy copy copy copy",
+        "Envelope": [
+          "recNgf0NWyk2zbxfH"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:42:15.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recnZKCAo8u4xcCjT",
+      "createdTime": "2026-06-30T06:40:42.000Z",
+      "fields": {
+        "Amount": 7083.94,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:40:42.000Z",
+        "Transaction Name": "Expense - Envelope Transfer copy copy copy",
+        "Envelope": [
+          "recjpVbjVdgFLHRLs"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:40:42.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recoAI4NliLIpnOgj",
+      "createdTime": "2026-05-18T08:10:04.000Z",
+      "fields": {
+        "Amount": 1599,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:33:12.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-05-18T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-05-18T08:10:04.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Converge"
+      }
+    },
+    {
+      "id": "recohqCGeYD0IF10C",
+      "createdTime": "2026-06-30T06:29:34.000Z",
+      "fields": {
+        "Amount": 7569.56,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:30:03.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recfcf2SiNfleAS1l"
+        ],
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:29:34.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Shell"
+      }
+    },
+    {
+      "id": "recqcw4Jhsj9b22UL",
+      "createdTime": "2026-02-02T10:01:48.000Z",
+      "fields": {
+        "Amount": 6900,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "reckiPec0YbzQ6juK"
+        ],
+        "Date": "2026-01-29T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:01:48.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Haimobilia",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recrJUKzclLX6czLU",
+      "createdTime": "2026-06-30T06:37:47.000Z",
+      "fields": {
+        "Amount": 3400,
+        "Type": "Expense",
+        "Last Modified Time": "2026-06-30T06:38:18.000Z",
+        "Transaction Name": "Expense - Envelope Transfer copy",
+        "Envelope": [
+          "recjpVbjVdgFLHRLs"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:37:47.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recrUq4glnlGiO6O9",
+      "createdTime": "2026-01-20T13:29:53.000Z",
+      "fields": {
+        "Amount": 50000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Account Transfer",
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:29:53.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Steven",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recregE8ajYoCAUBE",
+      "createdTime": "2026-06-30T06:33:03.000Z",
+      "fields": {
+        "Amount": 1340,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:39:03.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recuy2cAC6aRpNQ22"
+        ],
+        "Date": "2026-04-13T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:33:03.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Payor/Payee": "Reimburse to Michael"
+      }
+    },
+    {
+      "id": "recsxE6NwuRZBV3yI",
+      "createdTime": "2026-08-05T02:20:30.000Z",
+      "fields": {
+        "Amount": 7191,
+        "Type": "Expense",
+        "Last Modified Time": "2026-08-05T02:22:39.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recrEjx9mlKBP29jW"
+        ],
+        "Date": "2026-07-31T10:20:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-08-05T02:20:30.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Receipt": [
+          {
+            "id": "attQANhvX6QV4LbzF",
+            "width": 960,
+            "height": 1280,
+            "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/_DGuyHC8XsfSH-yMwAXqWA/QXh8rL4RWc0JcA0PCoW9r1lYFI52SvmTuVShKCD9lU8JG2PPiHLiKFUskI8EuF867GBRKOL649rgorL3MP_U9qbGZHPgNs-c5pN6x0p6klL4WomTxmwU0YQFOk5OdLf5nHraBIp0EVwy7MB3ckLCIQ/nG1YGBWyCIqXE0wwAVkFB5THEEJwmVnJCyg1FXO0HS8",
+            "filename": "image.png",
+            "size": 1597343,
+            "type": "image/png",
+            "thumbnails": {
+              "small": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/RGwU59j0RjJGA31h9XUqug/jPPJGZLj8JYtgwwKyKB7qUH5Zbk4et-RM7295l6eMKm_1dmWiIVkzc7giLTwhIu5a02zBUAkZ6TovMwysKi6fVzvzgfaR_vn-t3Rsfwnk1AuxX2UZQYGJ_oJkHVu_gp2XoMzxFUc_06dmQm_I-Utlg/5x5MsfP9SPdqIth2Kuv0TTBpyhWhtsVlvTNPMo9cB4M",
+                "width": 27,
+                "height": 36
+              },
+              "large": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/lhJegFNl2tC1P4qcElAojA/Xe3VXC1hUzK_IqwZyamWb0wKaEFrGYdr6_AJGEKt7qMqWldP6mB_YS3npWgu0BhNERwjmqvpHhU8akqcoCRRGH-c4L4zCNgCN_Jbz3uEDanSvB96motDgqd7aV3g6AWXQdPEMAd9fDBPHDRqTUVV2Q/Z-HdmtgNLd6B6Rqft7V0YhTN3USRkwA_OECodLI8ur0",
+                "width": 512,
+                "height": 683
+              },
+              "full": {
+                "url": "https://v5.airtableusercontent.com/v3/u/57/57/1790164800000/60Wv7wZwr61o7lhgGEa3vA/HKXYrHTKKH69e_g2T-Uf8WNuLsu2YQnCQt-1ixV22331vrbENPeNulv0IPDU3TOHKRWKGKpuRltyGayUvY0tXBZC5GHMFTDNBO4qQaD5shheSwZHIeWffAeRjTKG4rm8dqQ5c_V-8k_ekmMsnGuMOQ/69AvyrLMtlIJviRBxzBNsy-qfVbG2a9VdMSgfIufx9k",
+                "width": 960,
+                "height": 1280
+              }
+            }
+          }
+        ],
+        "Payor/Payee": "Korbutcher's Dining Inc.",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "rectCziKpycC905sy",
+      "createdTime": "2026-02-02T10:10:47.000Z",
+      "fields": {
+        "Amount": 1753,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-31T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:10:47.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Lazada",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "rectokklrxYv9rxrL",
+      "createdTime": "2026-06-30T06:52:48.000Z",
+      "fields": {
+        "Amount": 1268.96,
+        "Type": "Credit",
+        "Last Modified Time": "2026-06-30T06:54:00.000Z",
+        "Transaction Name": "Credit - Account Transfer",
+        "Envelope": [
+          "rec7UY9tuuwlThJkr"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:52:48.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recu9TsY0Q6AZLqT6",
+      "createdTime": "2026-06-30T06:54:08.000Z",
+      "fields": {
+        "Amount": 155295,
+        "Type": "Credit",
+        "Last Modified Time": "2026-07-28T13:26:38.000Z",
+        "Budget Code Name": [
+          "BGT-003-20260630"
+        ],
+        "Transaction Name": "Credit",
+        "Envelope": [
+          "recBmgWNP1KeZU5Iy"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:54:08.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ],
+        "Budget Code": [
+          "recfQSwt4QAft5pph"
+        ]
+      }
+    },
+    {
+      "id": "recuW2paC729OgaQ7",
+      "createdTime": "2026-06-30T06:51:42.000Z",
+      "fields": {
+        "Amount": 4000,
+        "Type": "Credit",
+        "Last Modified Time": "2026-06-30T06:52:06.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "reclcxLMwfF0Oezv7"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:51:42.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recwVMQSqv3hlx0mB",
+      "createdTime": "2026-06-20T08:29:45.000Z",
+      "fields": {
+        "Amount": 1699,
+        "Type": "Expense",
+        "Last Modified Time": "2026-07-30T10:33:15.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "rec16VAERW0WC66F9"
+        ],
+        "Date": "2026-06-20T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-20T08:29:45.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PLDT"
+      }
+    },
+    {
+      "id": "recxmsRNMjpDKxKUF",
+      "createdTime": "2026-01-20T13:28:28.000Z",
+      "fields": {
+        "Amount": 50010,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:28:28.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PC Configure",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recy1KQ48wcsU3qXv",
+      "createdTime": "2026-02-02T10:30:04.000Z",
+      "fields": {
+        "Amount": 1267.01,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "reckiPec0YbzQ6juK"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:30:04.000Z",
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recy6dml5R9LoxeJf",
+      "createdTime": "2026-01-20T13:18:07.000Z",
+      "fields": {
+        "Amount": 45700,
+        "Type": "Expense",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recUUTcjpJWwWBi4t"
+        ],
+        "Date": "2026-01-20T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-01-20T13:18:07.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "PC Wise",
+        "Created By": "Steven Gaurano"
+      }
+    },
+    {
+      "id": "recyUaT21HlABEzMN",
+      "createdTime": "2026-02-02T10:24:41.000Z",
+      "fields": {
+        "Amount": 2500,
+        "Type": "Credit",
+        "Last Modified Time": "2026-02-11T08:27:44.000Z",
+        "Transaction Name": "Credit - Envelope Transfer",
+        "Envelope": [
+          "recUWs1fvThfhpqhu"
+        ],
+        "Date": "2026-02-02T20:48:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-02-02T10:24:41.000Z",
+        "Payor/Payee": "Nathaniel",
+        "Created By": "Nathaniel Tanglao"
+      }
+    },
+    {
+      "id": "recyWCrA8fDtBOxsy",
+      "createdTime": "2026-06-30T06:37:59.000Z",
+      "fields": {
+        "Amount": 3400,
+        "Type": "Credit",
+        "Last Modified Time": "2026-06-30T06:38:21.000Z",
+        "Transaction Name": "Credit - Envelope Transfer copy",
+        "Envelope": [
+          "reclcxLMwfF0Oezv7"
+        ],
+        "Date": "2026-06-30T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-06-30T06:37:59.000Z",
+        "Account": [
+          "reciUxgpHCnR8wRkq"
+        ]
+      }
+    },
+    {
+      "id": "recz3xL0joWwId1Jq",
+      "createdTime": "2026-05-06T14:50:56.000Z",
+      "fields": {
+        "Amount": 1390.71,
+        "Type": "Expense",
+        "Last Modified Time": "2026-05-07T01:49:20.000Z",
+        "Transaction Name": "Expense",
+        "Envelope": [
+          "recMOrdJXnihIHo9s"
+        ],
+        "Description": "Claude subscription for faster code generation",
+        "Date": "2026-05-05T00:00:00.000Z",
+        "Auto-Extracted Details": {
+          "state": "error",
+          "errorType": "emptyDependency",
+          "value": null,
+          "isStale": false
+        },
+        "Created Time": "2026-05-06T14:50:56.000Z",
+        "Account": [
+          "rec1eq8Y5NIFXNlST"
+        ],
+        "Payor/Payee": "Claude"
+      }
+    }
+  ]
+}

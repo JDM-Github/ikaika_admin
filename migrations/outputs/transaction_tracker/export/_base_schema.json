@@ -1,0 +1,1067 @@
+[
+  {
+    "id": "tblKpuFbcyc6YfmH1",
+    "name": "Transactions",
+    "primaryFieldId": "fldAg6K5rSVpyORWq",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldAg6K5rSVpyORWq",
+        "name": "Transaction Name"
+      },
+      {
+        "type": "dateTime",
+        "options": {
+          "dateFormat": {
+            "name": "iso",
+            "format": "YYYY-MM-DD"
+          },
+          "timeFormat": {
+            "name": "24hour",
+            "format": "HH:mm"
+          },
+          "timeZone": "utc"
+        },
+        "id": "fldQRftZG0W9D1lnX",
+        "name": "Date"
+      },
+      {
+        "type": "currency",
+        "options": {
+          "precision": 2,
+          "symbol": "\u20b1"
+        },
+        "id": "fld5wcHKcgiaWPsCm",
+        "name": "Amount"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selg9Um2PqlczO04Y",
+              "name": "Expense",
+              "color": "blueLight2"
+            },
+            {
+              "id": "sel6Nn4lVdbhHcMwY",
+              "name": "Credit",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selBF0Aw6N3ieKdBk",
+              "name": "Transfer",
+              "color": "tealLight2"
+            }
+          ]
+        },
+        "id": "fld8TOlCKtk47XSVA",
+        "name": "Type"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbluWKBN7zWuPMjON",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldpKComKXgGdmV6s"
+        },
+        "id": "fldgUwcM8OdCd6Dpl",
+        "name": "Account"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblbeCM0N32nUcQe0",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldVwa7fRuphftkrm"
+        },
+        "id": "fldIushNcGNzYh5nd",
+        "name": "Envelope"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldxwAWsqy92xeSX6",
+        "name": "Payor/Payee"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": true
+        },
+        "id": "fldgkflGEeWiKlLfW",
+        "name": "Receipt"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldIzqiVzE8pkuJEp",
+        "name": "Description"
+      },
+      {
+        "type": "singleCollaborator",
+        "id": "fldwRhUaA6H7i7AZ2",
+        "name": "Reviewed By"
+      },
+      {
+        "type": "dateTime",
+        "options": {
+          "dateFormat": {
+            "name": "iso",
+            "format": "YYYY-MM-DD"
+          },
+          "timeFormat": {
+            "name": "24hour",
+            "format": "HH:mm"
+          },
+          "timeZone": "utc"
+        },
+        "id": "fldpRrDJv9KUGIcwm",
+        "name": "Approval Date"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldzdEshs6yjPYcVx",
+        "name": "Created By"
+      },
+      {
+        "type": "createdTime",
+        "options": {
+          "result": {
+            "type": "dateTime",
+            "options": {
+              "dateFormat": {
+                "name": "us",
+                "format": "M/D/YYYY"
+              },
+              "timeFormat": {
+                "name": "12hour",
+                "format": "h:mma"
+              },
+              "timeZone": "utc"
+            }
+          }
+        },
+        "id": "fldYXGIghyLmAP05F",
+        "name": "Created Time"
+      },
+      {
+        "type": "lastModifiedTime",
+        "options": {
+          "isValid": true,
+          "referencedFieldIds": [],
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "us",
+                "format": "M/D/YYYY"
+              }
+            }
+          }
+        },
+        "id": "fld8xBto0eE7cYMgm",
+        "name": "Last Modified Time"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": true
+        },
+        "id": "fldrYne4Q031EojyL",
+        "name": "Attachments"
+      },
+      {
+        "type": "aiText",
+        "options": {
+          "referencedFieldIds": [
+            "fldgkflGEeWiKlLfW",
+            "fldIzqiVzE8pkuJEp"
+          ],
+          "prompt": [
+            "You are an expert data extractor specializing in parsing financial receipts and transaction descriptions for business expense tracking systems. Assume a professional and detail-oriented tone as you extract information from provided documents.\n\nTask description:\nCarefully review the provided receipt and transaction description. Identify and extract the following details: 1) line items (including item names and amounts, if available), 2) the merchant or payor/payee associated with the transaction, and 3) any relevant notes such as transaction purpose, location, or special considerations. Focus on clarity and factual accuracy.\n\nOutput format:\nSummarize the extracted information as plain text. Use short labeled sections for line items, merchant/payor/payee, and notes (if available), separated by semicolons. Do not include any additional commentary, formatting, or headings. If you cannot extract any information, output \"Unable to extract details from the receipt or description.\"\nExample: Line Items: [Lunch, 2 sandwiches, 12.00]; Merchant: [Cafe Roma]; Notes: [Business lunch with client] (Real examples may contain multiple line items and more detailed notes.)\n\nContext and Data:\nReceipt: ",
+            {
+              "field": {
+                "fieldId": "fldgkflGEeWiKlLfW"
+              }
+            },
+            "\nDescription: ",
+            {
+              "field": {
+                "fieldId": "fldIzqiVzE8pkuJEp"
+              }
+            },
+            "\n\nOutput:\n"
+          ]
+        },
+        "id": "fldY44t0pdVo0AoKd",
+        "name": "Auto-Extracted Details"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbluWKBN7zWuPMjON",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldXAtMpgHZTUbKOc"
+        },
+        "id": "fldajTwF9bylLxZPA",
+        "name": "Transfer Destination Account"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldajTwF9bylLxZPA",
+          "fieldIdInLinkedTable": "fldHOttJJvX5ggiRN",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldBV3UMbMoodB53t",
+        "name": "Account Name (from Transfer Destination Account)"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbluWKBN7zWuPMjON",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldU3Ri66Jj2Dt7mX"
+        },
+        "id": "fldaGTNGpN3C0mam7",
+        "name": "Transfer Source Account"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldaGTNGpN3C0mam7",
+          "fieldIdInLinkedTable": "fldHOttJJvX5ggiRN",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldomY7gpw1VKFSmm",
+        "name": "Account Name (from Transfer Source Account)"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": false,
+          "recordLinkFieldId": "fldgUwcM8OdCd6Dpl",
+          "fieldIdInLinkedTable": null,
+          "referencedFieldIds": [],
+          "result": null
+        },
+        "id": "fldGcToBVHjByyg7r",
+        "name": "Current Balance (from Account)"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": false,
+          "recordLinkFieldId": "fldaGTNGpN3C0mam7",
+          "fieldIdInLinkedTable": null,
+          "referencedFieldIds": [],
+          "result": null
+        },
+        "id": "fldjgZlNaxzNg8hMk",
+        "name": "Current Balance (from Transfer Source Account)"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": false,
+          "recordLinkFieldId": null,
+          "fieldIdInLinkedTable": null,
+          "result": null
+        },
+        "id": "fldqDnZHSXVLqr2aR",
+        "name": "Pay to the Expense of"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblhCLVztUsaZJpN8",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldFvQ4UbyfvFYFxT"
+        },
+        "id": "fldsqmu7RDyfuJlyz",
+        "name": "Budget Code"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldsqmu7RDyfuJlyz",
+          "fieldIdInLinkedTable": "fldLKLhEGhSNaGMib",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldA9akfSmZbudW5L",
+        "name": "Budget Code Name"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwtqIQ4HvcquFSUa",
+        "name": "Grid view",
+        "type": "grid"
+      },
+      {
+        "id": "viwBRi9eqWad5NNT4",
+        "name": "Grid view per transaction",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblbeCM0N32nUcQe0",
+    "name": "Envelopes - Budget",
+    "primaryFieldId": "fldN9jIbwWCvep1vb",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldN9jIbwWCvep1vb",
+        "name": "Envelope Name"
+      },
+      {
+        "type": "currency",
+        "options": {
+          "precision": 2,
+          "symbol": "\u20b1"
+        },
+        "id": "fldYtZdMBC1apAH9n",
+        "name": "Budget Amount"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldVwa7fRuphftkrm",
+          "fieldIdInLinkedTable": "fld5wcHKcgiaWPsCm",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "currency",
+            "options": {
+              "precision": 2,
+              "symbol": "\u20b1"
+            }
+          }
+        },
+        "id": "fldW5lDtu5qoMAPzI",
+        "name": "Total Expense Transaction Amount"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "({fldwdSq8hv89DF1lu} - {fldW5lDtu5qoMAPzI})",
+          "referencedFieldIds": [
+            "fldwdSq8hv89DF1lu",
+            "fldW5lDtu5qoMAPzI"
+          ],
+          "result": {
+            "type": "currency",
+            "options": {
+              "precision": 2,
+              "symbol": "\u20b1"
+            }
+          }
+        },
+        "id": "fldPh1Uq41lRTQN2O",
+        "name": "Remaining Budget"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selqGZlBdBWyUykTH",
+              "name": "Maintenance",
+              "color": "cyanDark1"
+            },
+            {
+              "id": "sel3xRJg9WpSbS9yg",
+              "name": "Capital Expenditure",
+              "color": "blueLight2"
+            }
+          ]
+        },
+        "id": "fld7HAC87SjMBmTS9",
+        "name": "Group"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selmFhcEpCmiQug10",
+              "name": "Monthly",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selWcRWyaWNwEbljV",
+              "name": "Quarterly",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selgr8KIoCxxDR3rG",
+              "name": "Yearly",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selUnUYnEJaQXg68r",
+              "name": "One-time",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldg2MlprOq4XJ6y3",
+        "name": "Time Period"
+      },
+      {
+        "type": "checkbox",
+        "options": {
+          "icon": "thumbsUp",
+          "color": "greenBright"
+        },
+        "id": "fld5Wy0zP7lFEofhe",
+        "name": "Active"
+      },
+      {
+        "type": "multilineText",
+        "id": "fld6UIQMJYTOO2eg8",
+        "name": "Budget Notes"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblKpuFbcyc6YfmH1",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldIushNcGNzYh5nd"
+        },
+        "id": "fldVwa7fRuphftkrm",
+        "name": "Transactions"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldVwa7fRuphftkrm",
+          "fieldIdInLinkedTable": "fld5wcHKcgiaWPsCm",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "currency",
+            "options": {
+              "precision": 2,
+              "symbol": "\u20b1"
+            }
+          }
+        },
+        "id": "fldwdSq8hv89DF1lu",
+        "name": "Total Income Transaction Amount"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbluWKBN7zWuPMjON",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldRWhHFfF5xFuHsT"
+        },
+        "id": "fldJOB1UAjParaexb",
+        "name": "Account"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblhCLVztUsaZJpN8",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldisl7mZrSImhNHy"
+        },
+        "id": "fld7lauA6ftvqV4CG",
+        "name": "Budget Code"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fld7lauA6ftvqV4CG",
+          "fieldIdInLinkedTable": "fldvJF2fRbVC9ycKP",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "flduhe9ApKzN9Awhf",
+        "name": "Name Rollup (from Budget Code)"
+      }
+    ],
+    "views": [
+      {
+        "id": "viw3uWihyZ5Y89G0V",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tbluWKBN7zWuPMjON",
+    "name": "Accounts",
+    "primaryFieldId": "fldHOttJJvX5ggiRN",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldHOttJJvX5ggiRN",
+        "name": "Account Name"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selE5S5bZWoGM0YcZ",
+              "name": "Bank",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selU6oxA813IO1eF8",
+              "name": "Credit Card",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sel3hBguBNctNrogk",
+              "name": "Cash",
+              "color": "tealLight2"
+            },
+            {
+              "id": "seln3voajpkBBIfxl",
+              "name": "Other",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selebZidvV3x8qaCn",
+              "name": "Checking",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selMek4sfB66TGJTr",
+              "name": "Savings",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selmBesrYBJxcktNw",
+              "name": "Business Checking",
+              "color": "tealLight2"
+            },
+            {
+              "id": "seld4iMcx1qWWVmCm",
+              "name": "Trust",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selm9ui5y9jUlmyyz",
+              "name": "Brokerage",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "sel8SyutlocAOUJLb",
+              "name": "Escrow",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "selfIa2dtZrX87YVn",
+              "name": "Credit",
+              "color": "redLight2"
+            },
+            {
+              "id": "sel5FreBEh0fh0qiI",
+              "name": "Education",
+              "color": "pinkLight2"
+            },
+            {
+              "id": "selLn4MzlNDjo4Ykl",
+              "name": "Loan",
+              "color": "purpleLight2"
+            },
+            {
+              "id": "selYv4DC8eUsa3iAp",
+              "name": "Business Savings",
+              "color": "grayLight2"
+            },
+            {
+              "id": "selfjm8fFUoxrt0TN",
+              "name": "HSA",
+              "color": "blueLight1"
+            },
+            {
+              "id": "selOIWaJDfCRWrf70",
+              "name": "IRA",
+              "color": "cyanLight1"
+            }
+          ]
+        },
+        "id": "fldL3DLO47Ra5Z4mh",
+        "name": "Account Type"
+      },
+      {
+        "type": "email",
+        "id": "fldTapAVcAPoJbqHd",
+        "name": "Email"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldmKnWWZY6bbkJFH",
+        "name": "QRCode"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldJUMTG25WapwtFw",
+        "name": "Institution"
+      },
+      {
+        "type": "checkbox",
+        "options": {
+          "icon": "thumbsUp",
+          "color": "greenBright"
+        },
+        "id": "fldrXpoo0gwspKYZ4",
+        "name": "Active"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "{fldDD7DIJFqvFuo67} - {fldZZyp3lmXax4svR}",
+          "referencedFieldIds": [
+            "fldDD7DIJFqvFuo67",
+            "fldZZyp3lmXax4svR"
+          ],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 2
+            }
+          }
+        },
+        "id": "fldNtO0tr5vue51IU",
+        "name": "Remaining Funds"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblKpuFbcyc6YfmH1",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldgUwcM8OdCd6Dpl"
+        },
+        "id": "fldpKComKXgGdmV6s",
+        "name": "Transactions"
+      },
+      {
+        "type": "createdTime",
+        "options": {
+          "result": {
+            "type": "dateTime",
+            "options": {
+              "dateFormat": {
+                "name": "us",
+                "format": "M/D/YYYY"
+              },
+              "timeFormat": {
+                "name": "12hour",
+                "format": "h:mma"
+              },
+              "timeZone": "utc"
+            }
+          }
+        },
+        "id": "fldbuDZ44mgdw2pSa",
+        "name": "Created Time"
+      },
+      {
+        "type": "lastModifiedTime",
+        "options": {
+          "isValid": true,
+          "referencedFieldIds": [],
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "us",
+                "format": "M/D/YYYY"
+              }
+            }
+          }
+        },
+        "id": "fldJoCLUSvyQO0oiP",
+        "name": "Last Modified Time"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblbeCM0N32nUcQe0",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldJOB1UAjParaexb"
+        },
+        "id": "fldRWhHFfF5xFuHsT",
+        "name": "Envelopes"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldpKComKXgGdmV6s",
+          "fieldIdInLinkedTable": "fld5wcHKcgiaWPsCm",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "currency",
+            "options": {
+              "precision": 2,
+              "symbol": "\u20b1"
+            }
+          }
+        },
+        "id": "fldDD7DIJFqvFuo67",
+        "name": "Total Income Transaction Amount"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldpKComKXgGdmV6s",
+          "fieldIdInLinkedTable": "fld5wcHKcgiaWPsCm",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "currency",
+            "options": {
+              "precision": 2,
+              "symbol": "\u20b1"
+            }
+          }
+        },
+        "id": "fldZZyp3lmXax4svR",
+        "name": "Total Expense Transaction Amount"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldRWhHFfF5xFuHsT",
+          "fieldIdInLinkedTable": "fldwdSq8hv89DF1lu",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "currency",
+            "options": {
+              "precision": 2,
+              "symbol": "\u20b1"
+            }
+          }
+        },
+        "id": "fldUXVhcCnXmZVIaB",
+        "name": "Total Envelope Income"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblKpuFbcyc6YfmH1",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldajTwF9bylLxZPA"
+        },
+        "id": "fldXAtMpgHZTUbKOc",
+        "name": "Incoming Transfers"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblKpuFbcyc6YfmH1",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldaGTNGpN3C0mam7"
+        },
+        "id": "fldU3Ri66Jj2Dt7mX",
+        "name": "Outgoing Transfers"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selVzjkfIDvFnikSh",
+              "name": "Complete",
+              "color": "greenLight1"
+            },
+            {
+              "id": "sel0sUeBDmryp1hTd",
+              "name": "Incomplete",
+              "color": "yellowLight1"
+            }
+          ]
+        },
+        "id": "fldXmKkgia1DxQbZu",
+        "name": "CreationStatus"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldRWhHFfF5xFuHsT",
+          "fieldIdInLinkedTable": "fldN9jIbwWCvep1vb",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldFrvZ63Nh45VArC",
+        "name": "Envelope Name (from Envelopes)"
+      }
+    ],
+    "views": [
+      {
+        "id": "viw5CfINw0FuCebhH",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblt4gtJjG7MtzV7y",
+    "name": "Payor/Payee",
+    "primaryFieldId": "fldlpBBZGZ5Khh1Ae",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldlpBBZGZ5Khh1Ae",
+        "name": "Name"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selo5JDlWB9QBkMLo",
+              "name": "Payor",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selpZY85RzoiyhuQ6",
+              "name": "Payee",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selMCYJRGiWcQxzrf",
+              "name": "Both",
+              "color": "tealLight2"
+            }
+          ]
+        },
+        "id": "fldha0BNcQ30mi2WE",
+        "name": "Type"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld724rz43EjJZgnk",
+        "name": "Contact Name"
+      },
+      {
+        "type": "email",
+        "id": "flda7YMBEowvhKdP5",
+        "name": "Email"
+      },
+      {
+        "type": "phoneNumber",
+        "id": "fld4CkGUqYt4c2ccW",
+        "name": "Phone"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldjK8Qz3J43ULDfi",
+        "name": "Associated Transactions"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldFJhxcTBFcsyqta",
+        "name": "Company"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldEssP4UcT9YWFrc",
+        "name": "Notes"
+      },
+      {
+        "type": "aiText",
+        "options": {
+          "referencedFieldIds": [
+            "fldlpBBZGZ5Khh1Ae",
+            "fldFJhxcTBFcsyqta"
+          ],
+          "prompt": [
+            "You are a diligent business researcher with expertise in locating up-to-date and authoritative information about companies and organizations. Maintain a professional tone and focus on accuracy and relevancy.\n\nTask description:\nSearch the internet for official business or company information related to the provided names. Prioritize details such as company website, description, headquarters location, industry, and contact information. Cross-reference multiple credible sources to ensure the reliability of the information. If multiple companies match the provided information, select the one most likely associated based on full name or context.\n\nOutput format:\nProvide a clear and concise company summary including the full business name, website URL, a brief company description, primary location (city/state/country, if available), industry, and primary contact method (email or phone, if public). Do not include any additional commentary, explanations, or bullet points. If no relevant business information can be found, output \"No business information found for the provided details.\"\nExample output:\nAcme Corporation, https://acme.com, Acme Corporation is an international provider of business supplies and solutions based in New York, NY, specializing in office products. Industry: Office Supplies. Contact: info@acme.com (real outputs should use the actual business details, which may be longer/more detailed).\n\nContext and Data:\nName: ",
+            {
+              "field": {
+                "fieldId": "fldlpBBZGZ5Khh1Ae"
+              }
+            },
+            "\nCompany: ",
+            {
+              "field": {
+                "fieldId": "fldFJhxcTBFcsyqta"
+              }
+            },
+            "\n\nOutput:\n"
+          ]
+        },
+        "id": "fld7BueWPpB1u4VWF",
+        "name": "Business Lookup"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldHroWqpXfPi0b7W",
+        "name": "Expense Plan"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwdK8GVYhGL4ThcR",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblhCLVztUsaZJpN8",
+    "name": "Budget Code",
+    "primaryFieldId": "fldLKLhEGhSNaGMib",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldLKLhEGhSNaGMib",
+        "name": "Name"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldvJF2fRbVC9ycKP",
+        "name": "Desc"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldNJxzjHn3Pcbgds",
+        "name": "Transfer Date (Received)"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fld0djIcmbQeqHjoN",
+        "name": "Expected Amount (Quotation)"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldFvQ4UbyfvFYFxT",
+          "fieldIdInLinkedTable": "fld5wcHKcgiaWPsCm",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "currency",
+            "options": {
+              "precision": 2,
+              "symbol": "\u20b1"
+            }
+          }
+        },
+        "id": "fldwZnnHozT0BY4Hk",
+        "name": "Actual Credited"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "IF(\r\n  OR({fld0djIcmbQeqHjoN} = BLANK(), {fldwZnnHozT0BY4Hk} = BLANK()),\r\n  BLANK(),\r\n  IF(\r\n    ROUND({fld0djIcmbQeqHjoN}, 2) = ROUND({fldwZnnHozT0BY4Hk}, 2), \"Complete\",\r\n    IF(\r\n      {fld0djIcmbQeqHjoN} > {fldwZnnHozT0BY4Hk}, \"Missing\",\r\n      \"Over\"\r\n    )\r\n  )\r\n)",
+          "referencedFieldIds": [
+            "fld0djIcmbQeqHjoN",
+            "fldwZnnHozT0BY4Hk"
+          ],
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldFbNI6amW3sRuUm",
+        "name": "Credit Status"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldgoriJBwBH4lkMf",
+        "name": "Attachments"
+      },
+      {
+        "type": "aiText",
+        "options": {
+          "referencedFieldIds": [
+            "fldgoriJBwBH4lkMf"
+          ],
+          "prompt": [
+            "You are a professional document analyst specializing in summarizing content from various file types. Your task is to extract key points and provide a concise summary of the content found in the attached files. Ensure that the summary captures the main ideas and any important details without including unnecessary information.\n\nAnalyze the content of the attached files to identify the main themes and significant details. Summarize these points clearly and concisely, ensuring that the summary is informative and relevant to the document's purpose.\n\nFormat your response as plain text, keeping it concise and to the point. If you cannot summarize the content, output \"Unable to summarize the content.\" Example: \"The document discusses the impact of climate change on polar bears, highlighting the loss of habitat and food sources.\" (Real examples should be longer and more detailed.)\n\nFiles:\n",
+            {
+              "field": {
+                "fieldId": "fldgoriJBwBH4lkMf"
+              }
+            }
+          ]
+        },
+        "id": "fld81RMQNqUGG2KVV",
+        "name": "Attachment Summary",
+        "description": "An AI generated summary of the Attachments field. Upload files to Attachments to generate a summary."
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblKpuFbcyc6YfmH1",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldsqmu7RDyfuJlyz"
+        },
+        "id": "fldFvQ4UbyfvFYFxT",
+        "name": "Transactions"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblbeCM0N32nUcQe0",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fld7lauA6ftvqV4CG"
+        },
+        "id": "fldisl7mZrSImhNHy",
+        "name": "Envelopes - Budget"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwCiYZ7hbJHfRwL2",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  }
+]
