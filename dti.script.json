@@ -62,16 +62,40 @@
             "default": ""
           },
           {
-            "flag": "Elevated",
-            "label": "-Elevated   [SwitchParameter]",
+            "flag": "MachineOnly",
+            "label": "-MachineOnly   [SwitchParameter]",
             "type": "boolean",
             "required": false,
-            "description": "The machine-wide half alone: VC++ runtimes, WampServer, its add-ons, php.ini.",
+            "description": "The machine-wide half alone - VC++ runtimes, WampServer, its add-ons, php.ini - and then stop.",
             "default": ""
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/development-setup -Report ${development-setup.args.Report} -Force ${development-setup.args.Force} -ToolsOnly ${development-setup.args.ToolsOnly} -Elevated ${development-setup.args.Elevated}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/development-setup -Report ${development-setup.args.Report} -Force ${development-setup.args.Force} -ToolsOnly ${development-setup.args.ToolsOnly} -MachineOnly ${development-setup.args.MachineOnly}"
+        ]
+      },
+      "environment-variables": {
+        "description": "Points this machine's PATH at whichever PHP, MySQL and Apache WampServer is currently set to serve, so php, composer and mysql work in any terminal without a full path",
+        "args": [
+          {
+            "flag": "Report",
+            "label": "-Report   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Print what WampServer has selected and what PATH would become, and stop.",
+            "default": ""
+          },
+          {
+            "flag": "Direct",
+            "label": "-Direct   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Write the literal directories instead of %WAMP_PHP% and friends.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/environment-variables -Report ${environment-variables.args.Report} -Direct ${environment-variables.args.Direct}"
         ]
       }
     },

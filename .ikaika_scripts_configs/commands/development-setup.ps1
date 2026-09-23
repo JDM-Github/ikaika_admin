@@ -45,11 +45,16 @@ param(
     [switch]$Force,
     # Stop after the machine is ready, without touching this repository.
     [switch]$ToolsOnly,
-    # The machine-wide half alone: VC++ runtimes, WampServer, its add-ons, php.ini.
-    # This is what the elevated child process runs, and it is a parameter rather than a
-    # private variable so that half can also be run on its own when a UAC prompt was
-    # declined and somebody wants to retry it from an admin terminal.
-    [switch]$Elevated,
+    # The machine-wide half alone - VC++ runtimes, WampServer, its add-ons, php.ini -
+    # and then stop. Composer, PATH and the repository are NOT done, because they must
+    # run as the ordinary user.
+    #
+    # NAMED FOR WHAT IT DOES, not for who runs it. This was -Elevated, which is what the
+    # elevated child is, and on a form that reads as "run this with administrator rights"
+    # - so ticking it was the obvious thing to do and it silently skipped Composer and
+    # the repository. A switch on a form is a promise about the outcome, and the outcome
+    # here is "the machine only".
+    [switch]$MachineOnly,
     [switch]$Help
 )
 # =============================[ end: Parameters ]==============================
@@ -68,6 +73,10 @@ $libDir = Join-Path $toolkit 'lib'
 
 . (Join-Path $libDir 'logging.ps1')
 . (Join-Path $libDir 'load-env.ps1')
+# Everything about WampServer - where it is, which version it is serving, and how PATH
+# follows that - is in one file, shared with environment-variables. Two copies of "which
+# PHP is active" would be two answers to the question this whole command turns on.
+. (Join-Path $configsDir 'lib\wamp.ps1')
 
 if ($Help) {
     Write-Host ''
@@ -75,6 +84,7 @@ if ($Help) {
     Write-Host ''
     Write-Host '  Usage'
     Write-Host '    .\script.ps1 development-setup [-Report] [-ToolsOnly] [-Force]'
+    Write-Host '    .\script.ps1 development-setup -MachineOnly    the machine, then stop'
     Write-Host ''
     Write-Host '  Installs, in order: the VC++ runtimes WampServer depends on, WampServer'
     Write-Host '  itself, the PHP and MySQL add-ons when the bundled versions are not the'
@@ -114,6 +124,8 @@ $addonBase = Get-ProjectValue 'setup.addonBase' 'https://wampserver.aviatechno.n
 $phpAddon = Get-ProjectValue 'setup.phpAddon' ''
 $mysqlAddon = Get-ProjectValue 'setup.mysqlAddon' ''
 $composerDir = Get-ProjectValue 'setup.composerDir' (Join-Path $env:LOCALAPPDATA 'Composer\bin')
+$dbFlavor = "$(Get-ProjectValue 'setup.dbFlavor' 'mysql')".ToLower()
+$composerHome = Get-ProjectValue 'setup.composerHome' (Join-Path $env:APPDATA 'Composer')
 $stampPath = Join-Path $repoRoot '.ikaika-install'
 
 # WampServer will not run without these, and the failure it gives when one is absent is
@@ -191,31 +203,6 @@ function Update-SessionPath {
         }
     }
     $env:Path = [string]::Join(';', $seen)
-}
-
-# READ FROM THE REGISTRY UNEXPANDED, never through [Environment]::GetEnvironmentVariable.
-# That accessor expands %USERPROFILE% and friends on the way out, so reading, appending
-# and writing back bakes today's values into PATH permanently - and the user only finds
-# out after moving a profile or a drive letter. RegistryValueOptions.DoNotExpand is the
-# whole point of this function; the append itself is trivial.
-function Add-UserPathEntry([string]$Directory) {
-    if (-not $Directory) { return $false }
-    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
-    if (-not $key) { throw 'Could not open HKCU\Environment for writing.' }
-    try {
-        $current = "$($key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))"
-        $entries = @($current.Split(';') | Where-Object { $_.Trim() })
-        if ($entries -contains $Directory) { return $false }
-
-        # The kind is preserved rather than chosen: a PATH that already holds a %VAR%
-        # must stay REG_EXPAND_SZ or every entry in it stops resolving at logon.
-        $kind = $key.GetValueKind('Path')
-        if ($kind -ne 'ExpandString' -and $kind -ne 'String') { $kind = 'ExpandString' }
-        $key.SetValue('Path', ((@($entries) + $Directory) -join ';'), $kind)
-    } finally { $key.Dispose() }
-
-    $env:Path = "$env:Path;$Directory"
-    return $true
 }
 
 function Get-ExternalVersion([string]$Command, [string[]]$CommandArgs) {
@@ -335,161 +322,8 @@ function Install-InnoSilently([string]$Installer, [string[]]$Extra = @()) {
 }
 
 # ------------------------------------------------------------------- wamp
-# WampServer's own installer starts wampmanager when it finishes, and an add-on that
-# then tries to replace files under bin\ is refused by Inno's pre-install stage with a
-# bare exit 7. So the running server is stopped BEFORE any add-on, deliberately, rather
-# than hoping /FORCECLOSEAPPLICATIONS reaches all six processes.
-#
-# Left stopped afterwards. Starting WampServer is the tray icon's job - it has its own
-# port checks and a version switch behind it - and a half-started one is worse than a
-# stopped one, because the icon is then orange for a reason nobody can see.
-function Stop-WampServer {
-    $stopped = @()
-    # Named rather than thrown. One of these refusing is not worth aborting over - the
-    # add-on may well not need that particular file - but it is exactly what explains a
-    # refusal thirty seconds later, so it is said out loud instead of swallowed.
-    $refused = @()
-
-    foreach ($service in @('wampapache64', 'wampmysqld64', 'wampmariadb64')) {
-        $found = Get-Service -Name $service -ErrorAction SilentlyContinue
-        if (-not $found -or $found.Status -eq 'Stopped') { continue }
-        try { Stop-Service -Name $service -Force -ErrorAction Stop; $stopped += $service }
-        catch { $refused += "$service ($($_.Exception.Message))" }
-    }
-    foreach ($name in @('wampmanager', 'httpd', 'mysqld', 'mariadbd')) {
-        foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
-            # A process that exited on its own between the enumeration and the Kill is
-            # the outcome this wanted, so it is not counted as refused.
-            if ($process.HasExited) { continue }
-            try { $process.Kill(); $stopped += $name }
-            catch { $refused += "$name ($($_.Exception.Message))" }
-        }
-    }
-
-    if ($stopped.Count) {
-        # Kill returns when the request is made, not when the handles are gone, and the
-        # file locks are precisely what the installer is about to trip over.
-        Start-Sleep -Seconds 3
-        Write-Host "      stopped $(@($stopped | Select-Object -Unique) -join ', ')" -ForegroundColor DarkGray
-    }
-    if ($refused.Count) {
-        Write-Host "      still running: $(@($refused | Select-Object -Unique) -join '; ')" -ForegroundColor Yellow
-    }
-    return $stopped.Count
-}
-
-# Which PHP and MySQL WampServer will actually RUN, as opposed to which are on disk. An
-# add-on adds a version; it does not necessarily make it the active one, and the two
-# disagreeing is invisible until a query hits the wrong server.
-function Get-WampActiveVersion([string]$Root, [string]$Key) {
-    if (-not $Root) { return '' }
-    $conf = Join-Path $Root 'wampmanager.conf'
-    if (-not (Test-Path -LiteralPath $conf)) { return '' }
-    foreach ($line in (Get-Content -LiteralPath $conf)) {
-        if ($line -match "^\s*$Key\s*=\s*`"([^`"]+)`"") { return $Matches[1] }
-    }
-    return ''
-}
-
-function Find-WampRoot {
-    if (Test-Path -LiteralPath (Join-Path $wampRoot 'wampmanager.exe')) { return $wampRoot }
-
-    # Inno records where it actually put things, which is the only source that survives
-    # somebody choosing a different directory during a manual install.
-    foreach ($hive in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
-            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
-        if (-not (Test-Path $hive)) { continue }
-        foreach ($entry in (Get-ChildItem $hive -ErrorAction SilentlyContinue)) {
-            $properties = Get-ItemProperty $entry.PSPath -ErrorAction SilentlyContinue
-            if ("$($properties.DisplayName)" -notmatch 'wampserver') { continue }
-            $location = "$($properties.InstallLocation)".Trim()
-            if ($location -and (Test-Path -LiteralPath (Join-Path $location 'wampmanager.exe'))) {
-                return $location
-            }
-        }
-    }
-
-    foreach ($candidate in @('C:\wamp64', 'C:\wamp')) {
-        if (Test-Path -LiteralPath (Join-Path $candidate 'wampmanager.exe')) { return $candidate }
-    }
-    return ''
-}
-
-# WampServer keeps every version it has ever been given side by side, as
-# bin\php\php8.4.15 and bin\mysql\mysql8.0.46. Newest match wins, so an add-on installed
-# later takes over from the bundled one without anything here being told about it.
-function Get-WampComponentDir([string]$Root, [string]$Kind, [string]$Series) {
-    if (-not $Root) { return '' }
-    $parent = Join-Path $Root "bin\$Kind"
-    if (-not (Test-Path -LiteralPath $parent)) { return '' }
-    $prefix = "$Kind$Series."
-    $matched = @(Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } |
-            Sort-Object { try { [version]($_.Name -replace "^$Kind", '') } catch { [version]'0.0' } })
-    if (-not $matched.Count) { return '' }
-    return $matched[-1].FullName
-}
-
-function Get-WampComponentVersion([string]$Path, [string]$Kind) {
-    if (-not $Path) { return '' }
-    return (Split-Path $Path -Leaf) -replace "^$Kind", ''
-}
-
-# WampServer ships php.ini twice, and they are not the same file: the one beside php.exe
-# is what the CLI reads, and the one under Apache's bin is what the web server reads.
-# Composer and artisan use the first, a browser request uses the second, so an extension
-# switched on in only one of them produces the exact bug where the site works and the
-# command line does not.
-function Get-PhpIniPaths([string]$Root, [string]$PhpDir) {
-    $paths = @()
-    foreach ($candidate in @((Join-Path $PhpDir 'php.ini'), (Join-Path $PhpDir 'phpForApache.ini'))) {
-        if (Test-Path -LiteralPath $candidate) { $paths += $candidate }
-    }
-    $apacheBin = Join-Path $Root 'bin\apache'
-    if (Test-Path -LiteralPath $apacheBin) {
-        foreach ($ini in (Get-ChildItem -LiteralPath $apacheBin -Recurse -Filter 'php.ini' -ErrorAction SilentlyContinue)) {
-            $paths += $ini.FullName
-        }
-    }
-    return @($paths | Select-Object -Unique)
-}
-
-function Get-DisabledExtensions([string]$IniPath, [string[]]$Names) {
-    if (-not (Test-Path -LiteralPath $IniPath)) { return @() }
-    $lines = Get-Content -LiteralPath $IniPath
-    $disabled = @()
-    foreach ($name in $Names) {
-        $enabled = @($lines | Where-Object { $_ -match "^\s*extension\s*=\s*""?$([regex]::Escape($name))(\.dll)?""?\s*$" }).Count
-        if (-not $enabled) { $disabled += $name }
-    }
-    return $disabled
-}
-
-function Enable-PhpExtension([string]$IniPath, [string[]]$Names) {
-    $lines = @(Get-Content -LiteralPath $IniPath)
-    $changed = @()
-    foreach ($name in $Names) {
-        $pattern = "^\s*;\s*extension\s*=\s*""?$([regex]::Escape($name))(\.dll)?""?\s*$"
-        $index = -1
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match $pattern) { $index = $i; break }
-        }
-        if ($index -ge 0) {
-            $lines[$index] = $lines[$index] -replace '^\s*;\s*', ''
-            $changed += $name
-            continue
-        }
-        # No commented line to uncomment: a version that never shipped the line at all.
-        # Appended rather than skipped, because php reports a missing extension only when
-        # something finally needs it, which is halfway through a migration.
-        $lines += "extension=$name"
-        $changed += $name
-    }
-    if ($changed.Count) {
-        [IO.File]::WriteAllLines($IniPath, $lines, [System.Text.UTF8Encoding]::new($false))
-    }
-    return $changed
-}
+# Find-WampRoot, Get-WampActiveVersion, Get-WampComponentDir, Stop-WampServer and the
+# php.ini helpers all live in .ikaika_scripts_configs/lib/wamp.ps1, dot-sourced above.
 
 # --------------------------------------------------------------- composer
 # The phar route rather than Composer-Setup.exe: it needs no administrator, it puts the
@@ -559,7 +393,7 @@ function Read-Grades {
     Set-Row 'VC++ runtimes' $(if ($vcReady) { 'OK' } else { 'MISSING' }) `
         $(if ($vcReady) { '2012 and 2015+ present' } else { 'WampServer will not start without them' })
 
-    $root = Find-WampRoot
+    $root = Find-WampRoot $wampRoot
     Set-Row 'WampServer' $(if ($root) { 'OK' } else { 'MISSING' }) $(if ($root) { $root } else { "will install to $wampRoot" })
 
     $phpDir = Get-WampComponentDir $root 'php' $phpSeries
@@ -652,7 +486,7 @@ if (-not (Get-WingetPath)) {
 $machineWork = @(@('PowerShell 7', 'Git', 'VC++ runtimes', 'WampServer', "PHP $phpSeries",
         "MySQL $mysqlSeries", 'PHP extensions') | Where-Object { Test-Missing $_ })
 
-if ($machineWork.Count -and -not $Elevated -and -not (Test-Elevated)) {
+if ($machineWork.Count -and -not $MachineOnly -and -not (Test-Elevated)) {
     Write-Host ''
     Write-Host '  Requesting administrator rights once, for:' -ForegroundColor Cyan
     foreach ($item in $machineWork) { Write-Host "    $item" -ForegroundColor DarkGray }
@@ -660,7 +494,7 @@ if ($machineWork.Count -and -not $Elevated -and -not (Test-Elevated)) {
     # powershell.exe, not pwsh: this half may be what INSTALLS PowerShell 7, and a
     # machine that has none cannot start the child that would fix that.
     $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass',
-        '-File', ('"{0}"' -f $PSCommandPath), '-Elevated')
+        '-File', ('"{0}"' -f $PSCommandPath), '-MachineOnly')
 
     # NOT a reason to stop. One refused add-on used to abort the whole run, so a machine
     # with a working PHP got no Composer and no vendor/ over a MySQL version that
@@ -678,7 +512,7 @@ if ($machineWork.Count -and -not $Elevated -and -not (Test-Elevated)) {
         # an error: everything that does not need administrator still runs.
         Write-Host ''
         Write-Host "  Administrator rights were not granted, so the machine-wide half was skipped." -ForegroundColor Yellow
-        Write-Host "  Re-run this, or run it from an admin terminal with -Elevated." -ForegroundColor DarkGray
+        Write-Host "  Re-run this, or run it from an admin terminal with -MachineOnly." -ForegroundColor DarkGray
     }
     Update-SessionPath
     $state = Read-Grades
@@ -727,7 +561,7 @@ if ($machineWork.Count) {
         Write-Host "    WampServer -> $wampRoot"
         try {
             Install-WingetPackage 'Wampserver.Wampserver' "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR=""$wampRoot"""
-            $state.WampRoot = Find-WampRoot
+            $state.WampRoot = Find-WampRoot $wampRoot
             if ($state.WampRoot) {
                 Set-Row 'WampServer' 'FIXED' $state.WampRoot
             } else {
@@ -789,10 +623,14 @@ if ($machineWork.Count) {
     }
 }
 
-if ($Elevated) {
+if ($MachineOnly) {
     # Labelled, because the parent prints its own table straight after this one and two
     # identical headings read as the same table printed twice.
-    Write-Report 'Elevated half'
+    Write-Report 'Machine only'
+    Write-Host ''
+    Write-Host '  Composer, PATH and this repository were NOT touched - they belong to the' -ForegroundColor Yellow
+    Write-Host '  ordinary user, and this half may be running as somebody else. Finish with:' -ForegroundColor DarkGray
+    Write-Host '    .\script.ps1 development-setup' -ForegroundColor DarkGray
     Write-Host ''
     exit (Get-FailedCount)
 }
@@ -802,20 +640,10 @@ if ($Elevated) {
 # A PATH entry written while elevated lands in the administrator's profile, and a
 # Composer installed there is a Composer the ordinary user cannot see.
 
-if ($state.PhpDir) {
-    Write-Host ''
-    Write-Host '  PATH' -ForegroundColor Cyan
-    try {
-        if (Add-UserPathEntry $state.PhpDir) {
-            Write-Host "    added $($state.PhpDir)"
-        } else {
-            Write-Host "    already there: $($state.PhpDir)" -ForegroundColor DarkGray
-        }
-    } catch {
-        Set-Row "PHP $phpSeries" 'FAILED' "installed, but could not be added to PATH: $($_.Exception.Message)"
-    }
-}
-
+# Composer BEFORE the PATH step, and verified after it. The shim it writes calls `php`
+# off PATH rather than an absolute php.exe, so composer cannot answer until PATH exists -
+# which is why the row below is filled in on the far side of the sync and not here.
+$composerInstalled = $false
 if (Test-Missing 'Composer') {
     Write-Host ''
     Write-Host '  Composer' -ForegroundColor Cyan
@@ -825,14 +653,69 @@ if (Test-Missing 'Composer') {
     } else {
         try {
             Install-Composer $phpExe $composerDir
-            [void](Add-UserPathEntry $composerDir)
-            $found = Get-ExternalVersion 'composer' @('--version', '--no-interaction')
-            Set-Row 'Composer' $(if ($found) { 'FIXED' } else { 'FAILED' }) `
-                $(if ($found) { "$found  $composerDir" } else { "installed to $composerDir but would not run" })
+            $composerInstalled = $true
         } catch {
             Set-Row 'Composer' 'FAILED' $_.Exception.Message
         }
     }
+}
+
+# PATH, through the same plan environment-variables uses - deliberately, because the two
+# disagreeing about which PHP is active is the exact failure this project keeps hitting.
+# What goes on PATH is %WAMP_PHP%, not a directory named after a version, so a switch in
+# WampServer's tray menu does not silently strand this.
+if ($state.WampRoot) {
+    Write-Host ''
+    Write-Host '  PATH' -ForegroundColor Cyan
+    try {
+        $plan = @(Get-WampEnvironmentPlan -Root $state.WampRoot -DbFlavor $dbFlavor -ComposerDir $composerDir)
+        $usable = @($plan | Where-Object { $_.Path -and (Test-Path -LiteralPath $_.Path) })
+        if (-not $usable.Count) {
+            Set-Row 'PATH' 'WARN' 'WampServer names no version that exists on disk'
+        } else {
+            $resolved = Resolve-WampPathEntry -Root $state.WampRoot -Plan $usable
+            foreach ($entry in $resolved.Removed) { Write-Host "    - $entry" -ForegroundColor DarkYellow }
+            foreach ($entry in $resolved.Added) { Write-Host "    + $entry" -ForegroundColor Green }
+            if (-not $resolved.Added.Count -and -not $resolved.Removed.Count) {
+                Write-Host '    already exactly this' -ForegroundColor DarkGray
+            }
+            Set-WampEnvironment -Plan $usable -PathEntries $resolved.Entries
+            Set-Row 'PATH' 'FIXED' "$(@($usable | Where-Object { $_.Name } | ForEach-Object { $_.Name }) -join ', ') -> the selected versions"
+        }
+    } catch {
+        Set-Row 'PATH' 'FAILED' $_.Exception.Message
+    }
+}
+
+# COMPOSER_HOME, on the far side of the PATH step because both are the same kind of
+# thing and this is where the user's environment is written.
+#
+# The value it is set to is the one Composer would have defaulted to anyway. Setting it
+# explicitly is not redundant: the default is computed per process from APPDATA, so a
+# task, a service or a shell with a different profile silently gets its own cache,
+# its own auth.json and its own global packages - and "composer global require worked
+# yesterday" becomes unexplainable.
+$composerReady = $(if ($script:Rows.Contains('Composer')) { $script:Rows['Composer'].State -ne 'SKIP' } else { $false })
+if ($composerReady) {
+    Write-Host ''
+    Write-Host '  Composer home' -ForegroundColor Cyan
+    try {
+        Set-ComposerHome $composerHome
+        Set-Row 'Composer home' 'FIXED' $composerHome
+        Write-Host "    COMPOSER_HOME = $composerHome"
+    } catch {
+        # Not fatal: Composer computes a default when this is unset, so the cost is the
+        # ambiguity above and not a broken install.
+        Set-Row 'Composer home' 'WARN' $_.Exception.Message
+    }
+}
+
+# Proved, not assumed - and proved HERE rather than at the install, because the shim
+# calls php off PATH and PATH only exists as of the step above.
+if ($composerInstalled) {
+    $found = Get-ExternalVersion 'composer' @('--version', '--no-interaction')
+    Set-Row 'Composer' $(if ($found) { 'FIXED' } else { 'FAILED' }) `
+        $(if ($found) { "$found  $composerDir" } else { "installed to $composerDir but would not run" })
 }
 
 if ($ToolsOnly) {
@@ -977,6 +860,7 @@ Write-Host '    Start WampServer from the Start menu, and wait for a green tray 
 if ($script:Rows.Contains('MySQL active') -and $script:Rows['MySQL active'].State -eq 'WARN') {
     Write-Host "    Left-click the tray icon: MySQL > Version > $mysqlSeries.x  (it is on $(Get-WampActiveVersion $state.WampRoot 'mysqlVersion') now)"
 }
+Write-Host '    .\script.ps1 environment-variables  re-point PATH at the versions in use'
 Write-Host '    .\script.ps1 development-setup      again, for the databases'
 Write-Host '    php artisan migrate                 build the schema'
 Write-Host '    php artisan serve                   run the API on http://localhost:8000'
