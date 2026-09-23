@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Portal\Administration;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalProjectDeletion;
 use App\Support\Portal\PortalRecycleBin;
 use App\Support\Portal\PortalSubmittedReports;
 use Illuminate\Http\JsonResponse;
@@ -14,6 +15,7 @@ class RecycleBinController extends Controller
     public function __construct(
         private readonly PortalRecycleBin $recycleBin,
         private readonly PortalSubmittedReports $reports,
+        private readonly PortalProjectDeletion $projects,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -44,7 +46,12 @@ class RecycleBinController extends Controller
         }
 
         $row = $this->recycleBin->itemForActor($actor, $id);
-        $this->reports->restoreFromBin($actor, $row, $request);
+        // The bin holds more than one kind of thing now, so the row says which hand puts it back.
+        if (PortalProjectDeletion::owns($row)) {
+            $this->projects->restoreFromBin($actor, $row, $request);
+        } else {
+            $this->reports->restoreFromBin($actor, $row, $request);
+        }
 
         return response()->json(null, 204);
     }

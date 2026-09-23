@@ -69,6 +69,16 @@ final class PortalActivityCopy
         return self::YOU.' deleted a '.self::reportKind($kind).' for '.self::date($date);
     }
 
+    public static function deletedProject(string $name): string
+    {
+        return self::YOU.' deleted the project '.$name;
+    }
+
+    public static function restoredProject(string $name): string
+    {
+        return self::YOU.' restored the project '.$name;
+    }
+
     public static function restoredReport(string $kind, string $date): string
     {
         return self::YOU.' restored a '.self::reportKind($kind).' for '.self::date($date);

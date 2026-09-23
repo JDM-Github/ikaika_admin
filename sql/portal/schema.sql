@@ -203,7 +203,11 @@ CREATE TABLE projects (
     project_creation_approver_remarks   TEXT,
     close_project_requester             VARCHAR(255),
     done_project_requester              VARCHAR(255),
-    date_modified                       TIMESTAMP NULL
+    date_modified                       TIMESTAMP NULL,
+    -- Soft delete. Eight tables cascade from projects(id), including projects_user_reports, so a
+    -- removed row would take the memberships, clients, scopes and the link to submitted reports
+    -- with it and no snapshot could bring them back. Reads filter this out instead.
+    deleted_at                          TIMESTAMP NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
