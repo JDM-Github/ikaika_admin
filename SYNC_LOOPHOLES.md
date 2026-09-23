@@ -9,6 +9,36 @@ Nothing here has been implemented. The concurrency lock is deliberately out of s
 
 Companion to `ADMIN_MISSING.md` section 3, which this corrects in two places (L-12, L-13).
 
+## Status - 2026-09-23 pass
+
+| ID | Status | What changed |
+| --- | --- | --- |
+| L-1 | Fixed | `sql/portal/reset.ps1` step 5 deletes `product='portal'` rows from core `actions` and `recycle`. Reset run: ledger now 0 rows, portal matches the dump manifest. |
+| L-2 | Fixed | Compensating `try/catch` + `deleteRequests` removed; `CoreLedger::within()` rolls both sides back. Audit and notifications run after commit. |
+| L-3 | Fixed | `CoreLedger::within()` nests the core transaction inside the product one; every ledgered write uses it. `recordEdit` is now transactional. |
+| L-4 | Fixed | Compensation-only hard deletes are gone. Items dropped by a reimbursement edit get `recycleDeleted` per item. |
+| L-5 | Fixed | `PortalManageRequests::recordDecision` - leave, overtime, offset, reimbursement, flag. Flag payload carries `userReportIds`. |
+| L-6 | Fixed | Role change ledgered as `portal.employees` / `employees`, same shape as a grid edit. |
+| L-7 | Fixed | Receipts ride in every reimbursement item snapshot; payout receipt ledgered as an edit. |
+| L-8 | Fixed | Reimbursement actions carry the full stored row (item, cost, quantity, purpose, team, status, receipt). |
+| L-9 | Fixed | One action per reimbursement item; report add/edit/restore carry `lineIds` (edit also `removedLineIds`). |
+| L-10 | Fixed | Grid and role edits write `portal.<table>`; nothing writes the env database name any more. |
+| L-11 | Fixed | Cancel payloads carry the stored fields plus status; grid edits add a flat `fields` map. Sync must still use PATCH. |
+| L-12 | Open | Airtable id write-back belongs to the sync build. |
+| L-13 | Fixed | Grid edits only tables with `airtable_record_id`. `ADMIN_MISSING.md` corrected. |
+| L-14 | N/A | Guidance for the sync build. |
+| L-15 | Fixed | `CorePayloadFilter` (moved out of `PortalAudit`) strips secrets and government/bank ids at any depth, in the ledger and the log. |
+| L-16 | Fixed | A repeat reimbursement decision no longer 404s. |
+| L-17 - L-20 | Open | Deferred by decision. |
+
+Also found and fixed during the pass: `PortalManageRequestsTest` and
+`PortalManageUsersTest` transacted only `portal`, so once those paths ledgered, test runs
+leaked action rows into the real core database. Both now transact `core` too.
+
+One consequence to know: an item removed from a reimbursement claim now appears in the
+Recycle Bin, but only reports can be restored from there, so its Restore answers
+"This item cannot be restored from here."
+
 ## How this was produced, and how far to trust it
 
 - 11 of 15 per-file audits completed (ManageUsers, Inbox, ManageRequests,

@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalAccessDenied;
+use App\Support\Portal\PortalLeaveRequests;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
@@ -23,7 +26,7 @@ class PortalManageRequestsTest extends TestCase
     /**
      * @var list<string>
      */
-    protected array $connectionsToTransact = ['portal'];
+    protected array $connectionsToTransact = ['portal', 'core'];
 
     protected function setUp(): void
     {
@@ -109,6 +112,21 @@ class PortalManageRequestsTest extends TestCase
         $this->assertSame('Approved', $savedRow->status);
         $this->assertSame('Coverage is in place.', $savedRow->approver_remarks);
 
+        // The decision is a write the sync must push, so it lands in the ledger as an edit.
+        $action = Action::query()
+            ->where('resource', 'requests.leave')
+            ->where('action_type', CoreActionType::EDIT)
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($action);
+        $this->assertSame('portal.requests', $action->database_target);
+        $this->assertEquals([
+            'id' => (string) $id,
+            'requestedFor' => $date,
+            'status' => 'Approved',
+            'approverRemarks' => 'Coverage is in place.',
+        ], $action->parameters['parameters']);
+
         $listed = $this->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date, [
             'Authorization' => "Bearer {$token}",
         ])->json('data');
@@ -165,6 +183,17 @@ class PortalManageRequestsTest extends TestCase
             $this->assertSame('Approved', $row->flag_status);
             $this->assertSame('Reviewed, looks fine.', $row->flag_remarks);
         }
+
+        $action = Action::query()
+            ->where('resource', 'reports.flagged')
+            ->where('record_id', (string) $firstId)
+            ->first();
+        $this->assertNotNull($action);
+        $this->assertSame('portal.user_reports', $action->database_target);
+        $parameters = $action->parameters['parameters'];
+        $this->assertSame('Approved', $parameters['flagStatus']);
+        $this->assertContains($firstId, $parameters['userReportIds']);
+        $this->assertContains($secondId, $parameters['userReportIds']);
 
         $notification = PortalNotification::query()
             ->where('employee_id', $member->getKey())
@@ -404,6 +433,75 @@ class PortalManageRequestsTest extends TestCase
             ->where('record_id', $itemId)
             ->where('field_name', 'payout_receipt')
             ->exists());
+
+        $action = Action::query()
+            ->where('resource', 'requests.reimbursement')
+            ->where('action_type', CoreActionType::EDIT)
+            ->where('record_id', (string) $itemId)
+            ->first();
+        $this->assertNotNull($action);
+        $this->assertSame('payout.jpg', $action->parameters['parameters']['payoutReceipt']['fileName']);
+    }
+
+    // A member's write must show on the admin queue at once, not after the queue's cache expires.
+    public function test_a_write_elsewhere_in_the_portal_refreshes_the_cached_queue(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $token = $this->tokenForAdmin();
+        $url = '/api/development/portal/manage/requests?from='.$date.'&to='.$date;
+
+        $this->getJson($url, ['Authorization' => "Bearer {$token}"])->assertOk();
+
+        $id = (int) DB::connection('portal')->table('requests')->insertGetId([
+            'request_date' => $date,
+            'name' => $this->memberName($member),
+            'reason' => 'Filed after the queue was cached',
+            'status' => 'Pending',
+            'type' => 'Leave',
+            'category' => '01 Vacation Leave',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        // What the leave form does after its write; it used to clear only its own cache.
+        app(PortalLeaveRequests::class)->bumpCache();
+
+        $listed = $this->getJson($url, ['Authorization' => "Bearer {$token}"])->json('data');
+        $this->assertIsArray($listed);
+        $this->assertNotNull(collect($listed)->firstWhere('id', (string) $id));
+    }
+
+    // update() counts changed rows, so re-sending the same decision used to read as a missing row.
+    public function test_repeating_a_reimbursement_decision_is_not_refused(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Printer ink',
+            'cost' => 120.0,
+            'qty' => 1,
+            'purpose' => 'Plans',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Cebu Office',
+            'status' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        $token = $this->tokenForAdmin();
+        $change = ['changes' => [[
+            'id' => (string) $itemId,
+            'kind' => 'reimbursement',
+            'status' => 'approved',
+            'approverRemarks' => null,
+        ]]];
+
+        $this->patchJson('/api/development/portal/manage/requests', $change, [
+            'Authorization' => "Bearer {$token}",
+        ])->assertOk()->assertJsonPath('saved', 1);
+
+        $this->assertSame(1, Action::query()
+            ->where('resource', 'requests.reimbursement')
+            ->where('record_id', (string) $itemId)
+            ->count());
     }
 
     public function test_a_payout_receipt_is_refused_on_a_claim_that_is_not_approved_yet(): void

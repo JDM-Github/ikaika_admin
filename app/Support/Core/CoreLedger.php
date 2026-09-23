@@ -4,6 +4,8 @@ namespace App\Support\Core;
 
 use App\Modules\Core\Models\Action;
 use App\Modules\Core\Models\Recycle;
+use Closure;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -24,6 +26,23 @@ final class CoreLedger
     public const DEFAULT_RETAIN_DAYS = 30;
 
     /**
+     * Runs a product write and its ledger rows as one unit: the core transaction nests inside the
+     * product one, so a throw anywhere rolls both back and a write can never land unlogged.
+     *
+     * Core commits first. The one window left -- the product COMMIT failing after it -- can only
+     * leave an action whose row is missing, which the sync reports; never a silent unlogged write.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $write
+     * @return T
+     */
+    public function within(ConnectionInterface $data, Closure $write): mixed
+    {
+        return $data->transaction(fn () => DB::connection('core')->transaction($write));
+    }
+
+    /**
      * @param  array<string, mixed>  $parameters
      */
     public function recordEdit(
@@ -36,7 +55,7 @@ final class CoreLedger
         ?int $actorId = null,
         ?string $actorIdNo = null,
     ): int {
-        return $this->insertAction(
+        return DB::connection('core')->transaction(fn (): int => $this->insertAction(
             $product,
             $databaseTarget,
             CoreActionType::EDIT,
@@ -46,7 +65,7 @@ final class CoreLedger
             $recycleKey,
             $actorId,
             $actorIdNo,
-        );
+        ));
     }
 
     /**
@@ -92,7 +111,7 @@ final class CoreLedger
                 'database_target' => $databaseTarget,
                 'resource' => $resource,
                 'record_id' => $recordId,
-                'payload' => $this->json($payload),
+                'payload' => $this->json(CorePayloadFilter::clean($payload)),
                 'deleted_by' => $actorId,
                 'deleted_by_id_no' => $actorIdNo,
                 'purges_at' => $this->purgesAt($product),
@@ -194,7 +213,7 @@ final class CoreLedger
             'record_id' => $recordId,
             'recycle_key' => $recycleKey,
             'actor_id' => $actorId,
-            'parameters' => $parameters,
+            'parameters' => CorePayloadFilter::clean($parameters),
         ];
 
         return (int) Action::query()->insertGetId([

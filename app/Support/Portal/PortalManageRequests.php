@@ -4,6 +4,7 @@ namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\UserReport;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -24,9 +25,10 @@ final class PortalManageRequests
 
     private const MAX_AHEAD_MONTHS = 12;
 
-    private const CACHE_VERSION_KEY = 'portal:manage:requests:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     public function __construct(
+        private readonly CoreLedger $ledger,
         private readonly PortalTimezone $timezone,
         private readonly PortalAudit $audit,
         private readonly PortalLeaveRequests $leave,
@@ -85,10 +87,10 @@ final class PortalManageRequests
             'changes.*.approverRemarks' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        $saved = $this->connection()->transaction(function () use ($validated, $actor, $request): int {
+        $saved = $this->ledger->within($this->connection(), function () use ($validated, $actor, $request): int {
             $count = 0;
             foreach ($validated['changes'] as $change) {
-                $this->notifyOwnerOfDecision($actor, $this->applyChange($change), $request);
+                $this->notifyOwnerOfDecision($actor, $this->applyChange($actor, $change), $request);
                 $count++;
             }
 
@@ -134,9 +136,9 @@ final class PortalManageRequests
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function uploadPayoutReceipt(int $itemId, Request $request): array
+    public function uploadPayoutReceipt(Employee $actor, int $itemId, Request $request): array
     {
-        $fields = $this->reimbursements->writePayoutReceipt($itemId, $request);
+        $fields = $this->reimbursements->writePayoutReceipt($actor, $itemId, $request);
         $this->bumpCache();
 
         return [
@@ -150,7 +152,7 @@ final class PortalManageRequests
      * @param  array{id: string, kind: string, status: string, approverRemarks?: string|null}  $change
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyChange(array $change): array
+    private function applyChange(Employee $actor, array $change): array
     {
         $id = (int) $change['id'];
         if ($id < 1 || (string) $id !== $change['id']) {
@@ -161,13 +163,13 @@ final class PortalManageRequests
         $remarks = $this->text($change['approverRemarks'] ?? null);
 
         if ($change['kind'] === 'reimbursement') {
-            return $this->applyClaim($id, $status, $remarks, $change['status']);
+            return $this->applyClaim($actor, $id, $status, $remarks, $change['status']);
         }
         if ($change['kind'] === 'flag') {
-            return $this->applyFlaggedReport($id, $status, $remarks, $change['status']);
+            return $this->applyFlaggedReport($actor, $id, $status, $remarks, $change['status']);
         }
 
-        return $this->applyQueuedRequest($id, $change['kind'], $status, $remarks, $change['status']);
+        return $this->applyQueuedRequest($actor, $id, $change['kind'], $status, $remarks, $change['status']);
     }
 
     /**
@@ -222,7 +224,7 @@ final class PortalManageRequests
     /**
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyQueuedRequest(int $id, string $kind, string $status, ?string $remarks, string $apiStatus): array
+    private function applyQueuedRequest(Employee $actor, int $id, string $kind, string $status, ?string $remarks, string $apiStatus): array
     {
         $row = $this->connection()
             ->table('requests')
@@ -258,6 +260,13 @@ final class PortalManageRequests
             ?? $this->calendarDate($row->original_work_day ?? null)
             ?? '';
 
+        $this->recordDecision($actor, $kind, $id, [
+            'id' => (string) $id,
+            'requestedFor' => $date,
+            'status' => $status,
+            'approverRemarks' => $remarks,
+        ]);
+
         return [
             'owner' => $this->employeeNamed($this->text($row->name ?? null)),
             'kind' => $kind,
@@ -270,7 +279,7 @@ final class PortalManageRequests
     /**
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyClaim(int $id, string $status, ?string $remarks, string $apiStatus): array
+    private function applyClaim(Employee $actor, int $id, string $status, ?string $remarks, string $apiStatus): array
     {
         $seed = $this->connection()
             ->table('reimbursements')
@@ -288,16 +297,21 @@ final class PortalManageRequests
          * approver_remarks, and a claim of three items is three costs an approver settles one at a
          * time -- deciding one of them used to rewrite its siblings, which is a decision nobody made.
          */
-        $updated = $this->connection()
+        // Existence is proven above; update() counts CHANGED rows, so a repeat decision reads 0.
+        $this->connection()
             ->table('reimbursements')
             ->where('id', $id)
             ->update([
                 'status' => $status,
                 'approver_remarks' => $remarks,
             ]);
-        if ($updated === 0) {
-            abort(404, 'That reimbursement is not on the queue.');
-        }
+
+        $this->recordDecision($actor, 'reimbursement', $id, [
+            'id' => (string) $id,
+            'requestedFor' => $this->calendarDate($seed->reimb_date ?? null),
+            'status' => $status,
+            'approverRemarks' => $remarks,
+        ]);
 
         $linkedId = $this->connection()
             ->table('employees_reimbursements')
@@ -326,7 +340,7 @@ final class PortalManageRequests
      *
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyFlaggedReport(int $id, string $status, ?string $remarks, string $apiStatus): array
+    private function applyFlaggedReport(Employee $actor, int $id, string $status, ?string $remarks, string $apiStatus): array
     {
         $seed = $this->connection()
             ->table('user_reports')
@@ -370,6 +384,16 @@ final class PortalManageRequests
                 'flag_remarks' => $remarks,
             ]);
 
+        // One decision covers every line of the group, so the sync needs each line's id.
+        $this->recordDecision($actor, 'flag', $id, [
+            'id' => (string) $id,
+            'employeeId' => $employeeId,
+            'userReportIds' => $groupIds,
+            'reportedOn' => $this->calendarDate($seed->report_date ?? null),
+            'flagStatus' => $status,
+            'flagRemarks' => $remarks,
+        ]);
+
         return [
             'owner' => Employee::query()->find($employeeId),
             'kind' => 'flag',
@@ -377,6 +401,23 @@ final class PortalManageRequests
             'recordId' => (string) $id,
             'status' => $apiStatus,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $parameters
+     */
+    private function recordDecision(Employee $actor, string $kind, int $id, array $parameters): void
+    {
+        $this->ledger->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            $kind === 'flag' ? 'portal.user_reports' : 'portal.requests',
+            $parameters,
+            $this->resourceForKind($kind),
+            (string) $id,
+            null,
+            (int) $actor->getKey(),
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
     }
 
     private function employeeNamed(?string $name): ?Employee

@@ -4,6 +4,7 @@ namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\Reimbursement;
+use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreLedger;
 use App\Support\Core\CoreRecycleKey;
 use Illuminate\Database\Connection;
@@ -68,7 +69,7 @@ final class PortalReimbursementRequests
 
     private const CANCELLED_STATUS = 'Cancelled';
 
-    private const CACHE_VERSION_KEY = 'portal:requests:reimbursement:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const CORE_TARGET = 'portal.requests';
 
@@ -141,12 +142,13 @@ final class PortalReimbursementRequests
         $name = $this->memberName($actor);
         $createdAt = $this->timezone->now();
 
-        $insertedIds = $this->connection()->transaction(function () use (
+        $insertedIds = $this->ledger->within($this->connection(), function () use (
             $date,
             $items,
             $employeeId,
             $name,
             $createdAt,
+            $actor,
         ): array {
             $ids = [];
             foreach ($items as $item) {
@@ -169,62 +171,46 @@ final class PortalReimbursementRequests
                 $ids[] = $id;
             }
 
+            $this->ledgerItems(CoreActionType::ADD, $actor, $date, $ids);
+
             return $ids;
         });
 
         $claimId = (string) min($insertedIds);
 
-        try {
-            $this->ledger->recordAdd(
-                CoreLedger::PRODUCT_PORTAL,
-                CoreRecycleKey::reimbursementRequest($employeeId, $date, (int) $claimId),
-                self::CORE_TARGET,
-                [
-                    'id' => $claimId,
-                    'requestedFor' => $date,
-                    'itemCount' => count($insertedIds),
-                ],
-                self::CORE_RESOURCE,
-                $claimId,
-                $employeeId,
-                is_string($actor->id_no) ? $actor->id_no : null,
-            );
-            $this->audit->record(
-                $actor,
-                PortalLogAction::INSERT,
-                self::CORE_RESOURCE,
-                PortalActivityCopy::filedReimbursement($date),
-                $claimId,
-                $request,
-                [
-                    'requestedFor' => $date,
-                    'items' => array_map(static fn (array $item): array => [
-                        'label' => $item['label'],
-                        'cost' => $item['cost'],
-                        'quantity' => $item['quantity'],
-                        'purpose' => $item['purpose'],
-                        'teamLabel' => $item['teamLabel'],
-                    ], $items),
-                ],
-            );
-            $this->audit->notifyManagers(
-                $actor,
-                PortalNotificationType::REQUEST_FILED_REIMBURSEMENT,
-                'New reimbursement request',
-                PortalActivityCopy::notifyFiled(
-                    PortalActivityCopy::displayName($actor),
-                    'reimbursement request',
-                    $date,
-                    $date,
-                ),
-                PortalShellPath::MANAGE_REQUESTS,
-                'Open queue',
-                ['recordId' => $claimId],
-            );
-        } catch (Throwable $error) {
-            $this->deleteClaims($insertedIds);
-            throw $error;
-        }
+        // After the commit: a failed log or notification must never undo a filed claim.
+        $this->audit->record(
+            $actor,
+            PortalLogAction::INSERT,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::filedReimbursement($date),
+            $claimId,
+            $request,
+            [
+                'requestedFor' => $date,
+                'items' => array_map(static fn (array $item): array => [
+                    'label' => $item['label'],
+                    'cost' => $item['cost'],
+                    'quantity' => $item['quantity'],
+                    'purpose' => $item['purpose'],
+                    'teamLabel' => $item['teamLabel'],
+                ], $items),
+            ],
+        );
+        $this->audit->notifyManagers(
+            $actor,
+            PortalNotificationType::REQUEST_FILED_REIMBURSEMENT,
+            'New reimbursement request',
+            PortalActivityCopy::notifyFiled(
+                PortalActivityCopy::displayName($actor),
+                'reimbursement request',
+                $date,
+                $date,
+            ),
+            PortalShellPath::MANAGE_REQUESTS,
+            'Open queue',
+            ['recordId' => $claimId],
+        );
 
         $this->bumpCache();
         $this->forgetReceipts($actor, $items);
@@ -259,13 +245,14 @@ final class PortalReimbursementRequests
         $existingIds = array_map(static fn (object $row): int => (int) $row->id, $rows);
         sort($existingIds);
 
-        $keptIds = $this->connection()->transaction(function () use (
+        $keptIds = $this->ledger->within($this->connection(), function () use (
             $date,
             $items,
             $employeeId,
             $name,
             $createdAt,
             $existingIds,
+            $actor,
         ): array {
             $kept = [];
             foreach ($items as $index => $item) {
@@ -298,27 +285,29 @@ final class PortalReimbursementRequests
                 $kept[] = $newId;
             }
 
-            $this->deleteClaims(array_values(array_diff($existingIds, $kept)));
+            // Snapshot the dropped items before they go, so each leaves a delete the sync can archive.
+            $removed = array_values(array_diff($existingIds, $kept));
+            $snapshots = $this->itemSnapshots($removed);
+            $this->deleteClaims($removed);
+
+            $this->ledgerItems(CoreActionType::EDIT, $actor, $date, $kept);
+            foreach ($snapshots as $removedId => $snapshot) {
+                $this->ledger->recycleDeleted(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreRecycleKey::reimbursementRequest($employeeId, $date, $removedId),
+                    self::CORE_TARGET,
+                    (string) $removedId,
+                    $snapshot,
+                    self::CORE_RESOURCE,
+                    $employeeId,
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            }
 
             return $kept;
         });
 
         $claimId = (string) min($keptIds);
-
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'id' => $claimId,
-                'requestedFor' => $date,
-                'itemCount' => count($keptIds),
-            ],
-            self::CORE_RESOURCE,
-            $claimId,
-            CoreRecycleKey::reimbursementRequest($employeeId, $date, (int) $claimId),
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
 
         $this->audit->record(
             $actor,
@@ -368,24 +357,25 @@ final class PortalReimbursementRequests
         $employeeId = (int) $actor->getKey();
         $claimId = (string) min($ids);
 
-        $this->connection()->table('reimbursements')
-            ->whereIn('id', $ids)
-            ->update(['status' => self::CANCELLED_STATUS]);
+        $this->ledger->within($this->connection(), function () use ($ids, $date, $employeeId, $actor): void {
+            $this->connection()->table('reimbursements')
+                ->whereIn('id', $ids)
+                ->update(['status' => self::CANCELLED_STATUS]);
 
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'id' => $claimId,
-                'requestedFor' => $date,
-                'status' => self::CANCELLED_STATUS,
-            ],
-            self::CORE_RESOURCE,
-            $claimId,
-            CoreRecycleKey::reimbursementRequest($employeeId, $date, (int) $claimId),
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
+            // One edit per item, each carrying its full row, so no item is left Pending in Airtable.
+            foreach ($this->itemSnapshots($ids) as $itemId => $snapshot) {
+                $this->ledger->recordEdit(
+                    CoreLedger::PRODUCT_PORTAL,
+                    self::CORE_TARGET,
+                    $snapshot,
+                    self::CORE_RESOURCE,
+                    (string) $itemId,
+                    CoreRecycleKey::reimbursementRequest($employeeId, $date, $itemId),
+                    $employeeId,
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            }
+        });
 
         $this->audit->record(
             $actor,
@@ -1119,7 +1109,7 @@ final class PortalReimbursementRequests
      *
      * @return array{payoutReceiptName: string, payoutReceiptUrl: string, payoutReceiptMime: string, payoutReceiptThumbUrl: ?string}
      */
-    public function writePayoutReceipt(int $itemId, Request $request): array
+    public function writePayoutReceipt(Employee $actor, int $itemId, Request $request): array
     {
         $row = $this->connection()->table('reimbursements')
             ->select(['id', 'status'])
@@ -1146,20 +1136,42 @@ final class PortalReimbursementRequests
 
         $stored = $this->cloudinary->uploadReceipt($file);
 
-        $this->connection()->table('attachments')
-            ->where('table_name', self::RECEIPT_TABLE)
-            ->where('record_id', $itemId)
-            ->where('field_name', self::PAYOUT_RECEIPT_FIELD)
-            ->delete();
-        $this->connection()->table('attachments')->insert([
-            'table_name' => self::RECEIPT_TABLE,
-            'record_id' => $itemId,
-            'field_name' => self::PAYOUT_RECEIPT_FIELD,
-            'file_url' => $stored['fileUrl'],
-            'file_name' => $stored['fileName'],
-            'file_size_bytes' => $stored['sizeBytes'],
-            'mime_type' => $stored['mimeType'],
-        ]);
+        $this->ledger->within($this->connection(), function () use ($actor, $itemId, $stored): void {
+            $this->connection()->table('attachments')
+                ->where('table_name', self::RECEIPT_TABLE)
+                ->where('record_id', $itemId)
+                ->where('field_name', self::PAYOUT_RECEIPT_FIELD)
+                ->delete();
+            $this->connection()->table('attachments')->insert([
+                'table_name' => self::RECEIPT_TABLE,
+                'record_id' => $itemId,
+                'field_name' => self::PAYOUT_RECEIPT_FIELD,
+                'file_url' => $stored['fileUrl'],
+                'file_name' => $stored['fileName'],
+                'file_size_bytes' => $stored['sizeBytes'],
+                'mime_type' => $stored['mimeType'],
+            ]);
+
+            // Only the changed field: the sync patches it onto the line item and leaves the rest alone.
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => (string) $itemId,
+                    'payoutReceipt' => [
+                        'fileName' => $stored['fileName'],
+                        'fileUrl' => $stored['fileUrl'],
+                        'mimeType' => $stored['mimeType'],
+                        'sizeBytes' => $stored['sizeBytes'],
+                    ],
+                ],
+                self::CORE_RESOURCE,
+                (string) $itemId,
+                null,
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
         $this->bumpCache();
 
         return [
@@ -1212,6 +1224,90 @@ final class PortalReimbursementRequests
     private function receiptCacheKey(Employee $actor, string $receiptId): string
     {
         return 'portal:requests:reimbursement:receipt:'.$actor->getKey().':'.$receiptId;
+    }
+
+    /**
+     * One ledger action per line item, each carrying that row as stored. Read back rather than
+     * rebuilt from the request, so the payload is what the database holds, receipt included.
+     *
+     * @param  list<int>  $ids
+     */
+    private function ledgerItems(string $actionType, Employee $actor, string $date, array $ids): void
+    {
+        $employeeId = (int) $actor->getKey();
+        $idNo = is_string($actor->id_no) ? $actor->id_no : null;
+
+        foreach ($this->itemSnapshots($ids) as $itemId => $snapshot) {
+            $recycleKey = CoreRecycleKey::reimbursementRequest($employeeId, $date, $itemId);
+            if ($actionType === CoreActionType::ADD) {
+                $this->ledger->recordAdd(
+                    CoreLedger::PRODUCT_PORTAL,
+                    $recycleKey,
+                    self::CORE_TARGET,
+                    $snapshot,
+                    self::CORE_RESOURCE,
+                    (string) $itemId,
+                    $employeeId,
+                    $idNo,
+                );
+
+                continue;
+            }
+
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                $snapshot,
+                self::CORE_RESOURCE,
+                (string) $itemId,
+                $recycleKey,
+                $employeeId,
+                $idNo,
+            );
+        }
+    }
+
+    /**
+     * @param  list<int>  $ids
+     * @return array<int, array<string, mixed>>
+     */
+    private function itemSnapshots(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        $rows = $this->connection()
+            ->table('reimbursements')
+            ->select(['id', 'reimb_date', 'item', 'cost', 'qty', 'purpose', 'team', 'status'])
+            ->whereIn('id', $ids)
+            ->orderBy('id')
+            ->get();
+        $receipts = $this->attachmentsByRecordId($ids, self::RECEIPT_FIELD);
+
+        $snapshots = [];
+        foreach ($rows as $row) {
+            $id = (int) $row->id;
+            $receipt = $receipts[$id] ?? null;
+            $snapshots[$id] = [
+                'id' => (string) $id,
+                'requestedFor' => $this->calendarDate($row->reimb_date ?? null),
+                'item' => $this->text($row->item ?? null),
+                'cost' => is_numeric($row->cost ?? null) ? (float) $row->cost : null,
+                'quantity' => is_numeric($row->qty ?? null) ? (int) $row->qty : null,
+                'purpose' => $this->text($row->purpose ?? null),
+                'team' => $this->text($row->team ?? null),
+                'status' => $this->text($row->status ?? null),
+                'receipt' => $receipt === null ? null : [
+                    'fileName' => $this->text($receipt->file_name ?? null),
+                    'fileUrl' => $this->text($receipt->file_url ?? null),
+                    'mimeType' => $this->text($receipt->mime_type ?? null),
+                    'sizeBytes' => is_numeric($receipt->file_size_bytes ?? null) ? (int) $receipt->file_size_bytes : null,
+                ],
+            ];
+        }
+
+        return $snapshots;
     }
 
     /**

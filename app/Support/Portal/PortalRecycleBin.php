@@ -30,7 +30,7 @@ final class PortalRecycleBin
      */
     public const PAGE_SIZES = [10, 25, 50, 100];
 
-    private const CACHE_VERSION_KEY = 'portal:administration:recycle-bin:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     /**
      * Table column key => SQL columns. Unknown keys fall back to newest first.

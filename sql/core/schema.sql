@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS actions (
     actor_id_no       VARCHAR(100) NULL,
     parameters        JSON         NOT NULL,
     synced_at         TIMESTAMP    NULL,
+    attempts          SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    last_error        TEXT         NULL,
     created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_actions_product_created (product, created_at),
     INDEX idx_actions_product_type (product, action_type),

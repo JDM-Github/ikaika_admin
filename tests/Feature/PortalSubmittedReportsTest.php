@@ -342,6 +342,12 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertNotNull($edited);
         $this->assertSame('edit', $edited->parameters['action_type'] ?? null);
         $this->assertSame('Adjusted hours', $edited->parameters['parameters']['remarks'] ?? null);
+        // An edit replaces every line, so it names both the new lines and the ones it removed.
+        $newLines = $edited->parameters['parameters']['lineIds'];
+        $removedLines = $edited->parameters['parameters']['removedLineIds'];
+        $this->assertNotEmpty($newLines);
+        $this->assertNotEmpty($removedLines);
+        $this->assertSame([], array_intersect($newLines, $removedLines));
 
         $log = PortalLog::query()
             ->where('employee_id', $actor->getKey())
@@ -516,6 +522,10 @@ class PortalSubmittedReportsTest extends TestCase
             ->first();
         $this->assertNotNull($action);
         $this->assertSame($today.'-daily', $action->record_id);
+        // A report is one user_reports row per line; the add names each so the sync can address them.
+        $lineIds = $action->parameters['parameters']['lineIds'];
+        $this->assertCount(1, $lineIds);
+        $this->assertTrue(DB::connection('portal')->table('user_reports')->where('id', $lineIds[0])->exists());
 
         $readable = Carbon::createFromFormat('Y-m-d', $today);
         $this->assertNotFalse($readable);

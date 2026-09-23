@@ -3,9 +3,11 @@
 namespace Tests\Feature;
 
 use App\Mail\PortalAccessAlertMail;
+use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalAccessDenied;
 use App\Support\Portal\PortalManageUserPresenter;
 use App\Support\Portal\PortalRole;
@@ -21,7 +23,7 @@ class PortalManageUsersTest extends TestCase
     /**
      * @var list<string>
      */
-    protected array $connectionsToTransact = ['portal'];
+    protected array $connectionsToTransact = ['portal', 'core'];
 
     protected function setUp(): void
     {
@@ -173,6 +175,19 @@ class PortalManageUsersTest extends TestCase
             ->assertJsonPath('data.is_admin', true);
 
         $this->assertSame(PortalRole::ADMIN, $member->fresh()?->role);
+
+        // Same target and shape as a grid edit of the column, so both screens sync alike.
+        $action = Action::query()
+            ->where('resource', 'employees')
+            ->where('action_type', CoreActionType::EDIT)
+            ->where('record_id', (string) $member->id)
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($action);
+        $this->assertSame('portal.employees', $action->database_target);
+        $this->assertSame((string) $admin->id_no, (string) $action->actor_id_no);
+        $this->assertSame(['role' => PortalRole::ADMIN], $action->parameters['parameters']['fields']);
+        $this->assertSame($previousRole, $action->parameters['parameters']['changes']['role']['from']);
 
         $memberName = trim(trim((string) $member->first_name).' '.trim((string) $member->last_name));
         $adminName = trim(trim((string) $admin->first_name).' '.trim((string) $admin->last_name));

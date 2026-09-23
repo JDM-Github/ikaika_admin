@@ -349,6 +349,7 @@ class PortalRecycleBinTest extends TestCase
             ->first();
         $this->assertNotNull($added);
         $this->assertTrue($added->parameters['parameters']['restored'] ?? false);
+        $this->assertNotEmpty($added->parameters['parameters']['lineIds']);
         $this->assertSame((int) $actor->getKey(), $added->actor_id);
     }
 

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Core\Models\Action;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalCache;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,7 @@ class WorkspaceWriteTest extends TestCase
         $before = (string) $project->project_name;
         $after = mb_substr($before, 0, 60).' (checked)';
         $admin = $this->administrator();
+        $generation = (int) Cache::get(PortalCache::DATA_VERSION_KEY, 1);
 
         $response = $this->patchJson(
             '/api/development/portal/_grid/projects/'.$project->id,
@@ -63,6 +65,13 @@ class WorkspaceWriteTest extends TestCase
 
         $this->assertSame($before, $action->parameters['parameters']['changes']['project_name']['from']);
         $this->assertSame($after, $action->parameters['parameters']['changes']['project_name']['to']);
+
+        // The portal's own screens cache these rows, so a grid edit must invalidate them too.
+        $this->assertSame($generation + 1, (int) Cache::get(PortalCache::DATA_VERSION_KEY, 1));
+
+        // A logical target the sync can map in any environment, plus the flat new-value map.
+        $this->assertSame('portal.projects', $action->database_target);
+        $this->assertSame(['project_name' => $after], $action->parameters['parameters']['fields']);
     }
 
     public function test_a_value_that_did_not_move_writes_nothing_and_logs_nothing(): void

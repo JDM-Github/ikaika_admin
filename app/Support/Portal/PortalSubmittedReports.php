@@ -30,7 +30,7 @@ final class PortalSubmittedReports
     // One POST files the whole builder, and the builder holds at most the eight-day date strip.
     private const MAX_GROUPS = 8;
 
-    private const CACHE_VERSION_KEY = 'portal:reports:submitted:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const LOOKUP_CHUNK = 500;
 
@@ -316,7 +316,7 @@ final class PortalSubmittedReports
         $isFlagged = (bool) ($first->is_flag ?? false);
         $flagStatus = (string) ($first->flag_status ?? 'Pending');
 
-        $this->connection()->transaction(function () use (
+        $this->ledger->within($this->connection(), function () use (
             $employeeId,
             $existing,
             $resolved,
@@ -327,10 +327,16 @@ final class PortalSubmittedReports
             $created,
             $isFlagged,
             $flagStatus,
+            $entries,
+            $id,
+            $kind,
+            $actor,
         ): void {
-            $this->deleteLines($this->lineIds($existing));
+            $removedIds = $this->lineIds($existing);
+            $this->deleteLines($removedIds);
+            $lineIds = [];
             foreach ($resolved as $entry) {
-                $this->insertLine(
+                $lineIds[] = $this->insertLine(
                     $employeeId,
                     $date,
                     $entry,
@@ -342,21 +348,27 @@ final class PortalSubmittedReports
                     $flagStatus,
                 );
             }
-        });
 
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'entries' => $entries,
-                'remarks' => $remarks,
-            ],
-            self::CORE_RESOURCE,
-            $id,
-            CoreRecycleKey::submittedReport($employeeId, $date, $kind),
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
+            // An edit replaces every line, so the sync needs both sets to archive and recreate.
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => $id,
+                    'kind' => $kind,
+                    'submittedOn' => $date,
+                    'entries' => $entries,
+                    'remarks' => $remarks,
+                    'lineIds' => $lineIds,
+                    'removedLineIds' => $removedIds,
+                ],
+                self::CORE_RESOURCE,
+                $id,
+                CoreRecycleKey::submittedReport($employeeId, $date, $kind),
+                $employeeId,
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
         $this->audit->record(
             $actor,
             PortalLogAction::PATCH,
@@ -465,18 +477,20 @@ final class PortalSubmittedReports
         // One check per filing, not per line: every group in this request is the same employee.
         $isFlagged = $this->hasActiveWarning($employeeId);
 
-        $insertedIds = $this->connection()->transaction(function () use (
+        $this->ledger->within($this->connection(), function () use (
             $employeeId,
             $groups,
             $resolved,
             $lateSubmission,
             $createdAt,
             $isFlagged,
-        ): array {
-            $ids = [];
+            $kind,
+            $actor,
+        ): void {
             foreach ($groups as $index => $group) {
+                $lineIds = [];
                 foreach ($resolved[$index] as $entry) {
-                    $ids[] = $this->insertLine(
+                    $lineIds[] = $this->insertLine(
                         $employeeId,
                         $group['date'],
                         $entry,
@@ -488,13 +502,8 @@ final class PortalSubmittedReports
                         self::NEW_FLAG_STATUS,
                     );
                 }
-            }
 
-            return $ids;
-        });
-
-        try {
-            foreach ($groups as $group) {
+                // One report is one user_reports row per line; lineIds lets the sync address each.
                 $id = $group['date'].'-'.$kind;
                 $this->ledger->recordAdd(
                     CoreLedger::PRODUCT_PORTAL,
@@ -506,30 +515,33 @@ final class PortalSubmittedReports
                         'submittedOn' => $group['date'],
                         'entries' => $group['entries'],
                         'remarks' => $group['remarks'],
+                        'lineIds' => $lineIds,
                     ],
                     self::CORE_RESOURCE,
                     $id,
                     $employeeId,
                     is_string($actor->id_no) ? $actor->id_no : null,
                 );
-                $this->audit->record(
-                    $actor,
-                    PortalLogAction::INSERT,
-                    self::CORE_RESOURCE,
-                    PortalActivityCopy::addedReport($kind, $group['date']),
-                    $id,
-                    $request,
-                    [
-                        'kind' => $kind,
-                        'submittedOn' => $group['date'],
-                        'remarks' => $group['remarks'],
-                        'entries' => $group['entries'],
-                    ],
-                );
             }
-        } catch (Throwable $error) {
-            $this->deleteLines($insertedIds);
-            throw $error;
+        });
+
+        // After the commit: a failed log must never undo a filed report.
+        foreach ($groups as $group) {
+            $id = $group['date'].'-'.$kind;
+            $this->audit->record(
+                $actor,
+                PortalLogAction::INSERT,
+                self::CORE_RESOURCE,
+                PortalActivityCopy::addedReport($kind, $group['date']),
+                $id,
+                $request,
+                [
+                    'kind' => $kind,
+                    'submittedOn' => $group['date'],
+                    'remarks' => $group['remarks'],
+                    'entries' => $group['entries'],
+                ],
+            );
         }
 
         $this->bumpCache();
@@ -574,23 +586,19 @@ final class PortalSubmittedReports
         // Hoisted rather than inlined so the log below can carry the same entries Recycle Bin's
         // own view already reads back from this snapshot.
         $snapshot = $this->recycleSnapshot($actor, $id, $date, $kind, $existing);
-        $written = $this->ledger->recycleDeleted(
-            CoreLedger::PRODUCT_PORTAL,
-            CoreRecycleKey::submittedReport($employeeId, $date, $kind),
-            self::CORE_TARGET,
-            $id,
-            $snapshot,
-            self::CORE_RESOURCE,
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
-
-        try {
+        $this->ledger->within($this->connection(), function () use ($ids, $employeeId, $date, $kind, $id, $snapshot, $actor): void {
             $this->deleteLines($ids);
-        } catch (Throwable $error) {
-            $this->ledger->revert($written['recycle_id'], $written['action_id']);
-            throw $error;
-        }
+            $this->ledger->recycleDeleted(
+                CoreLedger::PRODUCT_PORTAL,
+                CoreRecycleKey::submittedReport($employeeId, $date, $kind),
+                self::CORE_TARGET,
+                $id,
+                $snapshot,
+                self::CORE_RESOURCE,
+                $employeeId,
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
 
         $this->audit->record(
             $actor,
@@ -652,16 +660,13 @@ final class PortalSubmittedReports
             $lines[] = $line;
         }
 
-        $insertedIds = $this->connection()->transaction(function () use ($ownerId, $date, $lines): array {
-            $ids = [];
+        $this->ledger->within($this->connection(), function () use ($ownerId, $date, $lines, $row, $kind, $payload, $actor): void {
+            $lineIds = [];
             foreach ($lines as $line) {
-                $ids[] = $this->insertSnapshotLine($ownerId, $date, $line);
+                $lineIds[] = $this->insertSnapshotLine($ownerId, $date, $line);
             }
 
-            return $ids;
-        });
-
-        try {
+            // The restored lines get new ids, so the add carries them like a fresh filing does.
             $this->ledger->recordAdd(
                 CoreLedger::PRODUCT_PORTAL,
                 (string) $row->recycle_key,
@@ -670,6 +675,9 @@ final class PortalSubmittedReports
                     'id' => (string) $row->record_id,
                     'kind' => $kind,
                     'submittedOn' => $date,
+                    'entries' => $payload['report']['entries'] ?? [],
+                    'remarks' => $payload['report']['reason'] ?? null,
+                    'lineIds' => $lineIds,
                     'restored' => true,
                 ],
                 self::CORE_RESOURCE,
@@ -677,37 +685,36 @@ final class PortalSubmittedReports
                 (int) $actor->getKey(),
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
-            $this->audit->record(
+        });
+
+        // After the commit: a failed log or notification must never undo a restore.
+        $this->audit->record(
+            $actor,
+            PortalLogAction::INSERT,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::restoredReport($kind, $date),
+            (string) $row->record_id,
+            $request,
+            [
+                'kind' => $kind,
+                'submittedOn' => $date,
+                'remarks' => $payload['report']['reason'] ?? null,
+                'entries' => $payload['report']['entries'] ?? [],
+                'restored' => true,
+            ],
+        );
+        $owner = Employee::query()->find($ownerId);
+        if ($owner instanceof Employee) {
+            $this->audit->notifyIfOther(
+                $owner,
                 $actor,
-                PortalLogAction::INSERT,
-                self::CORE_RESOURCE,
-                PortalActivityCopy::restoredReport($kind, $date),
-                (string) $row->record_id,
-                $request,
-                [
-                    'kind' => $kind,
-                    'submittedOn' => $date,
-                    'remarks' => $payload['report']['reason'] ?? null,
-                    'entries' => $payload['report']['entries'] ?? [],
-                    'restored' => true,
-                ],
+                PortalNotificationType::BIN_RESTORED,
+                'Report restored',
+                PortalActivityCopy::notifyReportRestored($kind, $date, PortalActivityCopy::displayName($actor)),
+                PortalShellPath::SUBMITTED_REPORTS,
+                'Open reports',
+                ['recordId' => (string) $row->record_id],
             );
-            $owner = Employee::query()->find($ownerId);
-            if ($owner instanceof Employee) {
-                $this->audit->notifyIfOther(
-                    $owner,
-                    $actor,
-                    PortalNotificationType::BIN_RESTORED,
-                    'Report restored',
-                    PortalActivityCopy::notifyReportRestored($kind, $date, PortalActivityCopy::displayName($actor)),
-                    PortalShellPath::SUBMITTED_REPORTS,
-                    'Open reports',
-                    ['recordId' => (string) $row->record_id],
-                );
-            }
-        } catch (Throwable $error) {
-            $this->deleteLines($insertedIds);
-            throw $error;
         }
 
         $this->bumpCache();

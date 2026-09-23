@@ -3,6 +3,7 @@
 namespace App\Support\Workspace;
 
 use App\Support\Core\CoreLedger;
+use App\Support\Portal\PortalCache;
 use Illuminate\Support\Carbon;
 use Throwable;
 
@@ -110,19 +111,36 @@ final class WorkspaceWriter
             return $this->result($product, $table, $id, [], 0, $access);
         }
 
-        $connection->table($table)->where($key, $id)->update($updates);
-        WorkspaceIntrospector::flush();
-
-        $actionId = $this->ledger->recordEdit(
+        $actionId = $this->ledger->within($connection, function () use (
+            $connection,
             $product,
-            $this->introspector->database($product),
-            ['table' => $table, 'key' => $key, 'changes' => $changed],
             $table,
-            (string) $id,
-            null,
-            $access->actorId(),
-            $access->actorIdNo(),
-        );
+            $key,
+            $id,
+            $updates,
+            $changed,
+            $access,
+        ): int {
+            $connection->table($table)->where($key, $id)->update($updates);
+
+            // Logical target, never the env database name, so the sync maps it the same in every
+            // environment. `fields` is the flat new-value map every other edit payload carries.
+            return $this->ledger->recordEdit(
+                $product,
+                $product.'.'.$table,
+                ['table' => $table, 'key' => $key, 'fields' => $updates, 'changes' => $changed],
+                $table,
+                (string) $id,
+                null,
+                $access->actorId(),
+                $access->actorIdNo(),
+            );
+        });
+        WorkspaceIntrospector::flush();
+        // A grid edit changes rows the portal's own screens cache, so they must re-read too.
+        if ($product === CoreLedger::PRODUCT_PORTAL) {
+            PortalCache::bump();
+        }
 
         return $this->result($product, $table, $id, $changed, $actionId, $access);
     }

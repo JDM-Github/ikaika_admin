@@ -109,7 +109,8 @@ class PortalHomeTest extends TestCase
 
         app(PortalSubmittedReports::class)->bumpCache();
 
-        $this->assertSame(2, (int) Cache::get(PortalHome::CACHE_VERSION_KEY, 1));
+        // Home shares the portal-wide generation, so any bump invalidates it, possibly by more than one step.
+        $this->assertGreaterThan(1, (int) Cache::get(PortalHome::CACHE_VERSION_KEY, 1));
     }
 
     private function activeMember(): Employee

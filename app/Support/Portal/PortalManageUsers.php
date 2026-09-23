@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -22,7 +23,7 @@ final class PortalManageUsers
      */
     public const PAGE_SIZES = [10, 25, 50, 100];
 
-    private const CACHE_VERSION_KEY = 'portal:manage:users:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     /**
      * Table column key => SQL columns. Unknown keys fall back to the default rank order.
@@ -38,7 +39,10 @@ final class PortalManageUsers
         'access' => null,
     ];
 
-    public function __construct(private readonly PortalAudit $audit) {}
+    public function __construct(
+        private readonly PortalAudit $audit,
+        private readonly CoreLedger $ledger,
+    ) {}
 
     /**
      * @return array{
@@ -116,7 +120,26 @@ final class PortalManageUsers
             // place, so the log's "what changed from" would otherwise already be gone.
             $previousRole = $target->role;
             $target->role = $role;
-            $target->save();
+            // Same target, resource and payload shape as a grid edit of this column, so one
+            // sync rule covers the role no matter which screen changed it.
+            $this->ledger->within($target->getConnection(), function () use ($target, $actor, $previousRole, $role): void {
+                $target->save();
+                $this->ledger->recordEdit(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreLedger::PRODUCT_PORTAL.'.employees',
+                    [
+                        'table' => 'employees',
+                        'key' => 'id',
+                        'fields' => ['role' => $role],
+                        'changes' => ['role' => ['from' => $previousRole, 'to' => $role]],
+                    ],
+                    'employees',
+                    (string) $target->getKey(),
+                    null,
+                    (int) $actor->getKey(),
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            });
             $this->bumpCache();
             $this->audit->record(
                 $actor,

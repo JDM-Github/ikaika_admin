@@ -89,11 +89,21 @@ class PortalReimbursementRequestsTest extends TestCase
                 ->exists());
         }
 
-        $this->assertTrue(Action::query()
-            ->where('resource', 'requests.reimbursement')
-            ->where('record_id', $response->json('data.id'))
-            ->where('action_type', CoreActionType::ADD)
-            ->exists());
+        // One add per item, each carrying that row's own fields, so every item reaches Airtable.
+        $labels = [];
+        foreach ($ids as $itemId) {
+            $action = Action::query()
+                ->where('resource', 'requests.reimbursement')
+                ->where('record_id', (string) $itemId)
+                ->where('action_type', CoreActionType::ADD)
+                ->first();
+            $this->assertNotNull($action);
+            $parameters = $action->parameters['parameters'];
+            $this->assertSame('Angeles Pampanga Office', $parameters['team']);
+            $this->assertSame('Pending', $parameters['status']);
+            $labels[] = $parameters['item'];
+        }
+        $this->assertEqualsCanonicalizing(['Office Grocery', 'Water Refill'], $labels);
 
         $log = PortalLog::query()
             ->where('employee_id', $actor->getKey())
@@ -240,6 +250,11 @@ class PortalReimbursementRequestsTest extends TestCase
             ['item' => 'Paper Towel', 'cost' => 178, 'qty' => 1],
             ['item' => 'Toilet Paper', 'cost' => 416, 'qty' => 1],
         ]);
+        $droppedId = (int) DB::connection('portal')->table('reimbursements')
+            ->where('employee_name_input', $this->memberName($actor))
+            ->where('item', 'Toilet Paper')
+            ->where('reimb_date', $date)
+            ->value('id');
         Cache::flush();
         $token = $this->loginToken($actor);
 
@@ -262,6 +277,13 @@ class PortalReimbursementRequestsTest extends TestCase
             ->where('resource', 'requests.reimbursement')
             ->where('record_id', $id)
             ->where('action_type', CoreActionType::EDIT)
+            ->exists());
+        // The item the edit dropped leaves a delete, so the sync can archive its Airtable record.
+        $this->assertFalse(DB::connection('portal')->table('reimbursements')->where('id', $droppedId)->exists());
+        $this->assertTrue(Action::query()
+            ->where('resource', 'requests.reimbursement')
+            ->where('record_id', (string) $droppedId)
+            ->where('action_type', CoreActionType::DELETE)
             ->exists());
 
         $log = PortalLog::query()
@@ -308,6 +330,16 @@ class PortalReimbursementRequestsTest extends TestCase
             $this->assertSame('Cancelled', DB::connection('portal')->table('reimbursements')
                 ->where('id', $itemId)
                 ->value('status'));
+
+            // Every item is cancelled in the ledger too, not just the one the claim is named by.
+            $action = Action::query()
+                ->where('resource', 'requests.reimbursement')
+                ->where('record_id', (string) $itemId)
+                ->where('action_type', CoreActionType::EDIT)
+                ->first();
+            $this->assertNotNull($action);
+            $this->assertSame('Cancelled', $action->parameters['parameters']['status']);
+            $this->assertNotNull($action->parameters['parameters']['item']);
         }
 
         $log = PortalLog::query()
