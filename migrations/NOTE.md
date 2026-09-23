@@ -4,17 +4,19 @@ This file summarizes a claude.ai planning session so Claude Code can pick up
 without re-deriving everything from scratch. Point Claude Code at this file
 first (e.g. "read MIGRATION_NOTES.md before we continue").
 
-## The three Airtable bases involved
+## The four Airtable bases involved
 
 | Base | Base ID | Notes |
 |---|---|---|
 | Users & Projects (TEST) | `app8DvnFZErPZT5Az` | Snapshot/sandbox version, migrated first |
 | Users & Projects (PRODUCTION) | `app8jGTzRDQt4yPIa` | Same schema/field IDs as TEST (verified identical), real live data, ahead in record counts |
 | Project Estimator | `appgh0Mki2uHDLAQY` | Completely different schema — a separate tool, not a copy of Users & Projects |
+| Transaction Tracker | `appp5MogesHN2eVvG` | **Not yet migrated** — separate finance-tracking base, schema pulled but no schema.sql/data.sql built yet. See dedicated section below. |
 
 **Users & Projects TEST vs PRODUCTION share identical table/field IDs** — same
-schema works for both. Project Estimator does not share anything with the
-other two; it has its own schema entirely.
+schema works for both. Project Estimator and Transaction Tracker don't share
+anything with the other bases or each other; each has its own schema
+entirely.
 
 ## Deliverables already produced (in claude.ai, attached as files in that
 conversation — re-download or recreate if not already saved locally)
@@ -74,17 +76,25 @@ conversation — re-download or recreate if not already saved locally)
    every attachment — these were built through a connector with response
    size limits that made real attachment handling impractical at the time.
    **This is different from the migration script approach below**, which
-   downloads real files.
+   downloads real files and (for the TEST base at least) uploads them to
+   Cloudinary for real.
 
-5. **Two ambiguous/orphan links were NOT resolved with confidence** and are
-   flagged in schema comments rather than guessed at:
-   - Users & Projects: `projects_activity_scope` junction — target table
-     ambiguous, guessed as `project_scope_t3_activities`
+5. **Two ambiguous/orphan links were flagged, one now resolved:**
+   - Users & Projects: `projects_activity_scope` junction — schema.sql's
+     comment guesses the FK target is `project_scope_t3_activities`. This
+     guess has been checked against real TEST-base data and is **wrong** —
+     Projects' "Activity Scope" field actually links to **Activity Codes**
+     (verified: linked record IDs live in `Activity Code_s.json`, not the
+     T3 export). Not yet fixed in the checked-in schema — needs a one-line
+     FK change (`REFERENCES activity_codes(id)`) plus pointing the
+     generator's junction logic at `activity_id_map` instead of
+     `t3_id_map`. See "Known schema bug" below.
    - Project Estimator: Projects table's "Label" field links to records of
      unclear origin (date-stamped, don't match any obvious table) — no FK
-     generated, flagged as orphan link in schema comments
+     generated, flagged as orphan link in schema comments, still
+     unresolved.
 
-## Migration scripts (for the user to run themselves, in `migrations/`)
+## Migration scripts (in `migrations/`)
 
 Four standalone Python scripts, no Anthropic/Claude dependency:
 
@@ -123,7 +133,8 @@ Four standalone Python scripts, no Anthropic/Claude dependency:
   case — written under `field_name = 'receipts'` (matching
   `PortalReimbursementRequests::RECEIPT_FIELD`, the only table the live app
   currently reads attachments from), not the raw Airtable field name. No
-  equivalent script exists yet for the Project Estimator base's schema.
+  equivalent script exists yet for the Project Estimator or Transaction
+  Tracker bases' schemas.
   **`migrations/data.sql` is the real, current output** — generated against
   the TEST base with the Cloudinary cache applied (183 attachment rows: 186
   uploaded minus 3 reimbursements that had both receipt fields set, where
@@ -149,6 +160,65 @@ https://airtable.com/create/tokens (`data.records:read` +
 `schema.bases:read` scopes). **Note: an earlier token was pasted directly
 into the claude.ai chat and should be treated as compromised — confirm a
 fresh one was generated and the old one revoked before relying on this.**
+
+## Transaction Tracker — schema pulled, migration not started
+
+Base ID `appp5MogesHN2eVvG`. 5 tables, discovered via `list_tables_for_base`
+but not yet exported with `fetch_airtable.py` or converted to SQL:
+
+- **Transactions** (`tblKpuFbcyc6YfmH1`) — Transaction Name, Date, Amount
+  (currency), Type (singleSelect), Account (link → Accounts), Envelope
+  (link → Envelopes - Budget), Payor/Payee (plain text, NOT a link despite
+  the name — different from the Payor/Payee *table* below), Receipt
+  (attachment), Description, Reviewed By (collaborator), Approval Date,
+  Created By, Created Time, Attachments (second, separate attachment
+  field), Auto-Extracted Details (AI-generated text field), Transfer
+  Destination Account (link → Accounts), Transfer Source Account (link →
+  Accounts), Budget Code (link → Budget Code table), plus several
+  rollup/lookup fields (Current Balance, Account Name lookups, Budget Code
+  Name) that — per the convention used elsewhere in this project — should
+  NOT be stored as columns, just noted as computed/omitted.
+- **Envelopes - Budget** (`tblbeCM0N32nUcQe0`) — Envelope Name, Budget
+  Amount, Group (singleSelect), Time Period (singleSelect), Active
+  (checkbox → BOOLEAN), Budget Notes, links to Transactions/Account/Budget
+  Code. Several rollup/formula fields (Total Expense/Income Transaction
+  Amount, Remaining Budget) — omit as computed, same convention as above.
+- **Accounts** (`tbluWKBN7zWuPMjON`) — Account Name, Account Type
+  (singleSelect), Email, QRCode (attachment), Institution, Active
+  (checkbox), links to Transactions/Envelopes/Incoming Transfers/Outgoing
+  Transfers, CreationStatus (singleSelect). Remaining Funds and several
+  Total Income/Expense rollups are computed — omit.
+- **Payor/Payee** (`tblt4gtJjG7MtzV7y`) — Name, Type (singleSelect),
+  Contact Name, Email, Phone, Associated Transactions (plain text, not a
+  real link — worth double-checking against actual data whether this is
+  an orphan/free-text field or should resolve to something), Company,
+  Notes, Business Lookup (AI text), Expense Plan (plain text).
+  **Note**: this is a different thing from the plain-text "Payor/Payee"
+  field on the Transactions table above — same name, not the same data
+  relationship. Confirm with real data whether Transactions.Payor/Payee
+  free text is meant to match rows in this table by name, or is
+  genuinely independent.
+- **Budget Code** (`tblhCLVztUsaZJpN8`) — Name, Desc, Transfer Date
+  (Received), Expected Amount (Quotation), Attachments, Attachment
+  Summary (AI text), links to Transactions and Envelopes - Budget. Actual
+  Credited and Credit Status are computed — omit.
+
+**Likely connection to existing work**: one of the Reimbursements records
+in the Users & Projects TEST base data has the remark *"test reimbursement
+for integration to transaction tracker"* — this base may be the intended
+destination for reimbursement data going forward. Worth checking whether
+`Budget Code` or `Transactions` here is meant to receive rows sourced from
+the `reimbursements` table already migrated in the other bases, before
+building a schema in isolation.
+
+**Not yet done for this base**: no `fetch_airtable.py` export has been run
+against it, no `transaction_tracker_schema.sql` exists, and no data
+migration has happened. Next step would follow the same pattern used for
+Project Estimator: run `fetch_airtable.py --base-id appp5MogesHN2eVvG`,
+inspect real field names with `inspect_schema.py`, then build the schema +
+data SQL (and a `generate_sql_transaction_tracker.py` following the same
+pattern as the Users & Projects generator, which — unlike this one — is
+already fully implemented for all tables).
 
 ## Airtable ↔ SQL sync — design discussion (not yet built)
 

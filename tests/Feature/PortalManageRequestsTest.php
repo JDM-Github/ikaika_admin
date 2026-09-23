@@ -132,6 +132,125 @@ class PortalManageRequestsTest extends TestCase
         ]], $log->payload['changes']);
     }
 
+    /*
+     * The decide-unit is the whole filing batch, not one row: two entries filed together
+     * (PortalSubmittedReports::create() flags every line of one submission alike) must move
+     * together, and is_flag itself -- the permanent "this was filed on a warning" fact -- must
+     * survive the decision untouched.
+     */
+    public function test_an_admin_approves_a_flagged_report_with_remarks_and_the_employee_is_notified(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $firstId = $this->insertFlaggedLine($member, $date);
+        $secondId = $this->insertFlaggedLine($member, $date);
+        $token = $this->tokenForAdmin();
+
+        $this->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [[
+                'id' => (string) $firstId,
+                'kind' => 'flag',
+                'status' => 'approved',
+                'approverRemarks' => 'Reviewed, looks fine.',
+            ]],
+        ], [
+            'Authorization' => "Bearer {$token}",
+        ])->assertOk()->assertJsonPath('saved', 1);
+
+        foreach ([$firstId, $secondId] as $id) {
+            $row = DB::connection('portal')->table('employees_user_reports')
+                ->where('user_report_id', $id)->first();
+            $this->assertNotNull($row);
+            $this->assertSame(1, (int) $row->is_flag);
+            $this->assertSame('Approved', $row->flag_status);
+            $this->assertSame('Reviewed, looks fine.', $row->flag_remarks);
+        }
+
+        $notification = PortalNotification::query()
+            ->where('employee_id', $member->getKey())
+            ->where('type', 'reports.flagged.approved')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($notification);
+        $this->assertStringContainsString('flagged report', (string) $notification->message);
+
+        $log = PortalLog::query()
+            ->where('employee_id', $member->getKey())
+            ->where('resource', 'reports.flagged')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertIsArray($log->payload);
+        $this->assertSame('flag', $log->payload['kind']);
+        $this->assertSame('approved', $log->payload['status']);
+    }
+
+    // Rejecting keeps it on the list -- only approving is supposed to clear a flagged report.
+    public function test_an_admin_rejects_a_flagged_report(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $id = $this->insertFlaggedLine($member, $date);
+
+        $this->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [[
+                'id' => (string) $id,
+                'kind' => 'flag',
+                'status' => 'rejected',
+                'approverRemarks' => 'Needs a closer look.',
+            ]],
+        ], [
+            'Authorization' => 'Bearer '.$this->tokenForAdmin(),
+        ])->assertOk()->assertJsonPath('saved', 1);
+
+        $row = DB::connection('portal')->table('employees_user_reports')
+            ->where('user_report_id', $id)->first();
+        $this->assertNotNull($row);
+        $this->assertSame('Rejected', $row->flag_status);
+    }
+
+    // The approver reads everybody's flagged reports, so unlike GET /reports/flagged (the
+    // member's own, name always null) this bundle names whose report each one is.
+    public function test_get_manage_requests_bundles_flagged_reports_with_real_names(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $id = $this->insertFlaggedLine($member, $date);
+        $unflagged = $this->insertFlaggedLine($member, $date, isFlag: false);
+
+        $response = $this->getJson(
+            '/api/development/portal/manage/requests?from='.$date.'&to='.$date,
+            ['Authorization' => 'Bearer '.$this->tokenForAdmin()],
+        )->assertOk();
+
+        $flaggedIds = collect($response->json('flaggedReports'))->pluck('id');
+        $this->assertContains((string) $id, $flaggedIds);
+        $this->assertNotContains((string) $unflagged, $flaggedIds);
+        $row = collect($response->json('flaggedReports'))->firstWhere('id', (string) $id);
+        $this->assertIsArray($row);
+        $this->assertSame($this->memberName($member), $row['memberName']);
+        $this->assertSame('pending', $row['status']);
+    }
+
+    // A report that was never flagged has nothing here to decide, the same way an id belonging
+    // to no reimbursement or no queued request is refused.
+    public function test_deciding_a_report_that_was_never_flagged_is_refused(): void
+    {
+        $member = $this->activeMember();
+        $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+        $id = $this->insertFlaggedLine($member, $date, isFlag: false);
+
+        $this->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [[
+                'id' => (string) $id,
+                'kind' => 'flag',
+                'status' => 'approved',
+            ]],
+        ], [
+            'Authorization' => 'Bearer '.$this->tokenForAdmin(),
+        ])->assertStatus(404);
+    }
+
     public function test_each_owner_gets_an_inbox_row_when_their_request_is_reviewed(): void
     {
         $owners = Employee::query()
@@ -488,5 +607,25 @@ class PortalManageRequestsTest extends TestCase
             is_string($actor->first_name) ? $actor->first_name : null,
             is_string($actor->last_name) ? $actor->last_name : null,
         );
+    }
+
+    private function insertFlaggedLine(Employee $member, string $date, bool $isFlag = true): int
+    {
+        $id = (int) DB::connection('portal')->table('user_reports')->insertGetId([
+            'report_date' => $date,
+            'hours_rendered' => 8,
+            'change_in_elements' => 1,
+            'remarks' => 'Test entry',
+            'approval' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_user_reports')->insert([
+            'employee_id' => $member->getKey(),
+            'user_report_id' => $id,
+            'is_flag' => $isFlag,
+            'flag_status' => 'Pending',
+        ]);
+
+        return $id;
     }
 }

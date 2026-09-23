@@ -33,6 +33,7 @@ final class PortalManageRequests
         private readonly PortalOvertimeRequests $overtime,
         private readonly PortalOffsetRequests $offset,
         private readonly PortalReimbursementRequests $reimbursements,
+        private readonly PortalSubmittedReports $reports,
     ) {}
 
     /**
@@ -44,6 +45,7 @@ final class PortalManageRequests
      *     overtime: list<array<string, mixed>>,
      *     offset: list<array<string, mixed>>,
      *     reimbursements: list<array<string, mixed>>,
+     *     flaggedReports: list<array<string, mixed>>,
      *     range: array{from: string, to: string}
      * }
      */
@@ -64,6 +66,7 @@ final class PortalManageRequests
                 'overtime' => $overtime,
                 'offset' => $offset,
                 'reimbursements' => $this->claims($from, $to),
+                'flaggedReports' => $this->reports->flaggedReports($from, $to),
                 'range' => ['from' => $from, 'to' => $to],
             ];
         });
@@ -77,7 +80,7 @@ final class PortalManageRequests
         $validated = $request->validate([
             'changes' => ['required', 'array', 'min:1', 'max:50'],
             'changes.*.id' => ['required', 'string', 'max:32'],
-            'changes.*.kind' => ['required', 'in:leave,overtime,holiday-work,offset,reimbursement'],
+            'changes.*.kind' => ['required', 'in:leave,overtime,holiday-work,offset,reimbursement,flag'],
             'changes.*.status' => ['required', 'in:pending,approved,rejected'],
             'changes.*.approverRemarks' => ['nullable', 'string', 'max:2000'],
         ]);
@@ -107,6 +110,7 @@ final class PortalManageRequests
         $this->overtime->bumpCache();
         $this->offset->bumpCache();
         $this->reimbursements->bumpCache();
+        $this->reports->bumpCache();
 
         return [
             'section' => 'manage',
@@ -158,6 +162,9 @@ final class PortalManageRequests
 
         if ($change['kind'] === 'reimbursement') {
             return $this->applyClaim($id, $status, $remarks, $change['status']);
+        }
+        if ($change['kind'] === 'flag') {
+            return $this->applyFlaggedReport($id, $status, $remarks, $change['status']);
         }
 
         return $this->applyQueuedRequest($id, $change['kind'], $status, $remarks, $change['status']);
@@ -310,6 +317,68 @@ final class PortalManageRequests
         ];
     }
 
+    /**
+     * $id is the lowest user_reports.id in the flagged group -- the same "name a multi-row group by
+     * its lowest row id" convention applyClaim's own id already relies on. Every row filed in the
+     * same batch (PortalSubmittedReports::create()) shares the decision: flag_status and
+     * flag_remarks move together, the way they were set together. is_flag itself is never touched
+     * here -- it stays the permanent record that this report was filed on a warning.
+     *
+     * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
+     */
+    private function applyFlaggedReport(int $id, string $status, ?string $remarks, string $apiStatus): array
+    {
+        $seed = $this->connection()
+            ->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('user_reports.id', $id)
+            ->where('employees_user_reports.is_flag', 1)
+            ->select([
+                'user_reports.report_date',
+                'user_reports.late_submission',
+                'employees_user_reports.employee_id',
+            ])
+            ->first();
+        if ($seed === null) {
+            abort(404, 'That flagged report is not on the queue.');
+        }
+
+        $employeeId = (int) $seed->employee_id;
+        $kind = PortalSubmittedReportPresenter::kind($seed->late_submission ?? null);
+
+        $siblings = $this->connection()
+            ->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $employeeId)
+            ->where('user_reports.report_date', $seed->report_date)
+            ->select(['user_reports.id', 'user_reports.late_submission'])
+            ->get();
+
+        $groupIds = [];
+        foreach ($siblings as $sibling) {
+            if (PortalSubmittedReportPresenter::kind($sibling->late_submission ?? null) === $kind) {
+                $groupIds[] = (int) $sibling->id;
+            }
+        }
+
+        $this->connection()
+            ->table('employees_user_reports')
+            ->where('employee_id', $employeeId)
+            ->whereIn('user_report_id', $groupIds)
+            ->update([
+                'flag_status' => $status,
+                'flag_remarks' => $remarks,
+            ]);
+
+        return [
+            'owner' => Employee::query()->find($employeeId),
+            'kind' => 'flag',
+            'date' => $this->calendarDate($seed->report_date ?? null) ?? '',
+            'recordId' => (string) $id,
+            'status' => $apiStatus,
+        ];
+    }
+
     private function employeeNamed(?string $name): ?Employee
     {
         $key = strtolower(trim((string) $name));
@@ -332,6 +401,7 @@ final class PortalManageRequests
             'overtime' => 'overtime request',
             'holiday-work' => 'holiday work request',
             'offset' => 'offset request',
+            'flag' => 'flagged report',
             default => 'reimbursement request',
         };
     }
@@ -342,6 +412,7 @@ final class PortalManageRequests
             'leave' => 'requests.leave',
             'overtime', 'holiday-work' => 'requests.overtime',
             'offset' => 'requests.offset',
+            'flag' => 'reports.flagged',
             default => 'requests.reimbursement',
         };
     }
