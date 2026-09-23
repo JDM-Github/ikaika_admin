@@ -1,0 +1,6113 @@
+[
+  {
+    "id": "tblxk72TlMeFDOl8J",
+    "name": "Employees",
+    "primaryFieldId": "fldnLhltBwAfQTu3q",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldnLhltBwAfQTu3q",
+        "name": "ID No."
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "flduwdFg3akPiCi58",
+        "name": "Photo"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldhnj2U7amAzZR40",
+        "name": "QR Code"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldSxsLCfmNx6PdSF",
+        "name": "First Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld00NZO7B3dVjFLq",
+        "name": "Last Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldfFoOZr3thHTJpJ",
+        "name": "Middle Name"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selKODHxW9xv8hRnA",
+              "name": "Mechanical Engineer Manager",
+              "color": "blueLight2"
+            },
+            {
+              "id": "seluX90cmonm4JAEf",
+              "name": "Software Engineer Manager",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sel1Kjez3OgMHvdLU",
+              "name": "Mechanical Engineer",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selxnsvizzcADNS2R",
+              "name": "Software Engineer",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selDGJ6SESslJygPW",
+              "name": "President",
+              "color": "purpleLight2"
+            },
+            {
+              "id": "selBkaefBeD1TZJJy",
+              "name": "CEO",
+              "color": "yellowDark1"
+            },
+            {
+              "id": "selX9ZajAM2qa3gt6",
+              "name": "BIM Modeler (Electrical)",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "sel24qt28YEAqe0je",
+              "name": "BIM Modeler (Mechanical)",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "selo0ldhlOGsh3bMd",
+              "name": "BIM Modeler (Structural)",
+              "color": "redLight2"
+            },
+            {
+              "id": "seluoZBv3xodxGpkh",
+              "name": "BIM Modeler (Civil)",
+              "color": "pinkLight2"
+            }
+          ]
+        },
+        "id": "fldQ7onVlcCzxB3AI",
+        "name": "Job Title"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "{fldSxsLCfmNx6PdSF} & ' ' & {fld00NZO7B3dVjFLq}",
+          "referencedFieldIds": [
+            "fldSxsLCfmNx6PdSF",
+            "fld00NZO7B3dVjFLq"
+          ],
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldth1XGshLqoEA4c",
+        "name": "Name"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldzoM0yO66Q8Jdlu",
+        "name": "Nickname"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldc0TQg5WPZekm05",
+        "name": "Email"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fld6GkatUAoy7eycR",
+        "name": "Start Date"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldoQMHFfz6AvXFgM",
+        "name": "End Date"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "DATEADD({fld6GkatUAoy7eycR}, 3, 'month')\r\n",
+          "referencedFieldIds": [
+            "fld6GkatUAoy7eycR"
+          ],
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldkbPQ7QNgi2nAYu",
+        "name": "3rd Month Evaluation"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "DATEADD({fld6GkatUAoy7eycR}, 5, 'months')\r\n",
+          "referencedFieldIds": [
+            "fld6GkatUAoy7eycR"
+          ],
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldOxDm0DHfV3Tgra",
+        "name": "5th Month Evaluation"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "sel11zLI3Nnx3bNPS",
+              "name": "Active",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selwcMF5a7qwBLDAm",
+              "name": "Inactive",
+              "color": "redLight2"
+            }
+          ]
+        },
+        "id": "fldbREVeNvvc7kqYj",
+        "name": "Status"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selLIk7P7lazqdY0u",
+              "name": "Regular",
+              "color": "greenLight2"
+            },
+            {
+              "id": "sels9D4sv648uO4q2",
+              "name": "Probation",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "selHShoFho32OKoYW",
+              "name": "Contractual",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selu6zBDoWOJE9z3B",
+              "name": "Terminated",
+              "color": "redLight2"
+            },
+            {
+              "id": "selYV43JxNOyVMWPr",
+              "name": "AWOL",
+              "color": "purpleLight2"
+            },
+            {
+              "id": "seliDlpGi38MMNsSi",
+              "name": "Resigned",
+              "color": "orangeLight1"
+            }
+          ]
+        },
+        "id": "fldeOD70Gc4saOzZI",
+        "name": "Employment Status"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldZhMPNeDFSV0DbM",
+        "name": "Date of Birth"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selafOoxSzCsoXC1L",
+              "name": "AB+",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selfQRcRpm7hs87ju",
+              "name": "AB-",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selRPUabeOQzrMcZU",
+              "name": "A+",
+              "color": "greenLight2"
+            },
+            {
+              "id": "sel9Oi81YBAHIm7NH",
+              "name": "A-",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "sel4Cyaxch8LkwihM",
+              "name": "B+",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "sel3rDqBxiWrXlnZB",
+              "name": "B-",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selO9xfrJbwcU0Zi6",
+              "name": "O+",
+              "color": "redLight2"
+            },
+            {
+              "id": "selT0FGuA9QnUJYG2",
+              "name": "O-",
+              "color": "pinkLight2"
+            }
+          ]
+        },
+        "id": "fldH3MPS28S3b8Auc",
+        "name": "Blood Type"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldgvFdWrOcFzKu1s",
+        "name": "Address"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldzPBgYQTCU3Pnp4",
+        "name": "Personal E-Mail"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldAkJiW4VwZKF3cV",
+        "name": "Tax Identification No."
+      },
+      {
+        "type": "singleLineText",
+        "id": "flddMWS6seHlrDPif",
+        "name": "PhilHealth No."
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldEfHz9rrmmlqWP0",
+        "name": "SSS No."
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldOeNxSS3TYbEgau",
+        "name": "HDMF No."
+      },
+      {
+        "type": "phoneNumber",
+        "id": "fld5QhDhSo7zfIAWQ",
+        "name": "Phone Number"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldHLNfGvDaxRdOVj",
+        "name": "SL Credits"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldmHlAK3uFNYEvh1",
+        "name": "Remaining SL"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "flda8cYKPjlvgkmxN",
+        "name": "VL Credits"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldlDJq6nAVftCFkV",
+        "name": "Remaining VL"
+      },
+      {
+        "type": "url",
+        "id": "fldcsqPB1RhGMWBJc",
+        "name": "Profile Folder"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selSwL97bUjdavQzK",
+              "name": "Admin",
+              "color": "greenLight1"
+            },
+            {
+              "id": "selE7tNvFUGkA3ENB",
+              "name": "User",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selMAIZ7p7C0T3ptI",
+              "name": "ProjectAdmin",
+              "color": "redLight1"
+            }
+          ]
+        },
+        "id": "fldt6kqQVJB8tt4ue",
+        "name": "Role"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selsYrGm0POB0k1t0",
+              "name": "Engineering",
+              "color": "blueLight2"
+            },
+            {
+              "id": "seleI9hLcz6RHwptd",
+              "name": "MIS",
+              "color": "redLight1"
+            }
+          ]
+        },
+        "id": "fldNCvsnWMDInQsQj",
+        "name": "Department"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selhYhLMDdq23GbIL",
+              "name": "Pampanga",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selFniwPCxSMqam7I",
+              "name": "Cebu",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selXtPNWTOpacphPx",
+              "name": "Laguna",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selWefdlNc6ZHIfQV",
+              "name": "USA",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selRsH1AVGbsJxlZL",
+              "name": "NCR",
+              "color": "yellowLight2"
+            }
+          ]
+        },
+        "id": "fld3IQ7tMXLbRi6fK",
+        "name": "Location"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldD8KYRdKzsNf14e",
+        "name": "Tax Identification"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fld7Eyk5G4tZNQzuJ",
+        "name": "PhilHealth ID"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldSJ1NzVChG9mLvH",
+        "name": "SS ID"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldxbx6qZa5qtaUwB",
+        "name": "HDMF ID"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldp6SAvm2hDOkPup",
+        "name": "Emergency Contact Person Name"
+      },
+      {
+        "type": "phoneNumber",
+        "id": "fldoGBoone86fzPWS",
+        "name": "Emergency Contact Number"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldkOSKHysNvklcY0",
+        "name": "Emergency Contact Address"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fld6wRdHAoRMQ5xF7",
+        "name": "Bank Certificate"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selBH9LANdTkuBuUO",
+              "name": "Bank of the Philippine Islands",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selgX5aY7lCRQUsGY",
+              "name": "Banco De Oro",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selEkWHzPKD05ilmm",
+              "name": "Metro Bank",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selU9AzGm1nqhiAYg",
+              "name": "Rizal Commercial Banking Corporation",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selRvPcTX1DWlJrQg",
+              "name": "China Bank",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selPh4fGVR2E3zwAl",
+              "name": "GoTyme Bank",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "selMyF5QljRMHxtZm",
+              "name": "SeaBank",
+              "color": "redLight2"
+            },
+            {
+              "id": "selQ2bHqdYxi7g1Hu",
+              "name": "Sterling Bank of Asia",
+              "color": "pinkLight2"
+            },
+            {
+              "id": "selW0Fff3Z8h4RO2i",
+              "name": "Unionbank",
+              "color": "cyanLight1"
+            },
+            {
+              "id": "selb4vPg94ym6YkIb",
+              "name": "Security Bank",
+              "color": "blueLight1"
+            },
+            {
+              "id": "selmSfwq2WF22rtIh",
+              "name": "Philippine National Bank",
+              "color": "grayLight2"
+            },
+            {
+              "id": "selazMGrKlqLiOPpT",
+              "name": "Land Bank of the Philippines",
+              "color": "cyanLight1"
+            },
+            {
+              "id": "selZnpMKlIWI6laev",
+              "name": "UNObank",
+              "color": "purpleLight2"
+            }
+          ]
+        },
+        "id": "fldmStrPbosR7EJsv",
+        "name": "Bank Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld34E4TEOup4dKGv",
+        "name": "Bank Account Number"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldg9Lf414lUVDPJc",
+        "name": "Bank SWIFT Code"
+      },
+      {
+        "type": "singleLineText",
+        "id": "flde2erqkMZHc4OOH",
+        "name": "Reports"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblXUjJ26Rj95RPRl",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldsaFbLjhYAcSUK1"
+        },
+        "id": "fldRgg5Y2FCq3lMC7",
+        "name": "Reports 3"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldoi4UPhg73Fr0jB"
+        },
+        "id": "fldUKTUrSJHKS8RgF",
+        "name": "Project/s"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldDy17enSUOH566E"
+        },
+        "id": "fldg3N1WgdswFGtSO",
+        "name": "Project/s 2"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldFQDK454VsP3Q3G",
+        "name": "Timesheet"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldW1uQa3T815RmCm",
+        "name": "Request"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fld9Q132s677QiIT6"
+        },
+        "id": "fldbrVcSxG5Z3eB9t",
+        "name": "Project/s 3"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldhX0ihkFs9YBW3R"
+        },
+        "id": "fldQ03rtO7b19stq0",
+        "name": "Project/s 4"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbl0I6oTDN0cuLpA3",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldPyqtGfxGyg75gf"
+        },
+        "id": "fld9GlVmZQWXdNQUW",
+        "name": "Tasks & Sprints"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldnZyr6LZXiRfJCM",
+        "name": "Employment Agreement"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblLS2KumEan1DTUw",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldFkHvGYBzgEaMvD"
+        },
+        "id": "fldGrdJ8mSYyfUokx",
+        "name": "Reimbursements"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selwJ6ixKKMwp48jN",
+              "name": "Executive",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selXKo1hDY75kP0xz",
+              "name": "Management",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selgdgkUAukVUbpTV",
+              "name": "Project Leadership",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selwgrAt0i35m3ARJ",
+              "name": "Production/Technical",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selIQ1md2dUSy75X2",
+              "name": "Support",
+              "color": "yellowLight2"
+            }
+          ]
+        },
+        "id": "fldrUWb81fq8P4D61",
+        "name": "Role Level"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldfHJZ6jJOP4gvsw",
+        "name": "User Reports"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld6qvX0FTHpwbJBB",
+        "name": "User Reports 2"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldzzA7NjqJTTTJxe",
+        "name": "User Reports 3"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld3tmNXGOj22BWlg",
+        "name": "User Reports 4"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblbakHaKGLu4FecT",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldfs9LmJf0d4d8Vz"
+        },
+        "id": "fldyYAIdm3uuFAKM5",
+        "name": "Project Scopes"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fld0xhEQgu8GuU6d6"
+        },
+        "id": "flddByblb5EsdXxbv",
+        "name": "Project/s 5"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldWz4swai22qNO2z",
+        "name": "Zip Code"
+      }
+    ],
+    "views": [
+      {
+        "id": "viw14OeaKAR8FtCso",
+        "name": "Grid view",
+        "type": "grid"
+      },
+      {
+        "id": "viwk95zpY22CPRIEl",
+        "name": "Grid view - Active Status",
+        "type": "grid"
+      },
+      {
+        "id": "viwpGI3iGurhSvUTZ",
+        "name": "Gallery",
+        "type": "gallery"
+      }
+    ]
+  },
+  {
+    "id": "tblXUjJ26Rj95RPRl",
+    "name": "User Reports",
+    "primaryFieldId": "fldrFU5jB0GPRKXEX",
+    "fields": [
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldrFU5jB0GPRKXEX",
+        "name": "Date"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblxk72TlMeFDOl8J",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldRgg5Y2FCq3lMC7"
+        },
+        "id": "fldsaFbLjhYAcSUK1",
+        "name": "Employee No."
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldsaFbLjhYAcSUK1",
+          "fieldIdInLinkedTable": "fldth1XGshLqoEA4c",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldlh2NOlkHIjepcK",
+        "name": "Name"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldsaFbLjhYAcSUK1",
+          "fieldIdInLinkedTable": "fldrUWb81fq8P4D61",
+          "result": {
+            "type": "singleSelect",
+            "options": {
+              "choices": [
+                {
+                  "id": "selwJ6ixKKMwp48jN",
+                  "name": "Executive",
+                  "color": "blueLight2"
+                },
+                {
+                  "id": "selXKo1hDY75kP0xz",
+                  "name": "Management",
+                  "color": "tealLight2"
+                },
+                {
+                  "id": "selgdgkUAukVUbpTV",
+                  "name": "Project Leadership",
+                  "color": "cyanLight2"
+                },
+                {
+                  "id": "selwgrAt0i35m3ARJ",
+                  "name": "Production/Technical",
+                  "color": "greenLight2"
+                },
+                {
+                  "id": "selIQ1md2dUSy75X2",
+                  "name": "Support",
+                  "color": "yellowLight2"
+                }
+              ]
+            }
+          }
+        },
+        "id": "fldVpOdePu9vPOMGN",
+        "name": "Role Level (from Employees)"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldsaFbLjhYAcSUK1",
+          "fieldIdInLinkedTable": "fldbREVeNvvc7kqYj",
+          "result": {
+            "type": "singleSelect",
+            "options": {
+              "choices": [
+                {
+                  "id": "sel11zLI3Nnx3bNPS",
+                  "name": "Active",
+                  "color": "greenLight2"
+                },
+                {
+                  "id": "selwcMF5a7qwBLDAm",
+                  "name": "Inactive",
+                  "color": "redLight2"
+                }
+              ]
+            }
+          }
+        },
+        "id": "fldjpUTZgdGAW0W61",
+        "name": "Employment Status (from Employees)"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldsaFbLjhYAcSUK1",
+          "fieldIdInLinkedTable": "fldNCvsnWMDInQsQj",
+          "result": {
+            "type": "singleSelect",
+            "options": {
+              "choices": [
+                {
+                  "id": "selsYrGm0POB0k1t0",
+                  "name": "Engineering",
+                  "color": "blueLight2"
+                },
+                {
+                  "id": "seleI9hLcz6RHwptd",
+                  "name": "MIS",
+                  "color": "redLight1"
+                }
+              ]
+            }
+          }
+        },
+        "id": "fldTPGtfUwqKZ3EDd",
+        "name": "Department (from Employees)"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldDeSRLuMjQQkWfG"
+        },
+        "id": "fldx3a4gwVZEvDVFt",
+        "name": "Project"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldx3a4gwVZEvDVFt",
+          "fieldIdInLinkedTable": "fldRkBXQ7bbRYO73P",
+          "result": {
+            "type": "singleSelect",
+            "options": {
+              "choices": [
+                {
+                  "id": "sel6fwG6AABsuQYGd",
+                  "name": "Scan-to-BIM",
+                  "color": "cyanLight2"
+                },
+                {
+                  "id": "seluEkTh8gLyxY4eQ",
+                  "name": "CAD-to-BIM",
+                  "color": "tealLight2"
+                },
+                {
+                  "id": "seleV1Rgn4uciz0v6",
+                  "name": "Dusty CAD",
+                  "color": "blueLight2"
+                },
+                {
+                  "id": "selDAxxJH7DBhlRjT",
+                  "name": "PDF-to-CAD",
+                  "color": "orangeLight2"
+                },
+                {
+                  "id": "selWM7rz0IEwlYDO8",
+                  "name": "6D",
+                  "color": "greenLight2"
+                },
+                {
+                  "id": "selpynM2A3oGjJBps",
+                  "name": "Material TakeOff",
+                  "color": "yellowLight2"
+                },
+                {
+                  "id": "seltCKkrCzLMwFEsT",
+                  "name": "Clash Detection",
+                  "color": "redLight2"
+                },
+                {
+                  "id": "selr795ZY3qt5KLnm",
+                  "name": "Software Development",
+                  "color": "pinkLight2"
+                },
+                {
+                  "id": "sellOkdmN6e27fmEo",
+                  "name": "Management",
+                  "color": "purpleLight2"
+                },
+                {
+                  "id": "selpGuG2W6TPJorTP",
+                  "name": "Training",
+                  "color": "grayLight2"
+                }
+              ]
+            }
+          }
+        },
+        "id": "flddfLKpCZP0qkjiw",
+        "name": "Type of Job (from Project)"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbl9ANPghOOi7toup",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldsAlx2Hxt5EW8AU"
+        },
+        "id": "fldWoDnpHwKMfdvow",
+        "name": "Activity"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbl3ZjKB95yckcwcJ",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldHIsXv0mXx3txGn"
+        },
+        "id": "fld3uLYHsmFWQheU9",
+        "name": "Earn Code"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fld3uLYHsmFWQheU9",
+          "fieldIdInLinkedTable": "fld5ESwNCauAtNAqZ",
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 3
+            }
+          }
+        },
+        "id": "fldsHI6Sz006uIicF",
+        "name": "Hours Multiplier"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "flduahNcyB7fWDy2N",
+        "name": "Hours Rendered"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldODwzUqWXPF4fOQ",
+        "name": "Change in Elements (+/-)"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "{flduahNcyB7fWDy2N}*{fldsHI6Sz006uIicF}",
+          "referencedFieldIds": [
+            "flduahNcyB7fWDy2N",
+            "fldsHI6Sz006uIicF"
+          ],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fld7bV0Fr7ogabq8i",
+        "name": "*Hrs."
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "{fldODwzUqWXPF4fOQ}/{flduahNcyB7fWDy2N}*8",
+          "referencedFieldIds": [
+            "fldODwzUqWXPF4fOQ",
+            "flduahNcyB7fWDy2N"
+          ],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldxLxxNYx9pt16p7",
+        "name": "Elements per 8 Hours"
+      },
+      {
+        "type": "percent",
+        "options": {
+          "precision": 0
+        },
+        "id": "fldseNEeFBuLqvKVG",
+        "name": "Progress per Activity"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld1k1sX370F26cso",
+        "name": "Remarks"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selrGMedITuAsCL7N",
+              "name": "YES",
+              "color": "redLight1"
+            },
+            {
+              "id": "selI2YmIusLEfZYB3",
+              "name": "NO",
+              "color": "greenLight1"
+            }
+          ]
+        },
+        "id": "fldiasdORQwc9B976",
+        "name": "LateSubmission"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selRzS3ewWPr5RoW8",
+              "name": "Approved",
+              "color": "greenLight1"
+            },
+            {
+              "id": "selC8pwl7bUJgewpc",
+              "name": "Pending",
+              "color": "yellowLight1"
+            },
+            {
+              "id": "selbRMk7acXS3Lz2w",
+              "name": "N/A",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sel7yArUjR4ergXbO",
+              "name": "Rejected",
+              "color": "redLight1"
+            }
+          ]
+        },
+        "id": "fldTfwox2G9RPLjKR",
+        "name": "LateSubmission Approval"
+      },
+      {
+        "type": "createdTime",
+        "options": {
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldCAdwhW8INBW3m1",
+        "name": "Date Created"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selI1yF77SjWtfs8s",
+              "name": "Approved",
+              "color": "greenLight1"
+            },
+            {
+              "id": "selsHuleNne0MFNlk",
+              "name": "Rejected",
+              "color": "redLight1"
+            },
+            {
+              "id": "selhfaknDNGWoqoPo",
+              "name": "Pending",
+              "color": "yellowLight1"
+            }
+          ]
+        },
+        "id": "fldFhxXLGvoBv629P",
+        "name": "Approval"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldvmzVkI2fFgWyMW",
+        "name": "Approver Remarks"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldx3a4gwVZEvDVFt",
+          "fieldIdInLinkedTable": "fldlJnBSFPfQ8mE95",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldgvR44BnMTYYtZh",
+        "name": "Client"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fld9CMtVYLPCo99zm",
+        "name": "Actual Work Date"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selFrvPpgD62pfilY",
+              "name": "Y",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selsVFOBMIqrcpqU1",
+              "name": "N",
+              "color": "cyanLight2"
+            }
+          ]
+        },
+        "id": "fldARo2hToHDTDfGf",
+        "name": "IsSupport"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldMa43uHDPJ2wpmy",
+        "name": "End date"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblXUjJ26Rj95RPRl",
+          "isReversed": false,
+          "prefersSingleRecordLink": false
+        },
+        "id": "fldYu0m6ZsJTMuOmv",
+        "name": "Dependencies"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldfy4dnn5eba94c7",
+        "name": "Project Test summary"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldegBPeC7ERGvCkx",
+        "name": "Project Test summary 2"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld9990XW0qHtpQzu",
+        "name": "Project/s"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld1n38M1wfegMCU7",
+        "name": "Project/s 2"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldEVH9oDBSeLkQRL"
+        },
+        "id": "fldHNU1xuThJ43MEE",
+        "name": "Project/s 3"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 0
+        },
+        "id": "fld3TJ0Ix4oZtgohy",
+        "name": "Duration"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldWeDIyFRFK3XTbJ",
+        "name": "Request"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblTl8CXCc8Dqhffz",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "flddhhF2j5woQOGJX"
+        },
+        "id": "fldObGLPAHSyZlORR",
+        "name": "Employees copy"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwLCzTcM6EyXA07V",
+        "name": "Raw Data",
+        "type": "grid"
+      },
+      {
+        "id": "viwcwZOQ7hSphlwuZ",
+        "name": "Raw Data (Date Filtered)",
+        "type": "grid"
+      },
+      {
+        "id": "viwaebmdhzUTLC2Bt",
+        "name": "Per Project",
+        "type": "grid"
+      },
+      {
+        "id": "viw3jmkEWMHmRWO55",
+        "name": "B2R Hour Log for Truebeck",
+        "type": "grid"
+      },
+      {
+        "id": "viwCuYqVCHFHDHfRQ",
+        "name": "Per Project (2025)",
+        "type": "grid"
+      },
+      {
+        "id": "viwhxazSGAxN5ldH8",
+        "name": "Per User",
+        "type": "grid"
+      },
+      {
+        "id": "viwtu1Pw3FndS1QwG",
+        "name": "2025-Q2",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblM1YUKzuiMqISmC",
+    "name": "Project/s",
+    "primaryFieldId": "fldjubH6AypCBnK64",
+    "fields": [
+      {
+        "type": "multilineText",
+        "id": "fldjubH6AypCBnK64",
+        "name": "Project Name"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblaUeddS3nOJrXHX",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldFo49Hvy9rTJJ3B"
+        },
+        "id": "fldlJnBSFPfQ8mE95",
+        "name": "Client"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selw3WNUzhB31ERsI",
+              "name": "Engineering",
+              "color": "cyanLight1"
+            },
+            {
+              "id": "selmFla6qjYJhVxdR",
+              "name": "MIS",
+              "color": "yellowBright"
+            },
+            {
+              "id": "selPvGV0tbWpJVVCQ",
+              "name": "Admin",
+              "color": "redLight1"
+            },
+            {
+              "id": "selffCFq0cESZ4Oel",
+              "name": "General",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldxhQN5K0AAnJV37",
+        "name": "Department"
+      },
+      {
+        "type": "checkbox",
+        "options": {
+          "icon": "check",
+          "color": "greenBright"
+        },
+        "id": "fldfJdwO3RcMlWGXM",
+        "name": "Is the ACC project renamed with ACC latest project number?"
+      },
+      {
+        "type": "checkbox",
+        "options": {
+          "icon": "check",
+          "color": "greenBright"
+        },
+        "id": "fld70pWnW0zlhzvlt",
+        "name": "Is the project ledger (MS Teams Planner) moved and updated to For Submission (completed status)?"
+      },
+      {
+        "type": "checkbox",
+        "options": {
+          "icon": "check",
+          "color": "greenBright"
+        },
+        "id": "fldvG6mXHUexd7nZs",
+        "name": "Are the details in the project ledger (MS Teams Planner) updated?"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selVjdGaCSHoC0kP3",
+              "name": "Started",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selyEntq9eShaLMgF",
+              "name": "Done",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sel9e82F2h9XBfSto",
+              "name": "Closed",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldG1ihiAH6hfRzUE",
+        "name": "Status"
+      },
+      {
+        "type": "percent",
+        "options": {
+          "precision": 0
+        },
+        "id": "fldoTNL5k6E72YedK",
+        "name": "Progress"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "sel6fwG6AABsuQYGd",
+              "name": "Scan-to-BIM",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "seluEkTh8gLyxY4eQ",
+              "name": "CAD-to-BIM",
+              "color": "tealLight2"
+            },
+            {
+              "id": "seleV1Rgn4uciz0v6",
+              "name": "Dusty CAD",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selDAxxJH7DBhlRjT",
+              "name": "PDF-to-CAD",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "selWM7rz0IEwlYDO8",
+              "name": "6D",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selpynM2A3oGjJBps",
+              "name": "Material TakeOff",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "seltCKkrCzLMwFEsT",
+              "name": "Clash Detection",
+              "color": "redLight2"
+            },
+            {
+              "id": "selr795ZY3qt5KLnm",
+              "name": "Software Development",
+              "color": "pinkLight2"
+            },
+            {
+              "id": "sellOkdmN6e27fmEo",
+              "name": "Management",
+              "color": "purpleLight2"
+            },
+            {
+              "id": "selpGuG2W6TPJorTP",
+              "name": "Training",
+              "color": "grayLight2"
+            }
+          ]
+        },
+        "id": "fldRkBXQ7bbRYO73P",
+        "name": "Type of Job"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldDd5u3IGrzacEWo",
+        "name": "Area (in S.F.)"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "sel66SzL3BsHiJtLJ",
+              "name": "N/A",
+              "color": "redLight2"
+            },
+            {
+              "id": "sel7YxLl5JgyBWuTT",
+              "name": "LOD 200",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selIKGWglCNBeROLE",
+              "name": "LOD 250",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selmYtcagFygScLtw",
+              "name": "LOD 300",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sels9oTbQuRJhRYVm",
+              "name": "LOD 350",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selQaGPiLGKBsR5Op",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selkvY1ZhOs4N09cv",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldI8poByANGJJuFp",
+        "name": "LOD"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "IF(\r\n  AND(\r\n    OR({fldXaNBvBxs2VYKl0}=\"N/A\", {fldXaNBvBxs2VYKl0}=\"\"),\r\n    OR({fld1Y1kehLUM2k5Tj}=\"N/A\", {fld1Y1kehLUM2k5Tj}=\"\"),\r\n    OR({fldb9l4mhxgupKZRT}=\"N/A\", {fldb9l4mhxgupKZRT}=\"\"),\r\n    OR({fldmoZphA4ZSSSGdY}=\"N/A\", {fldmoZphA4ZSSSGdY}=\"\"),\r\n    OR({fldm41KM3XWuDvH78}=\"N/A\", {fldm41KM3XWuDvH78}=\"\"),\r\n    OR({fld5bUpjoEfgJYAyt}=\"N/A\", {fld5bUpjoEfgJYAyt}=\"\")\r\n  ),\r\n  \"N/A\",\r\n\r\nIF(\r\n  (\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 200\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 200\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 200\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 200\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 200\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 200\",1,0)\r\n  ) >=\r\n  MAX(\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 250\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 250\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 250\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 250\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 250\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 250\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 300\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 300\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 300\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 300\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 300\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 300\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 350\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 350\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 350\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 350\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 350\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 350\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 400\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 400\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 400\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 400\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 400\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 400\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 500\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 500\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 500\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 500\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 500\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 500\",1,0)\r\n  ),\r\n  \"LOD 200\",\r\n\r\nIF(\r\n  (\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 250\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 250\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 250\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 250\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 250\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 250\",1,0)\r\n  ) >=\r\n  MAX(\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 300\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 300\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 300\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 300\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 300\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 300\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 350\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 350\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 350\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 350\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 350\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 350\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 400\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 400\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 400\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 400\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 400\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 400\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 500\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 500\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 500\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 500\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 500\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 500\",1,0)\r\n  ),\r\n  \"LOD 250\",\r\n\r\nIF(\r\n  (\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 300\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 300\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 300\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 300\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 300\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 300\",1,0)\r\n  ) >=\r\n  MAX(\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 350\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 350\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 350\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 350\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 350\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 350\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 400\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 400\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 400\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 400\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 400\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 400\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 500\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 500\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 500\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 500\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 500\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 500\",1,0)\r\n  ),\r\n  \"LOD 300\",\r\n\r\nIF(\r\n  (\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 350\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 350\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 350\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 350\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 350\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 350\",1,0)\r\n  ) >=\r\n  MAX(\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 400\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 400\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 400\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 400\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 400\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 400\",1,0),\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 500\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 500\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 500\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 500\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 500\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 500\",1,0)\r\n  ),\r\n  \"LOD 350\",\r\n\r\nIF(\r\n  (\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 400\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 400\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 400\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 400\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 400\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 400\",1,0)\r\n  ) >=\r\n  (\r\n    IF({fldXaNBvBxs2VYKl0}=\"LOD 500\",1,0)+IF({fld1Y1kehLUM2k5Tj}=\"LOD 500\",1,0)+IF({fldb9l4mhxgupKZRT}=\"LOD 500\",1,0)+IF({fldmoZphA4ZSSSGdY}=\"LOD 500\",1,0)+IF({fldm41KM3XWuDvH78}=\"LOD 500\",1,0)+IF({fld5bUpjoEfgJYAyt}=\"LOD 500\",1,0)\r\n  ),\r\n  \"LOD 400\",\r\n\r\n\"LOD 500\"\r\n)))))\r\n)",
+          "referencedFieldIds": [
+            "fldXaNBvBxs2VYKl0",
+            "fld1Y1kehLUM2k5Tj",
+            "fldb9l4mhxgupKZRT",
+            "fldmoZphA4ZSSSGdY",
+            "fldm41KM3XWuDvH78",
+            "fld5bUpjoEfgJYAyt"
+          ],
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fld5EdwLisfhC52Ja",
+        "name": "Ave LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selypdXnDKMJseSy7",
+              "name": "N/A",
+              "color": "redLight2"
+            },
+            {
+              "id": "sel7YxLl5JgyBWuTT",
+              "name": "LOD 200",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selIKGWglCNBeROLE",
+              "name": "LOD 250",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selmYtcagFygScLtw",
+              "name": "LOD 300",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sels9oTbQuRJhRYVm",
+              "name": "LOD 350",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selQaGPiLGKBsR5Op",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selkvY1ZhOs4N09cv",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldXaNBvBxs2VYKl0",
+        "name": "AR LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selDzaKb1Gr4woto4",
+              "name": "N/A",
+              "color": "redLight2"
+            },
+            {
+              "id": "sel7YxLl5JgyBWuTT",
+              "name": "LOD 200",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selIKGWglCNBeROLE",
+              "name": "LOD 250",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selmYtcagFygScLtw",
+              "name": "LOD 300",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sels9oTbQuRJhRYVm",
+              "name": "LOD 350",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selQaGPiLGKBsR5Op",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selkvY1ZhOs4N09cv",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fld1Y1kehLUM2k5Tj",
+        "name": "ST LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selbCotvetMTko6Dt",
+              "name": "N/A",
+              "color": "redLight2"
+            },
+            {
+              "id": "sel7YxLl5JgyBWuTT",
+              "name": "LOD 200",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selIKGWglCNBeROLE",
+              "name": "LOD 250",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selmYtcagFygScLtw",
+              "name": "LOD 300",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sels9oTbQuRJhRYVm",
+              "name": "LOD 350",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selQaGPiLGKBsR5Op",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selkvY1ZhOs4N09cv",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldb9l4mhxgupKZRT",
+        "name": "MD LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selnMnXD0e7BxNVK5",
+              "name": "N/A",
+              "color": "redLight2"
+            },
+            {
+              "id": "sel7YxLl5JgyBWuTT",
+              "name": "LOD 200",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selIKGWglCNBeROLE",
+              "name": "LOD 250",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selmYtcagFygScLtw",
+              "name": "LOD 300",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sels9oTbQuRJhRYVm",
+              "name": "LOD 350",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selQaGPiLGKBsR5Op",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selkvY1ZhOs4N09cv",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldmoZphA4ZSSSGdY",
+        "name": "EL LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selW4A1tTflMmDXgE",
+              "name": "N/A",
+              "color": "redLight2"
+            },
+            {
+              "id": "sel7YxLl5JgyBWuTT",
+              "name": "LOD 200",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selIKGWglCNBeROLE",
+              "name": "LOD 250",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selmYtcagFygScLtw",
+              "name": "LOD 300",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sels9oTbQuRJhRYVm",
+              "name": "LOD 350",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selQaGPiLGKBsR5Op",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selkvY1ZhOs4N09cv",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldm41KM3XWuDvH78",
+        "name": "PL LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "seleNe3tnkhtVjRpd",
+              "name": "N/A",
+              "color": "redLight2"
+            },
+            {
+              "id": "sel7YxLl5JgyBWuTT",
+              "name": "LOD 200",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selIKGWglCNBeROLE",
+              "name": "LOD 250",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selmYtcagFygScLtw",
+              "name": "LOD 300",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sels9oTbQuRJhRYVm",
+              "name": "LOD 350",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selQaGPiLGKBsR5Op",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selkvY1ZhOs4N09cv",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fld5bUpjoEfgJYAyt",
+        "name": "FP LOD"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbl9ANPghOOi7toup",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fld23aPlPQWzakLfm"
+        },
+        "id": "fldRMiQZjXmhKvl2v",
+        "name": "Activity Scope"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblXUjJ26Rj95RPRl",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldHNU1xuThJ43MEE"
+        },
+        "id": "fldEVH9oDBSeLkQRL",
+        "name": "Label"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldEVH9oDBSeLkQRL",
+          "fieldIdInLinkedTable": "fldrFU5jB0GPRKXEX",
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldIk4szm86PRTaC0",
+        "name": "Date (from Label)"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldmZe61GBk56E1RP",
+        "name": "Estimated # of Elements"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "IF({fldMebo5bItL2HrZR}<1,\"\", {fld8T4bAeEUUN0CkE}/{fldMebo5bItL2HrZR})",
+          "referencedFieldIds": [
+            "fldMebo5bItL2HrZR",
+            "fld8T4bAeEUUN0CkE"
+          ],
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldgYK7X4frb7yAsD",
+        "name": "Productivity KPI"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [
+            "flds7jugC6Gdaftjl"
+          ],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fld8T4bAeEUUN0CkE",
+        "name": "Total NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldP1PXSBgNLBOtAj",
+        "name": "AR NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldTsgTRg1gagX5UW",
+        "name": "ST NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldxTnQSwVnCLbVik",
+        "name": "EL NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldD0iUWH2ZuUojyE",
+        "name": "FP NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldMmggDtGEeTDmOi",
+        "name": "MD NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fld6VyfsQv0JPguGc",
+        "name": "MP NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldzieXDMRclfkcdq",
+        "name": "PL NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldQbq2QX2vdNcSZ9",
+        "name": "MC NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldODwzUqWXPF4fOQ",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldO5sc7V4c4U5JjW",
+        "name": "QC NoE"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "flduahNcyB7fWDy2N",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldMebo5bItL2HrZR",
+        "name": "Total NoH"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldB6rAPHOBS5VHhQ",
+        "name": "Tot Hrs"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fld4HDB6LAiEjwcYR",
+        "name": "Tot Hrs (internal)"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 2
+        },
+        "id": "fld8nZkFiJPEJnXIW",
+        "name": "Budgeted Hrs",
+        "description": "Expected Project completion from Project Estimator"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "{fld8nZkFiJPEJnXIW} - {fldMebo5bItL2HrZR}",
+          "referencedFieldIds": [
+            "fld8nZkFiJPEJnXIW",
+            "fldMebo5bItL2HrZR"
+          ],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldIYlzChtiTWCi5m",
+        "name": "Project Efficiency"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "flduahNcyB7fWDy2N",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 1
+            }
+          }
+        },
+        "id": "fldKzL4E6Zberjj71",
+        "name": "Total NoH OT"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fld773RINcpH6BgDl",
+        "name": "AR Hrs",
+        "description": "Architectural"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldFTtkV0dsxdbnkh",
+        "name": "ST Hrs",
+        "description": "Structural"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fld9VI78KBuqQjWqn",
+        "name": "EL Hrs",
+        "description": "Electrical"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldShugvJEnQYHne0",
+        "name": "EL Hrs copy",
+        "description": "Electrical"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldEuqrDZTBRNqlkT",
+        "name": "FP Hrs",
+        "description": "Fire Protection"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldQAU4gVRO6dAX2d",
+        "name": "MP Hrs",
+        "description": "Mechanical Pipe"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldWyP5bIn0kPY7fZ",
+        "name": "PL Hrs",
+        "description": "Plumbing"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldaBIkwXfSZlJlHl",
+        "name": "MC Hrs",
+        "description": "Miscellaneous"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldeVRgmEQpexBcNW",
+        "name": "MD Hrs",
+        "description": "Mechanical Duct"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldaueYQcrAMh4pUz",
+        "name": "QC Hrs",
+        "description": "Quality COntrol"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fld7bV0Fr7ogabq8i",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldyTY9tiry4SECk8",
+        "name": "DS Hrs",
+        "description": "Dusty"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 0
+        },
+        "id": "flds7jugC6Gdaftjl",
+        "name": "# of Elements"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldW8vqO5In1J73DS",
+        "name": "File Size (MB)"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldMKJRWgQRQXzvYe",
+        "name": "Scan File Size (GB)"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldrFU5jB0GPRKXEX",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldUYwjrcY3FdvBBK",
+        "name": "Date Started"
+      },
+      {
+        "type": "dateTime",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          },
+          "timeFormat": {
+            "name": "12hour",
+            "format": "h:mma"
+          },
+          "timeZone": "client"
+        },
+        "id": "fldZxKXd0FcpMbzo7",
+        "name": "Date (Done)"
+      },
+      {
+        "type": "dateTime",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          },
+          "timeFormat": {
+            "name": "12hour",
+            "format": "h:mma"
+          },
+          "timeZone": "client"
+        },
+        "id": "fldKo2xVO0P7Icnm1",
+        "name": "Date Closed"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldootxnpvfRUo7cG",
+        "name": "Due Date"
+      },
+      {
+        "type": "multilineText",
+        "id": "fld2CcSMzpaVsoEpA",
+        "name": "Forma Link"
+      },
+      {
+        "type": "url",
+        "id": "fld8vDcZEID39DuTu",
+        "name": "MSTeams Project Link"
+      },
+      {
+        "type": "url",
+        "id": "fldZEgwO2g0FLlKSK",
+        "name": "MS Planner Link"
+      },
+      {
+        "type": "url",
+        "id": "fldplu74lcqs1Ygob",
+        "name": "Panoramic Link"
+      },
+      {
+        "type": "url",
+        "id": "fldZampThhJg5VPTK",
+        "name": "MS Loop Link"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld2hIjLlcgkJKpdf",
+        "name": "Google Drive Folder Path"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblxk72TlMeFDOl8J",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldUKTUrSJHKS8RgF"
+        },
+        "id": "fldoi4UPhg73Fr0jB",
+        "name": "PM ID"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldoi4UPhg73Fr0jB",
+          "fieldIdInLinkedTable": "fldth1XGshLqoEA4c",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldzP1p95iODbC6rE",
+        "name": "PM Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldreH9z1gRRsci38",
+        "name": "Project Lead Email"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblxk72TlMeFDOl8J",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldg3N1WgdswFGtSO"
+        },
+        "id": "fldDy17enSUOH566E",
+        "name": "Project Members"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDy17enSUOH566E",
+          "fieldIdInLinkedTable": "fldth1XGshLqoEA4c",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldO8SBnS4jFl7OG6",
+        "name": "Project Member Names"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblxk72TlMeFDOl8J",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "flddByblb5EsdXxbv"
+        },
+        "id": "fld0xhEQgu8GuU6d6",
+        "name": "Support Members"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fld0xhEQgu8GuU6d6",
+          "fieldIdInLinkedTable": "fldth1XGshLqoEA4c",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fld1r72a8YWyJmrra",
+        "name": "Support Member Name"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldSJ37uiquOW797c",
+        "name": "totalElements"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblXUjJ26Rj95RPRl",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldx3a4gwVZEvDVFt"
+        },
+        "id": "fldDeSRLuMjQQkWfG",
+        "name": "User Reports"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblxk72TlMeFDOl8J",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldbrVcSxG5Z3eB9t"
+        },
+        "id": "fld9Q132s677QiIT6",
+        "name": "createdBy"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fld9Q132s677QiIT6",
+          "fieldIdInLinkedTable": "fldth1XGshLqoEA4c",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldMkGRB50bWoDcs6",
+        "name": "creatorName"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblxk72TlMeFDOl8J",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldQ03rtO7b19stq0"
+        },
+        "id": "fldhX0ihkFs9YBW3R",
+        "name": "lastModifiedBy"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldhX0ihkFs9YBW3R",
+          "fieldIdInLinkedTable": "fldth1XGshLqoEA4c",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "flduJWk8wFzEb9wHs",
+        "name": "lastModifiedByName"
+      },
+      {
+        "type": "lastModifiedTime",
+        "options": {
+          "isValid": true,
+          "referencedFieldIds": [],
+          "result": {
+            "type": "dateTime",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              },
+              "timeFormat": {
+                "name": "12hour",
+                "format": "h:mma"
+              },
+              "timeZone": "client"
+            }
+          }
+        },
+        "id": "fldmlLtXr9SsD0sTG",
+        "name": "Date Modified"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selZmoJAteZQX72OZ",
+              "name": "Approved",
+              "color": "greenLight1"
+            },
+            {
+              "id": "seltJbNidDXEyiVll",
+              "name": "Rejected",
+              "color": "redLight2"
+            },
+            {
+              "id": "selTlQ5ljth4xPflD",
+              "name": "Pending",
+              "color": "yellowLight1"
+            }
+          ]
+        },
+        "id": "fldmh4nVDxNqWYf9n",
+        "name": "ProjectCreationStatus",
+        "description": "Projects must be confirmed by admin before fully created for functional use "
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldBeEhSrBUD9MEgt",
+        "name": "ProjectCreationApprover"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldjj72pubtGtE1ja",
+        "name": "Project Approver Email"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldrET2WgXIPcm3Zt",
+        "name": "ProjectCreationApproverRemarks"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldDeSRLuMjQQkWfG",
+          "fieldIdInLinkedTable": "fldrFU5jB0GPRKXEX",
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldRCOd3MkWssSzWf",
+        "name": "Last Report Date"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldfMghgdBvATHta1",
+        "name": "Close Project Requester"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldIhqyEf1d4Sx5Jb",
+        "name": "Done Project Requester"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldRHlasa0OKoUdiQ",
+        "name": "Timesheet"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblNqKviuP8XaRPar",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fld6bDHZ6OPFOX1RA"
+        },
+        "id": "fldXigRVO1yiFLfPo",
+        "name": "Request"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldB6g7PGjrSSgZZC",
+        "name": "Tasks & Sprints"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblTl8CXCc8Dqhffz",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldgLUuv99BIFBLnv"
+        },
+        "id": "fldKj5uTyG11sUUqr",
+        "name": "Employees copy"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblTl8CXCc8Dqhffz",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldC4OB0xDmus9nZE"
+        },
+        "id": "fldZz2HiEiOMuy0du",
+        "name": "Employees copy"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblTl8CXCc8Dqhffz",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldxsWMWO6ZXQHvgj"
+        },
+        "id": "fldvR2D6Jw15DLC0W",
+        "name": "Employees copy"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblTl8CXCc8Dqhffz",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldc141x5x5ZWVnxQ"
+        },
+        "id": "fldDY1SlB5m7L4QaH",
+        "name": "Employees copy"
+      },
+      {
+        "type": "rollup",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fld9Q132s677QiIT6",
+          "fieldIdInLinkedTable": "fldc0TQg5WPZekm05",
+          "referencedFieldIds": [],
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "flduSOYWhZ5Pi1qzE",
+        "name": "ProjectCreatorEmail"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblbakHaKGLu4FecT",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldSG8wwxCOv1VW5h"
+        },
+        "id": "fldhqvmifiUPaGiP5",
+        "name": "Project Scopes"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbldfzazKRu33qcPu",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldcnrWz6UvIfNFVv"
+        },
+        "id": "fldisNeEn873XGHq0",
+        "name": "User Reports - Project Scope Progress"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldTsrUBEkv1G88Uz",
+        "name": "User Reports 2"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblH9hHFlvfZwVqJb",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fld0cwzA8Q4cXvLAr"
+        },
+        "id": "fldE4fy4iqp0QIx8G",
+        "name": "Project Action History"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwjVFKPqXEra3cBE",
+        "name": "Grid view",
+        "type": "grid"
+      },
+      {
+        "id": "viw09MEj1gWCEqXWm",
+        "name": "Grid view - Per Project Type",
+        "type": "grid"
+      },
+      {
+        "id": "viw5yAw1jobmCNHDX",
+        "name": "Grid View - for Teams",
+        "type": "grid"
+      },
+      {
+        "id": "viwtZ7C02rpOoKrDf",
+        "name": "B2R Projects - Truebeck View",
+        "type": "grid"
+      },
+      {
+        "id": "viwwzTNUqvTbZlR4c",
+        "name": "B2R Projects with Breakdown - Truebeck",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblbakHaKGLu4FecT",
+    "name": "Project Scopes",
+    "primaryFieldId": "fldwtEPbjEswJVHTq",
+    "fields": [
+      {
+        "type": "autoNumber",
+        "id": "fldwtEPbjEswJVHTq",
+        "name": "IDNo."
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldhqvmifiUPaGiP5"
+        },
+        "id": "fldSG8wwxCOv1VW5h",
+        "name": "Project"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldSG8wwxCOv1VW5h",
+          "fieldIdInLinkedTable": "fldjubH6AypCBnK64",
+          "result": {
+            "type": "multilineText"
+          }
+        },
+        "id": "fldjXdzcDsWbXwOSS",
+        "name": "Project Name"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbldhjjQAV0pqKzIz",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fld5j0eAEFetRzYCD"
+        },
+        "id": "fldhfyotJMUypl8Sh",
+        "name": "Scope - T3 Activities"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldhfyotJMUypl8Sh",
+          "fieldIdInLinkedTable": "fldVE6vOIJabseBlP",
+          "result": {
+            "type": "richText"
+          }
+        },
+        "id": "fldnamFcqC6nENc8Q",
+        "name": "Scope Name - T3 Activities"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblipfyqQgXQ0dVjG",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldIvCpFcvMtfwFt7"
+        },
+        "id": "fldR8uCJVAN10ZgSV",
+        "name": "Scope - T4 Tasks"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldR8uCJVAN10ZgSV",
+          "fieldIdInLinkedTable": "fldL4PFxUZEEruamt",
+          "result": {
+            "type": "richText"
+          }
+        },
+        "id": "fldWAp5xeG0nPPbSH",
+        "name": "Scope Name - T4 Tasks"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblxk72TlMeFDOl8J",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldyYAIdm3uuFAKM5"
+        },
+        "id": "fldfs9LmJf0d4d8Vz",
+        "name": "AssignedTo"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldfs9LmJf0d4d8Vz",
+          "fieldIdInLinkedTable": "fldth1XGshLqoEA4c",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldYJNPoXOvjtUc2B",
+        "name": "AssignedTo (Employee Name)"
+      },
+      {
+        "type": "percent",
+        "options": {
+          "precision": 0
+        },
+        "id": "fldnQjljvNjFABaD7",
+        "name": "Progress"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwvqjwcMIonc58D0",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblNqKviuP8XaRPar",
+    "name": "Request",
+    "primaryFieldId": "fldBc4tezqyaDCnLp",
+    "fields": [
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldBc4tezqyaDCnLp",
+        "name": "Date"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldCAgajPKWdekUiy",
+        "name": "Name"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldXigRVO1yiFLfPo"
+        },
+        "id": "fld6bDHZ6OPFOX1RA",
+        "name": "Project"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbl9ANPghOOi7toup",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldbureUtGrHcVG9V"
+        },
+        "id": "fldUFuAhZ1ywHJPIt",
+        "name": "Activity Scope"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbl3ZjKB95yckcwcJ",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fld99w8fEKb523i4l"
+        },
+        "id": "fldKZN8vq2kCIqbTZ",
+        "name": "Earn Code"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldRJhJsFreWNtVbz",
+        "name": "No. of Hours"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fld9IKsi19fl6MQW3",
+        "name": "Original Work Day"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldGDwIgzn5y8CeTE",
+        "name": "Offset Work Day"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "flds7YcsStO4RXamz",
+        "name": "Offset Hrs"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldUOu1rdXsjLLFl2",
+        "name": "Reason"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selD7mC2vBQB7BhmN",
+              "name": "Approved",
+              "color": "greenLight1"
+            },
+            {
+              "id": "selBswoxV8Xass4sI",
+              "name": "Pending",
+              "color": "yellowLight1"
+            },
+            {
+              "id": "sel93MHZJO1bMsyJr",
+              "name": "Rejected",
+              "color": "redLight1"
+            }
+          ]
+        },
+        "id": "fldJDeGFJtck1is0V",
+        "name": "Status"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldiq3rlIP7ISqj8E",
+        "name": "Approver Remarks"
+      },
+      {
+        "type": "createdTime",
+        "options": {
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldvxj94xnMjIjcBo",
+        "name": "Date Created"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldTNbqdDaILe6L5r",
+        "name": "Linked Report IDs"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldxGX9bVpXrAs1eu",
+        "name": "Type"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selBRwcvPi76EyT8t",
+              "name": "Regular Overtime",
+              "color": "blueLight2"
+            },
+            {
+              "id": "sel7FPfAAJbWCc08K",
+              "name": "Rest Day Overtime",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selKvihnTayn2izSK",
+              "name": "Holiday Overtime",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selfXPlQbaMNDZxQs",
+              "name": "Special Holiday Overtime",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selCsdREqketmxhrU",
+              "name": "Sick Leave",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "seld57aRH27f4Xo1L",
+              "name": "Vacation Leave",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fld1Iq3x9klricVYk",
+        "name": "Category"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwlqjxMRlt8JVXn9",
+        "name": "Grid view",
+        "type": "grid"
+      },
+      {
+        "id": "viwvAMNR5KZqtPQIX",
+        "name": "Leave Requests",
+        "type": "grid"
+      },
+      {
+        "id": "viwHxFUGvtNbOQlZp",
+        "name": "Overtime Requests",
+        "type": "grid"
+      },
+      {
+        "id": "viwL4r3QqsL25VUdK",
+        "name": "Holiday Work Hours",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tbl9ANPghOOi7toup",
+    "name": "Activity Code/s",
+    "primaryFieldId": "fldZ7rXipIgibg90S",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldZ7rXipIgibg90S",
+        "name": "Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "flde8gZYrYOJU8nlk",
+        "name": "IdNo"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldRMiQZjXmhKvl2v"
+        },
+        "id": "fld23aPlPQWzakLfm",
+        "name": "Project/s"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblXUjJ26Rj95RPRl",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldWoDnpHwKMfdvow"
+        },
+        "id": "fldsAlx2Hxt5EW8AU",
+        "name": "User Reports"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblNqKviuP8XaRPar",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldUFuAhZ1ywHJPIt"
+        },
+        "id": "fldbureUtGrHcVG9V",
+        "name": "Request"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selfbqP9eQE2TfPfj",
+              "name": "Admin",
+              "color": "redLight1"
+            },
+            {
+              "id": "selEb2iiVpcxDTCjY",
+              "name": "MIS",
+              "color": "yellowLight1"
+            },
+            {
+              "id": "selz5nW0aoxuFURJi",
+              "name": "Engineering",
+              "color": "cyanLight1"
+            },
+            {
+              "id": "selqAtVJVHTKtu30D",
+              "name": "General",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selWhljvThiaI4zVp",
+              "name": "HR",
+              "color": "blueDark1"
+            }
+          ]
+        },
+        "id": "fld9z7cP9aJ2Bxccj",
+        "name": "Department"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwKTQuJ9GGWtvoh9",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tbl3ZjKB95yckcwcJ",
+    "name": "Earn Codes",
+    "primaryFieldId": "fldPgPSy0vCd9fuJq",
+    "fields": [
+      {
+        "type": "multilineText",
+        "id": "fldPgPSy0vCd9fuJq",
+        "name": "Description"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 3
+        },
+        "id": "fldJ1c2qQ9PFKbcsC",
+        "name": "Did Not Work"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 3
+        },
+        "id": "fld5ESwNCauAtNAqZ",
+        "name": "Did Work"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblXUjJ26Rj95RPRl",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fld3uLYHsmFWQheU9"
+        },
+        "id": "fldHIsXv0mXx3txGn",
+        "name": "User Reports"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblNqKviuP8XaRPar",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldKZN8vq2kCIqbTZ"
+        },
+        "id": "fld99w8fEKb523i4l",
+        "name": "Request"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwdQYExOgV1azLXV",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblaUeddS3nOJrXHX",
+    "name": "Clients",
+    "primaryFieldId": "fldUB0e0j2rai48gZ",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldUB0e0j2rai48gZ",
+        "name": "Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldZ1eT7AG8xKglwC",
+        "name": "ClientID"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldaCOlObpGjDIpET",
+        "name": "Notes"
+      },
+      {
+        "type": "singleCollaborator",
+        "id": "fldBfNyaKXmjkMQSY",
+        "name": "Assignee"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selOFnbGewwSZIy8i",
+              "name": "Todo",
+              "color": "redLight2"
+            },
+            {
+              "id": "selzkD2SfRdbW9lPx",
+              "name": "In progress",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selx5cowOa8mPRIVV",
+              "name": "Done",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldAaQGZvGVe8BJAV",
+        "name": "Status"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "flddA2at0rfD9pndR",
+        "name": "Attachments"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldlJnBSFPfQ8mE95"
+        },
+        "id": "fldFo49Hvy9rTJJ3B",
+        "name": "Project/s"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldRqxzF0AWZRbpUp",
+        "name": "Tasks & Sprints"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldEJGadq9nAptxx8",
+        "name": "User Reports"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld6R02GZPyAvAixN",
+        "name": "User Reports 2"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldZODpsDm6neEBDe",
+        "name": "User Reports 3"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwGUmRHV4oVKbvoQ",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tbl0I6oTDN0cuLpA3",
+    "name": "Warnings",
+    "primaryFieldId": "fldQy2sYIwNes3h21",
+    "fields": [
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldQy2sYIwNes3h21",
+        "name": "Date"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblxk72TlMeFDOl8J",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fld9GlVmZQWXdNQUW"
+        },
+        "id": "fldPyqtGfxGyg75gf",
+        "name": "Employee"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldPyqtGfxGyg75gf",
+          "fieldIdInLinkedTable": "fldth1XGshLqoEA4c",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldQOH6HUvHUPNjuv",
+        "name": "Employee Name"
+      },
+      {
+        "type": "richText",
+        "id": "fldhoteSb4xGLupMm",
+        "name": "Description"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selFiT5iwxKn8awf4",
+              "name": "Active",
+              "color": "greenLight1"
+            },
+            {
+              "id": "selIWGP23zi65Zdd3",
+              "name": "Inactive",
+              "color": "redLight1"
+            }
+          ]
+        },
+        "id": "fldEnHCL6fu5KlBkF",
+        "name": "Status"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "sel7HzwqyqQjD8uCU",
+              "name": "N/A",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selt9gKH38X6OBoBC",
+              "name": "Attendance",
+              "color": "yellowLight1"
+            },
+            {
+              "id": "selakKvPCFyQ6ly9e",
+              "name": "Report",
+              "color": "tealLight2"
+            }
+          ]
+        },
+        "id": "flddSetn7peArVADd",
+        "name": "Violation Type"
+      },
+      {
+        "type": "createdTime",
+        "options": {
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldX5bySJt3IMlosD",
+        "name": "Date Created"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblTl8CXCc8Dqhffz",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldvHmvqggQV0gK1M"
+        },
+        "id": "fldbzr3KwXAw3AZn5",
+        "name": "Employees copy"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwsdOS2iyqG0KDGM",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblTl8CXCc8Dqhffz",
+    "name": "New Employee Data",
+    "primaryFieldId": "fldJMiVxSWudDmoag",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldJMiVxSWudDmoag",
+        "name": "ID No."
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldQxefkkAeN55ccY",
+        "name": "Photo"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldDokCYoAgymsLbQ",
+        "name": "QR Code"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldeytlGwMHvTi7Zv",
+        "name": "First Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldm1OzSo1XbIMzSg",
+        "name": "Last Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldBGpo3ItnfumDwz",
+        "name": "Middle Name"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selKODHxW9xv8hRnA",
+              "name": "Mechanical Engineer Manager",
+              "color": "blueLight2"
+            },
+            {
+              "id": "seluX90cmonm4JAEf",
+              "name": "Software Engineer Manager",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sel1Kjez3OgMHvdLU",
+              "name": "Mechanical Engineer",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selxnsvizzcADNS2R",
+              "name": "Software Engineer",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selDGJ6SESslJygPW",
+              "name": "President",
+              "color": "purpleLight2"
+            },
+            {
+              "id": "selBkaefBeD1TZJJy",
+              "name": "CEO",
+              "color": "yellowDark1"
+            },
+            {
+              "id": "selX9ZajAM2qa3gt6",
+              "name": "BIM Modeler (Electrical)",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "sel24qt28YEAqe0je",
+              "name": "BIM Modeler (Mechanical)",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "selo0ldhlOGsh3bMd",
+              "name": "BIM Modeler (Structural)",
+              "color": "redLight2"
+            },
+            {
+              "id": "seluoZBv3xodxGpkh",
+              "name": "BIM Modeler (Civil)",
+              "color": "pinkLight2"
+            }
+          ]
+        },
+        "id": "fldc8pXZCCwxk4XHy",
+        "name": "Job Title"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "{fldeytlGwMHvTi7Zv} & ' ' & {fldm1OzSo1XbIMzSg}",
+          "referencedFieldIds": [
+            "fldeytlGwMHvTi7Zv",
+            "fldm1OzSo1XbIMzSg"
+          ],
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "fldPi2xKJHFob7ub2",
+        "name": "Name"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldVpNAC5w0OVc7sk",
+        "name": "Nickname"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldy1UqkmmJX1Ng7V",
+        "name": "Email"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldsHlKxb0iwUHsjH",
+        "name": "Start Date"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldKRNhJwZ0yiqznC",
+        "name": "End Date"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "DATEADD({fldsHlKxb0iwUHsjH}, 3, 'month')\r\n",
+          "referencedFieldIds": [
+            "fldsHlKxb0iwUHsjH"
+          ],
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldGcQqb7dagPQu5k",
+        "name": "3rd Month Evaluation"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "DATEADD({fldsHlKxb0iwUHsjH}, 5, 'months')\r\n",
+          "referencedFieldIds": [
+            "fldsHlKxb0iwUHsjH"
+          ],
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldayEW4U79TQmay0",
+        "name": "5th Month Evaluation"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "sel11zLI3Nnx3bNPS",
+              "name": "Active",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selwcMF5a7qwBLDAm",
+              "name": "Inactive",
+              "color": "redLight2"
+            }
+          ]
+        },
+        "id": "fldxSFvi4VpaUNk59",
+        "name": "Status"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selLIk7P7lazqdY0u",
+              "name": "Regular",
+              "color": "greenLight2"
+            },
+            {
+              "id": "sels9D4sv648uO4q2",
+              "name": "Probation",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "selHShoFho32OKoYW",
+              "name": "Contractual",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selu6zBDoWOJE9z3B",
+              "name": "Terminated",
+              "color": "redLight2"
+            },
+            {
+              "id": "selYV43JxNOyVMWPr",
+              "name": "AWOL",
+              "color": "purpleLight2"
+            },
+            {
+              "id": "seliDlpGi38MMNsSi",
+              "name": "Resigned",
+              "color": "orangeLight1"
+            }
+          ]
+        },
+        "id": "fldAPEH4XCYqXht6y",
+        "name": "Employment Status"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldliNpRv3zQItxiC",
+        "name": "Date of Birth"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldCwGN0Ie6Dmdo8i",
+        "name": "Address"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldVQCQ27jwSQihwU",
+        "name": "Personal E-Mail"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldWlKS0llqXx8XjL",
+        "name": "Tax Identification No."
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldzNXsaJEBje6Jp5",
+        "name": "PhilHealth No."
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld0gI9dIRgk8TQWQ",
+        "name": "SSS No."
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldafO7W9tNWY7ahk",
+        "name": "HDMF No."
+      },
+      {
+        "type": "phoneNumber",
+        "id": "fldrRidl9O1x2bu3G",
+        "name": "Phone Number"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fld3MOPKM34vEGI29",
+        "name": "SL Credits"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldIImaOkUzLL7poR",
+        "name": "Remaining SL"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldw9dyO6Jft3NgED",
+        "name": "VL Credits"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldHEK0aE0Pdg5zrL",
+        "name": "Remaining VL"
+      },
+      {
+        "type": "url",
+        "id": "fldytrpFihbEzpvQ2",
+        "name": "Profile Folder"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selSwL97bUjdavQzK",
+              "name": "Admin",
+              "color": "greenLight1"
+            },
+            {
+              "id": "selE7tNvFUGkA3ENB",
+              "name": "User",
+              "color": "cyanLight2"
+            }
+          ]
+        },
+        "id": "fldP7l0Uc9v6gWYB4",
+        "name": "Role"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selsYrGm0POB0k1t0",
+              "name": "Engineering",
+              "color": "blueLight2"
+            },
+            {
+              "id": "seleI9hLcz6RHwptd",
+              "name": "MIS",
+              "color": "redLight1"
+            }
+          ]
+        },
+        "id": "fld9Dw2rdcxGajmX9",
+        "name": "Department"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldZ9LyVuatqAIVb4",
+        "name": "Tax Identification"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldtFzU9XunXAjtBz",
+        "name": "PhilHealth ID"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldeK2nDc2bEWPFCx",
+        "name": "SS ID"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldTcyGugAZogDODr",
+        "name": "HDMF ID"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldL7TazDsbBBNJBf",
+        "name": "Emergency Contact Person Name"
+      },
+      {
+        "type": "phoneNumber",
+        "id": "fldKHCYsEE2422J3I",
+        "name": "Emergency Contact Number"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldGPTkLPSHt7O65Q",
+        "name": "Emergency Contact Address"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldsxSNLROLKDyrMX",
+        "name": "Bank Certificate"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selBH9LANdTkuBuUO",
+              "name": "Bank of the Philippine Islands",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selgX5aY7lCRQUsGY",
+              "name": "Banco De Oro",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selEkWHzPKD05ilmm",
+              "name": "Metro Bank",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selU9AzGm1nqhiAYg",
+              "name": "Rizal Commercial Banking Corporation",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selRvPcTX1DWlJrQg",
+              "name": "China Bank",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selPh4fGVR2E3zwAl",
+              "name": "GoTyme Bank",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "selMyF5QljRMHxtZm",
+              "name": "SeaBank",
+              "color": "redLight2"
+            },
+            {
+              "id": "selIbQmv8WO0Pf5CV",
+              "name": "Sterling Bank of Asia",
+              "color": "pinkLight2"
+            },
+            {
+              "id": "seltpeDidbJwHo4Fa",
+              "name": "Unionbank",
+              "color": "purpleLight2"
+            },
+            {
+              "id": "selbh7R5mALfgipAe",
+              "name": "Security Bank",
+              "color": "grayLight2"
+            },
+            {
+              "id": "selUQgbk8wvE08XeT",
+              "name": "Philippine National Bank",
+              "color": "blueLight1"
+            },
+            {
+              "id": "selkwPPBxii60GXaf",
+              "name": "Land Bank of the Philippines",
+              "color": "cyanLight1"
+            },
+            {
+              "id": "selPdWtwOA72nO40M",
+              "name": "UNObank",
+              "color": "tealLight1"
+            }
+          ]
+        },
+        "id": "fldITu1TsOmPU7Dzl",
+        "name": "Bank Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldp5FEXVeonRGENl",
+        "name": "Bank Account Number"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldCaMP8iufSI6JQ2",
+        "name": "Bank SWIFT Code"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selsnJvoxqGP7k5MI",
+              "name": "Approved",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selsZhbzbptVEZ26m",
+              "name": "Reject",
+              "color": "redLight2"
+            },
+            {
+              "id": "seltjCH70GsfOIFEV",
+              "name": "Pending",
+              "color": "yellowLight1"
+            }
+          ]
+        },
+        "id": "fldMVBNflaGU0bKs2",
+        "name": "Data Approval"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldA3f1uBcTFZxIVx",
+        "name": "Reports"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblXUjJ26Rj95RPRl",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldObGLPAHSyZlORR"
+        },
+        "id": "flddhhF2j5woQOGJX",
+        "name": "Reports 3"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldKj5uTyG11sUUqr"
+        },
+        "id": "fldgLUuv99BIFBLnv",
+        "name": "Project/s"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldZz2HiEiOMuy0du"
+        },
+        "id": "fldC4OB0xDmus9nZE",
+        "name": "Project/s 2"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld1REk8muPqCwKaw",
+        "name": "Timesheet"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldi2vqekj2ZSkgJc",
+        "name": "Request"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldvR2D6Jw15DLC0W"
+        },
+        "id": "fldxsWMWO6ZXQHvgj",
+        "name": "Project/s 3"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldDY1SlB5m7L4QaH"
+        },
+        "id": "fldc141x5x5ZWVnxQ",
+        "name": "Project/s 4"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbl0I6oTDN0cuLpA3",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldbzr3KwXAw3AZn5"
+        },
+        "id": "fldvHmvqggQV0gK1M",
+        "name": "Tasks & Sprints"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwn5POe10L6sWwze",
+        "name": "Ikaika - New Employee Data",
+        "type": "grid"
+      },
+      {
+        "id": "viwGa69tfsWACkCLb",
+        "name": "Grid view - Active Status",
+        "type": "grid"
+      },
+      {
+        "id": "viwLHJDmXUlfFYO0P",
+        "name": "Gallery",
+        "type": "gallery"
+      }
+    ]
+  },
+  {
+    "id": "tblLS2KumEan1DTUw",
+    "name": "Reimbursements",
+    "primaryFieldId": "fldQyF9HJBjVzZ6Gt",
+    "fields": [
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldQyF9HJBjVzZ6Gt",
+        "name": "Date"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldHJTJW2z1ut2q86",
+        "name": "Item"
+      },
+      {
+        "type": "currency",
+        "options": {
+          "precision": 2,
+          "symbol": "\u20b1"
+        },
+        "id": "fldNXjRozyvKoEfOR",
+        "name": "Cost"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fld6pOongRd80tLwf",
+        "name": "QTY"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldSEmBguZCVOf8OY",
+        "name": "Purpose"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldsNH93xo4US8aOg",
+        "name": "Employee Name (Input your name so you can filter the IDs in \"Reimburse To\" field)",
+        "description": "employee name, so you can filter the IDs in \"Reimburse To\" field"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblxk72TlMeFDOl8J",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldGrdJ8mSYyfUokx"
+        },
+        "id": "fldFkHvGYBzgEaMvD",
+        "name": "Reimburse To"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldFkHvGYBzgEaMvD",
+          "fieldIdInLinkedTable": "fldth1XGshLqoEA4c",
+          "result": {
+            "type": "singleLineText"
+          }
+        },
+        "id": "flddeP77KDQqfbnaG",
+        "name": "Name (from Reimburse To)"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fld6SqJRwOe8Kom2C",
+        "name": "Receipts (If Applicable)"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selHAQlfgXt4bJClG",
+              "name": "Angeles Pampanga Office",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selFDApAIIY3viOiR",
+              "name": "Cebu Office",
+              "color": "cyanLight2"
+            }
+          ]
+        },
+        "id": "fldv51xxIoKgMaO48",
+        "name": "Team"
+      },
+      {
+        "type": "formula",
+        "options": {
+          "isValid": true,
+          "formula": "{fldNXjRozyvKoEfOR} * {fld6pOongRd80tLwf}",
+          "referencedFieldIds": [
+            "fldNXjRozyvKoEfOR",
+            "fld6pOongRd80tLwf"
+          ],
+          "result": {
+            "type": "number",
+            "options": {
+              "precision": 0
+            }
+          }
+        },
+        "id": "fldnebOJCtN4Z8ysM",
+        "name": "Total Cost"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "seliE83YlrJUPc1jk",
+              "name": "Completed",
+              "color": "greenLight1"
+            },
+            {
+              "id": "selvqggZoN2mgYsUB",
+              "name": "Pending",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selo8lHloMtc0NXuh",
+              "name": "Rejected",
+              "color": "redLight1"
+            }
+          ]
+        },
+        "id": "fldqzwmsCB1FlLSO8",
+        "name": "Status"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldK7TVwDW5RES9U1",
+        "name": "Reimbursement Receipt"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldsgbMLX69pq5XBv",
+        "name": "Approver Remarks"
+      },
+      {
+        "type": "createdTime",
+        "options": {
+          "result": {
+            "type": "date",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              }
+            }
+          }
+        },
+        "id": "fldunuhBCFwARujMx",
+        "name": "Date Created"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwScjXssJgcFrk1D",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblfItx4zc99afbDl",
+    "name": "Achievements and Milestones",
+    "primaryFieldId": "fldGsRjAV3ygV7nQH",
+    "fields": [
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldGsRjAV3ygV7nQH",
+        "name": "Date"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldifSTCxCCiK6299",
+        "name": "Project Name"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldU6TdxKefa77qli",
+        "name": "Description"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldV2Z0L1hRy0HsvS",
+        "name": "Attachments"
+      },
+      {
+        "type": "url",
+        "id": "fldm03WQ2wxghDstk",
+        "name": "Links"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwzGQ3zoxwdUrtT1",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tbl53is3fy1C7We0E",
+    "name": "Job Type Allowed Activities",
+    "primaryFieldId": "fldruNCY4pgNEneAy",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldruNCY4pgNEneAy",
+        "name": "Job Type"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldugTYvreEzMyQTf",
+        "name": "Activity Code ID Initials"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwQqyd8Ju6UZGXpp",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tbl86gVHZNyAPPSFe",
+    "name": "BIM Form",
+    "primaryFieldId": "fldkvGAC96dsWrSru",
+    "fields": [
+      {
+        "type": "singleLineText",
+        "id": "fldkvGAC96dsWrSru",
+        "name": "Project Number"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld8OLdoCGI8QYWGi",
+        "name": "Project Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldoIkNhMgY2oTxGG",
+        "name": "Project Address"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fld3T5tEbyTilZr0z",
+        "name": "Project Size (sq. ft)"
+      },
+      {
+        "type": "singleCollaborator",
+        "id": "fld7KqLu8n9YtQybr",
+        "name": "Assignee"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "sel3OpxUkHMSlMmOH",
+              "name": "Todo",
+              "color": "redLight2"
+            },
+            {
+              "id": "sel03EVvsPGei99dT",
+              "name": "In progress",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "sel2R7PqW3xQ8c8IP",
+              "name": "Done",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldiR0MczOhyq17TO",
+        "name": "Status"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldcbJcP5bCJvPJFn",
+        "name": "Attachments"
+      },
+      {
+        "type": "aiText",
+        "options": {
+          "referencedFieldIds": [
+            "fldcbJcP5bCJvPJFn"
+          ],
+          "prompt": [
+            "You are a professional document analyst specializing in summarizing content from various file types. Your task is to extract key points and provide a concise summary of the content found in the attached files. Ensure that the summary captures the main ideas and any important details without including unnecessary information.\n\nAnalyze the content of the attached files to identify the main themes and significant details. Summarize these points clearly and concisely, ensuring that the summary is informative and relevant to the document's purpose.\n\nFormat your response as plain text, keeping it concise and to the point. If you cannot summarize the content, output \"Unable to summarize the content.\" Example: \"The document discusses the impact of climate change on polar bears, highlighting the loss of habitat and food sources.\" (Real examples should be longer and more detailed.)\n\nFiles:\n",
+            {
+              "field": {
+                "fieldId": "fldcbJcP5bCJvPJFn"
+              }
+            }
+          ]
+        },
+        "id": "fld8pYDIpivj1b48K",
+        "name": "Attachment Summary",
+        "description": "An AI generated summary of the Attachments field. Upload files to Attachments to generate a summary."
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 1
+        },
+        "id": "fldQYmWJ6xe9oflkL",
+        "name": "No. of Floors"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldnX8c8KFQ0D7TXZ",
+        "name": "Client Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldZcHT5cFBdRI5W1",
+        "name": "Point of Contact (POC)"
+      },
+      {
+        "type": "phoneNumber",
+        "id": "fld3MEokS1ifWUybi",
+        "name": "POC Phone #"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selkN3bRN6LkWoi20",
+              "name": "Renovation/Remodeling",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selDGFZIKwl1Ov77W",
+              "name": "As-Built Documentation",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selW603dsSYURncKd",
+              "name": "MEP Coordination",
+              "color": "tealLight2"
+            },
+            {
+              "id": "seliybvfu5iz87Heg",
+              "name": "Facilities Management",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selK5eO2ZN5LvTxSX",
+              "name": "Clash Detection",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selh4k0Xg8dFCvcJv",
+              "name": "Base Plan",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "sel2rHCmJnr4YOPuN",
+              "name": "Others",
+              "color": "redLight2"
+            }
+          ]
+        },
+        "id": "fldJ9BsOtSpxylcBv",
+        "name": "Purpose of Scan to BIM Model"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selLfG8IMloJTOLGF",
+              "name": "Out of Scope",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selvOIexYtotDU9PQ",
+              "name": "LOD 100",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selJG1UUDrxwShEuW",
+              "name": "LOD 200",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selciXoHe9jl364QD",
+              "name": "LOD 300",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selsIdR2QqBuHEWgm",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "seld0XMl6qyhSTsHv",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldzVYKa7vfVVNnST",
+        "name": "ARCH LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selJdLAF3cIcaKGsT",
+              "name": "Out of Scope",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selYYFRqt9jpiXoT5",
+              "name": "LOD 100",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selLLmV2QHbJ36VHG",
+              "name": "LOD 200",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selVkOmO3cmwqkEdB",
+              "name": "LOD 300",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selqfYJzwy3tNPRHa",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selgrEVjs96Tu0evc",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldctAA5TALNlpjRg",
+        "name": "STRUCT LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selm2kPQYQ5LRDUhS",
+              "name": "Out of Scope",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selTXNsWZWx1j3YKx",
+              "name": "LOD 100",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selp3gfuRLvgnPRR0",
+              "name": "LOD 200",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selW96JcrLFH4BwaP",
+              "name": "LOD 300",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selB32Mi9r8sZAULq",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selmOKwQb0QVsNtLT",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldLEjvL2313pOKXz",
+        "name": "MECH LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selGPP55Gofcr58QW",
+              "name": "Out of Scope",
+              "color": "blueLight2"
+            },
+            {
+              "id": "sela4zQPyuHWJHnQI",
+              "name": "LOD 100",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sel8YyakEPS4fe6Uz",
+              "name": "LOD 200",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selw9edI6tK17R0pO",
+              "name": "LOD 300",
+              "color": "greenLight2"
+            },
+            {
+              "id": "seljleHKxoxPSLkjy",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "sel3Z6nvgIiKMDZwn",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldfMyU1bG8zAKwKG",
+        "name": "ELECT LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selTuzN13HiJoziUn",
+              "name": "Out of Scope",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selBshmg82lMOdyuX",
+              "name": "LOD 100",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selJAdCgByS1hRGwi",
+              "name": "LOD 200",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sel3O4DL2gbOw6jce",
+              "name": "LOD 300",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selnKreZxjRc1w7pC",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selBrQLPdvxgJhd3S",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fldxwjvgGWfsSSxpn",
+        "name": "PLUMB LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selR8aOAMSCIZzjjf",
+              "name": "Out of Scope",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selinyDKSuXcEujs7",
+              "name": "LOD 100",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sel3WINF5A6rJwaoV",
+              "name": "LOD 200",
+              "color": "tealLight2"
+            },
+            {
+              "id": "seldx9caFXC7URn6A",
+              "name": "LOD 300",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selxk9L3HX5tKm3KM",
+              "name": "LOD 400",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selvFtl4QXOjRy95A",
+              "name": "LOD 500",
+              "color": "orangeLight2"
+            }
+          ]
+        },
+        "id": "fld3NAFhttPFTZvsD",
+        "name": "FP LOD"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selqTdETwFyfSk7ru",
+              "name": "YES",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selT75UY5b52TSgX1",
+              "name": "NO - Scanning Service Required",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selLA0ocQmXSu2e8s",
+              "name": "N/A",
+              "color": "tealLight2"
+            }
+          ]
+        },
+        "id": "fld306sEJEdmZpjoi",
+        "name": "Client will provide point cloud scan"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selLoC94iRET2Sw2d",
+              "name": "RCP",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selWVs9M7OzzHPJ1j",
+              "name": "E57",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selIATvhqXFLCNM26",
+              "name": "LAS",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sel7Ohs0SmY3osfZK",
+              "name": "PTS",
+              "color": "greenLight2"
+            },
+            {
+              "id": "sel6IXOpd3bTJ6yTA",
+              "name": "Others",
+              "color": "yellowLight2"
+            }
+          ]
+        },
+        "id": "fldB8EmDRX5Pf5btt",
+        "name": "Point Cloud Scan Format"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "sel3XTyAyCKHfWV2f",
+              "name": "YES - Provide details & format",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selc2j72sg4LfGYWq",
+              "name": "NO",
+              "color": "cyanLight2"
+            }
+          ]
+        },
+        "id": "fldcGSHt1vOgmGd3a",
+        "name": "Client has existing CAD and RVT File"
+      },
+      {
+        "type": "multipleSelects",
+        "options": {
+          "choices": [
+            {
+              "id": "selig5BfXit7EiFxU",
+              "name": "Walls",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selMx0MinfmRAsFlr",
+              "name": "Doors",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selbpYcZiqPrUPLcY",
+              "name": "Windows",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selDV2MqOwAvXJgSv",
+              "name": "Floors",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selvor0dwlXrbz14y",
+              "name": "Ceilings",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selYBQ9jrgRqa9qBV",
+              "name": "Roofs",
+              "color": "orangeLight2"
+            },
+            {
+              "id": "selQulQMDWqTpeyw9",
+              "name": "Roof Screen",
+              "color": "redLight2"
+            },
+            {
+              "id": "selzioiqbmP1lJapL",
+              "name": "Roof Equipment",
+              "color": "pinkLight2"
+            },
+            {
+              "id": "selIZ2lI7Lh40iPeA",
+              "name": "Structural Beams",
+              "color": "purpleLight2"
+            },
+            {
+              "id": "selm5e4xRsKYNQDIm",
+              "name": "Structural Columns",
+              "color": "grayLight2"
+            },
+            {
+              "id": "selz8eGUDFzm2TmP2",
+              "name": "Fixtures",
+              "color": "blueLight1"
+            },
+            {
+              "id": "selonpPwPyOleCdJO",
+              "name": "Equipment",
+              "color": "cyanLight1"
+            },
+            {
+              "id": "selakJ5pouaejvSAH",
+              "name": "Annotation & Tag",
+              "color": "tealLight1"
+            },
+            {
+              "id": "selUpctBoEmdDLcRc",
+              "name": "Others",
+              "color": "greenLight1"
+            }
+          ]
+        },
+        "id": "fldGsWWsSeDIYO5Tb",
+        "name": "Elements Included in Model"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selsnROQGQfd0YN1v",
+              "name": "YES",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selYLlfHUY6NBsuSQ",
+              "name": "NO",
+              "color": "cyanLight2"
+            }
+          ]
+        },
+        "id": "fldEvXOrY3ROeiAH3",
+        "name": "Special Requests"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selmHIUVrM2oLoYYx",
+              "name": "Origin-to-origin",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selJNElZolKjVGBNg",
+              "name": "Project Base Point",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sellNHgPXcU8gmmQZ",
+              "name": "Survey Point",
+              "color": "tealLight2"
+            },
+            {
+              "id": "sel7Uk8z7y9JyFobs",
+              "name": "Custom",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldpGD55HbzLfa5ph",
+        "name": "Insertion Point Strategy"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selqlnZNXSVVbK01G",
+              "name": "Yes - Provide link/attachment to template",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selwH4uArRfGbBVxA",
+              "name": "No - Standard out of the box template (Revit template for MEPFS is the B2R standard template)",
+              "color": "cyanLight2"
+            }
+          ]
+        },
+        "id": "fldl0cgwaycWWOksN",
+        "name": "Preffered Workset"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldIdgGZmiO4M7yQ2",
+        "name": "Form Assigned By"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldBJjn04B2n1N3yD",
+        "name": "Filled Up By"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwIWcLclLORlxsQw",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tbldhjjQAV0pqKzIz",
+    "name": "Project Scope Source - T3 Activities",
+    "primaryFieldId": "fldGkGTCwTGlgXEKL",
+    "fields": [
+      {
+        "type": "multilineText",
+        "id": "fldGkGTCwTGlgXEKL",
+        "name": "WBS Code"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldqcM0c823Xe2SPL",
+        "name": "Activity Index"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selcZwQo9EoDBao90",
+              "name": "1",
+              "color": "blueLight2"
+            },
+            {
+              "id": "seltq0LxPag2hHdAV",
+              "name": "2",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selF1bsG88HjlWeGD",
+              "name": "3",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selU0lDJE1h1mpSM5",
+              "name": "4",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selxMPMluj9zuQlA3",
+              "name": "5",
+              "color": "yellowLight2"
+            }
+          ]
+        },
+        "id": "fldXcy65oqkp2adzv",
+        "name": "Level"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selgsNvockTBYFge5",
+              "name": "Process",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selSfwnVmCSXreaFN",
+              "name": "Procedure",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sel1fa2znZH1NB5H4",
+              "name": "Activity",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selvlY7l9ehlHccHW",
+              "name": "Task",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldCQwUyG8NZMFDJk",
+        "name": "Type"
+      },
+      {
+        "type": "richText",
+        "id": "fldVE6vOIJabseBlP",
+        "name": "Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldM9UYU4207S3MXL",
+        "name": "Procedure WBS"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldJ2Y2034cq37Q8G",
+        "name": "Procedure"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldSCClZbDDtGr3r5",
+        "name": "Process WBS"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldZFy1ePy7JcVOSb",
+        "name": "Process"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldm4G29iwCLTeZ1H",
+        "name": "SOP Reference"
+      },
+      {
+        "type": "checkbox",
+        "options": {
+          "icon": "check",
+          "color": "greenBright"
+        },
+        "id": "fldGjOybvPB3z3tTx",
+        "name": "Time Trackable"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldkkMAspZlAUV3sE",
+        "name": "Department"
+      },
+      {
+        "type": "singleCollaborator",
+        "id": "fld2fJlulE5erVxeQ",
+        "name": "Assignee"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selv6myFddyMK5dUp",
+              "name": "Todo",
+              "color": "redLight2"
+            },
+            {
+              "id": "selVtE3UJh7GGsfkT",
+              "name": "In progress",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selpAN4OdI3KNiTPI",
+              "name": "Done",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fld2nAey0LjrojcVA",
+        "name": "Status"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldnQYeYm3LrrgNnR",
+        "name": "Attachments"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblipfyqQgXQ0dVjG",
+          "isReversed": false,
+          "prefersSingleRecordLink": false
+        },
+        "id": "fldz895gDgRfzU05E",
+        "name": "T4 - Tasks"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblbakHaKGLu4FecT",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldhfyotJMUypl8Sh"
+        },
+        "id": "fld5j0eAEFetRzYCD",
+        "name": "Project Scopes"
+      },
+      {
+        "type": "singleLineText",
+        "id": "flddtQ0bVFo43lAq9",
+        "name": "User Reports"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbldfzazKRu33qcPu",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fld5COAkW5K4etrj5"
+        },
+        "id": "fldXIaUPXT7PD8EEk",
+        "name": "User Reports - Project Scope Progress"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwdLi3k5qbg4QKBC",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblipfyqQgXQ0dVjG",
+    "name": "Project Scope Source - T4 Tasks",
+    "primaryFieldId": "fld77pmhYZcmsVYOA",
+    "fields": [
+      {
+        "type": "multilineText",
+        "id": "fld77pmhYZcmsVYOA",
+        "name": "WBS Code"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld9y9952VZnZmGL0",
+        "name": "Task Index"
+      },
+      {
+        "type": "richText",
+        "id": "fldL4PFxUZEEruamt",
+        "name": "Task Name"
+      },
+      {
+        "type": "richText",
+        "id": "fldSaHmqJxSeFfRaC",
+        "name": "Task Notes"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldXWQT005W9Lx6jS",
+        "name": "Task"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbldhjjQAV0pqKzIz",
+          "isReversed": false,
+          "prefersSingleRecordLink": true
+        },
+        "id": "fldA4fL1D4xt2HSQz",
+        "name": "Activity WBS"
+      },
+      {
+        "type": "richText",
+        "id": "fldfhg8EH0qiV7Ie2",
+        "name": "Activity Name"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldohY4qByuTZDqIx",
+        "name": "Activity"
+      },
+      {
+        "type": "singleLineText",
+        "id": "flddJc9zaFNof18jm",
+        "name": "Procedure WBS (from Activity WBS)"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldq7Ycd2GlpZpuRu",
+        "name": "Procedure Name"
+      },
+      {
+        "type": "multilineText",
+        "id": "fld911OJOT1nmwX51",
+        "name": "Procedure"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldS0yln4Hjupw6Ft",
+        "name": "Process WBS (from Activity WBS)"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldXwQkr4uKTwrh36",
+        "name": "Process (from Activity WBS)"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldtlDYlR9qBC5DpE",
+        "name": "Description"
+      },
+      {
+        "type": "singleCollaborator",
+        "id": "fldHzIrIgTsVigHLj",
+        "name": "Assigned To"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "iso",
+            "format": "YYYY-MM-DD"
+          }
+        },
+        "id": "fldjGqSsdU3FfRdFC",
+        "name": "Start Date"
+      },
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "iso",
+            "format": "YYYY-MM-DD"
+          }
+        },
+        "id": "fldKBhx1oFqqqFBhD",
+        "name": "Due Date"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 0
+        },
+        "id": "fldQnhETK8zHDiK9O",
+        "name": "Time Spent (hrs)"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selp5OuFGuWjzhwcu",
+              "name": "Not Started",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selFHKiujXTC5ZWlu",
+              "name": "In Progress",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selGwXo8yo43aTfVN",
+              "name": "Blocked",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selbkYKf2vqy7iOwj",
+              "name": "Done",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fld5NKWCgltZzcY6O",
+        "name": "Status"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selDjXpSWwIc3EXWL",
+              "name": "Low",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selm3XM9ysc7qYqzE",
+              "name": "Medium",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selbBZilZMRKqVesX",
+              "name": "High",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selecTfwW6VSHNhA2",
+              "name": "Critical",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fld8RY8CxsiYEjcMC",
+        "name": "Priority"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblipfyqQgXQ0dVjG",
+          "isReversed": false,
+          "prefersSingleRecordLink": false
+        },
+        "id": "fldqJYXkNVnO8ddhP",
+        "name": "Dependencies"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblipfyqQgXQ0dVjG",
+          "isReversed": false,
+          "prefersSingleRecordLink": false
+        },
+        "id": "fldQMjwI4Em1vdn2S",
+        "name": "From field: Dependencies"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblbakHaKGLu4FecT",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldR8uCJVAN10ZgSV"
+        },
+        "id": "fldIvCpFcvMtfwFt7",
+        "name": "Project Scopes"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldR1ci8jnwJbR0kX",
+        "name": "User Reports"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbldfzazKRu33qcPu",
+          "isReversed": false,
+          "prefersSingleRecordLink": false,
+          "inverseLinkFieldId": "fldEORrqg3OFrAR76"
+        },
+        "id": "fldan8XnKu6pHEQEt",
+        "name": "User Reports - Project Scope Progress"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwaRep4iTSmgFlvN",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tbly6jy78GWm9tilj",
+    "name": "Project Scope Source - T1 Processes",
+    "primaryFieldId": "fldl8zfQloWaGyppK",
+    "fields": [
+      {
+        "type": "multilineText",
+        "id": "fldl8zfQloWaGyppK",
+        "name": "WBS Code"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldnIjDJwNbmwOkIs",
+        "name": "Process Index"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selcZwQo9EoDBao90",
+              "name": "1",
+              "color": "blueLight2"
+            },
+            {
+              "id": "seltq0LxPag2hHdAV",
+              "name": "2",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selF1bsG88HjlWeGD",
+              "name": "3",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selU0lDJE1h1mpSM5",
+              "name": "4",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selxMPMluj9zuQlA3",
+              "name": "5",
+              "color": "yellowLight2"
+            }
+          ]
+        },
+        "id": "fldmcbaynFi3FCXlG",
+        "name": "Level"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selgsNvockTBYFge5",
+              "name": "Process",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selSfwnVmCSXreaFN",
+              "name": "Procedure",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sel1fa2znZH1NB5H4",
+              "name": "Activity",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selvlY7l9ehlHccHW",
+              "name": "Task",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldkWRHLfLVNWNWi1",
+        "name": "Type"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldUN8wiR1yp5QQAw",
+        "name": "Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldqoV6jVCaDFsEPA",
+        "name": "Process WBS"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld1IeZhfzL8lMHEa",
+        "name": "SOP Name (from Process WBS)"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblAHKe9S2qNdQFHe",
+          "isReversed": false,
+          "prefersSingleRecordLink": false
+        },
+        "id": "fldOgIcTi13PZ2B5V",
+        "name": "Table 2"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldgFU9O90XVWJYgy",
+        "name": "Name (from Table 2)"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldtCB4PusFz50PY3",
+        "name": "SOP Reference"
+      },
+      {
+        "type": "checkbox",
+        "options": {
+          "icon": "check",
+          "color": "greenBright"
+        },
+        "id": "fld694FX3JTjynpkh",
+        "name": "Time Trackable"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldfBAXh8gFluARf8",
+        "name": "Department"
+      },
+      {
+        "type": "singleCollaborator",
+        "id": "fldEbOmZ97kO2L0dz",
+        "name": "Assignee"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selv6myFddyMK5dUp",
+              "name": "Todo",
+              "color": "redLight2"
+            },
+            {
+              "id": "selVtE3UJh7GGsfkT",
+              "name": "In progress",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selpAN4OdI3KNiTPI",
+              "name": "Done",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fld3yfzpww9W8AKy3",
+        "name": "Status"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fldcCcnL9gvWNw9Nw",
+        "name": "Attachments"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldbh60ErQ70MsU6o",
+        "name": "Attachment Summary"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldmiLgzahB67jsiR",
+        "name": "From field: Parent"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld97c5Zu34QWuGSJ",
+        "name": "From field: Parent copy"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldBYku5FgeRdH7R4",
+        "name": "From field: Table 1"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwL35SvissMuUoHN",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblAHKe9S2qNdQFHe",
+    "name": "Project Scope Source - T2 Procedures",
+    "primaryFieldId": "fldqHMNv6MPLkfbnR",
+    "fields": [
+      {
+        "type": "multilineText",
+        "id": "fldqHMNv6MPLkfbnR",
+        "name": "WBS Code"
+      },
+      {
+        "type": "number",
+        "options": {
+          "precision": 0
+        },
+        "id": "fldfidruxtL7PAdbb",
+        "name": "Sequence Index"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selcZwQo9EoDBao90",
+              "name": "1",
+              "color": "blueLight2"
+            },
+            {
+              "id": "seltq0LxPag2hHdAV",
+              "name": "2",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "selF1bsG88HjlWeGD",
+              "name": "3",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selU0lDJE1h1mpSM5",
+              "name": "4",
+              "color": "greenLight2"
+            },
+            {
+              "id": "selxMPMluj9zuQlA3",
+              "name": "5",
+              "color": "yellowLight2"
+            }
+          ]
+        },
+        "id": "fldm0dkZEk4gtZA8L",
+        "name": "Level"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selgsNvockTBYFge5",
+              "name": "Process",
+              "color": "blueLight2"
+            },
+            {
+              "id": "selSfwnVmCSXreaFN",
+              "name": "Procedure",
+              "color": "cyanLight2"
+            },
+            {
+              "id": "sel1fa2znZH1NB5H4",
+              "name": "Activity",
+              "color": "tealLight2"
+            },
+            {
+              "id": "selvlY7l9ehlHccHW",
+              "name": "Task",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldibRkqZQM4dT1kV",
+        "name": "Type"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fld28ihNjO2v7peRC",
+        "name": "Name"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbly6jy78GWm9tilj",
+          "isReversed": false,
+          "prefersSingleRecordLink": false
+        },
+        "id": "fldX30mAlb0NkG9aZ",
+        "name": "Process WBS"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldLzGP8DclmM7JgJ",
+        "name": "Process"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldd3dCHiQmdxp16T",
+        "name": "Activity WBS"
+      },
+      {
+        "type": "richText",
+        "id": "fldFgZuO81UQZPVqh",
+        "name": "Name (from Activity WBS)"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldp8vi1Eai8lAB7f",
+        "name": "SOP Reference"
+      },
+      {
+        "type": "checkbox",
+        "options": {
+          "icon": "check",
+          "color": "greenBright"
+        },
+        "id": "fldtpW0kyFvVdEmnT",
+        "name": "Time Trackable"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldX9dPt21pzNmuRG",
+        "name": "Department"
+      },
+      {
+        "type": "singleCollaborator",
+        "id": "fldtIiH2mxqrVvnNy",
+        "name": "Assignee"
+      },
+      {
+        "type": "singleSelect",
+        "options": {
+          "choices": [
+            {
+              "id": "selv6myFddyMK5dUp",
+              "name": "Todo",
+              "color": "redLight2"
+            },
+            {
+              "id": "selVtE3UJh7GGsfkT",
+              "name": "In progress",
+              "color": "yellowLight2"
+            },
+            {
+              "id": "selpAN4OdI3KNiTPI",
+              "name": "Done",
+              "color": "greenLight2"
+            }
+          ]
+        },
+        "id": "fldoAqyJfRfvz3UWv",
+        "name": "Status"
+      },
+      {
+        "type": "multipleAttachments",
+        "options": {
+          "isReversed": false
+        },
+        "id": "fld4AVzLu7bDx2e6i",
+        "name": "Attachments"
+      },
+      {
+        "type": "multilineText",
+        "id": "fldb100T8GlMTFXna",
+        "name": "Attachment Summary"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwyOBKl1Xk2wZ0fk",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tbldfzazKRu33qcPu",
+    "name": "User Reports - Project Scope Progress",
+    "primaryFieldId": "fldRwkdNMf3JHgrye",
+    "fields": [
+      {
+        "type": "date",
+        "options": {
+          "dateFormat": {
+            "name": "local",
+            "format": "l"
+          }
+        },
+        "id": "fldRwkdNMf3JHgrye",
+        "name": "Date"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldisNeEn873XGHq0"
+        },
+        "id": "fldcnrWz6UvIfNFVv",
+        "name": "Project"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldcnrWz6UvIfNFVv",
+          "fieldIdInLinkedTable": "fldjubH6AypCBnK64",
+          "result": {
+            "type": "multilineText"
+          }
+        },
+        "id": "fld7RFx8rbLQfnRuK",
+        "name": "Project Name"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tbldhjjQAV0pqKzIz",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldXIaUPXT7PD8EEk"
+        },
+        "id": "fld5COAkW5K4etrj5",
+        "name": "T3 Activity"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fld5COAkW5K4etrj5",
+          "fieldIdInLinkedTable": "fldVE6vOIJabseBlP",
+          "result": {
+            "type": "richText"
+          }
+        },
+        "id": "flddm3mJv7u1Pgqqv",
+        "name": "T3 Activity - Name"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblipfyqQgXQ0dVjG",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldan8XnKu6pHEQEt"
+        },
+        "id": "fldEORrqg3OFrAR76",
+        "name": "T4 - Tasks"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fldEORrqg3OFrAR76",
+          "fieldIdInLinkedTable": "fldL4PFxUZEEruamt",
+          "result": {
+            "type": "richText"
+          }
+        },
+        "id": "fldRtcaH1oMkQnYkz",
+        "name": "Task Name"
+      },
+      {
+        "type": "percent",
+        "options": {
+          "precision": 0
+        },
+        "id": "fldAMOpSVsO8UjUye",
+        "name": "Scope Progress"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldnX3g8lNutZzrvB",
+        "name": "ReportedBy"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwTRxlx2a7qGibYH",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  },
+  {
+    "id": "tblH9hHFlvfZwVqJb",
+    "name": "Project Action History",
+    "primaryFieldId": "fldZJpMXMdLMTEqVJ",
+    "fields": [
+      {
+        "type": "autoNumber",
+        "id": "fldZJpMXMdLMTEqVJ",
+        "name": "Name"
+      },
+      {
+        "type": "multipleRecordLinks",
+        "options": {
+          "linkedTableId": "tblM1YUKzuiMqISmC",
+          "isReversed": false,
+          "prefersSingleRecordLink": true,
+          "inverseLinkFieldId": "fldE4fy4iqp0QIx8G"
+        },
+        "id": "fld0cwzA8Q4cXvLAr",
+        "name": "Project"
+      },
+      {
+        "type": "multipleLookupValues",
+        "options": {
+          "isValid": true,
+          "recordLinkFieldId": "fld0cwzA8Q4cXvLAr",
+          "fieldIdInLinkedTable": "fldjubH6AypCBnK64",
+          "result": {
+            "type": "multilineText"
+          }
+        },
+        "id": "fldBkN7W3fjidBQir",
+        "name": "Project Name"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldHbgieNPOAn2A1N",
+        "name": "ActionName"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldp0DF1ZAJQnNKE9",
+        "name": "CreatedBy"
+      },
+      {
+        "type": "singleLineText",
+        "id": "fldj36Bn0hkJuIxdA",
+        "name": "Remarks"
+      },
+      {
+        "type": "createdTime",
+        "options": {
+          "result": {
+            "type": "dateTime",
+            "options": {
+              "dateFormat": {
+                "name": "local",
+                "format": "l"
+              },
+              "timeFormat": {
+                "name": "12hour",
+                "format": "h:mma"
+              },
+              "timeZone": "client"
+            }
+          }
+        },
+        "id": "fldGbJPXwcu5HXOVa",
+        "name": "Created"
+      }
+    ],
+    "views": [
+      {
+        "id": "viwEsFSWrxdcGHJFY",
+        "name": "Grid view",
+        "type": "grid"
+      }
+    ]
+  }
+]

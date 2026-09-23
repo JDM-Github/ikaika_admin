@@ -1,0 +1,69 @@
+{
+  "table_id": "tbl53is3fy1C7We0E",
+  "table_name": "Job Type Allowed Activities",
+  "records": [
+    {
+      "id": "rec85GtQCvMJ4CcIB",
+      "createdTime": "2026-01-07T03:29:06.000Z",
+      "fields": {
+        "Job Type": "Dusty CAD",
+        "Activity Code ID Initials": "80,81"
+      }
+    },
+    {
+      "id": "recDw2g9iyk3N3mOn",
+      "createdTime": "2026-01-07T03:29:06.000Z",
+      "fields": {
+        "Job Type": "CAD-to-BIM",
+        "Activity Code ID Initials": "80,82,83,88"
+      }
+    },
+    {
+      "id": "recJCZ004NPzq7JUd",
+      "createdTime": "2026-01-07T03:31:57.000Z",
+      "fields": {
+        "Job Type": "Material TakeOff",
+        "Activity Code ID Initials": "87"
+      }
+    },
+    {
+      "id": "recLgxmIkSi1x9WDb",
+      "createdTime": "2026-01-07T03:29:06.000Z",
+      "fields": {
+        "Job Type": "Scan-to-BIM",
+        "Activity Code ID Initials": "80,82,83,88"
+      }
+    },
+    {
+      "id": "recRwXmSBVPwOOfFF",
+      "createdTime": "2026-01-07T03:32:05.000Z",
+      "fields": {
+        "Job Type": "Clash Detection",
+        "Activity Code ID Initials": "88"
+      }
+    },
+    {
+      "id": "recUI7eC4JmNqukY2",
+      "createdTime": "2026-01-07T03:31:46.000Z",
+      "fields": {
+        "Job Type": "6D"
+      }
+    },
+    {
+      "id": "recWkr8z5nfvf2yIv",
+      "createdTime": "2026-01-07T03:31:38.000Z",
+      "fields": {
+        "Job Type": "PDF-to-CAD",
+        "Activity Code ID Initials": "85"
+      }
+    },
+    {
+      "id": "recym4sOsABBXhwvP",
+      "createdTime": "2026-01-07T03:32:40.000Z",
+      "fields": {
+        "Job Type": "Software Development",
+        "Activity Code ID Initials": "50"
+      }
+    }
+  ]
+}

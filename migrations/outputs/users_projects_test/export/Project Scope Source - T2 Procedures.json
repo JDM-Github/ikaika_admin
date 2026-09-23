@@ -1,0 +1,425 @@
+{
+  "table_id": "tblAHKe9S2qNdQFHe",
+  "table_name": "Project Scope Source - T2 Procedures",
+  "records": [
+    {
+      "id": "rec3WRlExGyEB3mzz",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Electrical Revit Modeling",
+        "Name (from Activity WBS)": "Model top view of electrical power system\nModel/adjust elevations in elevation view of electrical power system\nModel couples by splitting the elements\nModel hangers to support the conduit system.\n",
+        "Process": "BIM Modeling",
+        "Process WBS": [
+          "recX3EKWIuBThIMrF"
+        ],
+        "Activity WBS": "500-04-01, 500-04-02, 500-04-03, 500-04-04",
+        "Sequence Index": 4,
+        "WBS Code": "500-04"
+      }
+    },
+    {
+      "id": "rec97sZ3nB84AEz4G",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Archiving",
+        "Name (from Activity WBS)": "Archive project files\nBackup final deliverables\n",
+        "Process": "Project Closeout",
+        "Process WBS": [
+          "recEuktBvU9ztBLE2"
+        ],
+        "Activity WBS": "800-03-01, 800-03-02",
+        "Sequence Index": 3,
+        "WBS Code": "800-03"
+      }
+    },
+    {
+      "id": "recHmcVeeNGeWjRu3",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Documentation",
+        "Name (from Activity WBS)": "Prepare model report\nPrepare QA/QC report\n",
+        "Process": "Deliverables",
+        "Process WBS": [
+          "rec6pmjdnTOdsxfdp"
+        ],
+        "Activity WBS": "700-03-01, 700-03-02",
+        "Sequence Index": 3,
+        "WBS Code": "700-03"
+      }
+    },
+    {
+      "id": "recILVRWwTYbNI1oN",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Assigning Team Roles & Responsibilities",
+        "Name (from Activity WBS)": "Create project folder structure\nAssign team members (RACI) (size, skills, availability, value of diversity, motivation) (PM, PMembers, Stakeholders, sponsors)\nSetup project tracking system\\*\n",
+        "Process": "Project Initiation",
+        "Process WBS": [
+          "rec7ej8Q9QVoNiIF5"
+        ],
+        "Activity WBS": "100-02-03, 100-02-01, 100-02-02",
+        "Sequence Index": 2,
+        "WBS Code": "100-02"
+      }
+    },
+    {
+      "id": "recKJVQ1HqHa74aUJ",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Data Cleaning",
+        "Name (from Activity WBS)": "Remove noise\nClip unnecessary areas\nOptimize file size\n",
+        "Process": "File Preparation",
+        "Process WBS": [
+          "recEmxE9lSdPH4RzM"
+        ],
+        "Activity WBS": "400-02-01, 400-02-02, 400-02-03",
+        "Sequence Index": 2,
+        "WBS Code": "400-02"
+      }
+    },
+    {
+      "id": "recMBdKcA8u1lhKXU",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Model Setup",
+        "Name (from Activity WBS)": "Setup Revit template\nLink point cloud\nSet coordinates and levels\n",
+        "Process": "BIM Modeling",
+        "Process WBS": [
+          "recX3EKWIuBThIMrF"
+        ],
+        "Activity WBS": "500-01-01, 500-01-02, 500-01-03",
+        "Sequence Index": 1,
+        "WBS Code": "500-01"
+      }
+    },
+    {
+      "id": "recMViX2jTrhLyjZQ",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Data Transfer",
+        "Name (from Activity WBS)": "Download scan data\nBackup raw files\nOrganize scan files\n",
+        "Process": "Data Acquisition (Scanning)",
+        "Process WBS": [
+          "recm1uk28yjJX8lWe"
+        ],
+        "Activity WBS": "300-03-01, 300-03-02, 300-03-03",
+        "Sequence Index": 3,
+        "WBS Code": "300-03"
+      }
+    },
+    {
+      "id": "recU9ADDmVpv5wYkq",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Plumbing Revit Modeling",
+        "Name (from Activity WBS)": "Model top view of horizontal pipes, elbows & tees at a fixed height\nCap open ends of horizontal pipes\nModel elevation view of vertical pipes, elbows & tees\nCap open ends of vertical pipes\nSplit pipe elements and align to slope for proper flow direction and connectivity.\nModel Piping Accessories\nConnect Horizontal & Vertical Pipes\nModel hangers to support the piping system.\n",
+        "Process": "BIM Modeling",
+        "Process WBS": [
+          "recX3EKWIuBThIMrF"
+        ],
+        "Activity WBS": "500-08-01, 500-08-02, 500-08-03, 500-08-04, 500-08-05, 500-08-07, 500-08-06, 500-08-08",
+        "Sequence Index": 8,
+        "WBS Code": "500-08"
+      }
+    },
+    {
+      "id": "recUZb1dS3d6SSMC8",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Data Export",
+        "Name (from Activity WBS)": "Export to required formats (RCP/RCS, E57)\nVerify export integrity\n",
+        "Process": "File Preparation",
+        "Process WBS": [
+          "recEmxE9lSdPH4RzM"
+        ],
+        "Activity WBS": "400-03-01, 400-03-02",
+        "Sequence Index": 3,
+        "WBS Code": "400-03"
+      }
+    },
+    {
+      "id": "recUglhLecFxshx8D",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Drawing Production",
+        "Name (from Activity WBS)": "Generate plans, sections, elevations\nAnnotate drawings\n",
+        "Process": "Deliverables",
+        "Process WBS": [
+          "rec6pmjdnTOdsxfdp"
+        ],
+        "Activity WBS": "700-02-01, 700-02-02",
+        "Sequence Index": 2,
+        "WBS Code": "700-02"
+      }
+    },
+    {
+      "id": "recX1FbMCkYQFh0Fy",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Point Cloud Registration",
+        "Name (from Activity WBS)": "Import scans into software\nAlign scans\nRegister point clouds\n",
+        "Process": "File Preparation",
+        "Process WBS": [
+          "recEmxE9lSdPH4RzM"
+        ],
+        "Activity WBS": "400-01-01, 400-01-02, 400-01-03",
+        "Sequence Index": 1,
+        "WBS Code": "400-01"
+      }
+    },
+    {
+      "id": "recZc6SivaiMt608O",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Client Submission",
+        "Name (from Activity WBS)": "Deliver files\nConduct client walkthrough\n",
+        "Process": "Project Closeout",
+        "Process WBS": [
+          "recEuktBvU9ztBLE2"
+        ],
+        "Activity WBS": "800-02-01, 800-02-02",
+        "Sequence Index": 2,
+        "WBS Code": "800-02"
+      }
+    },
+    {
+      "id": "recbtIdDtFqP9dmXM",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Misc Revit Modeling",
+        "Process": "BIM Modeling",
+        "Process WBS": [
+          "recX3EKWIuBThIMrF"
+        ],
+        "Activity WBS": "500-09-01",
+        "Sequence Index": 9,
+        "WBS Code": "500-09"
+      }
+    },
+    {
+      "id": "recc5K3JzyTmWtPgH",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Structural Revit Modeling",
+        "Name (from Activity WBS)": "Model Top View\nModel Elevation View\nModel Structural Connections\nModel Miscellaneous Structural Details\n",
+        "Process": "BIM Modeling",
+        "Process WBS": [
+          "recX3EKWIuBThIMrF"
+        ],
+        "Activity WBS": "500-03-01, 500-03-02, 500-03-03, 500-03-04",
+        "Sequence Index": 3,
+        "WBS Code": "500-03"
+      }
+    },
+    {
+      "id": "reccD1NBfVfkBOuun",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Assigning Resources & Tools",
+        "Name (from Activity WBS)": "Review Resources\nReview Tools\n",
+        "Process": "Project Initiation",
+        "Process WBS": [
+          "rec7ej8Q9QVoNiIF5"
+        ],
+        "Activity WBS": "100-03-01, 100-03-02",
+        "Sequence Index": 3,
+        "WBS Code": "100-03"
+      }
+    },
+    {
+      "id": "reccFRveuHm7FBHaW",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Clash Detection",
+        "Name (from Activity WBS)": "Run clash detection\nResolve issues\n",
+        "Process": "QA/QC",
+        "Process WBS": [
+          "rec9GEXu8swBu8bIG"
+        ],
+        "Activity WBS": "600-03-01, 600-03-02",
+        "Sequence Index": 3,
+        "WBS Code": "600-03"
+      }
+    },
+    {
+      "id": "recf3zILG2RPrqZR9",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Internal Review",
+        "Name (from Activity WBS)": "Conduct final QA check\nSecure approvals\n",
+        "Process": "Project Closeout",
+        "Process WBS": [
+          "recEuktBvU9ztBLE2"
+        ],
+        "Activity WBS": "800-01-01, 800-01-02",
+        "Sequence Index": 1,
+        "WBS Code": "800-01"
+      }
+    },
+    {
+      "id": "recfUe5lNmnOT08yH",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "BIM Execution Planning",
+        "Name (from Activity WBS)": "Define Tasks & Milestones\n\nCreate a Schedule\nCreate a Budget\nConduct Risk Management\nGet team buy-in and hold the project kick-off meeting\nOrganizing communication and documentation\n",
+        "Process": "Project Planning",
+        "Process WBS": [
+          "recbRMKDp7QKwZbGv"
+        ],
+        "Activity WBS": "200-03-02, 200-03-03, 200-03-04, 200-03-05, 200-03-01, 200-03-06",
+        "Sequence Index": 3,
+        "WBS Code": "200-03"
+      }
+    },
+    {
+      "id": "recgeMxTgigOPR1cq",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Defining project goals, scope, deliverables, and success criteria",
+        "Name (from Activity WBS)": "Receive & fill-up BIM Form (Project Charter)\nReview in-scope, out-of-scope & possible scope creeps\nIdentify deliverables\nIdentify goals, objective & key results (OKRs)\nDefine success criteria (launch & landing, KPIs, Metrics)\n\n",
+        "Process": "Project Initiation",
+        "Process WBS": [
+          "rec7ej8Q9QVoNiIF5"
+        ],
+        "Activity WBS": "100-01-01, 100-01-03, 100-01-04, 100-01-02, 100-01-05",
+        "Sequence Index": 1,
+        "WBS Code": "100-01"
+      }
+    },
+    {
+      "id": "rechyQ9amS9TSh5f2",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Model Export",
+        "Name (from Activity WBS)": "Export native files (RVT)\nExport IFC/NWC formats\n",
+        "Process": "Deliverables",
+        "Process WBS": [
+          "rec6pmjdnTOdsxfdp"
+        ],
+        "Activity WBS": "700-01-01, 700-01-02",
+        "Sequence Index": 1,
+        "WBS Code": "700-01"
+      }
+    },
+    {
+      "id": "reciNZVNpcNbDC5LH",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Model Verification",
+        "Name (from Activity WBS)": "Check alignment with point cloud\nValidate dimensions and tolerances\n",
+        "Process": "QA/QC",
+        "Process WBS": [
+          "rec9GEXu8swBu8bIG"
+        ],
+        "Activity WBS": "600-01-01, 600-01-02",
+        "Sequence Index": 1,
+        "WBS Code": "600-01"
+      }
+    },
+    {
+      "id": "recjA14PtiJZHL2Q4",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Standards Compliance",
+        "Name (from Activity WBS)": "Check naming conventions\nVerify LOD compliance\n",
+        "Process": "QA/QC",
+        "Process WBS": [
+          "rec9GEXu8swBu8bIG"
+        ],
+        "Activity WBS": "600-02-01, 600-02-02",
+        "Sequence Index": 2,
+        "WBS Code": "600-02"
+      }
+    },
+    {
+      "id": "recp7IsuedlNEIuEK",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Laser Scanning",
+        "Name (from Activity WBS)": "Setup scanning equipment\nPerform scans\nValidate scan coverage\n",
+        "Process": "Data Acquisition (Scanning)",
+        "Process WBS": [
+          "recm1uk28yjJX8lWe"
+        ],
+        "Activity WBS": "300-02-01, 300-02-02, 300-02-03",
+        "Sequence Index": 2,
+        "WBS Code": "300-02"
+      }
+    },
+    {
+      "id": "recpDRbqZbuI014L8",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Fire Protection Revit Modeling",
+        "Name (from Activity WBS)": "Model Horizontal Elements in Top View\nModel Elevation View\nCap Open Ends\nModel & Connect Sprinkler Heads\nModel couples by splitting the elements\nConnect Branch Main to Cross Main\nModel Standpipes and Accessories & Connecting Cross Mains\nModel Vertical Pipes\nModel Hangers & Supports\n",
+        "Process": "BIM Modeling",
+        "Process WBS": [
+          "recX3EKWIuBThIMrF"
+        ],
+        "Activity WBS": "500-05-01, 500-05-02, 500-05-03, 500-05-05, 500-05-06, 500-05-07, 500-05-08, 500-05-04, 500-05-09",
+        "Sequence Index": 5,
+        "WBS Code": "500-05"
+      }
+    },
+    {
+      "id": "recsu0O3SDhYflmpi",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Architectural Revit Modeling",
+        "Name (from Activity WBS)": "Model Grids\nModel Top View\nModel Elevation View\n\nModel Staircase\nModel Holes/Sleeves\n",
+        "Process": "BIM Modeling",
+        "Process WBS": [
+          "recX3EKWIuBThIMrF"
+        ],
+        "Activity WBS": "500-02-01, 500-02-02, 500-02-03, 500-02-04, 500-02-05",
+        "Sequence Index": 2,
+        "WBS Code": "500-02"
+      }
+    },
+    {
+      "id": "rectqxwfgYIRHCD4r",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Site Preparation",
+        "Name (from Activity WBS)": "Coordinate with client\nConduct site inspection\nIdentify scan locations\n",
+        "Process": "Data Acquisition (Scanning)",
+        "Process WBS": [
+          "recm1uk28yjJX8lWe"
+        ],
+        "Activity WBS": "300-01-01, 300-01-02, 300-01-03",
+        "Sequence Index": 1,
+        "WBS Code": "300-01"
+      }
+    },
+    {
+      "id": "recy2NcIHAZTWoOSz",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Duct Revit Modeling",
+        "Name (from Activity WBS)": "Model top view of ducts, terminals & equipment\nModel elevation view of ducts, terminals & equipment\nModel couples by splitting the elements\nModel hangers to support the duct system\n",
+        "Process": "BIM Modeling",
+        "Process WBS": [
+          "recX3EKWIuBThIMrF"
+        ],
+        "Activity WBS": "500-07-01, 500-07-02, 500-07-03, 500-07-04",
+        "Sequence Index": 7,
+        "WBS Code": "500-07"
+      }
+    },
+    {
+      "id": "recztsKrBXf5y5xA3",
+      "createdTime": "2026-04-16T09:31:37.000Z",
+      "fields": {
+        "Name": "Mechanical Pipe Revit Modeling",
+        "Name (from Activity WBS)": "Model top view of mechanical equipment, pipes and fittings\nModel/adjust in elevation view of mechanical equipment, vertical pipes, elbows & tees\nModel pipe accessories\nAdd insulation\nModel hangers to support the piping system.\nSystem setup\n",
+        "Process": "BIM Modeling",
+        "Process WBS": [
+          "recX3EKWIuBThIMrF"
+        ],
+        "Activity WBS": "500-06-02, 500-06-03, 500-06-04, 500-06-05, 500-06-06, 500-06-01",
+        "Sequence Index": 6,
+        "WBS Code": "500-06"
+      }
+    }
+  ]
+}

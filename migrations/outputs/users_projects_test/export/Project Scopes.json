@@ -1,0 +1,182 @@
+{
+  "table_id": "tblbakHaKGLu4FecT",
+  "table_name": "Project Scopes",
+  "records": [
+    {
+      "id": "recChu2Hr5lYA1She",
+      "createdTime": "2026-05-20T06:40:42.000Z",
+      "fields": {
+        "AssignedTo (Employee Name)": [
+          "Elkin Danis Decena"
+        ],
+        "AssignedTo": [
+          "recl5XlCUi3mHLv8y"
+        ],
+        "Scope - T3 Activities": [
+          "recpirtBRi8Mhzmvs"
+        ],
+        "Progress": 0,
+        "Scope Name - T3 Activities": [
+          "Check naming conventions"
+        ],
+        "IDNo.": 304
+      }
+    },
+    {
+      "id": "recTzwa9L14LhkLKB",
+      "createdTime": "2026-05-20T06:40:42.000Z",
+      "fields": {
+        "Scope - T4 Tasks": [
+          "recOTaqCS71kpoh7n"
+        ],
+        "Scope Name - T4 Tasks": [
+          "Estimate Budget"
+        ],
+        "AssignedTo (Employee Name)": [
+          "Elkin Danis Decena"
+        ],
+        "AssignedTo": [
+          "recl5XlCUi3mHLv8y"
+        ],
+        "Scope - T3 Activities": [
+          "recHXdsiZf6aVELP2"
+        ],
+        "Progress": 0,
+        "Scope Name - T3 Activities": [
+          "Review Resources"
+        ],
+        "IDNo.": 298
+      }
+    },
+    {
+      "id": "recgbhsxslC2jlX6f",
+      "createdTime": "2026-05-20T06:40:42.000Z",
+      "fields": {
+        "Scope - T4 Tasks": [
+          "recpIUesEuMUQBXFi"
+        ],
+        "Scope Name - T4 Tasks": [
+          "Estimate People"
+        ],
+        "AssignedTo (Employee Name)": [
+          "Elkin Danis Decena"
+        ],
+        "AssignedTo": [
+          "recl5XlCUi3mHLv8y"
+        ],
+        "Scope - T3 Activities": [
+          "recHXdsiZf6aVELP2"
+        ],
+        "Progress": 0,
+        "Scope Name - T3 Activities": [
+          "Review Resources"
+        ],
+        "IDNo.": 299
+      }
+    },
+    {
+      "id": "recggaEUhq3mdHYrV",
+      "createdTime": "2026-05-20T06:40:42.000Z",
+      "fields": {
+        "Scope - T4 Tasks": [
+          "recRYRKPtSgbSiZ7c"
+        ],
+        "Scope Name - T4 Tasks": [
+          "Estimate Materials"
+        ],
+        "AssignedTo (Employee Name)": [
+          "Elkin Danis Decena"
+        ],
+        "AssignedTo": [
+          "recl5XlCUi3mHLv8y"
+        ],
+        "Scope - T3 Activities": [
+          "recHXdsiZf6aVELP2"
+        ],
+        "Progress": 0,
+        "Scope Name - T3 Activities": [
+          "Review Resources"
+        ],
+        "IDNo.": 300
+      }
+    },
+    {
+      "id": "reckgGK5IBqRff2O3",
+      "createdTime": "2026-05-20T06:40:42.000Z",
+      "fields": {
+        "Scope - T4 Tasks": [
+          "recrKriKcstFN5g5O"
+        ],
+        "Scope Name - T4 Tasks": [
+          "Review: Scheduling & Work Management Software"
+        ],
+        "AssignedTo (Employee Name)": [
+          "Elkin Danis Decena"
+        ],
+        "AssignedTo": [
+          "recl5XlCUi3mHLv8y"
+        ],
+        "Scope - T3 Activities": [
+          "recofscrdP6CfxmuC"
+        ],
+        "Progress": 0,
+        "Scope Name - T3 Activities": [
+          "Review Tools"
+        ],
+        "IDNo.": 301
+      }
+    },
+    {
+      "id": "recqROYG6rlzMJXEr",
+      "createdTime": "2026-05-20T06:40:42.000Z",
+      "fields": {
+        "Scope - T4 Tasks": [
+          "recVdEeDxolaEaOGn"
+        ],
+        "Scope Name - T4 Tasks": [
+          "Review: Productivity Tools"
+        ],
+        "AssignedTo (Employee Name)": [
+          "Elkin Danis Decena"
+        ],
+        "AssignedTo": [
+          "recl5XlCUi3mHLv8y"
+        ],
+        "Scope - T3 Activities": [
+          "recofscrdP6CfxmuC"
+        ],
+        "Progress": 0,
+        "Scope Name - T3 Activities": [
+          "Review Tools"
+        ],
+        "IDNo.": 302
+      }
+    },
+    {
+      "id": "recxo3i12tNVEIvZG",
+      "createdTime": "2026-05-20T06:40:42.000Z",
+      "fields": {
+        "Scope - T4 Tasks": [
+          "recyalBIcrHpeUpA5"
+        ],
+        "Scope Name - T4 Tasks": [
+          "Review: Collaboration Tools"
+        ],
+        "AssignedTo (Employee Name)": [
+          "Elkin Danis Decena"
+        ],
+        "AssignedTo": [
+          "recl5XlCUi3mHLv8y"
+        ],
+        "Scope - T3 Activities": [
+          "recofscrdP6CfxmuC"
+        ],
+        "Progress": 0,
+        "Scope Name - T3 Activities": [
+          "Review Tools"
+        ],
+        "IDNo.": 303
+      }
+    }
+  ]
+}
