@@ -34,4 +34,4 @@ __pycache__/
 # scans and employee photos, plus the SQL built from them. Never commit any of it.
 migrations/outputs/
 migrations/export_*/
-migrations/*.sql
+migrations/*.sqlmigrations/.token.private.txt
