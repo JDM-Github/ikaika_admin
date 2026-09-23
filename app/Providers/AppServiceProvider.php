@@ -124,6 +124,10 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(60)->by('administration-all-logs:'.$this->portalLimiterKey($request));
         });
 
+        RateLimiter::for('portal-administration-all-actions', function (Request $request) {
+            return Limit::perMinute(60)->by('administration-all-actions:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-administration-recycle-bin', function (Request $request) {
             return Limit::perMinute(60)->by('administration-recycle-bin:'.$this->portalLimiterKey($request));
         });

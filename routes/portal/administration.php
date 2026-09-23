@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Portal\Administration\AllActionsController;
 use App\Http\Controllers\Api\Portal\Administration\AllLogsController;
 use App\Http\Controllers\Api\Portal\Administration\EmailBlocksController;
 use App\Http\Controllers\Api\Portal\Administration\EmailMessagesController;
@@ -11,6 +12,11 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.admin', 'throttle:portal-administration-all-logs'])->group(function (): void {
         Route::get('administration/all-logs', [AllLogsController::class, 'index']);
         Route::get('administration/all-logs/{id}', [AllLogsController::class, 'show'])->whereNumber('id');
+    });
+
+    Route::middleware(['portal.admin', 'throttle:portal-administration-all-actions'])->group(function (): void {
+        Route::get('administration/all-actions', [AllActionsController::class, 'index']);
+        Route::get('administration/all-actions/{id}', [AllActionsController::class, 'show'])->whereNumber('id');
     });
 
     Route::middleware('throttle:portal-administration-recycle-bin')->group(function (): void {
