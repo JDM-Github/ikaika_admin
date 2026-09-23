@@ -36,3 +36,15 @@ Thumbs.db
 
 graphify-out/
 msal_test/
+
+# ikaika_scripts toolkit (decoupled-script/). Credentials live in
+# .ikaika_scripts_configs/ as *.env, and the broad rule catches a stray copy
+# anywhere too. Trust anchors (*.sha256, *.pin, *.known_hosts) and *.env.template
+# stay COMMITTED - they are not secrets, and are only useful when every machine
+# verifies the same value.
+*.env
+!ikaika_scripts.env
+.ikaika_scripts_configs/logs/
+.ikaika_scripts_configs/.toolkit-update-check
+.ikaika_scripts_configs/.toolkit-update-skip
+.ikaika_scripts_configs/.readiness-check

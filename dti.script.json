@@ -1,0 +1,466 @@
+{
+  "version": "0.0.0+1",
+  "name": "Ikaika Portal",
+  "title": "Ikaika Portal",
+  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.25.1",
+  "rules": {
+    "global": [
+      "flag",
+      "type",
+      "required",
+      "description",
+      "default",
+      "refresh",
+      "choices",
+      "label"
+    ],
+    "string": [
+      "allowed_values"
+    ],
+    "path": [
+      "allowed_values"
+    ],
+    "file": [
+      "allowed_values"
+    ],
+    "number": [
+      "min",
+      "max"
+    ],
+    "boolean": [],
+    "array": [
+      "allowed_values"
+    ]
+  },
+  "config": {
+    "git": {
+      "check-all": {
+        "description": "Runs every check that would otherwise be a CI job, and can install itself as a pre-push hook so nothing lands unchecked",
+        "args": [
+          {
+            "flag": "Full",
+            "label": "-Full   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Also run the checks.slow.<n> commands - a full web build and anything else too slow to want on every push.",
+            "default": ""
+          },
+          {
+            "flag": "ToolkitOnly",
+            "label": "-ToolkitOnly   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the project checks; toolkit checks only.",
+            "default": ""
+          },
+          {
+            "flag": "ProjectOnly",
+            "label": "-ProjectOnly   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the toolkit checks; project checks only.",
+            "default": ""
+          },
+          {
+            "flag": "InstallHook",
+            "label": "-InstallHook   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Install (or refresh) the pre-push hook and exit without running anything.",
+            "default": ""
+          },
+          {
+            "flag": "UninstallHook",
+            "label": "-UninstallHook   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Remove the pre-push hook and exit.",
+            "default": ""
+          },
+          {
+            "flag": "FromHook",
+            "label": "-FromHook   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Set by the hook itself. Only changes the closing message, which then explains how to bypass rather than how to push.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 git/check-all -Full ${check-all.args.Full} -ToolkitOnly ${check-all.args.ToolkitOnly} -ProjectOnly ${check-all.args.ProjectOnly} -InstallHook ${check-all.args.InstallHook} -UninstallHook ${check-all.args.UninstallHook} -FromHook ${check-all.args.FromHook}"
+        ]
+      },
+      "manage-tags": {
+        "description": "Manages git tags: creates an annotated tag for a chosen commit (optionally publishing it), renames a tag, and deletes tags picked from a numbered list (optionally on the remote too)",
+        "args": [
+          {
+            "flag": "Tag",
+            "label": "-Tag   [String[]]",
+            "type": "array",
+            "required": false,
+            "description": "Tag name(s) for non-interactive use; given alone it implies -Yes.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices git/manage-tags Tag"
+          },
+          {
+            "flag": "Delete",
+            "label": "-Delete   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Delete mode: pick tags from a list (or the -Tag names) instead of creating.",
+            "default": ""
+          },
+          {
+            "flag": "Rename",
+            "label": "-Rename   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Rename mode: give an existing tag a different name.",
+            "default": ""
+          },
+          {
+            "flag": "NewName",
+            "label": "-NewName   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Rename mode: the new name for the tag being renamed.",
+            "default": ""
+          },
+          {
+            "flag": "Commit",
+            "label": "-Commit   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Commit to tag (hash, branch, or any rev git resolves); default HEAD.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices git/manage-tags Commit",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/manage-tags Commit",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/manage-tags Commit -Preview"
+            }
+          },
+          {
+            "flag": "Message",
+            "label": "-Message   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Annotation message; default \"Release <tag>\".",
+            "default": ""
+          },
+          {
+            "flag": "Remote",
+            "label": "-Remote   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Remote to publish to / delete from.",
+            "default": "origin",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices git/manage-tags Remote",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/manage-tags Remote",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/manage-tags Remote -Preview"
+            }
+          },
+          {
+            "flag": "NoPublish",
+            "label": "-NoPublish   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Create: skip the push. Delete: remove local tags only.",
+            "default": ""
+          },
+          {
+            "flag": "Force",
+            "label": "-Force   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Create: replace an existing tag of the same name (also force-pushes it).",
+            "default": ""
+          },
+          {
+            "flag": "ManifestPath",
+            "label": "-ManifestPath   [String]",
+            "type": "file",
+            "required": false,
+            "description": "Manifest the default tag name is derived from, relative to the repo root.",
+            "default": ""
+          },
+          {
+            "flag": "Yes",
+            "label": "-Yes   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Accept every default without prompting (non-interactive mode).",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 git/manage-tags -Tag ${manage-tags.args.Tag} -Delete ${manage-tags.args.Delete} -Rename ${manage-tags.args.Rename} -NewName ${manage-tags.args.NewName} -Commit ${manage-tags.args.Commit} -Message ${manage-tags.args.Message} -Remote ${manage-tags.args.Remote} -NoPublish ${manage-tags.args.NoPublish} -Force ${manage-tags.args.Force} -ManifestPath ${manage-tags.args.ManifestPath} -Yes ${manage-tags.args.Yes}"
+        ]
+      },
+      "pull-updates": {
+        "description": "Pulls updates from another branch into the branch you are on",
+        "args": [
+          {
+            "flag": "Branch",
+            "label": "-Branch   [String]",
+            "type": "string",
+            "required": false,
+            "description": "",
+            "default": "development",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices git/pull-updates Branch",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/pull-updates Branch",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/pull-updates Branch -Preview"
+            }
+          },
+          {
+            "flag": "Remote",
+            "label": "-Remote   [String]",
+            "type": "string",
+            "required": false,
+            "description": "",
+            "default": "origin",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices git/pull-updates Remote",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/pull-updates Remote",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/pull-updates Remote -Preview"
+            }
+          },
+          {
+            "flag": "Rebase",
+            "label": "-Rebase   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "",
+            "default": ""
+          },
+          {
+            "flag": "Preview",
+            "label": "-Preview   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "",
+            "default": ""
+          },
+          {
+            "flag": "Prune",
+            "label": "-Prune   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "",
+            "default": ""
+          },
+          {
+            "flag": "List",
+            "label": "-List   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 git/pull-updates -Branch ${pull-updates.args.Branch} -Remote ${pull-updates.args.Remote} -Rebase ${pull-updates.args.Rebase} -Preview ${pull-updates.args.Preview} -Prune ${pull-updates.args.Prune} -List ${pull-updates.args.List}"
+        ]
+      },
+      "run-at-tag": {
+        "description": "Runs one of this project's commands against an already-tagged version, in isolation, without disturbing the current checkout",
+        "args": [
+          {
+            "flag": "Tag",
+            "label": "-Tag   [String]",
+            "type": "string",
+            "required": false,
+            "description": "",
+            "default": ""
+          },
+          {
+            "flag": "Command",
+            "label": "-Command   [String]",
+            "type": "string",
+            "required": false,
+            "description": "",
+            "default": "",
+            "allowed_values": [
+              "check-all",
+              "build-release"
+            ]
+          },
+          {
+            "flag": "Arguments",
+            "label": "-Arguments   [String[]]",
+            "type": "array",
+            "required": false,
+            "description": "",
+            "default": ""
+          },
+          {
+            "flag": "ArtifactDir",
+            "label": "-ArtifactDir   [String]",
+            "type": "path",
+            "required": false,
+            "description": "",
+            "default": ""
+          },
+          {
+            "flag": "Keep",
+            "label": "-Keep   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "",
+            "default": ""
+          },
+          {
+            "flag": "List",
+            "label": "-List   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 git/run-at-tag -Tag ${run-at-tag.args.Tag} -Command ${run-at-tag.args.Command} -Arguments ${run-at-tag.args.Arguments} -ArtifactDir ${run-at-tag.args.ArtifactDir} -Keep ${run-at-tag.args.Keep} -List ${run-at-tag.args.List}"
+        ]
+      }
+    },
+    "toolkit": {
+      "bump-version": {
+        "description": "Releases THIS toolkit: bumps VERSION, commits it, creates an annotated vX.Y.Z tag and pushes both",
+        "args": [
+          {
+            "flag": "Bump",
+            "label": "-Bump   [String]",
+            "type": "string",
+            "required": false,
+            "description": "major, minor, patch, or an explicit x.y.z. Omitted opens the interactive picker, which is also what a double-click gets.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices toolkit/bump-version Bump"
+          },
+          {
+            "flag": "NoPublish",
+            "label": "-NoPublish   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Commit and tag locally, push nothing. For rehearsing a release.",
+            "default": ""
+          },
+          {
+            "flag": "Remote",
+            "label": "-Remote   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Remote to push to.",
+            "default": "origin",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices toolkit/bump-version Remote"
+          },
+          {
+            "flag": "Yes",
+            "label": "-Yes   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the confirmation. For automation; the checks still run.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 toolkit/bump-version -Bump ${bump-version.args.Bump} -NoPublish ${bump-version.args.NoPublish} -Remote ${bump-version.args.Remote} -Yes ${bump-version.args.Yes}"
+        ]
+      },
+      "check-forms": {
+        "description": "Finds every parameter that reaches a front end as a blank box instead of a list",
+        "args": [
+          {
+            "flag": "Domain",
+            "label": "-Domain   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Which domain to check. Omitted checks all of them.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices toolkit/check-forms Domain"
+          },
+          {
+            "flag": "Strict",
+            "label": "-Strict   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Exit non-zero when a parameter is a text box and the command has not said why.",
+            "default": ""
+          },
+          {
+            "flag": "All",
+            "label": "-All   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Also list the parameters commands have declared as free text, with nothing to fix.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 toolkit/check-forms -Domain ${check-forms.args.Domain} -Strict ${check-forms.args.Strict} -All ${check-forms.args.All}"
+        ]
+      },
+      "install-tui": {
+        "description": "Installs or updates the terminal app, on purpose rather than when something notices",
+        "args": [
+          {
+            "flag": "Force",
+            "label": "-Force   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Install even when what is already here satisfies tui.version.",
+            "default": ""
+          },
+          {
+            "flag": "Prereleases",
+            "label": "-Prereleases   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Accept a prerelease for this run, whatever tui.prereleases says.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 toolkit/install-tui -Force ${install-tui.args.Force} -Prereleases ${install-tui.args.Prereleases}"
+        ]
+      },
+      "use-version": {
+        "description": "Moves this project onto a specific toolkit version: sets scripts.version in ikaika_scripts.env and checks the submodule out to match",
+        "args": [
+          {
+            "flag": "Version",
+            "label": "-Version   [String]",
+            "type": "string",
+            "required": false,
+            "description": "The version to use: 0.4.2 or v0.4.2. Omitted with -Latest picks the newest tag; omitted without it lists what is available and asks.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices toolkit/use-version Version"
+          },
+          {
+            "flag": "Latest",
+            "label": "-Latest   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Use the newest tag on the remote.",
+            "default": ""
+          },
+          {
+            "flag": "PinOnly",
+            "label": "-PinOnly   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Write scripts.version but do not touch the checkout.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 toolkit/use-version -Version ${use-version.args.Version} -Latest ${use-version.args.Latest} -PinOnly ${use-version.args.PinOnly}"
+        ]
+      }
+    }
+  }
+}
