@@ -1,106 +1,367 @@
 <#
-Runs the Airtable -> Cloudinary -> SQL pipeline (fetch_airtable.py, upload_attachments_to_cloudinary.py,
-generate_sql_users_projects.py) against a chosen base. The Airtable token is supplied at the command
-line each run and only ever lives in this process's environment for the fetch step -- it is never
-written to disk, logged, or passed to any step besides fetch_airtable.py.
+.SYNOPSIS
+  Exports an Airtable base into migrations/outputs/<base>/schema.sql + data.sql.
 
-Usage:
-  .\migrate.ps1 --token="patXXXXXXXXXXXXXX"
-  .\migrate.ps1 --token="patXXXXXXXXXXXXXX" --base-id=app8DvnFZErPZT5Az --output-dir=./export_test
-  .\migrate.ps1 --token="patXXXXXXXXXXXXXX" --step=fetch
-  .\migrate.ps1 --step=upload --output-dir=./export_prod          # token not needed past fetch
+.DESCRIPTION
+  Asks which base you want to migrate and whether you want schema, data, or
+  both, then writes everything for that base into one folder:
 
-Options:
-  --token=PAT        Airtable Personal Access Token. Required unless --step skips fetch.
-  --base-id=ID        Airtable base ID. Defaults to the production Users & Projects base
-                       (app8jGTzRDQt4yPIa). The TEST base is app8DvnFZErPZT5Az.
-  --output-dir=DIR    Export directory. Defaults to ./export_prod.
-  --step=STEP         all (default) | fetch | upload | generate
-  --database=NAME      Passed through to generate_sql_users_projects.py. Defaults to test_portal_database.
+      migrations/outputs/users_projects_prod/
+          export/      raw Airtable JSON, downloaded attachments, Cloudinary cache
+          schema.sql   the checked-in sql/<product>/ DDL, assembled into one file
+          data.sql     generated from that export
 
-This script does not touch the database. It stops after writing <output-dir>/data.sql and prints the
-sql-ready import steps for you to run and confirm yourself, since importing runs DROP DATABASE first.
+  Pass -Target and -Produce to skip the prompts.
+
+  Data is pulled live from Airtable (fetch -> Cloudinary upload -> SQL) for the
+  bases that have a generator. Schema is never generated -- it is the checked-in
+  DDL under sql/, copied here so one folder holds everything an import needs.
+
+  The Airtable token only ever lives in this process's environment, for the fetch
+  step alone. It is never written to disk, logged, or passed to another step.
+
+  This script does not touch MySQL. It prints the import commands and stops,
+  because schema.sql runs DROP DATABASE first.
+
+.PARAMETER Target
+  users-projects-prod | users-projects-test | project-estimator |
+  transaction-tracker | custom. Prompted for when omitted.
+
+.PARAMETER Produce
+  both | data | schema. Prompted for when omitted.
+
+.PARAMETER Token
+  Airtable Personal Access Token. Falls back to migrations/.token.private.txt,
+  then to a hidden prompt. Only needed when data is pulled from Airtable.
+
+.PARAMETER BaseId
+.PARAMETER Name
+  -Target custom only: the base to fetch, and the outputs/ folder to write into.
+
+.PARAMETER Database
+  Override the database name that the assembled schema and the generated data
+  target. Defaults to whatever the checked-in schema for that base already uses.
+
+.PARAMETER Step
+  all (default) | fetch | upload | generate -- resume a data pull part-way.
+
+.EXAMPLE
+  .\migrate.ps1
+  .\migrate.ps1 -Target users-projects-prod -Produce both
+  .\migrate.ps1 -Target users-projects-test -Produce data -Step generate
 #>
 
-$Token = $null
-$BaseId = "app8jGTzRDQt4yPIa"
-$OutputDir = "./export_prod"
-$Step = "all"
-$Database = "test_portal_database"
+[CmdletBinding()]
+param(
+    [string]$Target,
+    [string]$Produce,
+    [string]$Token,
+    [string]$BaseId,
+    [string]$Name,
+    [string]$Database,
+    [ValidateSet('all', 'fetch', 'upload', 'generate')]
+    [string]$Step = 'all'
+)
 
-foreach ($arg in $args) {
-    if ($arg -notmatch '^--([^=]+)=(.*)$') {
-        Write-Warning "Ignoring unrecognized argument: $arg"
-        continue
+$ErrorActionPreference = 'Stop'
+$scriptDir = $PSScriptRoot
+$repoRoot = Split-Path -Parent $scriptDir
+
+# Schema is a checked-in file per base, never generated -- SchemaFiles lists what
+# to concatenate. Generator is the script that turns an Airtable export into SQL;
+# DataSnapshot is the checked-in data.sql to fall back on for a base that has no
+# generator yet. Either can be $null: the base is then only partly migratable.
+$targets = @(
+    @{
+        Key          = 'users-projects-prod'
+        Label        = 'Users & Projects -- PRODUCTION (real live data)'
+        Folder       = 'users_projects_prod'
+        BaseId       = 'app8jGTzRDQt4yPIa'
+        Database     = 'test_portal_database'
+        SchemaFiles  = @('sql/portal/schema.sql', 'sql/portal/separate.sql')
+        Generator    = 'generate/generate_sql_users_projects.py'
+        DataSnapshot = $null
+    },
+    @{
+        Key          = 'users-projects-test'
+        Label        = 'Users & Projects -- TEST (sandbox snapshot)'
+        Folder       = 'users_projects_test'
+        BaseId       = 'app8DvnFZErPZT5Az'
+        Database     = 'test_portal_database'
+        SchemaFiles  = @('sql/portal/schema.sql', 'sql/portal/separate.sql')
+        Generator    = 'generate/generate_sql_users_projects.py'
+        DataSnapshot = $null
+    },
+    @{
+        Key          = 'project-estimator'
+        Label        = 'Project Estimator'
+        Folder       = 'project_estimator'
+        BaseId       = 'appgh0Mki2uHDLAQY'
+        Database     = 'test_estimator_database'
+        SchemaFiles  = @('sql/project_estimator/schema.sql')
+        Generator    = $null
+        DataSnapshot = 'sql/project_estimator/data.sql'
+    },
+    @{
+        Key          = 'transaction-tracker'
+        Label        = 'Transaction Tracker'
+        Folder       = 'transaction_tracker'
+        BaseId       = 'appp5MogesHN2eVvG'
+        Database     = 'test_tracker_database'
+        SchemaFiles  = @('sql/transaction_tracker/schema.sql')
+        Generator    = 'generate/generate_sql_transaction_tracker.py'
+        DataSnapshot = $null
+    },
+    @{
+        Key          = 'custom'
+        Label        = 'Custom -- another base ID'
+        Folder       = $null
+        BaseId       = $null
+        Database     = $null
+        SchemaFiles  = @()
+        Generator    = $null
+        DataSnapshot = $null
     }
-    $key = $matches[1]
-    $value = $matches[2]
-    switch ($key) {
-        'token'      { $Token = $value }
-        'base-id'    { $BaseId = $value }
-        'output-dir' { $OutputDir = $value }
-        'step'       { $Step = $value }
-        'database'   { $Database = $value }
-        default      { Write-Warning "Unknown option --$key" }
+)
+
+$produceModes = @(
+    @{ Key = 'both';   Label = 'Schema and data'; Schema = $true;  Data = $true },
+    @{ Key = 'data';   Label = 'Data only';       Schema = $false; Data = $true },
+    @{ Key = 'schema'; Label = 'Schema only';     Schema = $true;  Data = $false }
+)
+
+function Stop-WithMessage {
+    param([string]$Message, [int]$Code = 1)
+
+    Write-Host ''
+    Write-Host $Message -ForegroundColor Red
+    exit $Code
+}
+
+function Read-Choice {
+    param([string]$Title, [string[]]$Options)
+
+    Write-Host ''
+    Write-Host $Title -ForegroundColor Cyan
+    for ($i = 0; $i -lt $Options.Count; $i++) {
+        Write-Host ('  {0}. {1}' -f ($i + 1), $Options[$i])
+    }
+    while ($true) {
+        $answer = Read-Host "Choose 1-$($Options.Count)"
+        $parsed = 0
+        if ([int]::TryParse($answer, [ref]$parsed) -and $parsed -ge 1 -and $parsed -le $Options.Count) {
+            return $parsed - 1
+        }
+        Write-Host "  Enter a number between 1 and $($Options.Count)." -ForegroundColor Yellow
     }
 }
 
-$validSteps = @('all', 'fetch', 'upload', 'generate')
-if ($validSteps -notcontains $Step) {
-    Write-Error "--step must be one of: $($validSteps -join ', ')"
-    exit 1
+function Resolve-Selection {
+    param([string]$Requested, $Choices, [string]$Title, [string]$What)
+
+    if ($Requested) {
+        $match = $Choices | Where-Object { $_.Key -eq $Requested }
+        if (-not $match) {
+            Stop-WithMessage "Unknown $What '$Requested'. Valid: $(($Choices.Key) -join ', ')"
+        }
+        return $match
+    }
+    return $Choices[(Read-Choice -Title $Title -Options ($Choices | ForEach-Object { $_.Label }))]
 }
 
-$needsFetch = $Step -in @('all', 'fetch')
-if ($needsFetch -and -not $Token) {
-    Write-Error "--token is required for step '$Step'. Pass --token=`"patXXXXXXXXXXXXXX`"."
-    exit 1
+function Invoke-Python {
+    param([string]$Label, [string[]]$Arguments)
+
+    Write-Host "==> $Label" -ForegroundColor Cyan
+    python @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        Stop-WithMessage "$Label failed (exit $LASTEXITCODE). Stopping -- nothing after this step ran." $LASTEXITCODE
+    }
 }
+
+function Build-Schema {
+    param($Selected, [string]$OutFile, [string]$DatabaseName)
+
+    $sources = $Selected.SchemaFiles | ForEach-Object { "--   $_" }
+    $header = @"
+-- ============================================================================
+-- $($Selected.Label) -- schema
+--
+-- Assembled by migrations/migrate.ps1 on $(Get-Date -Format 'yyyy-MM-dd HH:mm') from:
+$($sources -join "`n")
+--
+-- Run this before data.sql. It DROPS and recreates ``$DatabaseName``.
+--
+-- sql/*/indexes.sql is deliberately left out: it only retrofits an index onto
+-- databases that predate it, and the schema below already creates that index on
+-- a fresh install -- importing it here would fail with Duplicate key name and
+-- abort everything after it in this file.
+-- ============================================================================
+
+"@
+
+    $body = foreach ($relative in $Selected.SchemaFiles) {
+        $path = Join-Path $repoRoot $relative
+        if (-not (Test-Path $path)) {
+            Stop-WithMessage "Schema source not found: $path"
+        }
+        "-- ---------------------------------------------------------------------------`n" +
+        "-- $relative`n" +
+        "-- ---------------------------------------------------------------------------`n`n" +
+        (Get-Content -Raw -Encoding UTF8 -Path $path) + "`n"
+    }
+
+    $sql = $header + ($body -join "`n")
+
+    # Only rewrite the database name where it is a statement's own identifier, so a
+    # rename can never reach into string data that happens to contain the old name.
+    if ($DatabaseName -ne $Selected.Database) {
+        $old = [regex]::Escape($Selected.Database)
+        $sql = $sql -replace "(?im)^(\s*(?:DROP\s+DATABASE\s+IF\s+EXISTS|CREATE\s+DATABASE(?:\s+IF\s+NOT\s+EXISTS)?|USE)\s+)$old\b", "`${1}$DatabaseName"
+    }
+
+    Set-Content -Path $OutFile -Value $sql -Encoding UTF8 -NoNewline
+    Write-Host "    wrote $OutFile" -ForegroundColor Green
+}
+
+$selected = Resolve-Selection -Requested $Target -Choices $targets `
+    -Title 'What do you want to migrate?' -What 'target'
+$mode = Resolve-Selection -Requested $Produce -Choices $produceModes `
+    -Title 'What do you want out of it?' -What 'produce mode'
+
+if ($selected.Key -eq 'custom') {
+    if (-not $BaseId) { $BaseId = Read-Host 'Airtable base ID (appXXXXXXXXXXXXXX)' }
+    if (-not $Name) { $Name = Read-Host 'Folder name under outputs/' }
+    if (-not $BaseId -or -not $Name) {
+        Stop-WithMessage 'A custom target needs both a base ID and a folder name.'
+    }
+    $selected.BaseId = $BaseId.Trim()
+    $selected.Folder = $Name.Trim()
+}
+
+if (-not $Database) { $Database = $selected.Database }
+$databaseName = $Database
+
+$targetDir = Join-Path (Join-Path $scriptDir 'outputs') $selected.Folder
+$exportDir = Join-Path $targetDir 'export'
+New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+
+Write-Host ''
+Write-Host "Base    : $($selected.Label)" -ForegroundColor White
+Write-Host "Base ID : $($selected.BaseId)"
+Write-Host "Output  : $targetDir"
+if ($databaseName) { Write-Host "Database: $databaseName" }
 
 $python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $python) {
-    Write-Error "python was not found on PATH."
-    exit 1
+if (-not $python -and $mode.Data) {
+    Stop-WithMessage 'python was not found on PATH.'
 }
 
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Push-Location $scriptDir
 try {
-    if ($Step -in @('all', 'fetch')) {
-        Write-Host "==> Fetching base $BaseId into $OutputDir" -ForegroundColor Cyan
-        $env:AIRTABLE_API_KEY = $Token
-        try {
-            python fetch_airtable.py --base-id $BaseId --output-dir $OutputDir
-            if ($LASTEXITCODE -ne 0) { throw "fetch_airtable.py exited with code $LASTEXITCODE" }
-        } finally {
-            Remove-Item Env:\AIRTABLE_API_KEY -ErrorAction SilentlyContinue
+    if ($mode.Data) {
+        if ($selected.Generator) {
+            if ($Step -in @('all', 'fetch')) {
+                if (-not $Token) {
+                    $tokenFile = Join-Path $scriptDir '.token.private.txt'
+                    if (Test-Path $tokenFile) {
+                        $Token = (Get-Content -Raw -Path $tokenFile).Trim()
+                        Write-Host 'Using the token in .token.private.txt.' -ForegroundColor DarkGray
+                    }
+                }
+                if (-not $Token) {
+                    $secure = Read-Host 'Airtable Personal Access Token' -AsSecureString
+                    $Token = [System.Net.NetworkCredential]::new('', $secure).Password
+                }
+                if (-not $Token) {
+                    Stop-WithMessage 'A token is required to fetch from Airtable.'
+                }
+
+                $env:AIRTABLE_API_KEY = $Token
+                try {
+                    Invoke-Python -Label "Fetching $($selected.BaseId) into export/" `
+                        -Arguments @('fetch_airtable.py', '--base-id', $selected.BaseId, '--output-dir', $exportDir)
+                } finally {
+                    Remove-Item Env:\AIRTABLE_API_KEY -ErrorAction SilentlyContinue
+                }
+            }
+
+            if ($Step -in @('all', 'upload')) {
+                Invoke-Python -Label 'Uploading attachments to Cloudinary' `
+                    -Arguments @('upload_attachments_to_cloudinary.py', '--export-dir', $exportDir)
+            }
+
+            if ($Step -in @('all', 'generate')) {
+                Invoke-Python -Label 'Generating data.sql' -Arguments @(
+                    $selected.Generator,
+                    '--export-dir', $exportDir,
+                    '--output', (Join-Path $targetDir 'data.sql'),
+                    '--database', $databaseName,
+                    '--cloudinary-cache', (Join-Path $exportDir 'cloudinary_uploads.json')
+                )
+            }
+        }
+        elseif ($Step -eq 'fetch') {
+            Invoke-Python -Label "Fetching $($selected.BaseId) into export/ (raw export only)" `
+                -Arguments @('fetch_airtable.py', '--base-id', $selected.BaseId, '--output-dir', $exportDir)
+            Write-Host "No generator exists for this base yet, so no data.sql was written." -ForegroundColor Yellow
+            Write-Host "Inspect the export with: python inspect_schema.py --export-dir $exportDir" -ForegroundColor Yellow
+        }
+        elseif ($selected.DataSnapshot) {
+            $snapshot = Join-Path $repoRoot $selected.DataSnapshot
+            Copy-Item -Path $snapshot -Destination (Join-Path $targetDir 'data.sql') -Force
+            Write-Host "==> Copied data.sql from $($selected.DataSnapshot)" -ForegroundColor Cyan
+            Write-Host "    That file is a checked-in snapshot, not a fresh Airtable pull -- this base" -ForegroundColor Yellow
+            Write-Host "    has no generator yet. Re-run with -Step fetch to pull the raw export." -ForegroundColor Yellow
+        }
+        else {
+            Write-Host ''
+            Write-Host "No data.sql was written: this base has neither a generator nor a checked-in" -ForegroundColor Yellow
+            Write-Host "snapshot. Run '.\migrate.ps1 -Target $($selected.Key) -Produce data -Step fetch'" -ForegroundColor Yellow
+            Write-Host "to pull the raw export, then build a schema and a generator for it (NOTE.md" -ForegroundColor Yellow
+            Write-Host "describes this base's tables and the fields worth omitting as computed)." -ForegroundColor Yellow
         }
     }
 
-    if ($Step -in @('all', 'upload')) {
-        Write-Host "==> Uploading attachments to Cloudinary" -ForegroundColor Cyan
-        python upload_attachments_to_cloudinary.py --export-dir $OutputDir
-        if ($LASTEXITCODE -ne 0) { throw "upload_attachments_to_cloudinary.py exited with code $LASTEXITCODE" }
+    if ($mode.Schema) {
+        if ($selected.SchemaFiles.Count -gt 0) {
+            Write-Host '==> Assembling schema.sql' -ForegroundColor Cyan
+            Build-Schema -Selected $selected -OutFile (Join-Path $targetDir 'schema.sql') -DatabaseName $databaseName
+        }
+        else {
+            Write-Host ''
+            Write-Host "No schema.sql was written: no checked-in DDL exists for this base yet." -ForegroundColor Yellow
+        }
     }
-
-    if ($Step -in @('all', 'generate')) {
-        Write-Host "==> Generating SQL" -ForegroundColor Cyan
-        $sqlOut = Join-Path $OutputDir "data.sql"
-        $cache = Join-Path $OutputDir "cloudinary_uploads.json"
-        python generate_sql_users_projects.py --export-dir $OutputDir --output $sqlOut --database $Database --cloudinary-cache $cache
-        if ($LASTEXITCODE -ne 0) { throw "generate_sql_users_projects.py exited with code $LASTEXITCODE" }
-
-        Write-Host ""
-        Write-Host "$OutputDir holds real downloaded files (bank certificates, SSS/PhilHealth/TIN, employee" -ForegroundColor Yellow
-        Write-Host "photos). It matches the migrations/export_*/ gitignore rule -- keep it that way." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "This script does not import into MySQL. Review $sqlOut, then run, in order:" -ForegroundColor Cyan
-        Write-Host "  mysql -u root -pPASSWORD --default-character-set=utf8mb4 < sql/portal/schema.sql"
-        Write-Host "  mysql -u root -pPASSWORD --default-character-set=utf8mb4 < sql/portal/separate.sql"
-        Write-Host "  mysql -u root -pPASSWORD -D $Database --default-character-set=utf8mb4 < sql/portal/indexes.sql"
-        Write-Host "  mysql -u root -pPASSWORD --default-character-set=utf8mb4 < $sqlOut"
-        Write-Host "schema.sql runs DROP DATABASE IF EXISTS $Database first -- confirm that's really what you want."
-    }
-} finally {
+}
+finally {
     Pop-Location
+}
+
+Write-Host ''
+if (Test-Path $exportDir) {
+    Write-Host "$exportDir holds real downloaded files (bank certificates, SSS/PhilHealth/TIN," -ForegroundColor Yellow
+    Write-Host "employee photos). migrations/outputs/ is gitignored -- keep it that way." -ForegroundColor Yellow
+    Write-Host ''
+}
+
+$schemaOut = Join-Path $targetDir 'schema.sql'
+$dataOut = Join-Path $targetDir 'data.sql'
+
+# A base with nothing to migrate yet should not leave an empty folder behind.
+if (-not (Get-ChildItem -Force -Path $targetDir)) {
+    Remove-Item -Path $targetDir
+}
+
+if ((Test-Path $schemaOut) -or (Test-Path $dataOut)) {
+    Write-Host 'This script does not import into MySQL. Review the output, then run, in order:' -ForegroundColor Cyan
+    if (Test-Path $schemaOut) {
+        Write-Host "  mysql -u root -pPASSWORD --default-character-set=utf8mb4 < `"$schemaOut`""
+    }
+    if (Test-Path $dataOut) {
+        Write-Host "  mysql -u root -pPASSWORD --default-character-set=utf8mb4 < `"$dataOut`""
+    }
+    if (Test-Path $schemaOut) {
+        Write-Host "schema.sql runs DROP DATABASE IF EXISTS $databaseName first -- confirm that's really what you want."
+    }
 }

@@ -3,6 +3,7 @@
 use App\Modules\Core\CoreModule;
 use App\Modules\Portal\PortalModule;
 use App\Modules\ProjectEstimator\ProjectEstimatorModule;
+use App\Modules\TransactionTracker\TransactionTrackerModule;
 
 /**
  * Product catalog for the central platform.
@@ -77,6 +78,20 @@ return [
             'password' => env('ESTIMATOR_DB_PASSWORD', env('DB_PASSWORD', '')),
             'enabled' => filter_var(env('ESTIMATOR_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
             'module' => ProjectEstimatorModule::class,
+        ],
+
+        'transaction-tracker' => [
+            'name' => 'Transaction Tracker',
+            'description' => 'Finance tracking: transactions, accounts, budget envelopes, and budget codes.',
+            'connection' => 'transaction_tracker',
+            'driver' => env('TRACKER_DB_DRIVER', 'mysql'),
+            'host' => env('TRACKER_DB_HOST', env('DB_HOST', '127.0.0.1')),
+            'port' => env('TRACKER_DB_PORT', env('DB_PORT', '3306')),
+            'database' => env('TRACKER_DB_DATABASE', 'test_tracker_database'),
+            'username' => env('TRACKER_DB_USERNAME', env('DB_USERNAME', 'root')),
+            'password' => env('TRACKER_DB_PASSWORD', env('DB_PASSWORD', '')),
+            'enabled' => filter_var(env('TRACKER_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+            'module' => TransactionTrackerModule::class,
         ],
 
     ],

@@ -11,7 +11,7 @@ first (e.g. "read MIGRATION_NOTES.md before we continue").
 | Users & Projects (TEST) | `app8DvnFZErPZT5Az` | Snapshot/sandbox version, migrated first |
 | Users & Projects (PRODUCTION) | `app8jGTzRDQt4yPIa` | Same schema/field IDs as TEST (verified identical), real live data, ahead in record counts |
 | Project Estimator | `appgh0Mki2uHDLAQY` | Completely different schema — a separate tool, not a copy of Users & Projects |
-| Transaction Tracker | `appp5MogesHN2eVvG` | **Not yet migrated** — separate finance-tracking base, schema pulled but no schema.sql/data.sql built yet. See dedicated section below. |
+| Transaction Tracker | `appp5MogesHN2eVvG` | Migrated — `sql/transaction_tracker/schema.sql` + `migrations/generate/generate_sql_transaction_tracker.py`. See dedicated section below. |
 
 **Users & Projects TEST vs PRODUCTION share identical table/field IDs** — same
 schema works for both. Project Estimator and Transaction Tracker don't share
@@ -161,10 +161,13 @@ https://airtable.com/create/tokens (`data.records:read` +
 into the claude.ai chat and should be treated as compromised — confirm a
 fresh one was generated and the old one revoked before relying on this.**
 
-## Transaction Tracker — schema pulled, migration not started
+## Transaction Tracker — migrated
 
-Base ID `appp5MogesHN2eVvG`. 5 tables, discovered via `list_tables_for_base`
-but not yet exported with `fetch_airtable.py` or converted to SQL:
+Base ID `appp5MogesHN2eVvG`, database `test_tracker_database`. Exported, and
+verified against a real MySQL 8.0 import: 2 accounts, 6 budget codes, 17
+payor/payee, 29 envelopes, 155 transactions, 14 attachments on real Cloudinary
+URLs, 14 enforced foreign keys, and an amount total matching the source export
+to the cent (4,193,700.25). The 5 tables and the fields worth knowing about:
 
 - **Transactions** (`tblKpuFbcyc6YfmH1`) — Transaction Name, Date, Amount
   (currency), Type (singleSelect), Account (link → Accounts), Envelope
@@ -211,14 +214,16 @@ destination for reimbursement data going forward. Worth checking whether
 the `reimbursements` table already migrated in the other bases, before
 building a schema in isolation.
 
-**Not yet done for this base**: no `fetch_airtable.py` export has been run
-against it, no `transaction_tracker_schema.sql` exists, and no data
-migration has happened. Next step would follow the same pattern used for
-Project Estimator: run `fetch_airtable.py --base-id appp5MogesHN2eVvG`,
-inspect real field names with `inspect_schema.py`, then build the schema +
-data SQL (and a `generate_sql_transaction_tracker.py` following the same
-pattern as the Users & Projects generator, which — unlike this one — is
-already fully implemented for all tables).
+**Two traps the schema documents in place, worth repeating here:** the
+Transactions field "Payor/Payee" is plain text, not a link to the Payor/Payee
+table, and `payor_payee.associated_transactions_text` is the mirror image —
+also plain text. Neither gets a foreign key, and whether that free text is
+meant to resolve to rows by name is still unconfirmed. Separately, Transactions
+links to Accounts through three distinct fields (Account, Transfer Source
+Account, Transfer Destination Account), so there are three junction tables;
+source and destination were both empty at export time.
+
+Run it with `.\migrate.ps1 -Target transaction-tracker -Produce both`.
 
 ## Airtable ↔ SQL sync — design discussion (not yet built)
 

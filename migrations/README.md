@@ -1,130 +1,141 @@
-# Airtable → SQL migration scripts
+# Airtable → SQL migration
 
-Four standalone Python scripts, no Claude/Anthropic dependency — run them
-yourself, on your own schedule, with your own Airtable and Cloudinary
-credentials.
+Run `migrate.ps1`. It asks which base you want and whether you want schema,
+data, or both, then writes everything for that base into one folder.
 
-## Setup
-
-```bash
-pip install requests
-export AIRTABLE_API_KEY="patXXXXXXXXXXXXXX"   # Personal Access Token, see below
-or
-$env:AIRTABLE_API_KEY="patXXXXXXXXXXXXXX"
+```powershell
+.\migrate.ps1
 ```
 
-Create the token at https://airtable.com/create/tokens with:
-- Scopes: `data.records:read`, `schema.bases:read`
-- Access: the specific base(s) you're exporting
+```text
+What do you want to migrate?
+  1. Users & Projects -- PRODUCTION (real live data)
+  2. Users & Projects -- TEST (sandbox snapshot)
+  3. Project Estimator
+  4. Transaction Tracker
+  5. Custom -- another base ID
 
-Uploading attachments to Cloudinary (step 3 below) reuses the same
-`CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` the
-admin app already has in its own `.env` — that script reads them from there
-by default, nothing extra to set up.
-
-## Workflow
-
-### 1. Fetch everything from Airtable
-
-```bash
-python3 fetch_airtable.py --base-id app8DvnFZErPZT5Az --output-dir ./export_test
+What do you want out of it?
+  1. Schema and data
+  2. Data only
+  3. Schema only
 ```
 
-This is fully generic — works for the TEST base, the PRODUCTION base, or
-Project Estimator, just by changing `--base-id`. It:
-- Auto-discovers every table and field via Airtable's Meta API (no hardcoded
-  table list to maintain)
-- Paginates properly (Airtable's real API caps pages at 100 records — this
-  loops using the `offset` cursor until everything's fetched)
-- **Downloads every attachment's actual file bytes immediately**, because
-  Airtable's attachment URLs are signed and expire within a few hours. The
-  `file_url` you'd get from the raw API response is useless by the time you
-  come back to it later — this script saves you from that trap.
-- Self-throttles to Airtable's 5 requests/second limit and retries on 429s
-- Skips already-downloaded files if you re-run it (safe to interrupt/resume)
+Skip the prompts by passing the answers:
 
-Output:
-```
-export_test/
-  _base_schema.json              <- table/field metadata
-  Employees.json
-  Projects.json
-  ... (one file per table)
-  attachments/
-    <record_id>/<field_name>/<original_filename>
-  attachments_manifest.json      <- maps records to local file paths
+```powershell
+.\migrate.ps1 -Target users-projects-prod -Produce both
+.\migrate.ps1 -Target users-projects-test -Produce data -Step generate
 ```
 
-### 2. See what field names you actually have
+## What you get
 
-```bash
-python3 inspect_schema.py --export-dir ./export_test
+One folder per base, holding everything an import needs:
+
+```text
+outputs/
+  users_projects_prod/
+    export/       raw Airtable JSON, downloaded attachments, Cloudinary cache
+    schema.sql    the checked-in sql/portal/ DDL, assembled into one file
+    data.sql      generated from that export
+  users_projects_test/
+    ...
+  project_estimator/
+    ...
 ```
 
-Important: the public Airtable API keys every field by its **display name**,
-not the internal field ID the connector I used internally relied on. Field
-names can be renamed in the Airtable UI at any time, so always check this
-against a fresh export.
+`migrate.ps1` never touches MySQL. It prints the two import commands and stops,
+because `schema.sql` runs `DROP DATABASE` first.
 
-### 3. Upload attachments to Cloudinary
-
-```bash
-python3 upload_attachments_to_cloudinary.py --export-dir ./export_test
+```powershell
+mysql -u root -pPASSWORD --default-character-set=utf8mb4 < outputs/users_projects_prod/schema.sql
+mysql -u root -pPASSWORD --default-character-set=utf8mb4 < outputs/users_projects_prod/data.sql
 ```
 
-Uploads every file `fetch_airtable.py` downloaded and writes
-`export_test/cloudinary_uploads.json`, keyed by Airtable's attachment id
-(stable across re-exports, so re-running this only uploads what's new).
-Reimbursement receipts land in `ikaika-portal/reimbursements` — the same
-folder the live app's `PortalCloudinary` uploads real member receipts to —
-everything else goes to `ikaika-portal/migrated/<table>`.
+To reload the local portal database instead, use `sql/portal/reset.ps1` — that
+one runs the checked-in files directly and does the confirmation for you.
 
-Skip this step if you just want a quick local `data.sql` for testing schema
-changes — step 4 below falls back to local file paths when there's no cache.
-For anything meant to actually run in the app, run this step: the app's own
-attachment-serving code (`PortalCloudinary::isOwnedUrl`) requires a real
-`res.cloudinary.com` URL and will not accept a local path.
+## Schema is copied, data is generated
 
-### 4. Transform into SQL
+**Schema is never generated.** It is the hand-maintained DDL under `sql/`,
+concatenated into a single `schema.sql` so one file does the whole job:
 
-```bash
-python3 generate_sql_users_projects.py --export-dir ./export_test --output data.sql \
-    --cloudinary-cache ./export_test/cloudinary_uploads.json
-```
+| Base | Assembled from |
+| --- | --- |
+| Users & Projects (both) | `sql/portal/schema.sql` + `sql/portal/separate.sql` |
+| Project Estimator | `sql/project_estimator/schema.sql` |
+| Transaction Tracker | `sql/transaction_tracker/schema.sql` |
 
-Loads into `sql/portal/schema.sql`. All 20 tables and every junction table
-are fully implemented, verified against a real export's field names (not
-guessed field IDs). Drop `--cloudinary-cache` to fall back to local file
-paths for a quicker no-upload test run.
+`sql/*/indexes.sql` is deliberately left out. It only retrofits an index onto
+databases that predate it, and the schema already creates that index on a fresh
+install — concatenating it would fail with `Duplicate key name` and abort
+everything after it in the file.
 
-Reimbursement receipts get one special case: the live app
-(`PortalReimbursementRequests::RECEIPT_FIELD`) reads exactly one receipt per
-row under `field_name = 'receipts'`, not the raw Airtable field name — the
-generator matches that instead of writing a generic snake-cased field name
-nothing would ever query.
+**Data is pulled live from Airtable** for the bases that have a generator under
+`generate/` (`fetch` → Cloudinary `upload` → `generate`). Project Estimator is
+the one base with no generator: it falls back to copying the checked-in
+`sql/project_estimator/data.sql` snapshot and says so. Its schema is also the
+one that still uses the Postgres inline `REFERENCES` shorthand, which parses in
+MySQL but creates no constraint — it enforces zero foreign keys. Follow
+`sql/portal/schema.sql` or `sql/transaction_tracker/schema.sql` instead, which
+declare foreign keys as explicit table-level clauses.
 
-## Attachments: real Cloudinary URLs, not base64 or placeholders
+## Credentials
 
-Earlier exports built by hand used a placeholder `'image.png'` filename
-because that work went through a size-limited connector. Now `file_url` in
-the `attachments` table holds either:
-- a real `https://res.cloudinary.com/...` URL, if step 3 ran and the file's
-  Airtable attachment id is in `cloudinary_uploads.json`, or
-- the **local relative path** to the downloaded file (e.g.
-  `attachments/rec123/Photo/headshot.jpg`) as a fallback, if it isn't.
+The Airtable token is read in this order: `-Token`, then
+`migrations/.token.private.txt`, then a hidden prompt. It only ever lives in the
+process environment for the fetch step — never written to disk by this script,
+never logged, never passed to another step.
 
-Never base64, and never the original Airtable URL (those are signed and
-expire within hours). Run step 3 before step 4 for anything that needs to
-actually work in the app — a local path renders as a broken link there.
+Create the token at https://airtable.com/create/tokens with scopes
+`data.records:read` and `schema.bases:read`, and access to the base you are
+exporting.
 
-**Status:** already run end to end against the TEST base's `export_test/`.
-All 186 attachments uploaded (0 failed), and the current `data.sql` in this
-directory was generated with `--cloudinary-cache` — every `file_url` in it
-is a real `res.cloudinary.com` link, verified against a real local MySQL
-import and a join query shaped like `PortalReimbursementRequests`'s own.
+Cloudinary reuses the `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` /
+`CLOUDINARY_API_SECRET` already in `ikaika_admin/.env` — nothing extra to set up.
 
-**Before committing anything:** `export_test/attachments/` holds real
-downloaded files — SSS/PhilHealth/TIN numbers, bank certificates, employee
-photos. Keep that folder (and `export_test/*.json`) out of version control;
-`data.sql` itself only carries Cloudinary URLs and Airtable record data, no
-raw documents.
+`pip install requests` is the only dependency.
+
+## Attachments
+
+Airtable's attachment URLs are signed and expire within hours, so `fetch` downloads
+the real file bytes immediately and `upload` puts them on Cloudinary, caching
+`attachment_id → secure_url` in `export/cloudinary_uploads.json` so re-runs never
+re-upload. `file_url` in the `attachments` table then holds either:
+
+- a real `https://res.cloudinary.com/...` URL, when the upload step ran, or
+- the local relative path under `export/attachments/`, as a fallback.
+
+Never base64, and never the original Airtable URL. A local path renders as a
+broken link in the app — `PortalCloudinary::isOwnedUrl` requires a real
+Cloudinary URL — so run the upload step for anything meant to actually work.
+
+Reimbursement receipts are the one special case: they are written under
+`field_name = 'receipts'` to match `PortalReimbursementRequests::RECEIPT_FIELD`,
+the only attachment field the live app reads, rather than the raw Airtable field
+name nothing would query. They also upload to the app's own
+`ikaika-portal/reimbursements` folder; everything else goes to
+`ikaika-portal/migrated/<table>`.
+
+## `outputs/` is gitignored, and must stay that way
+
+`export/` holds real downloaded documents — bank certificates, SSS/PhilHealth/TIN
+scans, employee photos — and `data.sql` holds real employee records. The
+`migrations/outputs/` rule in `.gitignore` covers all of it. When a generated
+`data.sql` is good enough to keep, promote it by hand to `sql/portal/data.sql`.
+
+## The scripts underneath
+
+`migrate.ps1` orchestrates four standalone Python scripts. Run them directly for
+anything it does not cover:
+
+| Script | Does |
+| --- | --- |
+| `fetch_airtable.py` | Exports any base via `--base-id`. Auto-discovers tables and fields, paginates properly, self-throttles to 5 req/s, downloads attachments, resumable. |
+| `inspect_schema.py` | Prints real field display names from an export's `_base_schema.json`. The public API keys fields by display **name**, which can be renamed in the UI at any time — always check against a fresh export. |
+| `upload_attachments_to_cloudinary.py` | Uploads what `fetch` downloaded, using the same signed-upload scheme as `PortalCloudinary.php`. |
+| `generate/generate_sql_users_projects.py` | Turns a Users & Projects export into SQL matching `sql/portal/schema.sql`. All 20 tables and every junction table are implemented. |
+| `generate/generate_sql_transaction_tracker.py` | Turns a Transaction Tracker export into SQL matching `sql/transaction_tracker/schema.sql`. All 5 tables plus 7 junctions and the shared `attachments` table. |
+
+`NOTE.md` has the base inventory, the known schema bug in
+`projects_activity_scope`, and the Transaction Tracker table breakdown.
