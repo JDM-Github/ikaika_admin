@@ -28,3 +28,10 @@ Thumbs.db
 
 graphify-out/
 msal_test/
+# Airtable migration secrets and raw exports. The token authenticates to the live base, and the
+# exports carry employees' government IDs, bank certificates and receipts -- none of it belongs in
+# history. The generated schema/data SQL under migrations/outputs stays tracked.
+/migrations/.token*
+/migrations/outputs/**/export/
+/migrations/generate/__pycache__/
+*.pyc
