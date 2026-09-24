@@ -5,6 +5,7 @@ namespace App\Support\Portal;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Core\CorePayloadFilter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -62,7 +63,7 @@ final class PortalAudit
         $log->location_source = $locationSource;
         $log->location_lat = $locationLat;
         $log->location_lng = $locationLng;
-        $log->payload = $this->sanitizePayload($payload);
+        $log->payload = CorePayloadFilter::clean($payload);
         $log->created_at = Carbon::now();
         $log->save();
         $this->bumpLogCache();
@@ -250,7 +251,7 @@ final class PortalAudit
         $notification->message = $message;
         $notification->link_path = $linkPath;
         $notification->link_label = $linkLabel === null || trim($linkLabel) === '' ? null : trim($linkLabel);
-        $notification->payload = $this->sanitizePayload($payload);
+        $notification->payload = CorePayloadFilter::clean($payload);
         $notification->read_at = null;
         $notification->created_at = Carbon::now();
         $notification->save();
@@ -265,7 +266,6 @@ final class PortalAudit
      *
      * @param  list<int>  $employeeIds
      * @param  array<string, mixed>  $payload
-     * @return int
      */
     public function notifyEach(
         array $employeeIds,
@@ -300,7 +300,7 @@ final class PortalAudit
             $linkPath = null;
         }
         $linkLabel = $linkLabel === null || trim($linkLabel) === '' ? null : trim($linkLabel);
-        $clean = $this->sanitizePayload($payload);
+        $clean = CorePayloadFilter::clean($payload);
         $createdAt = Carbon::now()->toDateTimeString();
 
         $rows = [];
@@ -353,29 +353,6 @@ final class PortalAudit
     {
         $current = (int) Cache::get(self::NOTIFICATION_CACHE_VERSION_KEY, 1);
         Cache::forever(self::NOTIFICATION_CACHE_VERSION_KEY, $current + 1);
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     * @return array<string, mixed>
-     */
-    private function sanitizePayload(array $payload): array
-    {
-        $blocked = [
-            'password', 'token', 'authorization', 'secret', 'api_key', 'apikey',
-            'access_token', 'refresh_token', 'jwt', 'bank_account_number',
-            'tax_identification_no', 'sss_no', 'philhealth_no', 'hdmf_no',
-        ];
-
-        $clean = [];
-        foreach ($payload as $key => $value) {
-            if (in_array(strtolower((string) $key), $blocked, true)) {
-                continue;
-            }
-            $clean[$key] = $value;
-        }
-
-        return $clean;
     }
 
     private function truncateUserAgent(?string $userAgent): ?string

@@ -26,4 +26,14 @@ class RequestsController extends Controller
 
         return response()->json($this->requests->decide($actor, $request));
     }
+
+    public function storePayoutReceipt(Request $request, int $id): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->requests->uploadPayoutReceipt($actor, $id, $request), 201);
+    }
 }

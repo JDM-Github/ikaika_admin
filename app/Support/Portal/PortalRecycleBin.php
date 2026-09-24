@@ -14,6 +14,9 @@ use Illuminate\Support\Facades\Cache;
  *
  * Restore puts a submitted report back and records an add. The original
  * delete action stays on core.actions.
+ *
+ * Everyone sees their own trash. The "all" view follows the Manage pages: a developer sees every
+ * department, any other admin only their own, and nobody sees an executive's rows but the executive.
  */
 final class PortalRecycleBin
 {
@@ -30,7 +33,7 @@ final class PortalRecycleBin
      */
     public const PAGE_SIZES = [10, 25, 50, 100];
 
-    private const CACHE_VERSION_KEY = 'portal:administration:recycle-bin:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     /**
      * Table column key => SQL columns. Unknown keys fall back to newest first.
@@ -58,7 +61,8 @@ final class PortalRecycleBin
      */
     public function list(Employee $actor, Request $request): array
     {
-        $canViewAll = PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null);
+        $canViewAll = $this->canViewAll($actor, $request);
+        $department = PortalPreview::departmentScope($actor, $request);
         $scope = $this->scope($request, $canViewAll);
         $employeeId = $this->employeeId($request, $canViewAll, $scope);
         $perPage = $this->perPage($request);
@@ -69,7 +73,7 @@ final class PortalRecycleBin
         $type = $this->type($request);
 
         $view = $canViewAll && $scope === self::SCOPE_ALL
-            ? 'all:'.($employeeId ?? 0)
+            ? 'all:'.md5($department ?? '*').':'.($employeeId ?? 0)
             : 'own:'.$actor->getKey();
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         $key = 'portal:administration:recycle-bin:'.$version.':'.$view.':'.($type ?? 'all').':'.$page.':'.$perPage.':'.md5($search).':'.$sort.':'.$dir;
@@ -77,6 +81,7 @@ final class PortalRecycleBin
         return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use (
             $actor,
             $canViewAll,
+            $department,
             $scope,
             $employeeId,
             $perPage,
@@ -86,7 +91,7 @@ final class PortalRecycleBin
             $dir,
             $type,
         ): array {
-            return $this->build($actor, $canViewAll, $scope, $employeeId, $type, $perPage, $page, $search, $sort, $dir);
+            return $this->build($actor, $canViewAll, $department, $scope, $employeeId, $type, $perPage, $page, $search, $sort, $dir);
         });
     }
 
@@ -101,9 +106,9 @@ final class PortalRecycleBin
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function show(Employee $actor, int $id): array
+    public function show(Employee $actor, int $id, Request $request): array
     {
-        $row = $this->itemForActor($actor, $id);
+        $row = $this->itemForActor($actor, $id, $request);
         $employeeId = is_numeric($row->deleted_by) ? (int) $row->deleted_by : 0;
         $names = $this->employeeDirectory($employeeId > 0 ? [$employeeId] : []);
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
@@ -120,21 +125,25 @@ final class PortalRecycleBin
 
     /**
      * One portal recycle row the actor may restore. Members only see their own
-     * `deleted_by`. Admin and Executive may restore anyone's portal row.
+     * `deleted_by`; an admin may also restore rows of the people their department scope covers.
      */
-    public function itemForActor(Employee $actor, int $id): Recycle
+    public function itemForActor(Employee $actor, int $id, Request $request): Recycle
     {
         if ($id <= 0) {
             abort(404, 'That item was not found.');
         }
 
-        $canViewAll = PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null);
+        $canViewAll = $this->canViewAll($actor, $request);
         $query = Recycle::query()
             ->select(PortalRecycleBinPresenter::restoreColumns())
             ->where('product', CoreLedger::PRODUCT_PORTAL)
             ->where('id', $id);
         if (! $canViewAll) {
             $query->where('deleted_by', (int) $actor->getKey());
+        } else {
+            $query->where(fn (Builder $inner) => $inner
+                ->where('deleted_by', (int) $actor->getKey())
+                ->orWhere(fn (Builder $managed) => $this->applyDepartment($managed, PortalPreview::departmentScope($actor, $request))));
         }
 
         $row = $query->first();
@@ -160,6 +169,7 @@ final class PortalRecycleBin
     private function build(
         Employee $actor,
         bool $canViewAll,
+        ?string $department,
         string $scope,
         ?int $employeeId,
         ?string $type,
@@ -169,7 +179,7 @@ final class PortalRecycleBin
         string $sort,
         string $dir,
     ): array {
-        $scoped = $this->scopedQuery($actor, $canViewAll, $scope, $employeeId, $type);
+        $scoped = $this->scopedQuery($actor, $canViewAll, $department, $scope, $employeeId, $type);
         $totalInBin = (clone $scoped)->toBase()->count();
 
         $this->applySearch($scoped, $search, $canViewAll);
@@ -184,7 +194,7 @@ final class PortalRecycleBin
             }
         }
 
-        $filterIds = $canViewAll ? $this->deletedByIds() : [];
+        $filterIds = $canViewAll ? $this->deletedByIds($department) : [];
         $names = $this->employeeDirectory(array_values(array_unique([...$pageEmployeeIds, ...$filterIds])));
 
         $rows = [];
@@ -229,7 +239,7 @@ final class PortalRecycleBin
         ];
     }
 
-    private function scopedQuery(Employee $actor, bool $canViewAll, string $scope, ?int $employeeId, ?string $type): Builder
+    private function scopedQuery(Employee $actor, bool $canViewAll, ?string $department, string $scope, ?int $employeeId, ?string $type): Builder
     {
         $query = Recycle::query()
             ->select(PortalRecycleBinPresenter::listColumns())
@@ -243,11 +253,44 @@ final class PortalRecycleBin
             return $query;
         }
 
+        $this->applyDepartment($query, $department);
         if ($employeeId !== null) {
             $query->where('deleted_by', $employeeId);
         }
 
         return $query;
+    }
+
+    // A developer counts as an admin whatever their role, until they preview below developer.
+    private function canViewAll(Employee $actor, Request $request): bool
+    {
+        return PortalPreview::actsAsDeveloper($actor, $request)
+            || PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null);
+    }
+
+    /**
+     * Limits rows to people the department scope covers. With no scope (a developer) every row
+     * shows except an executive's, including rows whose deleter matches no employee.
+     */
+    private function applyDepartment(Builder $query, ?string $department): void
+    {
+        $employees = Employee::query()->get(['id', 'department', 'role', 'role_level']);
+        if ($department === null) {
+            $executives = $employees
+                ->filter(fn (Employee $employee): bool => PortalRole::isExecutive($employee->role, $employee->role_level))
+                ->map(fn (Employee $employee): int => (int) $employee->getKey())
+                ->values()
+                ->all();
+            $query->where(fn (Builder $inner) => $inner->whereNull('deleted_by')->orWhereNotIn('deleted_by', $executives));
+
+            return;
+        }
+
+        $query->whereIn('deleted_by', $employees
+            ->filter(fn (Employee $employee): bool => PortalPreview::inScope($department, $employee))
+            ->map(fn (Employee $employee): int => (int) $employee->getKey())
+            ->values()
+            ->all());
     }
 
     private function applyType(Builder $query, ?string $type): void
@@ -316,11 +359,13 @@ final class PortalRecycleBin
     /**
      * @return list<int>
      */
-    private function deletedByIds(): array
+    private function deletedByIds(?string $department): array
     {
-        return Recycle::query()
+        $query = Recycle::query()->where('product', CoreLedger::PRODUCT_PORTAL);
+        $this->applyDepartment($query, $department);
+
+        return $query
             ->toBase()
-            ->where('product', CoreLedger::PRODUCT_PORTAL)
             ->whereNotNull('deleted_by')
             ->distinct()
             ->orderBy('deleted_by')

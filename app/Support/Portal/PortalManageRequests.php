@@ -4,6 +4,7 @@ namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\UserReport;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -24,15 +25,17 @@ final class PortalManageRequests
 
     private const MAX_AHEAD_MONTHS = 12;
 
-    private const CACHE_VERSION_KEY = 'portal:manage:requests:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     public function __construct(
+        private readonly CoreLedger $ledger,
         private readonly PortalTimezone $timezone,
         private readonly PortalAudit $audit,
         private readonly PortalLeaveRequests $leave,
         private readonly PortalOvertimeRequests $overtime,
         private readonly PortalOffsetRequests $offset,
         private readonly PortalReimbursementRequests $reimbursements,
+        private readonly PortalSubmittedReports $reports,
     ) {}
 
     /**
@@ -44,29 +47,85 @@ final class PortalManageRequests
      *     overtime: list<array<string, mixed>>,
      *     offset: list<array<string, mixed>>,
      *     reimbursements: list<array<string, mixed>>,
+     *     flaggedReports: list<array<string, mixed>>,
      *     range: array{from: string, to: string}
      * }
      */
     public function list(Request $request): array
     {
         [$from, $to] = $this->dateRange($request);
+        $scope = $this->departmentScope($request->attributes->get('portalEmployee'), $request);
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:manage:requests:'.$version.':'.$from.':'.$to;
+        // The scope is part of the key, so one department's queue is never served to another.
+        $key = 'portal:manage:requests:'.$version.':'.$from.':'.$to.':'.md5($scope ?? '*');
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($from, $to): array {
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($from, $to, $scope): array {
             [$data, $leave, $overtime, $offset] = $this->requestLists($from, $to);
+            $employees = $this->employeesByName();
 
             return [
                 'section' => 'manage',
                 'resource' => 'requests',
-                'data' => $data,
-                'leave' => $leave,
-                'overtime' => $overtime,
-                'offset' => $offset,
-                'reimbursements' => $this->claims($from, $to),
+                'data' => $this->scoped($data, $scope, $employees),
+                'leave' => $this->scoped($leave, $scope, $employees),
+                'overtime' => $this->scoped($overtime, $scope, $employees),
+                'offset' => $this->scoped($offset, $scope, $employees),
+                'reimbursements' => $this->scoped($this->claims($from, $to), $scope, $employees),
+                'flaggedReports' => $this->scoped($this->reports->flaggedReports($from, $to), $scope, $employees),
                 'range' => ['from' => $from, 'to' => $to],
             ];
         });
+    }
+
+    private function departmentScope(mixed $actor, Request $request): ?string
+    {
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return PortalPreview::departmentScope($actor, $request);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     * @param  array<string, Employee>  $employees
+     * @return list<array<string, mixed>>
+     */
+    private function scoped(array $rows, ?string $scope, array $employees): array
+    {
+        // A row whose member matches no employee has no department, so only a developer sees it.
+        return array_values(array_filter($rows, static function (array $row) use ($scope, $employees): bool {
+            $name = strtolower(trim((string) ($row['memberName'] ?? '')));
+
+            return PortalPreview::inScope($scope, $employees[$name] ?? null);
+        }));
+    }
+
+    /**
+     * Composed member name to employee, keyed the way employeeNamed() matches a request's owner.
+     *
+     * @return array<string, Employee>
+     */
+    private function employeesByName(): array
+    {
+        $map = [];
+        foreach (Employee::query()->get(['first_name', 'last_name', 'department', 'role', 'role_level']) as $employee) {
+            $name = strtolower(trim(trim((string) $employee->first_name).' '.trim((string) $employee->last_name)));
+            $map[$name] = $employee;
+        }
+
+        return $map;
+    }
+
+    /**
+     * Decisions obey the same scope as the list: a row outside it answers "not on the queue"
+     * rather than revealing that it exists in another department.
+     */
+    private function assertInScope(?string $scope, ?Employee $owner, string $notFound): void
+    {
+        if (! PortalPreview::inScope($scope, $owner)) {
+            abort(404, $notFound);
+        }
     }
 
     /**
@@ -77,15 +136,16 @@ final class PortalManageRequests
         $validated = $request->validate([
             'changes' => ['required', 'array', 'min:1', 'max:50'],
             'changes.*.id' => ['required', 'string', 'max:32'],
-            'changes.*.kind' => ['required', 'in:leave,overtime,holiday-work,offset,reimbursement'],
+            'changes.*.kind' => ['required', 'in:leave,overtime,holiday-work,offset,reimbursement,flag'],
             'changes.*.status' => ['required', 'in:pending,approved,rejected'],
             'changes.*.approverRemarks' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        $saved = $this->connection()->transaction(function () use ($validated, $actor, $request): int {
+        $scope = $this->departmentScope($actor, $request);
+        $saved = $this->ledger->within($this->connection(), function () use ($validated, $actor, $scope, $request): int {
             $count = 0;
             foreach ($validated['changes'] as $change) {
-                $this->notifyOwnerOfDecision($actor, $this->applyChange($change), $request);
+                $this->notifyOwnerOfDecision($actor, $this->applyChange($actor, $scope, $change), $request);
                 $count++;
             }
 
@@ -107,6 +167,7 @@ final class PortalManageRequests
         $this->overtime->bumpCache();
         $this->offset->bumpCache();
         $this->reimbursements->bumpCache();
+        $this->reports->bumpCache();
 
         return [
             'section' => 'manage',
@@ -122,10 +183,32 @@ final class PortalManageRequests
     }
 
     /**
+     * The payout proof an admin attaches once a reimbursement line item is approved -- the
+     * company's evidence it paid that item back, distinct from the employee's own purchase
+     * receipt. Delegates the actual attachments-table write to PortalReimbursementRequests,
+     * which already owns that table, and bumps this class's own cache so the queue reflects
+     * it immediately rather than waiting out the TTL.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function uploadPayoutReceipt(Employee $actor, int $itemId, Request $request): array
+    {
+        $this->assertInScope($this->departmentScope($actor, $request), $this->claimOwner($itemId), 'That reimbursement is not on the queue.');
+        $fields = $this->reimbursements->writePayoutReceipt($actor, $itemId, $request);
+        $this->bumpCache();
+
+        return [
+            'section' => 'manage',
+            'resource' => 'requests',
+            'data' => $fields,
+        ];
+    }
+
+    /**
      * @param  array{id: string, kind: string, status: string, approverRemarks?: string|null}  $change
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyChange(array $change): array
+    private function applyChange(Employee $actor, ?string $scope, array $change): array
     {
         $id = (int) $change['id'];
         if ($id < 1 || (string) $id !== $change['id']) {
@@ -136,10 +219,13 @@ final class PortalManageRequests
         $remarks = $this->text($change['approverRemarks'] ?? null);
 
         if ($change['kind'] === 'reimbursement') {
-            return $this->applyClaim($id, $status, $remarks, $change['status']);
+            return $this->applyClaim($actor, $scope, $id, $status, $remarks, $change['status']);
+        }
+        if ($change['kind'] === 'flag') {
+            return $this->applyFlaggedReport($actor, $scope, $id, $status, $remarks, $change['status']);
         }
 
-        return $this->applyQueuedRequest($id, $change['kind'], $status, $remarks, $change['status']);
+        return $this->applyQueuedRequest($actor, $scope, $id, $change['kind'], $status, $remarks, $change['status']);
     }
 
     /**
@@ -194,7 +280,7 @@ final class PortalManageRequests
     /**
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyQueuedRequest(int $id, string $kind, string $status, ?string $remarks, string $apiStatus): array
+    private function applyQueuedRequest(Employee $actor, ?string $scope, int $id, string $kind, string $status, ?string $remarks, string $apiStatus): array
     {
         $row = $this->connection()
             ->table('requests')
@@ -221,6 +307,9 @@ final class PortalManageRequests
             abort(422, 'That request is not that kind.');
         }
 
+        $owner = $this->employeeNamed($this->text($row->name ?? null));
+        $this->assertInScope($scope, $owner, 'That request is not on the queue.');
+
         $this->connection()->table('requests')->where('id', $id)->update([
             'status' => $status,
             'approver_remarks' => $remarks,
@@ -230,8 +319,15 @@ final class PortalManageRequests
             ?? $this->calendarDate($row->original_work_day ?? null)
             ?? '';
 
+        $this->recordDecision($actor, $kind, $id, [
+            'id' => (string) $id,
+            'requestedFor' => $date,
+            'status' => $status,
+            'approverRemarks' => $remarks,
+        ]);
+
         return [
-            'owner' => $this->employeeNamed($this->text($row->name ?? null)),
+            'owner' => $owner,
             'kind' => $kind,
             'date' => $date,
             'recordId' => (string) $id,
@@ -242,7 +338,7 @@ final class PortalManageRequests
     /**
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyClaim(int $id, string $status, ?string $remarks, string $apiStatus): array
+    private function applyClaim(Employee $actor, ?string $scope, int $id, string $status, ?string $remarks, string $apiStatus): array
     {
         $seed = $this->connection()
             ->table('reimbursements')
@@ -253,42 +349,145 @@ final class PortalManageRequests
             abort(404, 'That reimbursement is not on the queue.');
         }
 
-        $query = $this->connection()
+        $owner = $this->claimOwner($id);
+        $this->assertInScope($scope, $owner, 'That reimbursement is not on the queue.');
+
+        /*
+         * One line item, not the whole claim. Every reimbursements row carries its own status and
+         * approver_remarks, and a claim of three items is three costs an approver settles one at a
+         * time -- deciding one of them used to rewrite its siblings, which is a decision nobody made.
+         */
+        // Existence is proven above; update() counts CHANGED rows, so a repeat decision reads 0.
+        $this->connection()
             ->table('reimbursements')
-            ->where('date_created', $seed->date_created);
-        $name = $this->text($seed->employee_name_input ?? null);
-        if ($name === null) {
-            $query->where(function ($inner): void {
-                $inner->whereNull('employee_name_input')->orWhere('employee_name_input', '');
-            });
-        } else {
-            $query->where('employee_name_input', $seed->employee_name_input);
-        }
+            ->where('id', $id)
+            ->update([
+                'status' => $status,
+                'approver_remarks' => $remarks,
+            ]);
 
-        $updated = $query->update([
+        $this->recordDecision($actor, 'reimbursement', $id, [
+            'id' => (string) $id,
+            'requestedFor' => $this->calendarDate($seed->reimb_date ?? null),
             'status' => $status,
-            'approver_remarks' => $remarks,
+            'approverRemarks' => $remarks,
         ]);
-        if ($updated === 0) {
-            abort(404, 'That reimbursement is not on the queue.');
-        }
-
-        $linkedId = $this->connection()
-            ->table('employees_reimbursements')
-            ->where('reimbursement_id', $id)
-            ->value('employee_id');
-        $owner = is_numeric($linkedId) ? Employee::query()->find((int) $linkedId) : null;
-        if (! $owner instanceof Employee) {
-            $owner = $this->employeeNamed($name);
-        }
 
         return [
-            'owner' => $owner instanceof Employee ? $owner : null,
+            'owner' => $owner,
             'kind' => 'reimbursement',
             'date' => $this->calendarDate($seed->reimb_date ?? null) ?? '',
             'recordId' => (string) $id,
             'status' => $apiStatus,
         ];
+    }
+
+    /**
+     * $id is the lowest user_reports.id in the flagged group -- the same "name a multi-row group by
+     * its lowest row id" convention applyClaim's own id already relies on. Every row filed in the
+     * same batch (PortalSubmittedReports::create()) shares the decision: flag_status and
+     * flag_remarks move together, the way they were set together. is_flag itself is never touched
+     * here -- it stays the permanent record that this report was filed on a warning.
+     *
+     * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
+     */
+    private function applyFlaggedReport(Employee $actor, ?string $scope, int $id, string $status, ?string $remarks, string $apiStatus): array
+    {
+        $seed = $this->connection()
+            ->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('user_reports.id', $id)
+            ->where('employees_user_reports.is_flag', 1)
+            ->select([
+                'user_reports.report_date',
+                'user_reports.late_submission',
+                'employees_user_reports.employee_id',
+            ])
+            ->first();
+        if ($seed === null) {
+            abort(404, 'That flagged report is not on the queue.');
+        }
+
+        $employeeId = (int) $seed->employee_id;
+        $owner = Employee::query()->find($employeeId);
+        $this->assertInScope($scope, $owner instanceof Employee ? $owner : null, 'That flagged report is not on the queue.');
+        $kind = PortalSubmittedReportPresenter::kind($seed->late_submission ?? null);
+
+        $siblings = $this->connection()
+            ->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $employeeId)
+            ->where('user_reports.report_date', $seed->report_date)
+            ->select(['user_reports.id', 'user_reports.late_submission'])
+            ->get();
+
+        $groupIds = [];
+        foreach ($siblings as $sibling) {
+            if (PortalSubmittedReportPresenter::kind($sibling->late_submission ?? null) === $kind) {
+                $groupIds[] = (int) $sibling->id;
+            }
+        }
+
+        $this->connection()
+            ->table('employees_user_reports')
+            ->where('employee_id', $employeeId)
+            ->whereIn('user_report_id', $groupIds)
+            ->update([
+                'flag_status' => $status,
+                'flag_remarks' => $remarks,
+            ]);
+
+        // One decision covers every line of the group, so the sync needs each line's id.
+        $this->recordDecision($actor, 'flag', $id, [
+            'id' => (string) $id,
+            'employeeId' => $employeeId,
+            'userReportIds' => $groupIds,
+            'reportedOn' => $this->calendarDate($seed->report_date ?? null),
+            'flagStatus' => $status,
+            'flagRemarks' => $remarks,
+        ]);
+
+        return [
+            'owner' => $owner instanceof Employee ? $owner : null,
+            'kind' => 'flag',
+            'date' => $this->calendarDate($seed->report_date ?? null) ?? '',
+            'recordId' => (string) $id,
+            'status' => $apiStatus,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $parameters
+     */
+    private function recordDecision(Employee $actor, string $kind, int $id, array $parameters): void
+    {
+        $this->ledger->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            $kind === 'flag' ? 'portal.user_reports' : 'portal.requests',
+            $parameters,
+            $this->resourceForKind($kind),
+            (string) $id,
+            null,
+            (int) $actor->getKey(),
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
+    }
+
+    // The employee a claim line belongs to: the junction link when it exists, else the typed name.
+    private function claimOwner(int $id): ?Employee
+    {
+        $linkedId = $this->connection()
+            ->table('employees_reimbursements')
+            ->where('reimbursement_id', $id)
+            ->value('employee_id');
+        $owner = is_numeric($linkedId) ? Employee::query()->find((int) $linkedId) : null;
+        if ($owner instanceof Employee) {
+            return $owner;
+        }
+
+        $name = $this->connection()->table('reimbursements')->where('id', $id)->value('employee_name_input');
+
+        return $this->employeeNamed(is_string($name) ? $name : null);
     }
 
     private function employeeNamed(?string $name): ?Employee
@@ -313,6 +512,7 @@ final class PortalManageRequests
             'overtime' => 'overtime request',
             'holiday-work' => 'holiday work request',
             'offset' => 'offset request',
+            'flag' => 'flagged report',
             default => 'reimbursement request',
         };
     }
@@ -323,6 +523,7 @@ final class PortalManageRequests
             'leave' => 'requests.leave',
             'overtime', 'holiday-work' => 'requests.overtime',
             'offset' => 'requests.offset',
+            'flag' => 'reports.flagged',
             default => 'requests.reimbursement',
         };
     }
@@ -555,6 +756,10 @@ final class PortalManageRequests
             ->orderByDesc('reimbursements.id')
             ->get();
 
+        $ids = $rows->map(static fn (object $row): int => (int) $row->id)->all();
+        $receiptFields = $this->reimbursements->receiptFieldsByItemId($ids);
+        $payoutFields = $this->reimbursements->payoutReceiptFieldsByItemId($ids);
+
         $groups = [];
         foreach ($rows as $row) {
             $groups[$this->claimKey($row)][] = $row;
@@ -562,7 +767,7 @@ final class PortalManageRequests
 
         $data = [];
         foreach ($groups as $group) {
-            $claim = $this->presentClaim($group);
+            $claim = $this->presentClaim($group, $receiptFields, $payoutFields);
             if ($claim !== null) {
                 $data[] = $claim;
             }
@@ -573,9 +778,11 @@ final class PortalManageRequests
 
     /**
      * @param  list<object>  $rows
+     * @param  array<int, array{receiptName: ?string, receiptUrl: ?string, receiptMime: ?string, receiptThumbUrl: ?string}>  $receiptFields
+     * @param  array<int, array{payoutReceiptName: ?string, payoutReceiptUrl: ?string, payoutReceiptMime: ?string, payoutReceiptThumbUrl: ?string}>  $payoutFields
      * @return array<string, mixed>|null
      */
-    private function presentClaim(array $rows): ?array
+    private function presentClaim(array $rows, array $receiptFields, array $payoutFields): ?array
     {
         if ($rows === []) {
             return null;
@@ -588,9 +795,14 @@ final class PortalManageRequests
         $ids = [];
         $items = [];
         $approverRemarks = null;
+        $statuses = [];
         foreach ($rows as $row) {
             $itemId = (int) $row->id;
             $ids[] = $itemId;
+            $receipt = $receiptFields[$itemId] ?? null;
+            $payoutField = $payoutFields[$itemId] ?? null;
+            $itemStatus = $this->claimStatus($row->status ?? null);
+            $statuses[] = $itemStatus;
             $items[] = [
                 'id' => (string) $itemId,
                 'label' => $this->text($row->item ?? null) ?? 'Item',
@@ -598,10 +810,16 @@ final class PortalManageRequests
                 'quantity' => $this->quantity($row->qty ?? null),
                 'teamLabel' => $this->text($row->team ?? null),
                 'purpose' => $this->text($row->purpose ?? null),
-                'receiptName' => null,
-                'receiptUrl' => null,
-                'receiptMime' => null,
-                'receiptThumbUrl' => null,
+                'status' => $itemStatus,
+                'approverRemarks' => $this->text($row->approver_remarks ?? null),
+                'receiptName' => $receipt['receiptName'] ?? null,
+                'receiptUrl' => $receipt['receiptUrl'] ?? null,
+                'receiptMime' => $receipt['receiptMime'] ?? null,
+                'receiptThumbUrl' => $receipt['receiptThumbUrl'] ?? null,
+                'payoutReceiptName' => $payoutField['payoutReceiptName'] ?? null,
+                'payoutReceiptUrl' => $payoutField['payoutReceiptUrl'] ?? null,
+                'payoutReceiptMime' => $payoutField['payoutReceiptMime'] ?? null,
+                'payoutReceiptThumbUrl' => $payoutField['payoutReceiptThumbUrl'] ?? null,
             ];
             if ($approverRemarks === null) {
                 $approverRemarks = $this->text($row->approver_remarks ?? null);
@@ -623,18 +841,22 @@ final class PortalManageRequests
             ),
             'memberName' => $memberName,
             'submittedOn' => $submittedOn,
-            'status' => $this->claimStatus($first->status ?? null),
+            'status' => PortalReimbursementRequests::rolledUpStatus($statuses),
             'approverRemarks' => $approverRemarks,
             'items' => $items,
         ];
     }
 
+    /*
+     * Status is deliberately not part of the key. It is the line's own now, so keying on it would
+     * split one application into a separate claim per decision the moment its items disagree.
+     */
     private function claimKey(object $row): string
     {
         $employeeId = (int) ($row->employee_id ?? 0);
         $name = strtolower(trim((string) ($row->employee_name_input ?? '')));
 
-        return $employeeId.'|'.$name.'|'.$this->createdStamp($row->date_created ?? null).'|'.strtolower(trim((string) ($row->status ?? '')));
+        return $employeeId.'|'.$name.'|'.$this->createdStamp($row->date_created ?? null);
     }
 
     private function createdStamp(mixed $value): string

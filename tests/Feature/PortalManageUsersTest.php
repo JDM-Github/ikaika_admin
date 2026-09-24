@@ -3,9 +3,11 @@
 namespace Tests\Feature;
 
 use App\Mail\PortalAccessAlertMail;
+use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalAccessDenied;
 use App\Support\Portal\PortalManageUserPresenter;
 use App\Support\Portal\PortalRole;
@@ -21,7 +23,7 @@ class PortalManageUsersTest extends TestCase
     /**
      * @var list<string>
      */
-    protected array $connectionsToTransact = ['portal'];
+    protected array $connectionsToTransact = ['portal', 'core'];
 
     protected function setUp(): void
     {
@@ -69,6 +71,33 @@ class PortalManageUsersTest extends TestCase
         $this->assertGreaterThan(0, $response->json('counts.total'));
         $this->assertSame(25, $response->json('meta.per_page'));
         $this->assertSame(1, $response->json('meta.current_page'));
+    }
+
+    // The filter narrows the rows and the tiles together, and offers every department once.
+    public function test_the_roster_filters_by_department(): void
+    {
+        $member = $this->promotableMember();
+        $member->forceFill(['department' => ' mis '])->save();
+        $token = $this->tokenForAdmin();
+
+        $response = $this->withToken($token)
+            ->getJson('/api/development/portal/manage/users?per_page=100&department=MIS')
+            ->assertOk();
+
+        $departments = collect($response->json('data'))
+            ->map(fn (array $row): string => strtolower(trim((string) ($row['department'] ?? ''))))
+            ->unique()
+            ->values()
+            ->all();
+        $this->assertSame(['mis'], $departments);
+        $this->assertContains($member->id, $response->json('data.*.id'));
+        $this->assertSame(count($response->json('data')), $response->json('counts.total'));
+        $offered = $response->json('departments');
+        $this->assertIsArray($offered);
+        $this->assertSame(1, collect($offered)->filter(fn (string $name): bool => strtolower($name) === 'mis')->count());
+
+        $all = $this->withToken($token)->getJson('/api/development/portal/manage/users?per_page=100')->assertOk();
+        $this->assertGreaterThan($response->json('counts.total'), $all->json('counts.total'));
     }
 
     public function test_the_roster_uses_allow_listed_page_sizes(): void
@@ -173,6 +202,19 @@ class PortalManageUsersTest extends TestCase
             ->assertJsonPath('data.is_admin', true);
 
         $this->assertSame(PortalRole::ADMIN, $member->fresh()?->role);
+
+        // Same target and shape as a grid edit of the column, so both screens sync alike.
+        $action = Action::query()
+            ->where('resource', 'employees')
+            ->where('action_type', CoreActionType::EDIT)
+            ->where('record_id', (string) $member->id)
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($action);
+        $this->assertSame('portal.employees', $action->database_target);
+        $this->assertSame((string) $admin->id_no, (string) $action->actor_id_no);
+        $this->assertSame(['role' => PortalRole::ADMIN], $action->parameters['parameters']['fields']);
+        $this->assertSame($previousRole, $action->parameters['parameters']['changes']['role']['from']);
 
         $memberName = trim(trim((string) $member->first_name).' '.trim((string) $member->last_name));
         $adminName = trim(trim((string) $admin->first_name).' '.trim((string) $admin->last_name));

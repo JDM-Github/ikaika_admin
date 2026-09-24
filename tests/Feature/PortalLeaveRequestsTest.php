@@ -96,6 +96,81 @@ class PortalLeaveRequestsTest extends TestCase
         $this->assertGreaterThan(0, $managerInbox);
     }
 
+    public function test_a_range_over_a_weekend_files_only_the_weekdays(): void
+    {
+        $actor = $this->activeMember();
+        $token = $this->loginToken($actor);
+        $friday = Carbon::parse($this->freeDate($actor, 3))->next(Carbon::FRIDAY);
+        $tuesday = $friday->copy()->addDays(4);
+
+        $response = $this->withToken($token)->postJson('/api/development/portal/requests/leave', [
+            'leaveType' => '01 Vacation Leave',
+            'startDate' => $friday->toDateString(),
+            'endDate' => $tuesday->toDateString(),
+            'reason' => 'Long weekend',
+        ])->assertCreated();
+
+        // Friday, Monday, Tuesday: the Saturday and Sunday in between are not working days.
+        $this->assertSame([
+            $friday->toDateString(),
+            $friday->copy()->addDays(3)->toDateString(),
+            $tuesday->toDateString(),
+        ], $response->json('data.*.requestedOn'));
+    }
+
+    public function test_a_range_of_only_weekend_days_is_refused(): void
+    {
+        $actor = $this->activeMember();
+        $token = $this->loginToken($actor);
+        $saturday = Carbon::today()->addDays(7)->next(Carbon::SATURDAY);
+
+        $this->withToken($token)->postJson('/api/development/portal/requests/leave', [
+            'leaveType' => '01 Vacation Leave',
+            'startDate' => $saturday->toDateString(),
+            'endDate' => $saturday->copy()->addDay()->toDateString(),
+            'reason' => 'Weekend',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'That range has no working days to take as leave.');
+    }
+
+    public function test_a_leave_day_cannot_be_moved_onto_a_weekend(): void
+    {
+        $actor = $this->activeMember();
+        $date = $this->freeDate($actor, 3);
+        $id = $this->insertLeave($actor, $date, 'Pending');
+        Cache::flush();
+        $saturday = Carbon::parse($date)->next(Carbon::SATURDAY)->toDateString();
+
+        $this->withToken($this->loginToken($actor))
+            ->patchJson('/api/development/portal/requests/leave/'.$id, [
+                'leaveType' => '01 Vacation Leave',
+                'requestDate' => $saturday,
+                'reason' => 'Moved',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Leave is taken on working days; that day is a weekend.');
+    }
+
+    // A day filed on a weekend before the weekday rule existed can still have its reason fixed.
+    public function test_a_leave_already_on_a_weekend_stays_editable_in_place(): void
+    {
+        $actor = $this->activeMember();
+        $saturday = Carbon::parse($this->freeDate($actor, 3))->next(Carbon::SATURDAY)->toDateString();
+        $id = $this->insertLeave($actor, $saturday, 'Pending');
+        Cache::flush();
+
+        $this->withToken($this->loginToken($actor))
+            ->patchJson('/api/development/portal/requests/leave/'.$id, [
+                'leaveType' => '01 Vacation Leave',
+                'requestDate' => $saturday,
+                'reason' => 'Corrected reason',
+            ])
+            ->assertOk();
+
+        $this->assertSame('Corrected reason', DB::connection('portal')->table('requests')->where('id', $id)->value('reason'));
+    }
+
     public function test_one_day_is_a_range_of_one(): void
     {
         $actor = $this->activeMember();
@@ -352,6 +427,21 @@ class PortalLeaveRequestsTest extends TestCase
         $this->assertSame($date, $log->payload['requestedFor']);
         $this->assertSame('Cancelled', $log->payload['status']);
 
+        // The ledger edit carries the same fields filing does, so a sync never blanks them.
+        $action = Action::query()
+            ->where('resource', 'requests.leave')
+            ->where('action_type', CoreActionType::EDIT)
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($action);
+        $this->assertEquals([
+            'id' => (string) $id,
+            'requestedFor' => $date,
+            'leaveType' => '01 Vacation Leave',
+            'reason' => 'existing leave',
+            'status' => 'Cancelled',
+        ], $action->parameters['parameters']);
+
         $this->assertGreaterThan(0, PortalNotification::query()
             ->where('type', 'requests.leave.cancelled')
             ->where('actor_id', $actor->getKey())
@@ -433,6 +523,12 @@ class PortalLeaveRequestsTest extends TestCase
     {
         $name = $this->memberName($actor);
         for ($offset = $daysAhead; $offset < $daysAhead + 200; $offset++) {
+            // Three consecutive weekdays, so a range test gets one row per day it asked for.
+            if (Carbon::today()->addDays($offset)->isWeekend()
+                || Carbon::today()->addDays($offset + 1)->isWeekend()
+                || Carbon::today()->addDays($offset + 2)->isWeekend()) {
+                continue;
+            }
             $candidate = Carbon::today()->addDays($offset)->toDateString();
             $end = Carbon::today()->addDays($offset + 2)->toDateString();
             $reported = DB::connection('portal')->table('user_reports')

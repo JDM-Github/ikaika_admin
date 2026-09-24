@@ -18,7 +18,7 @@ final class PortalHome
 {
     public const CACHE_TTL_SECONDS = 30;
 
-    public const CACHE_VERSION_KEY = 'portal:home:version';
+    public const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const RECENT_REPORT_LIMIT = 5;
 

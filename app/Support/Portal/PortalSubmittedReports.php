@@ -30,7 +30,7 @@ final class PortalSubmittedReports
     // One POST files the whole builder, and the builder holds at most the eight-day date strip.
     private const MAX_GROUPS = 8;
 
-    private const CACHE_VERSION_KEY = 'portal:reports:submitted:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const LOOKUP_CHUNK = 500;
 
@@ -38,8 +38,17 @@ final class PortalSubmittedReports
 
     private const CORE_RESOURCE = 'reports.submitted';
 
+    // Kept by Airtable or a reviewer, never by the report form, so an edit must carry them over.
+    private const FORM_UNSET_COLUMNS = ['is_support', 'end_date', 'duration'];
+
+    // A decision on the whole report, so even a line an edit adds inherits it.
+    private const REPORT_LEVEL_COLUMNS = ['late_submission_approval', 'approver_remarks', 'actual_work_date'];
+
     // A freshly filed report has not been through anyone yet; replace() keeps whatever it finds.
     private const NEW_APPROVAL = 'Pending';
+
+    // A freshly flagged report has not been reviewed yet either; replace() keeps whatever it finds.
+    private const NEW_FLAG_STATUS = 'Pending';
 
     public function __construct(
         private readonly CoreLedger $ledger,
@@ -88,14 +97,157 @@ final class PortalSubmittedReports
      */
     public function listManaged(Employee $actor, Request $request): array
     {
-        $subject = $this->managedSubject($actor, $request);
+        $scope = PortalPreview::departmentScope($actor, $request);
+        $subject = $this->managedSubject($actor, $request, $scope);
         $page = $this->list($subject, $request);
         $page['section'] = 'manage';
         $page['resource'] = 'reports';
-        $page['employees'] = $this->roster();
+        $page['employees'] = $this->roster($actor, $scope);
         $page['employeeId'] = (string) $subject->getKey();
 
         return $page;
+    }
+
+    /**
+     * Reports / Flagged: the signed-in member's own reports that were flagged at filing time.
+     * Same cache version as list()/bumpCache() -- a decided flag or an edited report must
+     * invalidate both.
+     *
+     * @return array{
+     *     section: string,
+     *     resource: string,
+     *     data: list<array<string, mixed>>,
+     *     range: array{from: string, to: string}
+     * }
+     */
+    public function listFlagged(Employee $actor, Request $request): array
+    {
+        [$from, $to] = $this->dateRange($request);
+        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+        $key = 'portal:reports:flagged:'.$version.':'.$actor->getKey().':'.$from.':'.$to;
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor, $from, $to): array {
+            return [
+                'section' => 'reports',
+                'resource' => 'flagged',
+                'data' => $this->flaggedReports($from, $to, (int) $actor->getKey()),
+                'range' => ['from' => $from, 'to' => $to],
+            ];
+        });
+    }
+
+    /**
+     * Every report flagged at filing time (employees_user_reports.is_flag), for the given window.
+     * Grouped by (employee, date, kind) -- the exact unit create() flagged together and the unit a
+     * decision must land on as one, the same way build() groups one member's own lines.
+     *
+     * $onlyEmployeeId scopes to one member and nulls memberName in the output -- the same
+     * "null means the signed-in member filed it" convention LeaveRequestModel uses on the portal.
+     * Left null, every flagged report in range comes back with its real name, for the approver
+     * queue PortalManageRequests bundles this into.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function flaggedReports(string $from, string $to, ?int $onlyEmployeeId = null): array
+    {
+        $query = $this->connection()
+            ->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->leftJoin('employees', 'employees.id', '=', 'employees_user_reports.employee_id')
+            ->where('employees_user_reports.is_flag', 1)
+            ->whereNotNull('user_reports.report_date')
+            ->whereBetween('user_reports.report_date', [$from, $to])
+            ->select([
+                'user_reports.id',
+                'user_reports.report_date',
+                'user_reports.hours_rendered',
+                'user_reports.change_in_elements',
+                'user_reports.remarks',
+                'user_reports.late_submission',
+                'employees_user_reports.employee_id',
+                'employees_user_reports.flag_status',
+                'employees_user_reports.flag_remarks',
+                'employees.first_name',
+                'employees.last_name',
+                'employees.id_no',
+            ]);
+        if ($onlyEmployeeId !== null) {
+            $query->where('employees_user_reports.employee_id', $onlyEmployeeId);
+        }
+        $rows = $query
+            ->orderBy('user_reports.report_date', 'desc')
+            ->orderBy('user_reports.id')
+            ->get();
+
+        $ids = [];
+        foreach ($rows as $row) {
+            $ids[] = (int) $row->id;
+        }
+        $projects = $this->projectLabels($ids);
+        $activities = $this->activityLabels($ids);
+        $earnCodes = $this->earnCodeLabels($ids);
+
+        $groups = [];
+        foreach ($rows as $row) {
+            $date = $this->calendarDate($row->report_date);
+            if ($date === null) {
+                continue;
+            }
+            $kind = PortalSubmittedReportPresenter::kind($row->late_submission ?? null);
+            $employeeId = (int) $row->employee_id;
+            $key = $employeeId.'|'.$date.'|'.$kind;
+            if (! isset($groups[$key])) {
+                $groups[$key] = [
+                    'ids' => [],
+                    'kind' => $kind,
+                    'submittedOn' => $date,
+                    'reason' => null,
+                    'entries' => [],
+                    'flagStatus' => $this->text($row->flag_status ?? null) ?? 'Pending',
+                    'flagRemarks' => $this->text($row->flag_remarks ?? null),
+                    'referenceCode' => PortalSubmittedReportPresenter::referenceCode(
+                        $row->id_no ?? null,
+                        $employeeId,
+                    ),
+                    // Own view names nobody; the approver bundle names everybody.
+                    'memberName' => $onlyEmployeeId !== null ? null : PortalSubmittedReportPresenter::memberName(
+                        is_string($row->first_name ?? null) ? $row->first_name : null,
+                        is_string($row->last_name ?? null) ? $row->last_name : null,
+                    ),
+                ];
+            }
+            $reason = PortalSubmittedReportPresenter::reason($row->remarks ?? null);
+            if ($groups[$key]['reason'] === null && $reason !== null) {
+                $groups[$key]['reason'] = $reason;
+            }
+            $id = (int) $row->id;
+            $groups[$key]['ids'][] = $id;
+            $groups[$key]['entries'][] = PortalSubmittedReportPresenter::entry(
+                (string) $id,
+                $projects[$id] ?? [],
+                $activities[$id] ?? [],
+                $earnCodes[$id] ?? [],
+                $row->hours_rendered ?? 0,
+                $row->change_in_elements ?? 0,
+            );
+        }
+
+        $data = [];
+        foreach ($groups as $group) {
+            $data[] = [
+                'id' => (string) min($group['ids']),
+                'referenceCode' => $group['referenceCode'],
+                'memberName' => $group['memberName'],
+                'kind' => $group['kind'],
+                'submittedOn' => $group['submittedOn'],
+                'reason' => $group['reason'],
+                'status' => PortalSubmittedReportPresenter::requestStatus($group['flagStatus']),
+                'approverRemarks' => $group['flagRemarks'],
+                'entries' => $group['entries'],
+            ];
+        }
+
+        return $data;
     }
 
     /**
@@ -165,8 +317,13 @@ final class PortalSubmittedReports
         $lateSubmission = $first->late_submission ?? null;
         $approval = $first->approval ?? 'Approved';
         $created = $first->date_created ?? null;
+        // Carried over, not recomputed: a flag is set once at filing time, and editing a report's
+        // entries must not silently re-derive it from whatever the employee's warning status
+        // happens to be today, nor reset a reviewer's already-recorded flag_status back to Pending.
+        $isFlagged = (bool) ($first->is_flag ?? false);
+        $flagStatus = (string) ($first->flag_status ?? 'Pending');
 
-        $this->connection()->transaction(function () use (
+        $this->ledger->within($this->connection(), function () use (
             $employeeId,
             $existing,
             $resolved,
@@ -175,10 +332,22 @@ final class PortalSubmittedReports
             $lateSubmission,
             $approval,
             $created,
+            $isFlagged,
+            $flagStatus,
+            $entries,
+            $id,
+            $kind,
+            $actor,
         ): void {
-            $this->deleteLines($this->lineIds($existing));
-            foreach ($resolved as $entry) {
-                $this->insertLine(
+            $removedIds = $this->lineIds($existing);
+            // Read under a lock inside the transaction, so an id a sync writes back mid-edit is seen.
+            // Each new line takes its old line's Airtable id and the columns the form never sets, so
+            // Airtable keeps its record and an approved late submission stays approved.
+            $oldLines = $this->lockedLines($removedIds);
+            $this->deleteLines($removedIds);
+            $lineIds = [];
+            foreach (array_values($resolved) as $index => $entry) {
+                $lineIds[] = $this->insertLine(
                     $employeeId,
                     $date,
                     $entry,
@@ -186,23 +355,40 @@ final class PortalSubmittedReports
                     $lateSubmission,
                     $approval,
                     $created,
+                    $isFlagged,
+                    $flagStatus,
+                    $this->carriedColumns($oldLines, $index),
                 );
             }
-        });
+            // Old lines beyond the new count were dropped; their Airtable records are the sync's to delete.
+            $droppedAirtableIds = [];
+            foreach (array_slice($oldLines, count($resolved)) as $dropped) {
+                if (is_string($dropped->airtable_record_id) && $dropped->airtable_record_id !== '') {
+                    $droppedAirtableIds[] = $dropped->airtable_record_id;
+                }
+            }
 
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'entries' => $entries,
-                'remarks' => $remarks,
-            ],
-            self::CORE_RESOURCE,
-            $id,
-            CoreRecycleKey::submittedReport($employeeId, $date, $kind),
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
+            // An edit replaces every line, so the sync needs both sets to archive and recreate.
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => $id,
+                    'kind' => $kind,
+                    'submittedOn' => $date,
+                    'entries' => $entries,
+                    'remarks' => $remarks,
+                    'lineIds' => $lineIds,
+                    'removedLineIds' => $removedIds,
+                    'removedAirtableIds' => $droppedAirtableIds,
+                ],
+                self::CORE_RESOURCE,
+                $id,
+                CoreRecycleKey::submittedReport($employeeId, $date, $kind),
+                $employeeId,
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
         $this->audit->record(
             $actor,
             PortalLogAction::PATCH,
@@ -308,17 +494,23 @@ final class PortalSubmittedReports
             $resolved[$index] = $this->resolveNewEntries($group['entries'], $projects, $activities, $earnCodeId);
         }
 
-        $insertedIds = $this->connection()->transaction(function () use (
+        // One check per filing, not per line: every group in this request is the same employee.
+        $isFlagged = $this->hasActiveWarning($employeeId);
+
+        $this->ledger->within($this->connection(), function () use (
             $employeeId,
             $groups,
             $resolved,
             $lateSubmission,
             $createdAt,
-        ): array {
-            $ids = [];
+            $isFlagged,
+            $kind,
+            $actor,
+        ): void {
             foreach ($groups as $index => $group) {
+                $lineIds = [];
                 foreach ($resolved[$index] as $entry) {
-                    $ids[] = $this->insertLine(
+                    $lineIds[] = $this->insertLine(
                         $employeeId,
                         $group['date'],
                         $entry,
@@ -326,15 +518,12 @@ final class PortalSubmittedReports
                         $lateSubmission,
                         self::NEW_APPROVAL,
                         $createdAt,
+                        $isFlagged,
+                        self::NEW_FLAG_STATUS,
                     );
                 }
-            }
 
-            return $ids;
-        });
-
-        try {
-            foreach ($groups as $group) {
+                // One report is one user_reports row per line; lineIds lets the sync address each.
                 $id = $group['date'].'-'.$kind;
                 $this->ledger->recordAdd(
                     CoreLedger::PRODUCT_PORTAL,
@@ -346,30 +535,33 @@ final class PortalSubmittedReports
                         'submittedOn' => $group['date'],
                         'entries' => $group['entries'],
                         'remarks' => $group['remarks'],
+                        'lineIds' => $lineIds,
                     ],
                     self::CORE_RESOURCE,
                     $id,
                     $employeeId,
                     is_string($actor->id_no) ? $actor->id_no : null,
                 );
-                $this->audit->record(
-                    $actor,
-                    PortalLogAction::INSERT,
-                    self::CORE_RESOURCE,
-                    PortalActivityCopy::addedReport($kind, $group['date']),
-                    $id,
-                    $request,
-                    [
-                        'kind' => $kind,
-                        'submittedOn' => $group['date'],
-                        'remarks' => $group['remarks'],
-                        'entries' => $group['entries'],
-                    ],
-                );
             }
-        } catch (Throwable $error) {
-            $this->deleteLines($insertedIds);
-            throw $error;
+        });
+
+        // After the commit: a failed log must never undo a filed report.
+        foreach ($groups as $group) {
+            $id = $group['date'].'-'.$kind;
+            $this->audit->record(
+                $actor,
+                PortalLogAction::INSERT,
+                self::CORE_RESOURCE,
+                PortalActivityCopy::addedReport($kind, $group['date']),
+                $id,
+                $request,
+                [
+                    'kind' => $kind,
+                    'submittedOn' => $group['date'],
+                    'remarks' => $group['remarks'],
+                    'entries' => $group['entries'],
+                ],
+            );
         }
 
         $this->bumpCache();
@@ -414,23 +606,28 @@ final class PortalSubmittedReports
         // Hoisted rather than inlined so the log below can carry the same entries Recycle Bin's
         // own view already reads back from this snapshot.
         $snapshot = $this->recycleSnapshot($actor, $id, $date, $kind, $existing);
-        $written = $this->ledger->recycleDeleted(
-            CoreLedger::PRODUCT_PORTAL,
-            CoreRecycleKey::submittedReport($employeeId, $date, $kind),
-            self::CORE_TARGET,
-            $id,
-            $snapshot,
-            self::CORE_RESOURCE,
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
-
-        try {
+        $this->ledger->within($this->connection(), function () use ($ids, $employeeId, $date, $kind, $id, $snapshot, $actor): void {
+            // Re-read under a lock, so an id a sync wrote back after the snapshot was taken is kept.
+            $airtableIds = [];
+            foreach ($this->lockedLines($ids) as $line) {
+                $airtableIds[(int) $line->id] = $line->airtable_record_id;
+            }
+            $snapshot['lines'] = array_map(
+                static fn (array $line): array => [...$line, 'airtable_record_id' => $airtableIds[(int) $line['id']] ?? null],
+                $snapshot['lines'],
+            );
             $this->deleteLines($ids);
-        } catch (Throwable $error) {
-            $this->ledger->revert($written['recycle_id'], $written['action_id']);
-            throw $error;
-        }
+            $this->ledger->recycleDeleted(
+                CoreLedger::PRODUCT_PORTAL,
+                CoreRecycleKey::submittedReport($employeeId, $date, $kind),
+                self::CORE_TARGET,
+                $id,
+                $snapshot,
+                self::CORE_RESOURCE,
+                $employeeId,
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
 
         $this->audit->record(
             $actor,
@@ -492,16 +689,13 @@ final class PortalSubmittedReports
             $lines[] = $line;
         }
 
-        $insertedIds = $this->connection()->transaction(function () use ($ownerId, $date, $lines): array {
-            $ids = [];
+        $this->ledger->within($this->connection(), function () use ($ownerId, $date, $lines, $row, $kind, $payload, $actor): void {
+            $lineIds = [];
             foreach ($lines as $line) {
-                $ids[] = $this->insertSnapshotLine($ownerId, $date, $line);
+                $lineIds[] = $this->insertSnapshotLine($ownerId, $date, $line);
             }
 
-            return $ids;
-        });
-
-        try {
+            // The restored lines get new ids, so the add carries them like a fresh filing does.
             $this->ledger->recordAdd(
                 CoreLedger::PRODUCT_PORTAL,
                 (string) $row->recycle_key,
@@ -510,6 +704,9 @@ final class PortalSubmittedReports
                     'id' => (string) $row->record_id,
                     'kind' => $kind,
                     'submittedOn' => $date,
+                    'entries' => $payload['report']['entries'] ?? [],
+                    'remarks' => $payload['report']['reason'] ?? null,
+                    'lineIds' => $lineIds,
                     'restored' => true,
                 ],
                 self::CORE_RESOURCE,
@@ -517,37 +714,36 @@ final class PortalSubmittedReports
                 (int) $actor->getKey(),
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
-            $this->audit->record(
+        });
+
+        // After the commit: a failed log or notification must never undo a restore.
+        $this->audit->record(
+            $actor,
+            PortalLogAction::INSERT,
+            self::CORE_RESOURCE,
+            PortalActivityCopy::restoredReport($kind, $date),
+            (string) $row->record_id,
+            $request,
+            [
+                'kind' => $kind,
+                'submittedOn' => $date,
+                'remarks' => $payload['report']['reason'] ?? null,
+                'entries' => $payload['report']['entries'] ?? [],
+                'restored' => true,
+            ],
+        );
+        $owner = Employee::query()->find($ownerId);
+        if ($owner instanceof Employee) {
+            $this->audit->notifyIfOther(
+                $owner,
                 $actor,
-                PortalLogAction::INSERT,
-                self::CORE_RESOURCE,
-                PortalActivityCopy::restoredReport($kind, $date),
-                (string) $row->record_id,
-                $request,
-                [
-                    'kind' => $kind,
-                    'submittedOn' => $date,
-                    'remarks' => $payload['report']['reason'] ?? null,
-                    'entries' => $payload['report']['entries'] ?? [],
-                    'restored' => true,
-                ],
+                PortalNotificationType::BIN_RESTORED,
+                'Report restored',
+                PortalActivityCopy::notifyReportRestored($kind, $date, PortalActivityCopy::displayName($actor)),
+                PortalShellPath::SUBMITTED_REPORTS,
+                'Open reports',
+                ['recordId' => (string) $row->record_id],
             );
-            $owner = Employee::query()->find($ownerId);
-            if ($owner instanceof Employee) {
-                $this->audit->notifyIfOther(
-                    $owner,
-                    $actor,
-                    PortalNotificationType::BIN_RESTORED,
-                    'Report restored',
-                    PortalActivityCopy::notifyReportRestored($kind, $date, PortalActivityCopy::displayName($actor)),
-                    PortalShellPath::SUBMITTED_REPORTS,
-                    'Open reports',
-                    ['recordId' => (string) $row->record_id],
-                );
-            }
-        } catch (Throwable $error) {
-            $this->deleteLines($insertedIds);
-            throw $error;
         }
 
         $this->bumpCache();
@@ -793,6 +989,13 @@ final class PortalSubmittedReports
         }
 
         return [$from->toDateString(), $to->toDateString()];
+    }
+
+    private function text(mixed $value): ?string
+    {
+        $text = trim((string) ($value ?? ''));
+
+        return $text === '' ? null : $text;
     }
 
     private function parseDate(string $value): Carbon
@@ -1164,6 +1367,7 @@ final class PortalSubmittedReports
             ->toBase()
             ->select([
                 'user_reports.id',
+                'user_reports.airtable_record_id',
                 'user_reports.report_date',
                 'user_reports.hours_rendered',
                 'user_reports.change_in_elements',
@@ -1171,6 +1375,8 @@ final class PortalSubmittedReports
                 'user_reports.late_submission',
                 'user_reports.approval',
                 'user_reports.date_created',
+                'employees_user_reports.is_flag',
+                'employees_user_reports.flag_status',
             ])
             ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
             ->where('employees_user_reports.employee_id', $employeeId)
@@ -1257,6 +1463,8 @@ final class PortalSubmittedReports
             );
             $snapshotLines[] = [
                 'id' => $lineId,
+                // What the sync deletes in Airtable once this report is gone from SQL.
+                'airtable_record_id' => $line->airtable_record_id ?? null,
                 'report_date' => $this->calendarDate($line->report_date) ?? $date,
                 'hours_rendered' => $line->hours_rendered ?? 0,
                 'change_in_elements' => $line->change_in_elements ?? 0,
@@ -1683,6 +1891,55 @@ final class PortalSubmittedReports
     /**
      * @param  array{projectId: int, activityCodeId: int, earnCodeId: ?int, hoursRendered: float, elementChange: float}  $entry
      */
+    /**
+     * The old lines with their Airtable id and the columns the form never writes, in line order,
+     * read FOR UPDATE so a concurrent write-back either lands before this read or waits for the
+     * transaction, never slipping in between.
+     *
+     * @param  list<int>  $lineIds
+     * @return list<object>
+     */
+    private function lockedLines(array $lineIds): array
+    {
+        return $this->connection()->table('user_reports')
+            ->whereIn('id', $lineIds)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get(['id', 'airtable_record_id', ...self::FORM_UNSET_COLUMNS, ...self::REPORT_LEVEL_COLUMNS])
+            ->all();
+    }
+
+    /**
+     * What a re-inserted line keeps from the old line in its place. A line an edit added beyond the
+     * old count has no line of its own, but still inherits the report-level decision columns.
+     *
+     * @param  list<object>  $oldLines
+     * @return array<string, mixed>
+     */
+    private function carriedColumns(array $oldLines, int $index): array
+    {
+        $own = $oldLines[$index] ?? null;
+        if ($own !== null) {
+            $carried = ['airtable_record_id' => $own->airtable_record_id];
+            foreach ([...self::FORM_UNSET_COLUMNS, ...self::REPORT_LEVEL_COLUMNS] as $column) {
+                $carried[$column] = $own->{$column};
+            }
+
+            return $carried;
+        }
+
+        $first = $oldLines[0] ?? null;
+        if ($first === null) {
+            return [];
+        }
+        $carried = [];
+        foreach (self::REPORT_LEVEL_COLUMNS as $column) {
+            $carried[$column] = $first->{$column};
+        }
+
+        return $carried;
+    }
+
     private function insertLine(
         int $employeeId,
         string $date,
@@ -1691,8 +1948,12 @@ final class PortalSubmittedReports
         mixed $lateSubmission,
         mixed $approval,
         mixed $created,
+        bool $isFlagged,
+        string $flagStatus,
+        array $carried = [],
     ): int {
         $id = (int) $this->connection()->table('user_reports')->insertGetId([
+            ...$carried,
             'report_date' => $date,
             'hours_rendered' => $entry['hoursRendered'],
             'change_in_elements' => $entry['elementChange'],
@@ -1705,6 +1966,8 @@ final class PortalSubmittedReports
         $this->connection()->table('employees_user_reports')->insert([
             'employee_id' => $employeeId,
             'user_report_id' => $id,
+            'is_flag' => $isFlagged,
+            'flag_status' => $flagStatus,
         ]);
         $this->connection()->table('projects_user_reports')->insert([
             'project_id' => $entry['projectId'],
@@ -1724,12 +1987,23 @@ final class PortalSubmittedReports
         return $id;
     }
 
+    // A warning stays on file after it lapses, so only an Active row counts against a new filing.
+    private function hasActiveWarning(int $employeeId): bool
+    {
+        return $this->connection()
+            ->table('employees_warnings')
+            ->join('warnings', 'warnings.id', '=', 'employees_warnings.warning_id')
+            ->where('employees_warnings.employee_id', $employeeId)
+            ->where('warnings.status', 'Active')
+            ->exists();
+    }
+
     private function lookupKey(string $label): string
     {
         return strtolower(trim($label));
     }
 
-    private function managedSubject(Employee $actor, Request $request): Employee
+    private function managedSubject(Employee $actor, Request $request, ?string $scope): Employee
     {
         $raw = trim((string) $request->query('employee_id', ''));
         if ($raw === '') {
@@ -1740,7 +2014,8 @@ final class PortalSubmittedReports
         }
 
         $subject = Employee::query()->find((int) $raw);
-        if (! $subject instanceof Employee) {
+        // Someone outside the admin's department answers exactly like someone who does not exist.
+        if (! $subject instanceof Employee || (! $subject->is($actor) && ! PortalPreview::inScope($scope, $subject))) {
             abort(404, 'That member was not found.');
         }
 
@@ -1748,14 +2023,22 @@ final class PortalSubmittedReports
     }
 
     /**
-     * Active members the picker can open. Skinny: an id and a display name, nothing else.
+     * Active members the picker can open: the admin's department, never an executive (they are
+     * managed from their own portal), and always the admin themself. Skinny: an id and a name.
      *
      * @return list<array{value: string, label: string}>
      */
-    private function roster(): array
+    private function roster(Employee $actor, ?string $scope): array
     {
         $rows = Employee::query()
             ->select(['id', 'first_name', 'last_name'])
+            ->where(fn ($query) => $query
+                ->where('id', $actor->getKey())
+                ->orWhere(fn ($managed) => $managed
+                    ->whereRaw("LOWER(TRIM(COALESCE(role, ''))) != 'executive'")
+                    ->whereRaw("LOWER(TRIM(COALESCE(role_level, ''))) != 'executive'")
+                    ->when($scope !== null, fn ($inDepartment) => $inDepartment
+                        ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ? AND ? != ''", [$scope, $scope]))))
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->orderBy('last_name')
             ->orderBy('first_name')

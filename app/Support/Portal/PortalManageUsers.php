@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -22,7 +23,7 @@ final class PortalManageUsers
      */
     public const PAGE_SIZES = [10, 25, 50, 100];
 
-    private const CACHE_VERSION_KEY = 'portal:manage:users:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     /**
      * Table column key => SQL columns. Unknown keys fall back to the default rank order.
@@ -38,7 +39,10 @@ final class PortalManageUsers
         'access' => null,
     ];
 
-    public function __construct(private readonly PortalAudit $audit) {}
+    public function __construct(
+        private readonly PortalAudit $audit,
+        private readonly CoreLedger $ledger,
+    ) {}
 
     /**
      * @return array{
@@ -54,14 +58,16 @@ final class PortalManageUsers
         $perPage = $this->perPage($request);
         $page = max(1, $request->integer('page', 1));
         $search = trim((string) $request->query('q', ''));
+        $department = mb_substr(PortalPreview::department($request->query('department', '')), 0, 100);
         $sort = trim((string) $request->query('sort', ''));
         $dir = strtolower(trim((string) $request->query('dir', 'asc'))) === 'desc' ? 'desc' : 'asc';
 
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:manage:users:'.$version.':'.$page.':'.$perPage.':'.md5($search).':'.$sort.':'.$dir;
+        $key = 'portal:manage:users:'.$version.':'.$page.':'.$perPage.':'.md5($search).':'.md5($department).':'.$sort.':'.$dir;
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($perPage, $page, $search, $sort, $dir): array {
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($perPage, $page, $search, $department, $sort, $dir): array {
             $query = $this->rosterQuery();
+            $this->applyDepartment($query, $department);
             $this->applySearch($query, $search);
             $this->applyOrder($query, $sort, $dir);
 
@@ -79,7 +85,8 @@ final class PortalManageUsers
                 'section' => 'manage',
                 'resource' => 'users',
                 'data' => $rows,
-                'counts' => $this->counts(),
+                'counts' => $this->counts($department),
+                'departments' => $this->departments(),
                 'meta' => [
                     'current_page' => $pageResult->currentPage(),
                     'per_page' => $pageResult->perPage(),
@@ -116,7 +123,26 @@ final class PortalManageUsers
             // place, so the log's "what changed from" would otherwise already be gone.
             $previousRole = $target->role;
             $target->role = $role;
-            $target->save();
+            // Same target, resource and payload shape as a grid edit of this column, so one
+            // sync rule covers the role no matter which screen changed it.
+            $this->ledger->within($target->getConnection(), function () use ($target, $actor, $previousRole, $role): void {
+                $target->save();
+                $this->ledger->recordEdit(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreLedger::PRODUCT_PORTAL.'.employees',
+                    [
+                        'table' => 'employees',
+                        'key' => 'id',
+                        'fields' => ['role' => $role],
+                        'changes' => ['role' => ['from' => $previousRole, 'to' => $role]],
+                    ],
+                    'employees',
+                    (string) $target->getKey(),
+                    null,
+                    (int) $actor->getKey(),
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            });
             $this->bumpCache();
             $this->audit->record(
                 $actor,
@@ -166,9 +192,11 @@ final class PortalManageUsers
     /**
      * @return array{admins: int, members: int, active: int, inactive: int, total: int}
      */
-    public function counts(): array
+    public function counts(string $department = ''): array
     {
-        $row = Employee::query()
+        $query = Employee::query();
+        $this->applyDepartment($query, $department);
+        $row = $query
             ->toBase()
             ->selectRaw('COUNT(*) as total')
             ->selectRaw("SUM(CASE WHEN LOWER(COALESCE(role_level, '')) = 'executive' OR LOWER(COALESCE(role, '')) = 'admin' THEN 1 ELSE 0 END) as admins")
@@ -194,6 +222,33 @@ final class PortalManageUsers
     private function rosterQuery(): Builder
     {
         return Employee::query()->select(PortalManageUserPresenter::rosterColumns());
+    }
+
+    // The figures and rows narrow together, so a department's tiles describe the rows under them.
+    private function applyDepartment(Builder $query, string $department): void
+    {
+        if ($department !== '') {
+            $query->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ?", [$department]);
+        }
+    }
+
+    /**
+     * Every department on the roster, for the filter; spelled as the roster mostly spells it.
+     *
+     * @return list<string>
+     */
+    private function departments(): array
+    {
+        $names = [];
+        foreach (Employee::query()->whereNotNull('department')->pluck('department') as $value) {
+            $name = trim((string) $value);
+            if ($name !== '') {
+                $names[PortalPreview::department($name)] ??= $name;
+            }
+        }
+        natcasesort($names);
+
+        return array_values($names);
     }
 
     private function applySearch(Builder $query, string $search): void

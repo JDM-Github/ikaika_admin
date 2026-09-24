@@ -40,7 +40,7 @@ final class PortalEmail
 
     public const CORE_RESOURCE = 'administration.email';
 
-    private const CACHE_VERSION_KEY = 'portal:administration:email:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const MAX_NAME = 191;
 

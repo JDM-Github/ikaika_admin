@@ -58,6 +58,27 @@ class PortalAuthTest extends TestCase
         $this->assertSame('{UserName|You} signed in to the portal', $log->message);
     }
 
+    // The portal draws the avatar and the developer-only preview from these two fields.
+    public function test_login_carries_the_developer_flag_and_a_photo_thumbnail(): void
+    {
+        $developer = Employee::query()->where('status', 'Active')->where('is_developer', 1)->first();
+        $member = Employee::query()->where('status', 'Active')->where('is_developer', 0)->first();
+        $this->assertNotNull($developer);
+        $this->assertNotNull($member);
+
+        $photo = $this->postJson('/api/development/portal/auth/login', ['id_no' => $developer->id_no])
+            ->assertOk()
+            ->assertJsonPath('employee.is_developer', true)
+            ->json('employee.photo_url');
+        // A 96px crop of the stored upload, never the full-size original.
+        $this->assertIsString($photo);
+        $this->assertStringContainsString('/upload/c_fill,h_96,w_96', $photo);
+
+        $this->postJson('/api/development/portal/auth/login', ['id_no' => $member->id_no])
+            ->assertOk()
+            ->assertJsonPath('employee.is_developer', false);
+    }
+
     public function test_login_rejects_an_unknown_id_number(): void
     {
         $this->postJson('/api/development/portal/auth/login', [

@@ -46,6 +46,7 @@ final class PortalManageUserPresenter
             'job_title',
             'department',
             'status',
+            'is_developer',
         ];
     }
 

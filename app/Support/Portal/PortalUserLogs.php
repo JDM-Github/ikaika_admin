@@ -144,8 +144,9 @@ final class PortalUserLogs
         $dir = strtolower(trim((string) $request->query('dir', 'desc'))) === 'asc' ? 'asc' : 'desc';
         $timezone = $this->timezone->zone();
         $timezoneKey = md5($timezone->getName());
+        $visible = $this->visibleEmployeeIds($request);
         $version = (int) Cache::get(PortalAudit::LOG_CACHE_VERSION_KEY, 1);
-        $key = 'portal:administration:all-logs:'.$version.':'.$timezoneKey.':'.$page.':'.$perPage
+        $key = 'portal:administration:all-logs:'.$version.':'.$timezoneKey.':'.md5(json_encode($visible) ?: '*').':'.$page.':'.$perPage
             .':'.md5($search).':'.($action ?? 'all').':'.($resource ?? 'all').':'.md5($ipAddress ?? 'all')
             .':'.($year ?? 'all').':'.($month ?? 'all').':'.($day ?? 'all').':'.($employeeId ?? 'all')
             .':'.$sort.':'.$dir;
@@ -163,9 +164,11 @@ final class PortalUserLogs
             $search,
             $sort,
             $timezone,
+            $visible,
             $year,
         ): array {
             return $this->buildAll(
+                $visible,
                 $action,
                 $resource,
                 $ipAddress,
@@ -213,13 +216,17 @@ final class PortalUserLogs
     }
 
     /**
-     * Any portal log row, payload included. `AllLogsController` is already Admin/Executive only,
-     * so no further ownership check happens here.
+     * Any portal log row the viewer may read, payload included; one outside their reach is 404,
+     * exactly like one that does not exist.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function showAll(int $id): array
+    public function showAll(int $id, Request $request): array
     {
+        $visible = $this->visibleEmployeeIds($request);
+        if ($visible !== null && ! in_array((int) PortalLog::query()->whereKey($id)->value('employee_id'), $visible, true)) {
+            abort(404, 'That log entry was not found.');
+        }
         $version = (int) Cache::get(PortalAudit::LOG_CACHE_VERSION_KEY, 1);
         $key = 'portal:administration:all-logs:detail:'.$version.':'.$id;
 
@@ -261,6 +268,7 @@ final class PortalUserLogs
      * }
      */
     private function buildAll(
+        ?array $visible,
         ?string $action,
         ?string $resource,
         ?string $ipAddress,
@@ -282,8 +290,11 @@ final class PortalUserLogs
         $query = PortalLog::query()
             ->select(array_merge($columns, ['employees.first_name', 'employees.last_name']))
             ->leftJoin('employees', 'employees.id', '=', 'logs.employee_id');
+        if ($visible !== null) {
+            $query->whereIn('logs.employee_id', $visible);
+        }
         $total = (int) (clone $query)->toBase()->count();
-        $filters = $this->filters(null, $timezone, true);
+        $filters = $this->filters(null, $timezone, true, $visible);
 
         if ($employeeId !== null) {
             $query->where('logs.employee_id', $employeeId);
@@ -526,7 +537,10 @@ final class PortalUserLogs
      *     users: list<array{value: string, label: string}>
      * }
      */
-    private function filters(?int $employeeId, DateTimeZone $timezone, bool $includeUsers = false): array
+    /**
+     * @param  list<int>|null  $visible
+     */
+    private function filters(?int $employeeId, DateTimeZone $timezone, bool $includeUsers = false, ?array $visible = null): array
     {
         $query = PortalLog::query();
         if ($includeUsers) {
@@ -544,6 +558,9 @@ final class PortalUserLogs
         }
         if ($employeeId !== null) {
             $query->where($includeUsers ? 'logs.employee_id' : 'employee_id', $employeeId);
+        }
+        if ($visible !== null) {
+            $query->whereIn($includeUsers ? 'logs.employee_id' : 'employee_id', $visible);
         }
 
         $rows = $query->toBase()->get();
@@ -639,6 +656,38 @@ final class PortalUserLogs
             'days' => $dayOptions,
             'users' => $userOptions,
         ];
+    }
+
+    /**
+     * The employees whose rows this viewer may read, or null for every row (a developer, including
+     * rows tied to no employee). Anyone else reads their department and themself; an executive also
+     * reads every executive, and nobody else ever reads an executive's rows, logins included.
+     *
+     * @return list<int>|null
+     */
+    private function visibleEmployeeIds(Request $request): ?array
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+        $scope = PortalPreview::departmentScope($actor, $request);
+        if ($scope === null) {
+            return null;
+        }
+
+        $viewerIsExecutive = PortalRole::isExecutive($actor->role, $actor->role_level);
+        $ids = [(int) $actor->getKey()];
+        foreach (Employee::query()->get(['id', 'department', 'role', 'role_level']) as $employee) {
+            $isExecutive = PortalRole::isExecutive($employee->role, $employee->role_level);
+            if (PortalPreview::inScope($scope, $employee) || ($viewerIsExecutive && $isExecutive)) {
+                $ids[] = (int) $employee->getKey();
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        sort($ids);
+
+        return $ids;
     }
 
     private function applyOrder(Builder $query, string $sort, string $dir, bool $joined = false): void

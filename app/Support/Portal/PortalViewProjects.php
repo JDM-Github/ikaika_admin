@@ -17,7 +17,7 @@ final class PortalViewProjects
 {
     public const CACHE_TTL_SECONDS = 30;
 
-    public const CACHE_VERSION_KEY = 'portal:projects:version';
+    public const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     /**
      * @return array{

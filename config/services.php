@@ -35,6 +35,12 @@ return [
         ],
     ],
 
+    // A token scoped to the TEST base only, so the portal sync cannot write to production.
+    'airtable' => [
+        'token' => env('AIRTABLE_TOKEN'),
+        'base' => env('AIRTABLE_BASE_ID'),
+    ],
+
     'cloudinary' => [
         'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
         'api_key' => env('CLOUDINARY_API_KEY'),

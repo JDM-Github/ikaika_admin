@@ -40,7 +40,7 @@ final class PortalLeaveRequests
 
     private const CANCELLED_STATUS = 'Cancelled';
 
-    private const CACHE_VERSION_KEY = 'portal:requests:leave:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const CORE_TARGET = 'portal.requests';
 
@@ -125,16 +125,18 @@ final class PortalLeaveRequests
 
         $createdAt = $this->timezone->now();
 
-        $insertedIds = $this->connection()->transaction(function () use (
+        $insertedIds = $this->ledger->within($this->connection(), function () use (
             $dates,
             $name,
             $type,
             $reason,
             $createdAt,
+            $employeeId,
+            $actor,
         ): array {
             $ids = [];
             foreach ($dates as $date) {
-                $ids[] = (int) $this->connection()->table('requests')->insertGetId([
+                $id = (int) $this->connection()->table('requests')->insertGetId([
                     'request_date' => $date,
                     'name' => $name,
                     'reason' => $reason,
@@ -143,34 +145,27 @@ final class PortalLeaveRequests
                     'category' => $type,
                     'date_created' => $createdAt->toDateTimeString(),
                 ]);
-            }
+                $ids[] = $id;
 
-            return $ids;
-        });
-
-        try {
-            foreach ($dates as $index => $date) {
-                $id = (string) $insertedIds[$index];
                 $this->ledger->recordAdd(
                     CoreLedger::PRODUCT_PORTAL,
                     CoreRecycleKey::leaveRequest($employeeId, $date),
                     self::CORE_TARGET,
                     [
-                        'id' => $id,
+                        'id' => (string) $id,
                         'requestedFor' => $date,
                         'leaveType' => $type,
                         'reason' => $reason,
                     ],
                     self::CORE_RESOURCE,
-                    $id,
+                    (string) $id,
                     $employeeId,
                     is_string($actor->id_no) ? $actor->id_no : null,
                 );
             }
-        } catch (Throwable $error) {
-            $this->deleteRequests($insertedIds);
-            throw $error;
-        }
+
+            return $ids;
+        });
 
         $this->audit->record(
             $actor,
@@ -225,6 +220,10 @@ final class PortalLeaveRequests
         $reason = $this->validatedReason($request);
         $date = $this->parseDate(trim((string) $request->input('requestDate', '')));
         $this->assertFilableDate($date, $current);
+        // Moving onto a weekend is refused; a day already on one (filed before this rule) stays editable.
+        if ($date->isWeekend() && $date->toDateString() !== $current) {
+            abort(422, 'Leave is taken on working days; that day is a weekend.');
+        }
         $day = $date->toDateString();
 
         // Its own day is not a clash with itself; anything else is checked the way filing is.
@@ -233,27 +232,29 @@ final class PortalLeaveRequests
             $this->assertDatesAreNotReported((int) $actor->getKey(), [$day]);
         }
 
-        $this->connection()->table('requests')->where('id', (int) $row->id)->update([
-            'request_date' => $day,
-            'reason' => $reason,
-            'category' => $type,
-        ]);
-
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'id' => (string) (int) $row->id,
-                'requestedFor' => $day,
-                'leaveType' => $type,
+        $this->ledger->within($this->connection(), function () use ($row, $day, $reason, $type, $actor): void {
+            $this->connection()->table('requests')->where('id', (int) $row->id)->update([
+                'request_date' => $day,
                 'reason' => $reason,
-            ],
-            self::CORE_RESOURCE,
-            (string) (int) $row->id,
-            CoreRecycleKey::leaveRequest((int) $actor->getKey(), $day),
-            (int) $actor->getKey(),
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
+                'category' => $type,
+            ]);
+
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => (string) (int) $row->id,
+                    'requestedFor' => $day,
+                    'leaveType' => $type,
+                    'reason' => $reason,
+                ],
+                self::CORE_RESOURCE,
+                (string) (int) $row->id,
+                CoreRecycleKey::leaveRequest((int) $actor->getKey(), $day),
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
 
         $this->audit->record(
             $actor,
@@ -290,24 +291,29 @@ final class PortalLeaveRequests
         $row = $this->ownPendingRow($actor, $id);
         $day = $this->calendarDate($row->request_date ?? null) ?? '';
 
-        $this->connection()->table('requests')
-            ->where('id', (int) $row->id)
-            ->update(['status' => self::CANCELLED_STATUS]);
+        $this->ledger->within($this->connection(), function () use ($row, $day, $actor): void {
+            $this->connection()->table('requests')
+                ->where('id', (int) $row->id)
+                ->update(['status' => self::CANCELLED_STATUS]);
 
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'id' => (string) (int) $row->id,
-                'requestedFor' => $day,
-                'status' => self::CANCELLED_STATUS,
-            ],
-            self::CORE_RESOURCE,
-            (string) (int) $row->id,
-            CoreRecycleKey::leaveRequest((int) $actor->getKey(), $day),
-            (int) $actor->getKey(),
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
+            // Same keys as filing plus status, so a sync applying this edit never blanks a field.
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => (string) (int) $row->id,
+                    'requestedFor' => $day,
+                    'leaveType' => is_string($row->category ?? null) ? $row->category : null,
+                    'reason' => is_string($row->reason ?? null) ? $row->reason : null,
+                    'status' => self::CANCELLED_STATUS,
+                ],
+                self::CORE_RESOURCE,
+                (string) (int) $row->id,
+                CoreRecycleKey::leaveRequest((int) $actor->getKey(), $day),
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
 
         $this->audit->record(
             $actor,
@@ -635,9 +641,15 @@ final class PortalLeaveRequests
         $this->assertFilableDate($start);
         $this->assertFilableDate($end);
 
+        // A weekend is not a working day, so a range spanning one files only the weekdays in it.
         $dates = [];
         for ($day = $start->copy(); $day->lte($end); $day->addDay()) {
-            $dates[] = $day->toDateString();
+            if (! $day->isWeekend()) {
+                $dates[] = $day->toDateString();
+            }
+        }
+        if ($dates === []) {
+            abort(422, 'That range has no working days to take as leave.');
         }
 
         return $dates;
@@ -740,18 +752,6 @@ final class PortalLeaveRequests
         }
 
         return $name;
-    }
-
-    /**
-     * @param  list<int>  $ids
-     */
-    private function deleteRequests(array $ids): void
-    {
-        if ($ids === []) {
-            return;
-        }
-
-        $this->connection()->table('requests')->whereIn('id', $ids)->delete();
     }
 
     private function connection(): Connection
