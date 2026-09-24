@@ -97,6 +97,174 @@
         "command-after-success": [
           "pwsh -NoProfile -File ${root}/script.ps1 commands/environment-variables -Report ${environment-variables.args.Report} -Direct ${environment-variables.args.Direct}"
         ]
+      },
+      "run-servers": {
+        "description": "Starts and stops the servers this project develops against: WampServer's Apache and MySQL, phpMyAdmin in a browser, the Laravel API, and the Vite asset build",
+        "args": [
+          {
+            "flag": "Apache",
+            "label": "-Apache   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "WampServer's Apache. Serves the site and phpMyAdmin.",
+            "default": ""
+          },
+          {
+            "flag": "MySQL",
+            "label": "-MySQL   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "WampServer's MySQL service.",
+            "default": ""
+          },
+          {
+            "flag": "MariaDB",
+            "label": "-MariaDB   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "WampServer's MariaDB service. Separate from MySQL on purpose - they are two servers on two ports, and this project runs one of them.",
+            "default": ""
+          },
+          {
+            "flag": "PhpMyAdmin",
+            "label": "-PhpMyAdmin   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Open phpMyAdmin in the browser, starting Apache first if it is not up.",
+            "default": ""
+          },
+          {
+            "flag": "Api",
+            "label": "-Api   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "The Laravel API, as php artisan serve.",
+            "default": ""
+          },
+          {
+            "flag": "Vite",
+            "label": "-Vite   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "The Vite asset build, as npm run dev.",
+            "default": ""
+          },
+          {
+            "flag": "All",
+            "label": "-All   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Everything above, which is what a fresh working session usually wants.",
+            "default": ""
+          },
+          {
+            "flag": "Stop",
+            "label": "-Stop   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Stop instead of start. With no other switch, stops everything this started.",
+            "default": ""
+          },
+          {
+            "flag": "Status",
+            "label": "-Status   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Say what is running and stop. Nothing is started, stopped or opened.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/run-servers -Apache ${run-servers.args.Apache} -MySQL ${run-servers.args.MySQL} -MariaDB ${run-servers.args.MariaDB} -PhpMyAdmin ${run-servers.args.PhpMyAdmin} -Api ${run-servers.args.Api} -Vite ${run-servers.args.Vite} -All ${run-servers.args.All} -Stop ${run-servers.args.Stop} -Status ${run-servers.args.Status}"
+        ]
+      },
+      "update-database": {
+        "description": "Applies this repository's sql/ folder to the local databases, and runs Laravel's migrations",
+        "args": [
+          {
+            "flag": "Core",
+            "label": "-Core   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "The core platform database - the shared action log and recycle bin.",
+            "default": ""
+          },
+          {
+            "flag": "Portal",
+            "label": "-Portal   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "The employee portal database.",
+            "default": ""
+          },
+          {
+            "flag": "Estimator",
+            "label": "-Estimator   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "The project estimator database.",
+            "default": ""
+          },
+          {
+            "flag": "AllProducts",
+            "label": "-AllProducts   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "All three products.",
+            "default": ""
+          },
+          {
+            "flag": "Schema",
+            "label": "-Schema   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "schema.sql - the tables. DESTRUCTIVE for portal and estimator; see -DropAndRecreate.",
+            "default": ""
+          },
+          {
+            "flag": "Separate",
+            "label": "-Separate   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "separate.sql - the tables kept out of the main schema file. Portal only.",
+            "default": ""
+          },
+          {
+            "flag": "Indexes",
+            "label": "-Indexes   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "indexes.sql - indexes added to a database that already has the tables.",
+            "default": ""
+          },
+          {
+            "flag": "Data",
+            "label": "-Data   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "data.sql - the rows. Large, and portal's begins with a TRUNCATE.",
+            "default": ""
+          },
+          {
+            "flag": "DropAndRecreate",
+            "label": "-DropAndRecreate   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Allow a file that begins with DROP DATABASE to run. Without this, such a file is listed, named as destructive, and skipped.",
+            "default": ""
+          },
+          {
+            "flag": "Migrate",
+            "label": "-Migrate   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "php artisan migrate. Additive, and the supported way to update an existing deployment - the sql/ files are for building a local one.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Core ${update-database.args.Core} -Portal ${update-database.args.Portal} -Estimator ${update-database.args.Estimator} -AllProducts ${update-database.args.AllProducts} -Schema ${update-database.args.Schema} -Separate ${update-database.args.Separate} -Indexes ${update-database.args.Indexes} -Data ${update-database.args.Data} -DropAndRecreate ${update-database.args.DropAndRecreate} -Migrate ${update-database.args.Migrate}"
+        ]
       }
     },
     "git": {

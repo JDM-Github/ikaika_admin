@@ -52,3 +52,7 @@ msal_test/
 # The dependency fingerprint development-setup writes, so a pull that changes
 # nothing in composer.lock does not reinstall vendor/.
 .ikaika-install
+
+# Which servers run-servers started, and their pids. Machine state, not a
+# project fact - it is meaningless on any other machine.
+.ikaika_scripts_configs/.servers.json
