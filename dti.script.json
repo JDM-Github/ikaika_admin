@@ -74,6 +74,39 @@
           "pwsh -NoProfile -File ${root}/script.ps1 commands/development-setup -Report ${development-setup.args.Report} -Force ${development-setup.args.Force} -ToolsOnly ${development-setup.args.ToolsOnly} -MachineOnly ${development-setup.args.MachineOnly}"
         ]
       },
+      "env-file": {
+        "description": "Browses and edits this repository's .env, beside the .env.example it is supposed to match - which key is missing, which is empty, which is set to something the example never mentioned, and what each one actually holds",
+        "args": [
+          {
+            "flag": "Show",
+            "label": "-Show   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Which keys to list. A fact about the command rather than about this machine, so it is a ValidateSet and reaches the app as a dropdown.",
+            "default": "all",
+            "allowed_values": [
+              "all",
+              "missing",
+              "empty",
+              "extra",
+              "secrets"
+            ]
+          },
+          {
+            "flag": "Reveal",
+            "label": "-Reveal   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Show values in the clear.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/env-file -Show ${env-file.args.Show} -Reveal ${env-file.args.Reveal}"
+        ],
+        "interactive": true,
+        "view": "browser"
+      },
       "environment-variables": {
         "description": "Points this machine's PATH at whichever PHP, MySQL and Apache WampServer is currently set to serve, so php, composer and mysql work in any terminal without a full path",
         "args": [
