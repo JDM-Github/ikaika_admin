@@ -153,7 +153,21 @@ if (-not (Test-Path -LiteralPath $toolkitEntry)) {
     Write-Host ''
 }
 
+# ASKING FOR HELP WITH NO COMMAND MEANS THE LISTING. Typed bare, -Help reached the
+# terminal app as an argument it does not take, and the answer was an argparse usage
+# line for `dti` - a different program, with different flags, and no mention of any
+# command in this repository. It is the first thing somebody types when they do not
+# know what to type, so it has to answer that question.
+#
+# Only when it is the FIRST argument. `.\script.ps1 build-release -Help` is a request
+# for that command's own help and must reach it untouched; the difference between the
+# two is whether a command was named, which is exactly what position says here.
+$forwarded = @($args)
+if ($forwarded.Count -and "$($forwarded[0])" -match '^(--?help|--?h|/\?|/h)$') {
+    $forwarded = @('help')
+}
+
 # & rather than dot-sourcing: the target manages its own exit codes, and running it in
 # its own scope keeps this shim from leaking variables into it.
-& $toolkitEntry @args
+& $toolkitEntry @forwarded
 exit $LASTEXITCODE
