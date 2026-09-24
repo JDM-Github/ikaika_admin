@@ -92,6 +92,10 @@ if ($Help) {
     Write-Host ''
     Write-Host '  No switches lists every file and applies none of them.'
     Write-Host ''
+    Write-Host '  -Idempotent means everything: all three products, all four files, and'
+    Write-Host '  the migrations. It skips what is already applied, so running it twice'
+    Write-Host '  does nothing the second time.'
+    Write-Host ''
     Write-Host '  -Schema is DESTRUCTIVE for portal and estimator: those files open with'
     Write-Host '  DROP DATABASE, so applying one empties it. They are skipped unless'
     Write-Host '  -DropAndRecreate is also given. sql/core/schema.sql does not drop.'
@@ -121,6 +125,15 @@ if ($AllProducts) { $Core = $Portal = $Estimator = $true }
 if ($Idempotent -and -not ($Core -or $Portal -or $Estimator -or $Schema -or $Separate -or $Indexes -or $Data)) {
     $Core = $Portal = $Estimator = $true
     $Schema = $Separate = $Indexes = $Data = $true
+    # MIGRATIONS ARE PART OF "UP TO DATE", and leaving them out was a real gap rather
+    # than a scoping decision: the sql/ files build the tables, and every column added
+    # since lives in a migration. A run that applied every file and skipped these left a
+    # schema the application could not use, failing later with "Unknown column" - which
+    # names neither the migration nor the command that should have run it.
+    #
+    # Safe to include because artisan migrate is itself idempotent: it consults its own
+    # migrations table and runs only what is not there.
+    $Migrate = $true
 }
 
 $wantedFolders = @()
@@ -422,8 +435,14 @@ foreach ($step in $plan) {
     # and fails somewhere in the middle with a syntax error nobody can place.
     $quoted = ($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
     $output = & cmd.exe '/c' "`"$($mysql.Source)`" $quoted < `"$($step.Facts.Path)`" 2>&1"
+    # CAPTURED IMMEDIATELY. $LASTEXITCODE belongs to the last native command to run, and
+    # every branch below queries the server to work out what happened - so by the time
+    # the failure was printed it carried the exit code of the diagnostic query instead of
+    # the one that failed. It read "FAILED (exit 0)", which is a sentence that should
+    # never appear.
+    $mysqlExit = $LASTEXITCODE
     $ledgerTarget = $(if ($step.Facts.Target) { $step.Facts.Target } else { $step.Product.Database })
-    if ($LASTEXITCODE -eq 0) {
+    if ($mysqlExit -eq 0) {
         Write-Host "      applied to $ledgerTarget" -ForegroundColor Green
         if ($Idempotent) { $ledger[(Get-LedgerKey $ledgerTarget $step.Key)] = @{ sha256 = $step.Hash; bytes = $step.Facts.Bytes; note = 'applied'; applied_at = (Get-Date).ToString('o') }; $ledgerTouched = $true }
         continue
@@ -450,9 +469,30 @@ foreach ($step in $plan) {
             if ($Idempotent) { $ledger[(Get-LedgerKey $ledgerTarget $step.Key)] = @{ sha256 = $step.Hash; bytes = $step.Facts.Bytes; note = 'adopted'; applied_at = (Get-Date).ToString('o') }; $ledgerTouched = $true }
             continue
         }
-        Write-Host "      FAILED (exit $LASTEXITCODE) $why" -ForegroundColor Red
-        Write-Host "      mysql stops at the first error, so the rest of the file did not run." -ForegroundColor Yellow
-        Write-Host "      Still missing from ${target}: $($missing -join ', ')" -ForegroundColor Yellow
+        # PART-APPLIED, and the missing tables are the point. mysql stops at the first
+        # error, so a file that grew new CREATE TABLEs after it was first applied never
+        # reaches them - which is exactly what happens every time somebody adds tables to
+        # separate.sql, and the answer "six tables are missing" helps nobody on its own.
+        #
+        # --force makes mysql carry on past the ones that already exist and create the
+        # ones that do not. It is used ONLY here, on the retry, never on the first
+        # attempt: it also swallows real errors, so the end state is then read back from
+        # the server rather than inferred from an exit code it no longer reports usefully.
+        Write-Host "      $($missing.Count) table(s) missing - retrying past what is already there" -ForegroundColor DarkGray
+        $forced = $arguments + @('--force')
+        $forcedQuoted = ($forced | ForEach-Object { '"' + $_ + '"' }) -join ' '
+        [void](& cmd.exe '/c' "`"$($mysql.Source)`" $forcedQuoted < `"$($step.Facts.Path)`" 2>&1")
+
+        $stillMissing = @(Get-MissingTable $step.Product $target $declaredTables)
+        if (-not $stillMissing.Count) {
+            Write-Host "      applied - $($missing.Count) table(s) added, the rest were already there" -ForegroundColor Green
+            if ($Idempotent) { $ledger[(Get-LedgerKey $ledgerTarget $step.Key)] = @{ sha256 = $step.Hash; bytes = $step.Facts.Bytes; note = 'applied'; applied_at = (Get-Date).ToString('o') }; $ledgerTouched = $true }
+            continue
+        }
+
+        Write-Host "      FAILED (exit $mysqlExit) $why" -ForegroundColor Red
+        Write-Host "      Still missing from ${target} even after a forced retry:" -ForegroundColor Yellow
+        Write-Host "        $($stillMissing -join ', ')" -ForegroundColor Yellow
         $failures++
         continue
     }
@@ -464,7 +504,7 @@ foreach ($step in $plan) {
         continue
     }
 
-    Write-Host "      FAILED (exit $LASTEXITCODE) $why" -ForegroundColor Red
+    Write-Host "      FAILED (exit $mysqlExit) $why" -ForegroundColor Red
     # data.sql is NOT re-runnable and that is a property of the file, not a bug here: it
     # truncates one table and then inserts into fifty, so a second run collides with the
     # rows the first one wrote. Reported as the failure it is, with the only thing that
