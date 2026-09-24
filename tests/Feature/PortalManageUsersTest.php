@@ -54,7 +54,7 @@ class PortalManageUsersTest extends TestCase
             ->assertJsonPath('resource', 'users')
             ->assertJsonStructure([
                 'data' => [
-                    ['id', 'id_no', 'first_name', 'last_name', 'email', 'department', 'job_title', 'status', 'role', 'role_level', 'is_admin', 'is_executive', 'is_locked'],
+                    ['id', 'id_no', 'first_name', 'last_name', 'email', 'department', 'job_title', 'status', 'role', 'role_level', 'is_admin', 'is_executive', 'is_locked', 'canEditAccess'],
                 ],
                 'counts' => ['admins', 'members', 'active', 'inactive', 'total'],
                 'meta' => ['current_page', 'per_page', 'total', 'last_page'],
@@ -62,7 +62,7 @@ class PortalManageUsersTest extends TestCase
 
         $first = $response->json('data.0');
         $this->assertIsArray($first);
-        $this->assertSame(PortalManageUserPresenter::rosterColumns(), array_values(array_diff(array_keys($first), ['is_admin', 'is_executive', 'is_locked'])));
+        $this->assertSame(PortalManageUserPresenter::rosterColumns(), array_values(array_diff(array_keys($first), ['is_admin', 'is_executive', 'is_locked', 'canEditAccess'])));
         $this->assertArrayNotHasKey('bank_account_number', $first);
         $this->assertArrayNotHasKey('tax_identification_no', $first);
         $this->assertArrayNotHasKey('personal_email', $first);

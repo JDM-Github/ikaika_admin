@@ -59,6 +59,22 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(30)->by('user-notifications-write:'.$this->portalLimiterKey($request));
         });
 
+        RateLimiter::for('portal-access', function (Request $request) {
+            return Limit::perMinute(60)->by('access:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-access-write', function (Request $request) {
+            return Limit::perMinute(60)->by('access-write:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-manage-access', function (Request $request) {
+            return Limit::perMinute(60)->by('manage-access:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-manage-access-write', function (Request $request) {
+            return Limit::perMinute(60)->by('manage-access-write:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-projects', function (Request $request) {
             return Limit::perMinute(60)->by('projects:'.$this->portalLimiterKey($request));
         });

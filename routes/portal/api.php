@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Route;
  *   routes/portal/reports.php   Reports / Submitted
  *   routes/portal/requests.php  Requests / Overtime
  *   routes/portal/calendar.php        Calendar / Holidays
+ *   routes/portal/access.php          Access
  *   routes/portal/administration.php  Administration / Recycle Bin
  */
 
@@ -24,5 +25,6 @@ Route::prefix('portal')->group(function (): void {
     require __DIR__.'/reports.php';
     require __DIR__.'/requests.php';
     require __DIR__.'/calendar.php';
+    require __DIR__.'/access.php';
     require __DIR__.'/administration.php';
 });
