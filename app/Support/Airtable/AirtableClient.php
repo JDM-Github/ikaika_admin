@@ -76,21 +76,49 @@ final class AirtableClient
      */
     public function update(string $table, string $recordId, array $fields): void
     {
-        $this->send('patch', '/'.$this->base().'/'.rawurlencode($table).'/'.rawurlencode($recordId), [
+        $response = $this->send('patch', '/'.$this->base().'/'.rawurlencode($table).'/'.rawurlencode($recordId), [
             'fields' => $fields,
             'typecast' => false,
-        ]);
+        ], true);
+
+        if ($response->failed()) {
+            if (! $this->exists($table, $recordId)) {
+                throw new AirtableRecordGone('The Airtable record '.$recordId.' no longer exists.');
+            }
+            throw $this->failure($response);
+        }
     }
 
+    // Already gone counts as deleted: a retry after a half-finished run must not fail on it.
     public function delete(string $table, string $recordId): void
     {
-        $this->send('delete', '/'.$this->base().'/'.rawurlencode($table).'/'.rawurlencode($recordId));
+        $response = $this->send('delete', '/'.$this->base().'/'.rawurlencode($table).'/'.rawurlencode($recordId), [], true);
+
+        if ($response->failed() && $this->exists($table, $recordId)) {
+            throw $this->failure($response);
+        }
+    }
+
+    /**
+     * Airtable answers a missing record and a missing permission with the same 403, so whether a
+     * record is really gone is asked with a read, which the token can make either way.
+     */
+    private function exists(string $table, string $recordId): bool
+    {
+        // Only a well-formed id goes into the formula; anything else is never declared gone.
+        if (preg_match('/^rec[A-Za-z0-9]{14}$/', $recordId) !== 1) {
+            return true;
+        }
+        $query = http_build_query(['filterByFormula' => "RECORD_ID()='".$recordId."'", 'maxRecords' => 1]);
+        $records = $this->send('get', '/'.$this->base().'/'.rawurlencode($table).'?'.$query)->json('records');
+
+        return is_array($records) && $records !== [];
     }
 
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function send(string $method, string $path, array $payload = []): Response
+    private function send(string $method, string $path, array $payload = [], bool $returnNotFound = false): Response
     {
         for ($attempt = 1; $attempt <= 2; $attempt++) {
             usleep(self::SPACING_MICROSECONDS);
@@ -106,17 +134,28 @@ final class AirtableClient
                 continue;
             }
 
+            // A missing record and a missing permission share these; the caller tells them apart.
+            if ($returnNotFound && in_array($response->status(), [403, 404], true)) {
+                return $response;
+            }
+
             if ($response->failed()) {
-                // Airtable's own error type and message only; the request, and so the token, never.
-                $type = $response->json('error.type') ?? $response->json('error') ?? 'HTTP_'.$response->status();
-                $message = $response->json('error.message') ?? '';
-                throw new RuntimeException(trim((is_string($type) ? $type : 'HTTP_'.$response->status()).' '.(is_string($message) ? $message : '')));
+                throw $this->failure($response);
             }
 
             return $response;
         }
 
         throw new RuntimeException('Airtable rate limit did not clear after one retry.');
+    }
+
+    // Airtable's own error type and message only; the request, and so the token, never.
+    private function failure(Response $response): RuntimeException
+    {
+        $type = $response->json('error.type') ?? $response->json('error') ?? 'HTTP_'.$response->status();
+        $message = $response->json('error.message') ?? '';
+
+        return new RuntimeException(trim((is_string($type) ? $type : 'HTTP_'.$response->status()).' '.(is_string($message) ? $message : '')));
     }
 
     private function request(): PendingRequest

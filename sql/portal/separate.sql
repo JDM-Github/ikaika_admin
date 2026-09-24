@@ -157,3 +157,25 @@ ALTER TABLE employees_user_reports
     ADD COLUMN flag_status  VARCHAR(50) NOT NULL DEFAULT 'Pending',
     ADD COLUMN flag_remarks TEXT        NULL;
 
+
+-- ============================================================================
+-- DEVELOPER ACCESS — is_developer on employees
+-- Portal-only, like the flags above: Airtable's Employees table has no such field and
+-- the sync never sends it. A developer will sit above an admin (who has limits a
+-- developer will not); nothing reads it yet. Read-only in the admin grid
+-- (config/workspace.php readonly_columns), so an admin cannot grant it to themselves.
+-- ============================================================================
+
+ALTER TABLE employees
+    ADD COLUMN is_developer TINYINT(1) NOT NULL DEFAULT 0;
+
+-- The portal's developers. Matched on id_no, never on name: another employee carries
+-- "Malabanan" as a middle name. Needs the employees data.sql loads, which is why
+-- reset.ps1 runs this file after data.sql.
+UPDATE employees
+SET is_developer = 1
+WHERE id_no IN (
+    '260701-0020', -- John Dave Pega
+    '260701-0019'  -- Jhon Noriel Malabanan
+);
+

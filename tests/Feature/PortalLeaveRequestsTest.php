@@ -152,6 +152,25 @@ class PortalLeaveRequestsTest extends TestCase
             ->assertJsonPath('message', 'Leave is taken on working days; that day is a weekend.');
     }
 
+    // A day filed on a weekend before the weekday rule existed can still have its reason fixed.
+    public function test_a_leave_already_on_a_weekend_stays_editable_in_place(): void
+    {
+        $actor = $this->activeMember();
+        $saturday = Carbon::parse($this->freeDate($actor, 3))->next(Carbon::SATURDAY)->toDateString();
+        $id = $this->insertLeave($actor, $saturday, 'Pending');
+        Cache::flush();
+
+        $this->withToken($this->loginToken($actor))
+            ->patchJson('/api/development/portal/requests/leave/'.$id, [
+                'leaveType' => '01 Vacation Leave',
+                'requestDate' => $saturday,
+                'reason' => 'Corrected reason',
+            ])
+            ->assertOk();
+
+        $this->assertSame('Corrected reason', DB::connection('portal')->table('requests')->where('id', $id)->value('reason'));
+    }
+
     public function test_one_day_is_a_range_of_one(): void
     {
         $actor = $this->activeMember();

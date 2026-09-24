@@ -9,11 +9,27 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 // Dry run unless --send is given: the default must never write to Airtable by accident.
-Artisan::command('portal:airtable-sync {--send : Write to Airtable; without it nothing is written anywhere}', function (PortalAirtableSync $sync) {
+Artisan::command('portal:airtable-sync
+    {--send : Write to Airtable; without it nothing is written anywhere}
+    {--check : Test every mapping against one real row each; writes nothing}', function (PortalAirtableSync $sync) {
     $send = (bool) $this->option('send');
-    $this->info($send ? 'Sending unsynced portal actions to Airtable.' : 'DRY RUN -- nothing will be written to Airtable or the ledger.');
+    $check = (bool) $this->option('check');
+    $this->info(match (true) {
+        $check => 'CHECK -- every mapping against the live base; nothing will be written.',
+        $send => 'Sending unsynced portal actions to Airtable.',
+        default => 'DRY RUN -- nothing will be written to Airtable or the ledger.',
+    });
 
-    $report = $sync->run($send);
+    try {
+        $report = $check
+            ? ['items' => $sync->check(), 'counts' => null]
+            : $sync->run($send);
+    } catch (Throwable $error) {
+        // Unreachable or misconfigured Airtable: a readable reason, never a stack trace or the token.
+        $this->error('Airtable sync stopped: '.$error->getMessage().' Anything already sent is recorded; run it again to continue.');
+
+        return 1;
+    }
 
     foreach ($report['items'] as $item) {
         $this->line(sprintf(
@@ -35,12 +51,15 @@ Artisan::command('portal:airtable-sync {--send : Write to Airtable; without it n
     }
 
     $counts = $report['counts'];
+    if ($counts === null) {
+        return 0;
+    }
     $this->newLine();
-    $this->info(sprintf(
-        'create %d · update %d · discard %d · synced %d · covered %d · blocked %d · failed %d · skipped %d',
-        $counts['create'], $counts['update'], $counts['discard'], $counts['synced'], $counts['covered'],
-        $counts['blocked'], $counts['failed'], $counts['skipped'],
-    ));
+    $this->info(implode(' · ', array_map(
+        static fn (string $outcome, int $count): string => $outcome.' '.$count,
+        array_keys($counts),
+        $counts,
+    )));
 
     return $counts['failed'] > 0 ? 1 : 0;
 })->purpose('Replay unsynced portal ledger rows into Airtable (dry run unless --send)');

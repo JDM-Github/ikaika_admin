@@ -635,6 +635,93 @@ class PortalSubmittedReportsTest extends TestCase
      * back unflagged after the edit, which would be wrong -- the report was filed while the
      * employee was on a warning, and that fact does not change because the warning later lapsed.
      */
+    // An edit re-inserts every line; the new lines inherit the old Airtable ids so the sync patches.
+    public function test_an_edit_hands_the_old_airtable_ids_to_the_new_lines_and_a_delete_keeps_them(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstProject();
+        $activity = $this->firstActivity();
+        $earn = $this->firstEarnCode();
+        $today = Carbon::today()->toDateString();
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $this->insertLine($actor, ['report_date' => $today, 'airtable_record_id' => 'recFIRST00000001'], $project, $activity, $earn);
+        $this->insertLine($actor, ['report_date' => $today, 'airtable_record_id' => 'recSECOND0000001'], $project, $activity, $earn);
+        $id = $today.'-daily';
+
+        $this->patchJson('/api/development/portal/reports/submitted/'.$id, [
+            'entries' => [[
+                'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+                'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name ?? null, $activity->id_no ?? null),
+                'hoursRendered' => 8,
+                'elementChange' => 0,
+            ]],
+            'remarks' => 'One line now',
+        ], $headers)->assertOk();
+
+        $edited = Action::query()
+            ->where('recycle_key', CoreRecycleKey::submittedReport((int) $actor->getKey(), $today, 'daily'))
+            ->where('action_type', CoreActionType::EDIT)
+            ->first();
+        $this->assertNotNull($edited);
+        $lineIds = $edited->parameters['parameters']['lineIds'];
+        $this->assertCount(1, $lineIds);
+        $this->assertSame('recFIRST00000001', DB::connection('portal')->table('user_reports')->where('id', $lineIds[0])->value('airtable_record_id'));
+        $this->assertSame(['recSECOND0000001'], $edited->parameters['parameters']['removedAirtableIds']);
+
+        // Deleting the report records the surviving line's Airtable id, so the sync can remove it.
+        $this->deleteJson('/api/development/portal/reports/submitted/'.$id, [], $headers)->assertNoContent();
+        $deleted = Action::query()
+            ->where('recycle_key', CoreRecycleKey::submittedReport((int) $actor->getKey(), $today, 'daily'))
+            ->where('action_type', CoreActionType::DELETE)
+            ->first();
+        $this->assertNotNull($deleted);
+        $this->assertSame('recFIRST00000001', $deleted->parameters['parameters']['lines'][0]['airtable_record_id']);
+    }
+
+    // The form never sets these, so an edit that re-inserts the lines must carry them over.
+    public function test_an_edit_keeps_the_columns_the_form_never_sets(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstProject();
+        $activity = $this->firstActivity();
+        $earn = $this->firstEarnCode();
+        $today = Carbon::today()->toDateString();
+        $lineId = $this->insertLine($actor, ['report_date' => $today, 'late_submission' => 'YES'], $project, $activity, $earn);
+        DB::connection('portal')->table('user_reports')->where('id', $lineId)->update([
+            'late_submission_approval' => 'Approved', 'approver_remarks' => 'Late is fine', 'actual_work_date' => $today,
+            'is_support' => 'Y', 'duration' => 8,
+        ]);
+        $label = fn () => [
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name ?? null, $activity->id_no ?? null),
+        ];
+
+        // Two lines now where there was one: the first keeps its line's values, the added one
+        // inherits only the report-level decision.
+        $this->patchJson('/api/development/portal/reports/submitted/'.$today.'-late', [
+            'entries' => [
+                [...$label(), 'hoursRendered' => 4, 'elementChange' => 0],
+                [...$label(), 'hoursRendered' => 4, 'elementChange' => 0],
+            ],
+            'remarks' => 'Split the day',
+        ], ['Authorization' => 'Bearer '.$this->loginToken($actor)])->assertOk();
+
+        $lines = DB::connection('portal')->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->where('user_reports.report_date', $today)
+            ->orderBy('user_reports.id')
+            ->get(['user_reports.late_submission_approval', 'user_reports.approver_remarks', 'user_reports.is_support', 'user_reports.duration']);
+        $this->assertCount(2, $lines);
+        $this->assertSame('Approved', $lines[0]->late_submission_approval);
+        $this->assertSame('Late is fine', $lines[0]->approver_remarks);
+        $this->assertSame('Y', $lines[0]->is_support);
+        $this->assertEquals(8, $lines[0]->duration);
+        $this->assertSame('Approved', $lines[1]->late_submission_approval);
+        $this->assertSame('Late is fine', $lines[1]->approver_remarks);
+        $this->assertNull($lines[1]->is_support);
+    }
+
     public function test_editing_a_flagged_report_keeps_its_flag_without_recomputing_it(): void
     {
         $actor = $this->activeMember();
@@ -1184,6 +1271,7 @@ class PortalSubmittedReportsTest extends TestCase
         object $earn,
     ): int {
         $id = (int) DB::connection('portal')->table('user_reports')->insertGetId([
+            'airtable_record_id' => $attributes['airtable_record_id'] ?? null,
             'report_date' => $attributes['report_date'],
             'hours_rendered' => $attributes['hours_rendered'] ?? 8,
             'change_in_elements' => $attributes['change_in_elements'] ?? 0,

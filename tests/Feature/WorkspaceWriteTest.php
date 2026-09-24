@@ -131,6 +131,21 @@ class WorkspaceWriteTest extends TestCase
         $this->assertSame($project->airtable_record_id, $fresh->airtable_record_id);
     }
 
+    // A developer outranks an admin, so an admin must not be able to grant it from the grid.
+    public function test_is_developer_is_shown_but_never_editable_from_the_grid(): void
+    {
+        $employee = DB::connection('portal')->table('employees')->orderBy('id')->first();
+        $this->assertNotNull($employee);
+        $headers = $this->headersFor($this->administrator());
+
+        $fields = collect($this->getJson('/api/development/portal/_schema/employees', $headers)->assertOk()->json('fields'));
+        $this->assertFalse($fields->firstWhere('name', 'is_developer')['editable'] ?? true);
+
+        $this->patchJson('/api/development/portal/_grid/employees/'.$employee->id, ['changes' => ['is_developer' => true]], $headers)
+            ->assertStatus(422);
+        $this->assertSame(0, (int) DB::connection('portal')->table('employees')->where('id', $employee->id)->value('is_developer'));
+    }
+
     public function test_a_value_the_column_cannot_hold_is_refused_before_it_reaches_mysql(): void
     {
         $project = DB::connection('portal')->table('projects')->orderBy('id')->first();

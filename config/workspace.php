@@ -32,6 +32,16 @@ return [
     'writable_products' => ['portal', 'project-estimator'],
 
     /*
+     * Columns the grid shows but never lets anyone edit, per product and table. is_developer
+     * outranks an admin, so an admin must not be able to grant it to themselves from here.
+     */
+    'readonly_columns' => [
+        'portal' => [
+            'employees' => ['is_developer'],
+        ],
+    ],
+
+    /*
      * Tables that are infrastructure rather than data. Junction tables are detected
      * by shape and hidden automatically, so they never need listing here.
      */

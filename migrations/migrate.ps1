@@ -64,11 +64,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$runStarted = Get-Date
 $scriptDir = $PSScriptRoot
 $repoRoot = Split-Path -Parent $scriptDir
 
 # Schema is a checked-in file per base, never generated -- SchemaFiles lists what
 # to concatenate. Generator is the script that turns an Airtable export into SQL;
+# AfterData is DDL that must run once the data is in -- portal-only tables, columns and
+# grants that update loaded rows -- so with both outputs it ends data.sql, not schema.sql.
 # DataSnapshot is the checked-in data.sql to fall back on for a base that has no
 # generator yet. Either can be $null: the base is then only partly migratable.
 $targets = @(
@@ -78,7 +81,8 @@ $targets = @(
         Folder       = 'users_projects_prod'
         BaseId       = 'app8jGTzRDQt4yPIa'
         Database     = 'test_portal_database'
-        SchemaFiles  = @('sql/portal/schema.sql', 'sql/portal/separate.sql')
+        SchemaFiles  = @('sql/portal/schema.sql')
+        AfterData    = @('sql/portal/separate.sql')
         Generator    = 'generate/generate_sql_users_projects.py'
         DataSnapshot = $null
     },
@@ -88,7 +92,8 @@ $targets = @(
         Folder       = 'users_projects_test'
         BaseId       = 'app8DvnFZErPZT5Az'
         Database     = 'test_portal_database'
-        SchemaFiles  = @('sql/portal/schema.sql', 'sql/portal/separate.sql')
+        SchemaFiles  = @('sql/portal/schema.sql')
+        AfterData    = @('sql/portal/separate.sql')
         Generator    = 'generate/generate_sql_users_projects.py'
         DataSnapshot = $null
     },
@@ -101,6 +106,7 @@ $targets = @(
         SchemaFiles  = @('sql/project_estimator/schema.sql')
         Generator    = $null
         DataSnapshot = 'sql/project_estimator/data.sql'
+        AfterData    = @()
     },
     @{
         Key          = 'transaction-tracker'
@@ -111,6 +117,7 @@ $targets = @(
         SchemaFiles  = @('sql/transaction_tracker/schema.sql')
         Generator    = 'generate/generate_sql_transaction_tracker.py'
         DataSnapshot = $null
+        AfterData    = @()
     },
     @{
         Key          = 'custom'
@@ -121,6 +128,7 @@ $targets = @(
         SchemaFiles  = @()
         Generator    = $null
         DataSnapshot = $null
+        AfterData    = @()
     }
 )
 
@@ -180,9 +188,9 @@ function Invoke-Python {
 }
 
 function Build-Schema {
-    param($Selected, [string]$OutFile, [string]$DatabaseName)
+    param($Selected, [string]$OutFile, [string]$DatabaseName, [string[]]$Files)
 
-    $sources = $Selected.SchemaFiles | ForEach-Object { "--   $_" }
+    $sources = $Files | ForEach-Object { "--   $_" }
     $header = @"
 -- ============================================================================
 -- $($Selected.Label) -- schema
@@ -200,7 +208,7 @@ $($sources -join "`n")
 
 "@
 
-    $body = foreach ($relative in $Selected.SchemaFiles) {
+    $body = foreach ($relative in $Files) {
         $path = Join-Path $repoRoot $relative
         if (-not (Test-Path $path)) {
             Stop-WithMessage "Schema source not found: $path"
@@ -323,10 +331,32 @@ try {
         }
     }
 
+    # With data coming, the after-data DDL ends data.sql; schema-only keeps it in schema.sql,
+    # since nothing follows to load and its tables are still needed.
+    $dataFile = Join-Path $targetDir 'data.sql'
+    $afterData = @($selected.AfterData)
+    # Only a data.sql this run wrote: -Step fetch/upload leave an older one that already has it.
+    $freshData = (Test-Path $dataFile) -and (Get-Item $dataFile).LastWriteTime -ge $runStarted
+    if ($mode.Data -and $mode.Schema -and $afterData.Count -gt 0 -and $freshData) {
+        Write-Host '==> Appending portal-only DDL to data.sql (it needs the loaded rows)' -ForegroundColor Cyan
+        foreach ($relative in $afterData) {
+            $path = Join-Path $repoRoot $relative
+            if (-not (Test-Path $path)) {
+                Stop-WithMessage "After-data source not found: $path"
+            }
+            $extra = Get-Content -Raw -Encoding UTF8 -Path $path
+            if ($databaseName -ne $selected.Database) {
+                $extra = $extra -replace "(?im)^(\s*USE\s+)$([regex]::Escape($selected.Database))\b", "`${1}$databaseName"
+            }
+            Add-Content -Path $dataFile -Encoding UTF8 -Value ("`n-- ---------------------------------------------------------------------------`n-- $relative (after the data)`n-- ---------------------------------------------------------------------------`n`n" + $extra)
+        }
+    }
+
     if ($mode.Schema) {
         if ($selected.SchemaFiles.Count -gt 0) {
             Write-Host '==> Assembling schema.sql' -ForegroundColor Cyan
-            Build-Schema -Selected $selected -OutFile (Join-Path $targetDir 'schema.sql') -DatabaseName $databaseName
+            $files = if ($mode.Data -and $freshData) { $selected.SchemaFiles } else { @($selected.SchemaFiles) + $afterData }
+            Build-Schema -Selected $selected -OutFile (Join-Path $targetDir 'schema.sql') -DatabaseName $databaseName -Files $files
         }
         else {
             Write-Host ''

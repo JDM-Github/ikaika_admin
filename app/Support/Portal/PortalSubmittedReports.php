@@ -38,6 +38,12 @@ final class PortalSubmittedReports
 
     private const CORE_RESOURCE = 'reports.submitted';
 
+    // Kept by Airtable or a reviewer, never by the report form, so an edit must carry them over.
+    private const FORM_UNSET_COLUMNS = ['is_support', 'end_date', 'duration'];
+
+    // A decision on the whole report, so even a line an edit adds inherits it.
+    private const REPORT_LEVEL_COLUMNS = ['late_submission_approval', 'approver_remarks', 'actual_work_date'];
+
     // A freshly filed report has not been through anyone yet; replace() keeps whatever it finds.
     private const NEW_APPROVAL = 'Pending';
 
@@ -333,9 +339,13 @@ final class PortalSubmittedReports
             $actor,
         ): void {
             $removedIds = $this->lineIds($existing);
+            // Read under a lock inside the transaction, so an id a sync writes back mid-edit is seen.
+            // Each new line takes its old line's Airtable id and the columns the form never sets, so
+            // Airtable keeps its record and an approved late submission stays approved.
+            $oldLines = $this->lockedLines($removedIds);
             $this->deleteLines($removedIds);
             $lineIds = [];
-            foreach ($resolved as $entry) {
+            foreach (array_values($resolved) as $index => $entry) {
                 $lineIds[] = $this->insertLine(
                     $employeeId,
                     $date,
@@ -346,7 +356,15 @@ final class PortalSubmittedReports
                     $created,
                     $isFlagged,
                     $flagStatus,
+                    $this->carriedColumns($oldLines, $index),
                 );
+            }
+            // Old lines beyond the new count were dropped; their Airtable records are the sync's to delete.
+            $droppedAirtableIds = [];
+            foreach (array_slice($oldLines, count($resolved)) as $dropped) {
+                if (is_string($dropped->airtable_record_id) && $dropped->airtable_record_id !== '') {
+                    $droppedAirtableIds[] = $dropped->airtable_record_id;
+                }
             }
 
             // An edit replaces every line, so the sync needs both sets to archive and recreate.
@@ -361,6 +379,7 @@ final class PortalSubmittedReports
                     'remarks' => $remarks,
                     'lineIds' => $lineIds,
                     'removedLineIds' => $removedIds,
+                    'removedAirtableIds' => $droppedAirtableIds,
                 ],
                 self::CORE_RESOURCE,
                 $id,
@@ -587,6 +606,15 @@ final class PortalSubmittedReports
         // own view already reads back from this snapshot.
         $snapshot = $this->recycleSnapshot($actor, $id, $date, $kind, $existing);
         $this->ledger->within($this->connection(), function () use ($ids, $employeeId, $date, $kind, $id, $snapshot, $actor): void {
+            // Re-read under a lock, so an id a sync wrote back after the snapshot was taken is kept.
+            $airtableIds = [];
+            foreach ($this->lockedLines($ids) as $line) {
+                $airtableIds[(int) $line->id] = $line->airtable_record_id;
+            }
+            $snapshot['lines'] = array_map(
+                static fn (array $line): array => [...$line, 'airtable_record_id' => $airtableIds[(int) $line['id']] ?? null],
+                $snapshot['lines'],
+            );
             $this->deleteLines($ids);
             $this->ledger->recycleDeleted(
                 CoreLedger::PRODUCT_PORTAL,
@@ -1338,6 +1366,7 @@ final class PortalSubmittedReports
             ->toBase()
             ->select([
                 'user_reports.id',
+                'user_reports.airtable_record_id',
                 'user_reports.report_date',
                 'user_reports.hours_rendered',
                 'user_reports.change_in_elements',
@@ -1433,6 +1462,8 @@ final class PortalSubmittedReports
             );
             $snapshotLines[] = [
                 'id' => $lineId,
+                // What the sync deletes in Airtable once this report is gone from SQL.
+                'airtable_record_id' => $line->airtable_record_id ?? null,
                 'report_date' => $this->calendarDate($line->report_date) ?? $date,
                 'hours_rendered' => $line->hours_rendered ?? 0,
                 'change_in_elements' => $line->change_in_elements ?? 0,
@@ -1859,6 +1890,55 @@ final class PortalSubmittedReports
     /**
      * @param  array{projectId: int, activityCodeId: int, earnCodeId: ?int, hoursRendered: float, elementChange: float}  $entry
      */
+    /**
+     * The old lines with their Airtable id and the columns the form never writes, in line order,
+     * read FOR UPDATE so a concurrent write-back either lands before this read or waits for the
+     * transaction, never slipping in between.
+     *
+     * @param  list<int>  $lineIds
+     * @return list<object>
+     */
+    private function lockedLines(array $lineIds): array
+    {
+        return $this->connection()->table('user_reports')
+            ->whereIn('id', $lineIds)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get(['id', 'airtable_record_id', ...self::FORM_UNSET_COLUMNS, ...self::REPORT_LEVEL_COLUMNS])
+            ->all();
+    }
+
+    /**
+     * What a re-inserted line keeps from the old line in its place. A line an edit added beyond the
+     * old count has no line of its own, but still inherits the report-level decision columns.
+     *
+     * @param  list<object>  $oldLines
+     * @return array<string, mixed>
+     */
+    private function carriedColumns(array $oldLines, int $index): array
+    {
+        $own = $oldLines[$index] ?? null;
+        if ($own !== null) {
+            $carried = ['airtable_record_id' => $own->airtable_record_id];
+            foreach ([...self::FORM_UNSET_COLUMNS, ...self::REPORT_LEVEL_COLUMNS] as $column) {
+                $carried[$column] = $own->{$column};
+            }
+
+            return $carried;
+        }
+
+        $first = $oldLines[0] ?? null;
+        if ($first === null) {
+            return [];
+        }
+        $carried = [];
+        foreach (self::REPORT_LEVEL_COLUMNS as $column) {
+            $carried[$column] = $first->{$column};
+        }
+
+        return $carried;
+    }
+
     private function insertLine(
         int $employeeId,
         string $date,
@@ -1869,8 +1949,10 @@ final class PortalSubmittedReports
         mixed $created,
         bool $isFlagged,
         string $flagStatus,
+        array $carried = [],
     ): int {
         $id = (int) $this->connection()->table('user_reports')->insertGetId([
+            ...$carried,
             'report_date' => $date,
             'hours_rendered' => $entry['hoursRendered'],
             'change_in_elements' => $entry['elementChange'],

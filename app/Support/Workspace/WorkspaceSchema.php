@@ -145,7 +145,8 @@ final class WorkspaceSchema
                 'numeric' => WorkspaceFieldType::isNumericType($type),
                 'filled' => $locked ? null : ($probes[$column['name']]['nonnull'] ?? null),
                 'locked' => $locked,
-                'editable' => $writable && ! $locked && WorkspaceFieldType::isEditable($type),
+                'editable' => $writable && ! $locked && WorkspaceFieldType::isEditable($type)
+                    && ! in_array($column['name'], (array) config('workspace.readonly_columns.'.$product.'.'.$table, []), true),
             ];
 
             if ($type === WorkspaceFieldType::SELECT) {

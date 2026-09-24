@@ -220,7 +220,8 @@ final class PortalLeaveRequests
         $reason = $this->validatedReason($request);
         $date = $this->parseDate(trim((string) $request->input('requestDate', '')));
         $this->assertFilableDate($date, $current);
-        if ($date->isWeekend()) {
+        // Moving onto a weekend is refused; a day already on one (filed before this rule) stays editable.
+        if ($date->isWeekend() && $date->toDateString() !== $current) {
             abort(422, 'Leave is taken on working days; that day is a weekend.');
         }
         $day = $date->toDateString();

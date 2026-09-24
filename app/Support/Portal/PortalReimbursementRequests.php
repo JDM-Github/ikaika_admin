@@ -1279,7 +1279,7 @@ final class PortalReimbursementRequests
 
         $rows = $this->connection()
             ->table('reimbursements')
-            ->select(['id', 'reimb_date', 'item', 'cost', 'qty', 'purpose', 'team', 'status'])
+            ->select(['id', 'airtable_record_id', 'reimb_date', 'item', 'cost', 'qty', 'purpose', 'team', 'status'])
             ->whereIn('id', $ids)
             ->orderBy('id')
             ->get();
@@ -1291,6 +1291,8 @@ final class PortalReimbursementRequests
             $receipt = $receipts[$id] ?? null;
             $snapshots[$id] = [
                 'id' => (string) $id,
+                // Kept so a dropped item's delete can remove the record Airtable holds for it.
+                'airtableRecordId' => is_string($row->airtable_record_id ?? null) ? $row->airtable_record_id : null,
                 'requestedFor' => $this->calendarDate($row->reimb_date ?? null),
                 'item' => $this->text($row->item ?? null),
                 'cost' => is_numeric($row->cost ?? null) ? (float) $row->cost : null,
