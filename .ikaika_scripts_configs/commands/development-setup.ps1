@@ -77,6 +77,7 @@ $libDir = Join-Path $toolkit 'lib'
 # follows that - is in one file, shared with environment-variables. Two copies of "which
 # PHP is active" would be two answers to the question this whole command turns on.
 . (Join-Path $configsDir 'lib\wamp.ps1')
+. (Join-Path $configsDir 'lib\dev-dependencies.ps1')
 
 if ($Help) {
     Write-Host ''
@@ -111,28 +112,39 @@ if ($Help) {
 Start-BuildLog 'development-setup'
 
 # =========================[ start: Project requirements ]=====================
-# Stated here rather than in the toolkit: the toolkit must not know which repository it
-# landed in, but this file IS the repository, and its machine requirements are exactly
-# what it exists to say. Anything a future version might want to move sits in
-# ikaika_scripts.env instead, which is why the version pair and the add-on filenames
-# are read rather than written.
+# DECLARED IN dev.json, not here. What this project needs installed is a fact about the
+# project rather than about the command that installs it, so it lives in a file a person
+# can read, CI can parse without a PowerShell host, and review shows as a one-line diff
+# when a floor moves. This command is what ACTS on that list.
+#
+# What stays in ikaika_scripts.env is the wiring rather than the requirement: where
+# WampServer is, which add-on URL to fetch, where composer.phar goes. Those are answers
+# to "how", and dev.json answers "what and which version".
+
+$devJsonPath = Join-Path $repoRoot 'dev.json'
+$declared = @(Get-DevDependency -Path $devJsonPath)
+$phpExtensionsDeclared = @((Get-Content -LiteralPath $devJsonPath -Raw | ConvertFrom-Json).phpExtensions.required)
+
+function Get-Declared([string]$Key) {
+    return ($declared | Where-Object { $_.Key -eq $Key } | Select-Object -First 1)
+}
 
 $wampRoot = Get-ProjectValue 'setup.wampRoot' 'C:\wamp64'
-$phpSeries = Get-ProjectValue 'setup.phpVersion' '8.4'
-$mysqlSeries = Get-ProjectValue 'setup.mysqlVersion' '8.0'
+$phpSeries = "$((Get-Declared 'php').Series)"
+$mysqlSeries = "$((Get-Declared 'mysql').Series)"
 $addonBase = Get-ProjectValue 'setup.addonBase' 'https://wampserver.aviatechno.net/files'
 $phpAddon = Get-ProjectValue 'setup.phpAddon' ''
 $mysqlAddon = Get-ProjectValue 'setup.mysqlAddon' ''
-$composerDir = Get-ProjectValue 'setup.composerDir' (Join-Path $env:LOCALAPPDATA 'Composer\bin')
+$composerDir = Get-ProjectValue 'setup.composerDir' (Join-Path $env:LOCALAPPDATA 'Composerin')
 $dbFlavor = "$(Get-ProjectValue 'setup.dbFlavor' 'mysql')".ToLower()
 $composerHome = Get-ProjectValue 'setup.composerHome' (Join-Path $env:APPDATA 'Composer')
 $stampPath = Join-Path $repoRoot '.ikaika-install'
 
 # WampServer will not run without these, and the failure it gives when one is absent is
-# an orange tray icon and a dialog naming a DLL - which is why they are installed
-# outright rather than graded. winget declares them as dependencies of the WampServer
-# package, but winget only resolves dependencies when the source says so and silently
-# skips them otherwise, so this list does not rely on that.
+# an orange tray icon and a dialog naming a DLL - which is why the whole set is installed
+# outright rather than graded. dev.json names the one that is PROBED (2015+); the rest are
+# its historical companions, listed here because they are an implementation detail of
+# installing that one and not a requirement anybody reads.
 $VcRedistIds = @(
     'Microsoft.VCRedist.2005.x86', 'Microsoft.VCRedist.2005.x64'
     'Microsoft.VCRedist.2008.x86', 'Microsoft.VCRedist.2008.x64'
@@ -142,12 +154,7 @@ $VcRedistIds = @(
     'Microsoft.VCRedist.2015+.x86', 'Microsoft.VCRedist.2015+.x64'
 )
 
-# Switched on in the CLI php.ini. Laravel's own list plus what this API uses: pdo_mysql
-# for the three databases, intl for the formatter, zip and curl because Composer falls
-# back to a much slower path without them, and sodium for encrypted cookies.
-$RequiredExtensions = @(
-    'curl', 'fileinfo', 'intl', 'mbstring', 'openssl', 'pdo_mysql', 'sodium', 'zip'
-)
+$RequiredExtensions = @($phpExtensionsDeclared)
 # ==========================[ end: Project requirements ]======================
 
 # ---------------------------------------------------------------- the report
