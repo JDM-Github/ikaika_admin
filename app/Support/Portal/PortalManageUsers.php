@@ -62,10 +62,15 @@ final class PortalManageUsers
         $sort = trim((string) $request->query('sort', ''));
         $dir = strtolower(trim((string) $request->query('dir', 'asc'))) === 'desc' ? 'desc' : 'asc';
 
-        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:manage:users:'.$version.':'.$page.':'.$perPage.':'.md5($search).':'.md5($department).':'.$sort.':'.$dir;
+        $viewer = $request->attributes->get('portalEmployee');
+        $viewerId = $viewer instanceof Employee ? (int) $viewer->getKey() : 0;
+        $live = $viewer instanceof Employee && PortalDeveloperMode::isOn($viewer, $request) ? $viewerId : null;
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($perPage, $page, $search, $department, $sort, $dir): array {
+        // The viewer and their Developer mode are part of the key: whose Access Rules they may open differs.
+        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+        $key = 'portal:manage:users:'.$version.':'.$viewerId.':'.($live === null ? 'd' : 'dev').':'.$page.':'.$perPage.':'.md5($search).':'.md5($department).':'.$sort.':'.$dir;
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($viewerId, $live, $perPage, $page, $search, $department, $sort, $dir): array {
             $query = $this->rosterQuery();
             $this->applyDepartment($query, $department);
             $this->applySearch($query, $search);
@@ -74,10 +79,14 @@ final class PortalManageUsers
             $pageResult = $query
                 ->paginate($perPage, PortalManageUserPresenter::rosterColumns(), 'page', $page);
 
+            $graph = PortalAccessGraph::load($live);
             $rows = [];
             foreach ($pageResult->items() as $employee) {
                 if ($employee instanceof Employee) {
-                    $rows[] = PortalManageUserPresenter::rosterItem($employee);
+                    $rows[] = [
+                        ...PortalManageUserPresenter::rosterItem($employee),
+                        'canEditAccess' => $graph->canManage($viewerId, (int) $employee->getKey()),
+                    ];
                 }
             }
 
@@ -317,6 +326,7 @@ final class PortalManageUsers
             PortalRole::isAdmin($target->role, $target->role_level),
             PortalRole::isRemovingAdminRights($target->role, $target->role_level, $newRole),
             $this->adminCount(),
+            PortalDeveloperMode::isOn($actor, $request),
         );
         if ($block !== null) {
             abort(403, $block);

@@ -46,6 +46,7 @@ class AuthenticatePortalJwt
         }
 
         $request->attributes->set('portalEmployee', $employee);
+        $request->attributes->set('portalSessionId', is_string($payload['sid'] ?? null) ? $payload['sid'] : null);
 
         return $next($request);
     }

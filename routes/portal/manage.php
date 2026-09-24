@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Portal\Manage\AccessController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
@@ -21,4 +22,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->whereNumber('id');
     Route::middleware(['portal.admin', 'throttle:portal-manage-reports'])
         ->get('manage/reports', [ReportsController::class, 'index']);
+    Route::middleware(['portal.admin', 'throttle:portal-manage-access'])
+        ->get('manage/access/{id}', [AccessController::class, 'show'])
+        ->whereNumber('id');
+    Route::middleware(['portal.admin', 'throttle:portal-manage-access-write'])
+        ->patch('manage/access/{id}', [AccessController::class, 'update'])
+        ->whereNumber('id');
 });

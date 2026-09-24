@@ -6,23 +6,14 @@ use App\Modules\Portal\Models\Employee;
 use Illuminate\Http\Request;
 
 /**
- * The view a developer is previewing in the portal, sent on every request. The header can only
- * take access away: a developer previewing Admin or Member is treated as not being a developer,
- * and nobody gains anything by sending it.
+ * Who acts as a developer on this request, and the department scope that follows from it. Only a
+ * developer with Developer mode switched on (PortalDeveloperMode); in Default they are their role.
  */
 final class PortalPreview
 {
-    public const HEADER = 'X-Portal-View';
-
     public static function actsAsDeveloper(Employee $employee, Request $request): bool
     {
-        if (! (bool) $employee->is_developer) {
-            return false;
-        }
-
-        $view = strtolower(trim((string) $request->header(self::HEADER)));
-
-        return $view !== 'admin' && $view !== 'member';
+        return PortalDeveloperMode::isOn($employee, $request);
     }
 
     /**

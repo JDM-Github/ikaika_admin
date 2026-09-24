@@ -696,18 +696,19 @@ class PortalRecycleBinTest extends TestCase
         $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$mine)->assertOk();
     }
 
-    // Previewing as Admin holds a developer to their department; their real view sees everyone.
-    public function test_a_developer_sees_every_department_until_previewing_as_admin(): void
+    // Default holds a developer to their department; Developer mode sees everyone.
+    public function test_a_developer_sees_every_department_only_in_developer_mode(): void
     {
         [, $outside] = $this->membersInBothDepartments();
         $this->emptyPortalBin();
         $this->putInBin($outside, ['submittedOn' => '2026-08-11']);
-        $token = $this->loginToken($this->adminWhoIsNotExecutive());
+        $admin = $this->adminWhoIsNotExecutive();
+        $token = $this->loginToken($admin);
 
         $real = $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin?scope=all')->assertOk();
         $this->assertContains('2026-08-11-daily', collect($real->json('data'))->pluck('recordId')->all());
 
-        $preview = $this->withToken($token)->withHeaders(['X-Portal-View' => 'admin'])
+        $preview = $this->withToken($this->defaultToken($admin))
             ->getJson('/api/development/portal/administration/recycle-bin?scope=all')->assertOk();
         $this->assertNotContains('2026-08-11-daily', collect($preview->json('data'))->pluck('recordId')->all());
     }
@@ -766,7 +767,16 @@ class PortalRecycleBinTest extends TestCase
         return [$inside, $outside];
     }
 
+    // A developer fixture acts in Developer mode, so the bin itself is tested across departments.
     private function loginToken(Employee $employee): string
+    {
+        $token = $this->defaultToken($employee);
+
+        return (bool) $employee->is_developer ? $this->developerModeOn($token) : $token;
+    }
+
+    // A fresh sign-in, which always starts in Default.
+    private function defaultToken(Employee $employee): string
     {
         $this->assertNotEmpty($employee->id_no);
 

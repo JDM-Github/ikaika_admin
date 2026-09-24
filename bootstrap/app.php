@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\RequirePortalAdmin;
+use App\Http\Middleware\RequirePortalRule;
 use App\Support\ApiPath;
 use App\Support\Portal\PortalForbiddenException;
 use Illuminate\Foundation\Application;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'portal.admin' => RequirePortalAdmin::class,
+            'portal.rule' => RequirePortalRule::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

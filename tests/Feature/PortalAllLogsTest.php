@@ -292,16 +292,17 @@ class PortalAllLogsTest extends TestCase
         $this->withToken($token)->getJson("/api/development/portal/administration/all-logs/{$executiveLog}")->assertNotFound();
     }
 
-    // Only a developer or an executive reads an executive's sign-ins; previewing as Admin hides them.
+    // Only a developer in Developer mode or an executive reads an executive's sign-ins; Default hides them.
     public function test_a_developer_and_an_executive_read_executive_sign_ins(): void
     {
         $executive = $this->executive();
         $this->loginToken($executive);
         $executiveLog = $this->latestLogOf($executive);
-        $developer = $this->loginToken($this->adminWhoIsNotExecutive());
+        $admin = $this->adminWhoIsNotExecutive();
+        $developer = $this->loginToken($admin);
 
         $this->withToken($developer)->getJson("/api/development/portal/administration/all-logs/{$executiveLog}")->assertOk();
-        $this->withToken($developer)->withHeaders(['X-Portal-View' => 'admin'])
+        $this->withToken($this->defaultToken($admin))
             ->getJson("/api/development/portal/administration/all-logs/{$executiveLog}")
             ->assertNotFound();
 
@@ -378,7 +379,16 @@ class PortalAllLogsTest extends TestCase
         return (int) $id;
     }
 
+    // A developer fixture acts in Developer mode, so the page itself is tested across departments.
     private function loginToken(Employee $employee): string
+    {
+        $token = $this->defaultToken($employee);
+
+        return (bool) $employee->is_developer ? $this->developerModeOn($token) : $token;
+    }
+
+    // A fresh sign-in, which always starts in Default.
+    private function defaultToken(Employee $employee): string
     {
         $token = $this->postJson('/api/development/portal/auth/login', [
             'id_no' => $employee->id_no,

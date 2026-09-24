@@ -153,12 +153,13 @@ class PortalManageReportsTest extends TestCase
             ->assertNotFound();
     }
 
-    // Previewing as Admin holds a developer to their department; their real view opens everyone.
-    public function test_a_developer_previewing_as_admin_is_held_to_their_department(): void
+    // Default holds a developer to their department; Developer mode opens everyone.
+    public function test_a_developer_in_default_is_held_to_their_department(): void
     {
         $outside = $this->activeMember();
         $outside->forceFill(['department' => 'Engineering'])->save();
-        $token = $this->loginToken($this->departmentAdmin(developer: true));
+        $developer = $this->departmentAdmin(developer: true);
+        $token = $this->developerModeOn($this->loginToken($developer));
 
         $roster = $this->withToken($token)
             ->getJson('/api/development/portal/manage/reports?employee_id='.$outside->id)
@@ -167,7 +168,7 @@ class PortalManageReportsTest extends TestCase
         $this->assertIsArray($roster);
         $this->assertContains((string) $outside->id, $roster);
 
-        $this->withToken($token)->withHeaders(['X-Portal-View' => 'admin'])
+        $this->withToken($this->loginToken($developer))
             ->getJson('/api/development/portal/manage/reports?employee_id='.$outside->id)
             ->assertNotFound();
     }
@@ -190,7 +191,7 @@ class PortalManageReportsTest extends TestCase
     public function test_an_executive_is_never_listed_or_opened(): void
     {
         $executive = $this->executive();
-        $token = $this->loginToken($this->departmentAdmin(developer: true));
+        $token = $this->developerModeOn($this->loginToken($this->departmentAdmin(developer: true)));
 
         $roster = $this->withToken($token)
             ->getJson('/api/development/portal/manage/reports')
@@ -233,7 +234,7 @@ class PortalManageReportsTest extends TestCase
     // A developer sees every department, so tests about the page itself do not depend on who is where.
     private function tokenForAdmin(): string
     {
-        return $this->loginToken($this->departmentAdmin(developer: true));
+        return $this->developerModeOn($this->loginToken($this->departmentAdmin(developer: true)));
     }
 
     private function departmentAdmin(bool $developer = false): Employee
