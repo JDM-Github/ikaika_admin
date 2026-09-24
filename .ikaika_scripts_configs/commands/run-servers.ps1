@@ -37,7 +37,12 @@
 
 # ============================[ start: Parameters ]============================
 param(
-    # WampServer's Apache. Serves the site and phpMyAdmin.
+    # Start WampServer itself - wampmanager.exe, the tray application - and let it bring
+    # up Apache and the database the way it does when a person double-clicks it. This is
+    # what a bare run does.
+    [switch]$WampServer,
+    # WampServer's Apache, as a Windows service. Needs administrator; -WampServer does
+    # not, which is why that is the default and this is the scalpel.
     [switch]$Apache,
     # WampServer's MySQL service.
     [switch]$MySQL,
@@ -76,15 +81,19 @@ if ($Help) {
     Write-Host '  run-servers - start and stop what this project develops against.'
     Write-Host ''
     Write-Host '  Usage'
-    Write-Host '    .\script.ps1 run-servers [-Apache] [-MySQL] [-MariaDB] [-PhpMyAdmin]'
-    Write-Host '                             [-Api] [-Vite] [-All] [-Stop] [-Status]'
+    Write-Host '    .\script.ps1 run-servers [-WampServer] [-Apache] [-MySQL] [-MariaDB]'
+    Write-Host '                             [-PhpMyAdmin] [-Api] [-Vite] [-All]'
+    Write-Host '                             [-Stop] [-Status]'
     Write-Host ''
-    Write-Host '  No switches starts Apache and the active database - the pair the site'
-    Write-Host '  cannot load without. -Status changes nothing.'
+    Write-Host '  No switches starts WampServer itself - wampmanager, the tray'
+    Write-Host '  application - which brings up Apache and the database. It needs no'
+    Write-Host '  administrator, which is the whole reason it is the default.'
     Write-Host ''
-    Write-Host '  Apache, MySQL and MariaDB are the services WampServer installed, so'
-    Write-Host '  they need administrator. The API and Vite are ordinary processes, run'
-    Write-Host '  as you, with their output in .ikaika_scripts_configs/logs/.'
+    Write-Host '  -Apache, -MySQL and -MariaDB drive the Windows services directly and DO'
+    Write-Host '  need an admin terminal. Use them when you want one of them alone.'
+    Write-Host ''
+    Write-Host '  The API and Vite are ordinary processes, run as you, with their output'
+    Write-Host '  in .ikaika_scripts_configs/logs/. -Status changes nothing.'
     Write-Host ''
     Write-Host '  Config (ikaika_scripts.env)'
     Write-Host '    setup.wampRoot      where WampServer is'
@@ -105,15 +114,30 @@ $startTimeout = [int](Get-ProjectValue 'serve.startTimeoutSeconds' '30')
 $statePath = Join-Path $configsDir '.servers.json'
 $logsDir = Get-LogsDir
 
-if ($All) { $Apache = $MySQL = $PhpMyAdmin = $Api = $Vite = $true }
+if ($All) { $WampServer = $PhpMyAdmin = $Api = $Vite = $true }
 
 # The bare run. Written as "nothing was asked for" rather than as a default on each
 # switch, because a default on a switch would make -Stop mean "stop everything except
 # the two that default to on", which is not what anybody types it for.
-$nothingPicked = -not ($Apache -or $MySQL -or $MariaDB -or $PhpMyAdmin -or $Api -or $Vite)
+$nothingPicked = -not ($WampServer -or $Apache -or $MySQL -or $MariaDB -or $PhpMyAdmin -or $Api -or $Vite)
+
+# THE BARE RUN STARTS WAMPSERVER, not the two services underneath it, and the reason is
+# administrator rights. Start-Service on wampapache64 needs them; launching wampmanager
+# does not - it is an ordinary application that manages its own services, asks for
+# elevation itself if it needs any, and is what every developer here already
+# double-clicks. Driving the services directly made the common case prompt for a
+# password it never needed.
+#
+# The scalpel is still there: -Apache and -MySQL do exactly what they say, and still
+# need an admin terminal. That is the right trade - the default is the easy path, and
+# the precise one is available and honest about its cost.
 if ($nothingPicked -and -not $Stop -and -not $Status) {
-    $Apache = $true
-    if ($dbFlavor -eq 'mariadb') { $MariaDB = $true } else { $MySQL = $true }
+    if ($wampRoot -and (Test-Path -LiteralPath (Join-Path $wampRoot 'wampmanager.exe'))) {
+        $WampServer = $true
+    } else {
+        $Apache = $true
+        if ($dbFlavor -eq 'mariadb') { $MariaDB = $true } else { $MySQL = $true }
+    }
 }
 
 # --------------------------------------------------------------- the servers
@@ -205,6 +229,13 @@ $state = Get-ServerState
 function Write-Status {
     Write-Host ''
     Write-Host '  Servers' -ForegroundColor Cyan
+
+    # First, because it is the thing that starts the two below it. A tray icon has no
+    # state this can read - green, orange and red are wampmanager's own - so what is
+    # reported is whether the application is up, and the services speak for themselves.
+    $manager = @(Get-Process -Name 'wampmanager' -ErrorAction SilentlyContinue)
+    Write-ServerLine 'WampServer' $(if ($manager.Count) { 'running' } else { 'stopped' }) `
+        $(if ($manager.Count) { "wampmanager pid $($manager[0].Id)" } else { 'the tray application is not up' })
     foreach ($server in $Servers) {
         if ($server.Service) {
             $status = Get-ServiceState $server.Service
@@ -242,6 +273,17 @@ if ($Stop) {
     Write-Host ''
     Write-Host '  Stopping' -ForegroundColor Cyan
     $failures = 0
+
+    # Stopping WampServer is the tray icon's own Exit, and there is no documented
+    # command line for it. Rather than inventing one - killing wampmanager leaves its
+    # services running, which is the worst of both - the services are stopped, which is
+    # what "stop the servers" means, and the tray is left to be closed by hand.
+    if ($WampServer -or $nothingPicked) {
+        $manager = @(Get-Process -Name 'wampmanager' -ErrorAction SilentlyContinue)
+        if ($manager.Count) {
+            Write-ServerLine 'WampServer' 'running' 'the tray application stays - close it from the tray icon'
+        }
+    }
 
     foreach ($server in @($Servers | Where-Object { $nothingPicked -or $_.Wanted })) {
         if ($server.Service) {
@@ -302,8 +344,50 @@ if ($Stop) {
 Write-Host ''
 Write-Host '  Starting' -ForegroundColor Cyan
 
-# phpMyAdmin is Apache's, so asking for it asks for Apache.
-if ($PhpMyAdmin) { $Apache = $true }
+# phpMyAdmin is served by Apache, and WampServer is what starts Apache without a
+# password. Asking for the page therefore asks for WampServer, not for the service.
+if ($PhpMyAdmin -and -not ($Apache -or $WampServer)) { $WampServer = $true }
+
+if ($WampServer) {
+    $manager = $(if ($wampRoot) { Join-Path $wampRoot 'wampmanager.exe' } else { '' })
+    if (-not $manager -or -not (Test-Path -LiteralPath $manager)) {
+        Write-ServerLine 'WampServer' 'absent' 'no wampmanager.exe - run development-setup'
+        $failures++
+    } elseif (@(Get-Process -Name 'wampmanager' -ErrorAction SilentlyContinue).Count) {
+        Write-ServerLine 'WampServer' 'running' 'wampmanager is already up'
+    } else {
+        try {
+            # Started from the wamp root, because wampmanager resolves its own config
+            # relative to the working directory and starts with an error dialog from
+            # anywhere else - which, being a dialog, hangs an unattended run.
+            [void](Start-Process -FilePath $manager -WorkingDirectory $wampRoot -PassThru)
+
+            # Waited for by its PORTS, not by its window: wampmanager returns
+            # immediately and then starts Apache and the database behind the tray icon.
+            # Green means answering here exactly as it does everywhere else in this file.
+            $dbPort = $(if ($dbFlavor -eq 'mariadb') { 3307 } else { 3306 })
+            $deadline = (Get-Date).AddSeconds($startTimeout)
+            while ((Get-Date) -lt $deadline) {
+                if ((Test-PortListening 80) -and (Test-PortListening $dbPort)) { break }
+                Start-Sleep -Milliseconds 500
+            }
+            $up = @()
+            if (Test-PortListening 80) { $up += 'Apache' }
+            if (Test-PortListening $dbPort) { $up += "the database on $dbPort" }
+            if ($up.Count -eq 2) {
+                Write-ServerLine 'WampServer' 'started' "$($up -join ' and ') are answering"
+            } else {
+                # Not called failed: wampmanager may still be working, or the tray icon
+                # may be orange for a reason only it can explain. Named for what was
+                # seen, with the one place that says why.
+                Write-ServerLine 'WampServer' 'slow' "started, but $(if ($up.Count) { "only $($up -join '') is up" } else { 'nothing is answering yet' }) after ${startTimeout}s - check the tray icon"
+            }
+        } catch {
+            Write-ServerLine 'WampServer' 'failed' $_.Exception.Message
+            $failures++
+        }
+    }
+}
 foreach ($server in $Servers) { if ($server.Key -eq 'apache' -and $Apache) { $server.Wanted = $true } }
 
 $failures = 0

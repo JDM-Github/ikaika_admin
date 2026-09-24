@@ -102,11 +102,19 @@
         "description": "Starts and stops the servers this project develops against: WampServer's Apache and MySQL, phpMyAdmin in a browser, the Laravel API, and the Vite asset build",
         "args": [
           {
+            "flag": "WampServer",
+            "label": "-WampServer   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Start WampServer itself - wampmanager.exe, the tray application - and let it bring up Apache and the database the way it does when a person...",
+            "default": ""
+          },
+          {
             "flag": "Apache",
             "label": "-Apache   [SwitchParameter]",
             "type": "boolean",
             "required": false,
-            "description": "WampServer's Apache. Serves the site and phpMyAdmin.",
+            "description": "WampServer's Apache, as a Windows service.",
             "default": ""
           },
           {
@@ -175,7 +183,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/run-servers -Apache ${run-servers.args.Apache} -MySQL ${run-servers.args.MySQL} -MariaDB ${run-servers.args.MariaDB} -PhpMyAdmin ${run-servers.args.PhpMyAdmin} -Api ${run-servers.args.Api} -Vite ${run-servers.args.Vite} -All ${run-servers.args.All} -Stop ${run-servers.args.Stop} -Status ${run-servers.args.Status}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/run-servers -WampServer ${run-servers.args.WampServer} -Apache ${run-servers.args.Apache} -MySQL ${run-servers.args.MySQL} -MariaDB ${run-servers.args.MariaDB} -PhpMyAdmin ${run-servers.args.PhpMyAdmin} -Api ${run-servers.args.Api} -Vite ${run-servers.args.Vite} -All ${run-servers.args.All} -Stop ${run-servers.args.Stop} -Status ${run-servers.args.Status}"
         ]
       },
       "update-database": {

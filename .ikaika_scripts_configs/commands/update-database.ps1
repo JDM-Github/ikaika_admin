@@ -519,6 +519,17 @@ if ($Migrate) {
                 # a schema problem: it is MyISAM, which caps an index at 1000 bytes,
                 # while Laravel's users_email_unique on a utf8mb4 varchar(255) needs
                 # 1020. Nothing in the error names MyISAM or the file that selected it.
+                # A migration that failed part way leaves what it had already created,
+                # because MySQL does not roll back DDL - so the retry dies on the table
+                # the first attempt made rather than on whatever actually broke. Named,
+                # because "already exists" sends people looking for a duplicate
+                # migration file that does not exist.
+                if ("$output" -match 'already exists') {
+                    Write-Host '    A previous migration stopped part way and left its tables behind;' -ForegroundColor Yellow
+                    Write-Host '    MySQL does not roll back DDL, so the retry trips over them. Either drop' -ForegroundColor Yellow
+                    Write-Host '    the table the error names, or rebuild from nothing:' -ForegroundColor Yellow
+                    Write-Host '      php artisan migrate:fresh     (DESTROYS every table on that connection)' -ForegroundColor DarkGray
+                }
                 if ("$output" -match 'key was too long|1071') {
                     Write-Host '    That is MyISAM, not your schema: WampServer sets' -ForegroundColor Yellow
                     Write-Host '    default_storage_engine=MYISAM in my.ini, and MyISAM caps an index at' -ForegroundColor Yellow
