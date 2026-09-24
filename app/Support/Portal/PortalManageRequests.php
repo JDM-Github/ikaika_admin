@@ -54,24 +54,78 @@ final class PortalManageRequests
     public function list(Request $request): array
     {
         [$from, $to] = $this->dateRange($request);
+        $scope = $this->departmentScope($request->attributes->get('portalEmployee'), $request);
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:manage:requests:'.$version.':'.$from.':'.$to;
+        // The scope is part of the key, so one department's queue is never served to another.
+        $key = 'portal:manage:requests:'.$version.':'.$from.':'.$to.':'.md5($scope ?? '*');
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($from, $to): array {
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($from, $to, $scope): array {
             [$data, $leave, $overtime, $offset] = $this->requestLists($from, $to);
+            $employees = $this->employeesByName();
 
             return [
                 'section' => 'manage',
                 'resource' => 'requests',
-                'data' => $data,
-                'leave' => $leave,
-                'overtime' => $overtime,
-                'offset' => $offset,
-                'reimbursements' => $this->claims($from, $to),
-                'flaggedReports' => $this->reports->flaggedReports($from, $to),
+                'data' => $this->scoped($data, $scope, $employees),
+                'leave' => $this->scoped($leave, $scope, $employees),
+                'overtime' => $this->scoped($overtime, $scope, $employees),
+                'offset' => $this->scoped($offset, $scope, $employees),
+                'reimbursements' => $this->scoped($this->claims($from, $to), $scope, $employees),
+                'flaggedReports' => $this->scoped($this->reports->flaggedReports($from, $to), $scope, $employees),
                 'range' => ['from' => $from, 'to' => $to],
             ];
         });
+    }
+
+    private function departmentScope(mixed $actor, Request $request): ?string
+    {
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return PortalPreview::departmentScope($actor, $request);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     * @param  array<string, Employee>  $employees
+     * @return list<array<string, mixed>>
+     */
+    private function scoped(array $rows, ?string $scope, array $employees): array
+    {
+        // A row whose member matches no employee has no department, so only a developer sees it.
+        return array_values(array_filter($rows, static function (array $row) use ($scope, $employees): bool {
+            $name = strtolower(trim((string) ($row['memberName'] ?? '')));
+
+            return PortalPreview::inScope($scope, $employees[$name] ?? null);
+        }));
+    }
+
+    /**
+     * Composed member name to employee, keyed the way employeeNamed() matches a request's owner.
+     *
+     * @return array<string, Employee>
+     */
+    private function employeesByName(): array
+    {
+        $map = [];
+        foreach (Employee::query()->get(['first_name', 'last_name', 'department', 'role', 'role_level']) as $employee) {
+            $name = strtolower(trim(trim((string) $employee->first_name).' '.trim((string) $employee->last_name)));
+            $map[$name] = $employee;
+        }
+
+        return $map;
+    }
+
+    /**
+     * Decisions obey the same scope as the list: a row outside it answers "not on the queue"
+     * rather than revealing that it exists in another department.
+     */
+    private function assertInScope(?string $scope, ?Employee $owner, string $notFound): void
+    {
+        if (! PortalPreview::inScope($scope, $owner)) {
+            abort(404, $notFound);
+        }
     }
 
     /**
@@ -87,10 +141,11 @@ final class PortalManageRequests
             'changes.*.approverRemarks' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        $saved = $this->ledger->within($this->connection(), function () use ($validated, $actor, $request): int {
+        $scope = $this->departmentScope($actor, $request);
+        $saved = $this->ledger->within($this->connection(), function () use ($validated, $actor, $scope, $request): int {
             $count = 0;
             foreach ($validated['changes'] as $change) {
-                $this->notifyOwnerOfDecision($actor, $this->applyChange($actor, $change), $request);
+                $this->notifyOwnerOfDecision($actor, $this->applyChange($actor, $scope, $change), $request);
                 $count++;
             }
 
@@ -138,6 +193,7 @@ final class PortalManageRequests
      */
     public function uploadPayoutReceipt(Employee $actor, int $itemId, Request $request): array
     {
+        $this->assertInScope($this->departmentScope($actor, $request), $this->claimOwner($itemId), 'That reimbursement is not on the queue.');
         $fields = $this->reimbursements->writePayoutReceipt($actor, $itemId, $request);
         $this->bumpCache();
 
@@ -152,7 +208,7 @@ final class PortalManageRequests
      * @param  array{id: string, kind: string, status: string, approverRemarks?: string|null}  $change
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyChange(Employee $actor, array $change): array
+    private function applyChange(Employee $actor, ?string $scope, array $change): array
     {
         $id = (int) $change['id'];
         if ($id < 1 || (string) $id !== $change['id']) {
@@ -163,13 +219,13 @@ final class PortalManageRequests
         $remarks = $this->text($change['approverRemarks'] ?? null);
 
         if ($change['kind'] === 'reimbursement') {
-            return $this->applyClaim($actor, $id, $status, $remarks, $change['status']);
+            return $this->applyClaim($actor, $scope, $id, $status, $remarks, $change['status']);
         }
         if ($change['kind'] === 'flag') {
-            return $this->applyFlaggedReport($actor, $id, $status, $remarks, $change['status']);
+            return $this->applyFlaggedReport($actor, $scope, $id, $status, $remarks, $change['status']);
         }
 
-        return $this->applyQueuedRequest($actor, $id, $change['kind'], $status, $remarks, $change['status']);
+        return $this->applyQueuedRequest($actor, $scope, $id, $change['kind'], $status, $remarks, $change['status']);
     }
 
     /**
@@ -224,7 +280,7 @@ final class PortalManageRequests
     /**
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyQueuedRequest(Employee $actor, int $id, string $kind, string $status, ?string $remarks, string $apiStatus): array
+    private function applyQueuedRequest(Employee $actor, ?string $scope, int $id, string $kind, string $status, ?string $remarks, string $apiStatus): array
     {
         $row = $this->connection()
             ->table('requests')
@@ -251,6 +307,9 @@ final class PortalManageRequests
             abort(422, 'That request is not that kind.');
         }
 
+        $owner = $this->employeeNamed($this->text($row->name ?? null));
+        $this->assertInScope($scope, $owner, 'That request is not on the queue.');
+
         $this->connection()->table('requests')->where('id', $id)->update([
             'status' => $status,
             'approver_remarks' => $remarks,
@@ -268,7 +327,7 @@ final class PortalManageRequests
         ]);
 
         return [
-            'owner' => $this->employeeNamed($this->text($row->name ?? null)),
+            'owner' => $owner,
             'kind' => $kind,
             'date' => $date,
             'recordId' => (string) $id,
@@ -279,7 +338,7 @@ final class PortalManageRequests
     /**
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyClaim(Employee $actor, int $id, string $status, ?string $remarks, string $apiStatus): array
+    private function applyClaim(Employee $actor, ?string $scope, int $id, string $status, ?string $remarks, string $apiStatus): array
     {
         $seed = $this->connection()
             ->table('reimbursements')
@@ -290,7 +349,8 @@ final class PortalManageRequests
             abort(404, 'That reimbursement is not on the queue.');
         }
 
-        $name = $this->text($seed->employee_name_input ?? null);
+        $owner = $this->claimOwner($id);
+        $this->assertInScope($scope, $owner, 'That reimbursement is not on the queue.');
 
         /*
          * One line item, not the whole claim. Every reimbursements row carries its own status and
@@ -313,17 +373,8 @@ final class PortalManageRequests
             'approverRemarks' => $remarks,
         ]);
 
-        $linkedId = $this->connection()
-            ->table('employees_reimbursements')
-            ->where('reimbursement_id', $id)
-            ->value('employee_id');
-        $owner = is_numeric($linkedId) ? Employee::query()->find((int) $linkedId) : null;
-        if (! $owner instanceof Employee) {
-            $owner = $this->employeeNamed($name);
-        }
-
         return [
-            'owner' => $owner instanceof Employee ? $owner : null,
+            'owner' => $owner,
             'kind' => 'reimbursement',
             'date' => $this->calendarDate($seed->reimb_date ?? null) ?? '',
             'recordId' => (string) $id,
@@ -340,7 +391,7 @@ final class PortalManageRequests
      *
      * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
      */
-    private function applyFlaggedReport(Employee $actor, int $id, string $status, ?string $remarks, string $apiStatus): array
+    private function applyFlaggedReport(Employee $actor, ?string $scope, int $id, string $status, ?string $remarks, string $apiStatus): array
     {
         $seed = $this->connection()
             ->table('user_reports')
@@ -358,6 +409,8 @@ final class PortalManageRequests
         }
 
         $employeeId = (int) $seed->employee_id;
+        $owner = Employee::query()->find($employeeId);
+        $this->assertInScope($scope, $owner instanceof Employee ? $owner : null, 'That flagged report is not on the queue.');
         $kind = PortalSubmittedReportPresenter::kind($seed->late_submission ?? null);
 
         $siblings = $this->connection()
@@ -395,7 +448,7 @@ final class PortalManageRequests
         ]);
 
         return [
-            'owner' => Employee::query()->find($employeeId),
+            'owner' => $owner instanceof Employee ? $owner : null,
             'kind' => 'flag',
             'date' => $this->calendarDate($seed->report_date ?? null) ?? '',
             'recordId' => (string) $id,
@@ -418,6 +471,23 @@ final class PortalManageRequests
             (int) $actor->getKey(),
             is_string($actor->id_no) ? $actor->id_no : null,
         );
+    }
+
+    // The employee a claim line belongs to: the junction link when it exists, else the typed name.
+    private function claimOwner(int $id): ?Employee
+    {
+        $linkedId = $this->connection()
+            ->table('employees_reimbursements')
+            ->where('reimbursement_id', $id)
+            ->value('employee_id');
+        $owner = is_numeric($linkedId) ? Employee::query()->find((int) $linkedId) : null;
+        if ($owner instanceof Employee) {
+            return $owner;
+        }
+
+        $name = $this->connection()->table('reimbursements')->where('id', $id)->value('employee_name_input');
+
+        return $this->employeeNamed(is_string($name) ? $name : null);
     }
 
     private function employeeNamed(?string $name): ?Employee

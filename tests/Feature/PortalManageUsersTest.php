@@ -73,6 +73,33 @@ class PortalManageUsersTest extends TestCase
         $this->assertSame(1, $response->json('meta.current_page'));
     }
 
+    // The filter narrows the rows and the tiles together, and offers every department once.
+    public function test_the_roster_filters_by_department(): void
+    {
+        $member = $this->promotableMember();
+        $member->forceFill(['department' => ' mis '])->save();
+        $token = $this->tokenForAdmin();
+
+        $response = $this->withToken($token)
+            ->getJson('/api/development/portal/manage/users?per_page=100&department=MIS')
+            ->assertOk();
+
+        $departments = collect($response->json('data'))
+            ->map(fn (array $row): string => strtolower(trim((string) ($row['department'] ?? ''))))
+            ->unique()
+            ->values()
+            ->all();
+        $this->assertSame(['mis'], $departments);
+        $this->assertContains($member->id, $response->json('data.*.id'));
+        $this->assertSame(count($response->json('data')), $response->json('counts.total'));
+        $offered = $response->json('departments');
+        $this->assertIsArray($offered);
+        $this->assertSame(1, collect($offered)->filter(fn (string $name): bool => strtolower($name) === 'mis')->count());
+
+        $all = $this->withToken($token)->getJson('/api/development/portal/manage/users?per_page=100')->assertOk();
+        $this->assertGreaterThan($response->json('counts.total'), $all->json('counts.total'));
+    }
+
     public function test_the_roster_uses_allow_listed_page_sizes(): void
     {
         $token = $this->tokenForAdmin();

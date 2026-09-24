@@ -58,14 +58,16 @@ final class PortalManageUsers
         $perPage = $this->perPage($request);
         $page = max(1, $request->integer('page', 1));
         $search = trim((string) $request->query('q', ''));
+        $department = mb_substr(PortalPreview::department($request->query('department', '')), 0, 100);
         $sort = trim((string) $request->query('sort', ''));
         $dir = strtolower(trim((string) $request->query('dir', 'asc'))) === 'desc' ? 'desc' : 'asc';
 
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:manage:users:'.$version.':'.$page.':'.$perPage.':'.md5($search).':'.$sort.':'.$dir;
+        $key = 'portal:manage:users:'.$version.':'.$page.':'.$perPage.':'.md5($search).':'.md5($department).':'.$sort.':'.$dir;
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($perPage, $page, $search, $sort, $dir): array {
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($perPage, $page, $search, $department, $sort, $dir): array {
             $query = $this->rosterQuery();
+            $this->applyDepartment($query, $department);
             $this->applySearch($query, $search);
             $this->applyOrder($query, $sort, $dir);
 
@@ -83,7 +85,8 @@ final class PortalManageUsers
                 'section' => 'manage',
                 'resource' => 'users',
                 'data' => $rows,
-                'counts' => $this->counts(),
+                'counts' => $this->counts($department),
+                'departments' => $this->departments(),
                 'meta' => [
                     'current_page' => $pageResult->currentPage(),
                     'per_page' => $pageResult->perPage(),
@@ -189,9 +192,11 @@ final class PortalManageUsers
     /**
      * @return array{admins: int, members: int, active: int, inactive: int, total: int}
      */
-    public function counts(): array
+    public function counts(string $department = ''): array
     {
-        $row = Employee::query()
+        $query = Employee::query();
+        $this->applyDepartment($query, $department);
+        $row = $query
             ->toBase()
             ->selectRaw('COUNT(*) as total')
             ->selectRaw("SUM(CASE WHEN LOWER(COALESCE(role_level, '')) = 'executive' OR LOWER(COALESCE(role, '')) = 'admin' THEN 1 ELSE 0 END) as admins")
@@ -217,6 +222,33 @@ final class PortalManageUsers
     private function rosterQuery(): Builder
     {
         return Employee::query()->select(PortalManageUserPresenter::rosterColumns());
+    }
+
+    // The figures and rows narrow together, so a department's tiles describe the rows under them.
+    private function applyDepartment(Builder $query, string $department): void
+    {
+        if ($department !== '') {
+            $query->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ?", [$department]);
+        }
+    }
+
+    /**
+     * Every department on the roster, for the filter; spelled as the roster mostly spells it.
+     *
+     * @return list<string>
+     */
+    private function departments(): array
+    {
+        $names = [];
+        foreach (Employee::query()->whereNotNull('department')->pluck('department') as $value) {
+            $name = trim((string) $value);
+            if ($name !== '') {
+                $names[PortalPreview::department($name)] ??= $name;
+            }
+        }
+        natcasesort($names);
+
+        return array_values($names);
     }
 
     private function applySearch(Builder $query, string $search): void

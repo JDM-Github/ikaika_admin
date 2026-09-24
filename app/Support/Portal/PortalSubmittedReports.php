@@ -97,11 +97,12 @@ final class PortalSubmittedReports
      */
     public function listManaged(Employee $actor, Request $request): array
     {
-        $subject = $this->managedSubject($actor, $request);
+        $scope = PortalPreview::departmentScope($actor, $request);
+        $subject = $this->managedSubject($actor, $request, $scope);
         $page = $this->list($subject, $request);
         $page['section'] = 'manage';
         $page['resource'] = 'reports';
-        $page['employees'] = $this->roster();
+        $page['employees'] = $this->roster($actor, $scope);
         $page['employeeId'] = (string) $subject->getKey();
 
         return $page;
@@ -2002,7 +2003,7 @@ final class PortalSubmittedReports
         return strtolower(trim($label));
     }
 
-    private function managedSubject(Employee $actor, Request $request): Employee
+    private function managedSubject(Employee $actor, Request $request, ?string $scope): Employee
     {
         $raw = trim((string) $request->query('employee_id', ''));
         if ($raw === '') {
@@ -2013,7 +2014,8 @@ final class PortalSubmittedReports
         }
 
         $subject = Employee::query()->find((int) $raw);
-        if (! $subject instanceof Employee) {
+        // Someone outside the admin's department answers exactly like someone who does not exist.
+        if (! $subject instanceof Employee || (! $subject->is($actor) && ! PortalPreview::inScope($scope, $subject))) {
             abort(404, 'That member was not found.');
         }
 
@@ -2021,14 +2023,22 @@ final class PortalSubmittedReports
     }
 
     /**
-     * Active members the picker can open. Skinny: an id and a display name, nothing else.
+     * Active members the picker can open: the admin's department, never an executive (they are
+     * managed from their own portal), and always the admin themself. Skinny: an id and a name.
      *
      * @return list<array{value: string, label: string}>
      */
-    private function roster(): array
+    private function roster(Employee $actor, ?string $scope): array
     {
         $rows = Employee::query()
             ->select(['id', 'first_name', 'last_name'])
+            ->where(fn ($query) => $query
+                ->where('id', $actor->getKey())
+                ->orWhere(fn ($managed) => $managed
+                    ->whereRaw("LOWER(TRIM(COALESCE(role, ''))) != 'executive'")
+                    ->whereRaw("LOWER(TRIM(COALESCE(role_level, ''))) != 'executive'")
+                    ->when($scope !== null, fn ($inDepartment) => $inDepartment
+                        ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ? AND ? != ''", [$scope, $scope]))))
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->orderBy('last_name')
             ->orderBy('first_name')

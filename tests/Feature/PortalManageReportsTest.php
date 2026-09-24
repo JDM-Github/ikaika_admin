@@ -130,7 +130,113 @@ class PortalManageReportsTest extends TestCase
         $this->getJson('/api/development/portal/manage/reports')->assertUnauthorized();
     }
 
+    public function test_a_department_admin_opens_only_their_own_department(): void
+    {
+        $inside = $this->activeMember();
+        $outside = $this->otherActiveMember($inside);
+        $inside->forceFill(['department' => ' mis '])->save();
+        $outside->forceFill(['department' => 'Engineering'])->save();
+        $admin = $this->departmentAdmin();
+        $token = $this->loginToken($admin);
+
+        $roster = $this->withToken($token)
+            ->getJson('/api/development/portal/manage/reports?employee_id='.$inside->id)
+            ->assertOk()
+            ->json('employees.*.value');
+        $this->assertIsArray($roster);
+        $this->assertContains((string) $inside->id, $roster);
+        $this->assertContains((string) $admin->id, $roster);
+        $this->assertNotContains((string) $outside->id, $roster);
+
+        $this->withToken($token)
+            ->getJson('/api/development/portal/manage/reports?employee_id='.$outside->id)
+            ->assertNotFound();
+    }
+
+    // Previewing as Admin holds a developer to their department; their real view opens everyone.
+    public function test_a_developer_previewing_as_admin_is_held_to_their_department(): void
+    {
+        $outside = $this->activeMember();
+        $outside->forceFill(['department' => 'Engineering'])->save();
+        $token = $this->loginToken($this->departmentAdmin(developer: true));
+
+        $roster = $this->withToken($token)
+            ->getJson('/api/development/portal/manage/reports?employee_id='.$outside->id)
+            ->assertOk()
+            ->json('employees.*.value');
+        $this->assertIsArray($roster);
+        $this->assertContains((string) $outside->id, $roster);
+
+        $this->withToken($token)->withHeaders(['X-Portal-View' => 'admin'])
+            ->getJson('/api/development/portal/manage/reports?employee_id='.$outside->id)
+            ->assertNotFound();
+    }
+
+    // An admin with no department still opens their own timesheets and nobody else's.
+    public function test_an_admin_with_no_department_opens_only_themself(): void
+    {
+        $admin = $this->departmentAdmin();
+        $admin->forceFill(['department' => null])->save();
+
+        $roster = $this->withToken($this->loginToken($admin))
+            ->getJson('/api/development/portal/manage/reports')
+            ->assertOk()
+            ->json('employees.*.value');
+
+        $this->assertSame([(string) $admin->id], $roster);
+    }
+
+    // Executives are managed from their own portal: not even a developer lists or opens them.
+    public function test_an_executive_is_never_listed_or_opened(): void
+    {
+        $executive = $this->executive();
+        $token = $this->loginToken($this->departmentAdmin(developer: true));
+
+        $roster = $this->withToken($token)
+            ->getJson('/api/development/portal/manage/reports')
+            ->assertOk()
+            ->json('employees.*.value');
+        $this->assertIsArray($roster);
+        $this->assertNotContains((string) $executive->id, $roster);
+
+        $this->withToken($token)
+            ->getJson('/api/development/portal/manage/reports?employee_id='.$executive->id)
+            ->assertNotFound();
+    }
+
+    // An executive who opens this page still reads their own timesheets.
+    public function test_an_executive_still_opens_their_own_timesheets(): void
+    {
+        $executive = $this->executive();
+
+        $this->withToken($this->loginToken($executive))
+            ->getJson('/api/development/portal/manage/reports')
+            ->assertOk()
+            ->assertJsonPath('employeeId', (string) $executive->id)
+            ->assertJsonPath('employees.0.value', (string) $executive->id);
+    }
+
+    private function executive(): Employee
+    {
+        $executive = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->first();
+        $this->assertNotNull($executive);
+        $executive->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+
+        return $executive;
+    }
+
+    // A developer sees every department, so tests about the page itself do not depend on who is where.
     private function tokenForAdmin(): string
+    {
+        return $this->loginToken($this->departmentAdmin(developer: true));
+    }
+
+    private function departmentAdmin(bool $developer = false): Employee
     {
         $employee = Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
@@ -140,8 +246,9 @@ class PortalManageReportsTest extends TestCase
             ->where('id_no', '!=', '')
             ->first();
         $this->assertNotNull($employee);
+        $employee->forceFill(['is_developer' => $developer, 'department' => 'MIS'])->save();
 
-        return $this->loginToken($employee);
+        return $employee;
     }
 
     private function tokenForMember(): string

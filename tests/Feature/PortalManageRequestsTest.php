@@ -654,7 +654,212 @@ class PortalManageRequestsTest extends TestCase
         $this->assertNull($item['receiptThumbUrl']);
     }
 
+    public function test_a_department_admin_sees_only_their_own_department_on_the_queue(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $mine = $this->insertLeave($this->memberName($inside), $date);
+        $theirs = $this->insertLeave($this->memberName($outside), $date);
+        $nobody = $this->insertLeave('Nobody Onstaff', $date);
+
+        $ids = $this->queuedLeaveIds($this->loginToken($this->departmentAdmin()), $date);
+
+        $this->assertContains((string) $mine, $ids);
+        $this->assertNotContains((string) $theirs, $ids);
+        $this->assertNotContains((string) $nobody, $ids);
+    }
+
+    public function test_a_developer_sees_every_department_and_unmatched_rows(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $expected = [
+            (string) $this->insertLeave($this->memberName($inside), $date),
+            (string) $this->insertLeave($this->memberName($outside), $date),
+            (string) $this->insertLeave('Nobody Onstaff', $date),
+        ];
+
+        $ids = $this->queuedLeaveIds($this->loginToken($this->departmentAdmin(developer: true)), $date);
+
+        foreach ($expected as $id) {
+            $this->assertContains($id, $ids);
+        }
+    }
+
+    // Executives are managed from their own portal, so their rows are on nobody's queue here.
+    public function test_an_executive_s_request_is_on_nobody_s_queue(): void
+    {
+        $executive = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->first();
+        $this->assertNotNull($executive);
+        $date = $this->today();
+        $theirs = $this->insertLeave($this->memberName($executive), $date);
+        $token = $this->tokenForAdmin();
+
+        $this->assertNotContains((string) $theirs, $this->queuedLeaveIds($token, $date));
+        $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => (string) $theirs, 'kind' => 'leave', 'status' => 'approved', 'approverRemarks' => '']],
+        ])->assertNotFound();
+    }
+
+    // Executives work from their own portal, so here they are held to their department like any admin.
+    public function test_an_executive_sees_only_their_own_department(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $mine = $this->insertLeave($this->memberName($inside), $date);
+        $theirs = $this->insertLeave($this->memberName($outside), $date);
+        $executive = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->first();
+        $this->assertNotNull($executive);
+        $executive->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+
+        $ids = $this->queuedLeaveIds($this->loginToken($executive), $date);
+
+        $this->assertContains((string) $mine, $ids);
+        $this->assertNotContains((string) $theirs, $ids);
+    }
+
+    // One department's cached queue must never be served to another department's admin.
+    public function test_the_cached_queue_is_kept_apart_per_department(): void
+    {
+        [, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $theirs = $this->insertLeave($this->memberName($outside), $date);
+        $this->assertContains((string) $theirs, $this->queuedLeaveIds($this->tokenForAdmin(), $date));
+
+        $ids = $this->queuedLeaveIds($this->loginToken($this->departmentAdmin()), $date);
+
+        $this->assertNotContains((string) $theirs, $ids);
+    }
+
+    public function test_a_department_admin_cannot_decide_another_department_s_request(): void
+    {
+        [, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $theirs = $this->insertLeave($this->memberName($outside), $date);
+        $nobody = $this->insertLeave('Nobody Onstaff', $date);
+        $token = $this->loginToken($this->departmentAdmin());
+
+        foreach ([$theirs, $nobody] as $id) {
+            $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+                'changes' => [['id' => (string) $id, 'kind' => 'leave', 'status' => 'approved', 'approverRemarks' => '']],
+            ])->assertNotFound()->assertJsonPath('message', 'That request is not on the queue.');
+
+            $this->assertSame('Pending', DB::connection('portal')->table('requests')->where('id', $id)->value('status'));
+            $this->assertFalse(Action::query()->where('resource', 'requests.leave')->where('record_id', (string) $id)->exists());
+        }
+    }
+
+    public function test_a_department_admin_cannot_decide_another_department_s_claim_or_flag(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $claim = $this->insertApprovedClaim($outside, $date);
+        $flag = $this->insertFlaggedLine($outside, $date);
+        $ownFlag = $this->insertFlaggedLine($inside, $date);
+        $token = $this->loginToken($this->departmentAdmin());
+
+        $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => (string) $claim, 'kind' => 'reimbursement', 'status' => 'rejected', 'approverRemarks' => '']],
+        ])->assertNotFound()->assertJsonPath('message', 'That reimbursement is not on the queue.');
+        $this->assertSame('Approved', DB::connection('portal')->table('reimbursements')->where('id', $claim)->value('status'));
+
+        $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => (string) $flag, 'kind' => 'flag', 'status' => 'approved', 'approverRemarks' => '']],
+        ])->assertNotFound()->assertJsonPath('message', 'That flagged report is not on the queue.');
+        $this->assertSame('Pending', DB::connection('portal')->table('employees_user_reports')->where('user_report_id', $flag)->value('flag_status'));
+
+        $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => (string) $ownFlag, 'kind' => 'flag', 'status' => 'approved', 'approverRemarks' => '']],
+        ])->assertOk()->assertJsonPath('saved', 1);
+    }
+
+    public function test_a_department_admin_cannot_attach_a_payout_receipt_to_another_department_s_claim(): void
+    {
+        Http::preventStrayRequests();
+        [, $outside] = $this->membersInBothDepartments();
+        $claim = $this->insertApprovedClaim($outside, $this->today());
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $this->withToken($this->loginToken($this->departmentAdmin()))->post(
+            "/api/development/portal/manage/requests/reimbursement/{$claim}/payout-receipt",
+            ['file' => $file],
+            ['Accept' => 'application/json'],
+        )->assertNotFound()->assertJsonPath('message', 'That reimbursement is not on the queue.');
+    }
+
+    // A developer can do everything an admin can, even with a member role.
+    public function test_a_member_role_developer_reads_the_queue(): void
+    {
+        $member = $this->activeMember();
+        $member->forceFill(['is_developer' => true])->save();
+
+        $this->withToken($this->loginToken($member))
+            ->getJson('/api/development/portal/manage/requests')
+            ->assertOk();
+    }
+
+    // Previewing as Admin must show exactly what a department admin sees, decisions included.
+    public function test_a_developer_previewing_as_admin_is_held_to_their_department(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $mine = $this->insertLeave($this->memberName($inside), $date);
+        $theirs = $this->insertLeave($this->memberName($outside), $date);
+        $token = $this->loginToken($this->departmentAdmin(developer: true));
+        $this->assertContains((string) $theirs, $this->queuedLeaveIds($token, $date));
+
+        $ids = $this->queuedLeaveIds($token, $date, ['X-Portal-View' => 'admin']);
+
+        $this->assertContains((string) $mine, $ids);
+        $this->assertNotContains((string) $theirs, $ids);
+
+        $this->withToken($token)->withHeaders(['X-Portal-View' => 'admin'])
+            ->patchJson('/api/development/portal/manage/requests', [
+                'changes' => [['id' => (string) $theirs, 'kind' => 'leave', 'status' => 'approved', 'approverRemarks' => '']],
+            ])->assertNotFound();
+        $this->assertSame('Pending', DB::connection('portal')->table('requests')->where('id', $theirs)->value('status'));
+    }
+
+    // The header only takes access away: a member-role developer previewing below developer is a member.
+    public function test_a_member_role_developer_previewing_below_developer_is_refused_the_queue(): void
+    {
+        $member = $this->activeMember();
+        $member->forceFill(['is_developer' => true])->save();
+        $token = $this->loginToken($member);
+
+        foreach (['admin', 'member'] as $view) {
+            $this->withToken($token)->withHeaders(['X-Portal-View' => $view])
+                ->getJson('/api/development/portal/manage/requests')
+                ->assertForbidden();
+        }
+    }
+
+    public function test_the_preview_header_grants_a_department_admin_nothing(): void
+    {
+        [, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $theirs = $this->insertLeave($this->memberName($outside), $date);
+
+        $ids = $this->queuedLeaveIds($this->loginToken($this->departmentAdmin()), $date, ['X-Portal-View' => 'developer']);
+
+        $this->assertNotContains((string) $theirs, $ids);
+    }
+
+    // A developer sees every department, so tests about the queue itself do not depend on who is where.
     private function tokenForAdmin(): string
+    {
+        return $this->loginToken($this->departmentAdmin(developer: true));
+    }
+
+    private function departmentAdmin(bool $developer = false): Employee
     {
         $employee = Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
@@ -664,8 +869,88 @@ class PortalManageRequestsTest extends TestCase
             ->where('id_no', '!=', '')
             ->first();
         $this->assertNotNull($employee);
+        $employee->forceFill(['is_developer' => $developer, 'department' => 'MIS'])->save();
 
-        return $this->loginToken($employee);
+        return $employee;
+    }
+
+    /**
+     * Two active members, one in MIS written loosely and one in Engineering.
+     *
+     * @return array{0: Employee, 1: Employee}
+     */
+    private function membersInBothDepartments(): array
+    {
+        $members = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role, '')) = 'user'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->whereNotNull('first_name')
+            ->where('is_developer', false)
+            ->limit(2)
+            ->get();
+        $this->assertCount(2, $members);
+        $inside = $members[0];
+        $outside = $members[1];
+        $inside->forceFill(['department' => ' mis '])->save();
+        $outside->forceFill(['department' => 'Engineering'])->save();
+
+        return [$inside, $outside];
+    }
+
+    private function today(): string
+    {
+        return Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
+    }
+
+    private function insertLeave(string $name, string $date): int
+    {
+        return (int) DB::connection('portal')->table('requests')->insertGetId([
+            'request_date' => $date,
+            'name' => $name,
+            'reason' => 'Family event',
+            'status' => 'Pending',
+            'type' => 'Leave',
+            'category' => '01 Vacation Leave',
+            'date_created' => $date.' 09:00:00',
+        ]);
+    }
+
+    private function insertApprovedClaim(Employee $member, string $date): int
+    {
+        $itemId = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+            'reimb_date' => $date,
+            'item' => 'Grab to the site',
+            'cost' => 250.0,
+            'qty' => 1,
+            'purpose' => 'Site visit',
+            'employee_name_input' => $this->memberName($member),
+            'team' => 'Angeles Pampanga Office',
+            'status' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_reimbursements')->insert([
+            'employee_id' => $member->getKey(),
+            'reimbursement_id' => $itemId,
+        ]);
+
+        return $itemId;
+    }
+
+    /**
+     * @param  array<string, string>  $headers
+     * @return list<string>
+     */
+    private function queuedLeaveIds(string $token, string $date, array $headers = []): array
+    {
+        $ids = $this->withToken($token)
+            ->withHeaders($headers)
+            ->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date)
+            ->assertOk()
+            ->json('leave.*.id');
+        $this->assertIsArray($ids);
+
+        return $ids;
     }
 
     private function tokenForMember(): string
