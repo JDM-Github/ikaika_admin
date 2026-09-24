@@ -29,9 +29,9 @@ final class PortalAccessControl
      *
      * @return array{section: string, resource: string, tier: string, employee: array<string, mixed>, data: list<array<string, mixed>>}
      */
-    public function show(Employee $editor, int $targetId): array
+    public function show(Employee $editor, int $targetId, Request $request): array
     {
-        $graph = PortalAccessGraph::load();
+        $graph = PortalAccessGraph::forViewer($editor, $request);
         $editorId = (int) $editor->getKey();
         $target = $this->manageable($graph, $editorId, $targetId);
         $theirs = $graph->effective($targetId);
@@ -79,7 +79,7 @@ final class PortalAccessControl
         return [
             'section' => 'manage',
             'resource' => 'access',
-            'tier' => PortalAccessGraph::tier($editor),
+            'tier' => $graph->actingTier($editorId),
             'employee' => $this->person($target),
             'data' => $data,
         ];
@@ -91,7 +91,8 @@ final class PortalAccessControl
      */
     public function change(Employee $editor, int $targetId, array $change, Request $request): array
     {
-        $graph = PortalAccessGraph::load();
+        $graph = PortalAccessGraph::forViewer($editor, $request);
+        $live = $graph->actingTier((int) $editor->getKey()) === PortalAccessGraph::TIER_DEVELOPER ? (int) $editor->getKey() : null;
         $editorId = (int) $editor->getKey();
         $target = $this->manageable($graph, $editorId, $targetId);
         $key = $change['key'];
@@ -100,8 +101,8 @@ final class PortalAccessControl
         }
 
         $message = match ($change['action']) {
-            self::ON => $this->switchOn($editor, $targetId, $key, $change),
-            self::OFF => $this->switchOff($editorId, $targetId, $key),
+            self::ON => $this->switchOn($editorId, $live, $targetId, $key, $change),
+            self::OFF => $this->switchOff($editorId, $live, $targetId, $key),
             default => $this->reach($graph, $editorId, $targetId, $key, $change),
         };
         // Whose Access Rules each viewer may open is part of the cached Users roster.
@@ -117,7 +118,7 @@ final class PortalAccessControl
             ['employeeId' => $targetId, 'key' => $key, 'action' => $change['action'], 'reach' => $change['reach'] ?? null],
         );
 
-        return $this->show($editor, $targetId);
+        return $this->show($editor, $targetId, $request);
     }
 
     /**
@@ -127,22 +128,21 @@ final class PortalAccessControl
      *
      * @param  array{key: string, action: string, reach?: string|null, includeExecutives?: bool}  $change
      */
-    private function switchOn(Employee $editor, int $targetId, string $key, array $change): string
+    private function switchOn(int $editorId, ?int $live, int $targetId, string $key, array $change): string
     {
-        $editorId = (int) $editor->getKey();
-        $before = PortalAccessGraph::load();
+        $before = PortalAccessGraph::load($live);
         if (! $before->canHold($targetId, $key)) {
             abort(422, 'Only an administrator or above can hold that power.');
         }
         $lift = DB::connection('portal')->table('access_limits')
             ->where('employee_id', $targetId)
             ->whereIn('permission_key', [...$before->ancestors($key), $key]);
-        if (PortalAccessGraph::tier($editor) !== PortalAccessGraph::TIER_DEVELOPER) {
+        if ($live === null) {
             $lift->where('limited_by', $editorId);
         }
         $lift->delete();
 
-        $graph = PortalAccessGraph::load();
+        $graph = PortalAccessGraph::load($live);
         if (isset($graph->effective($targetId)[$key])) {
             return '{UserName|You} switched on %2$s for %1$s';
         }
@@ -168,16 +168,16 @@ final class PortalAccessControl
      * Takes back the editor's gift of the power and everything under it, then limits the power if
      * their role or someone else still gives it.
      */
-    private function switchOff(int $editorId, int $targetId, string $key): string
+    private function switchOff(int $editorId, ?int $live, int $targetId, string $key): string
     {
-        $before = PortalAccessGraph::load();
+        $before = PortalAccessGraph::load($live);
         DB::connection('portal')->table('access_grants')
             ->where('employee_id', $targetId)
             ->where('granted_by', $editorId)
             ->whereIn('permission_key', $before->subtree($key))
             ->delete();
 
-        if (isset(PortalAccessGraph::load()->effective($targetId)[$key])) {
+        if (isset(PortalAccessGraph::load($live)->effective($targetId)[$key])) {
             DB::connection('portal')->table('access_limits')->insertOrIgnore([
                 'employee_id' => $targetId,
                 'permission_key' => $key,

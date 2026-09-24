@@ -14,7 +14,7 @@ class AccessController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        return response()->json($this->access->powers($this->actor($request)));
+        return response()->json($this->access->powers($this->actor($request), $request));
     }
 
     public function updateSwitch(Request $request): JsonResponse

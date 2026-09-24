@@ -323,11 +323,15 @@ class PortalAccessControlTest extends TestCase
         return trim(trim((string) $employee->first_name).' '.trim((string) $employee->last_name));
     }
 
+    // The developer fixture works in Developer mode; everyone else as their role.
     private function as(Employee $employee): self
     {
-        $this->tokens[$employee->id] ??= (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])
-            ->assertOk()
-            ->json('token');
+        if (! isset($this->tokens[$employee->id])) {
+            $token = (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])
+                ->assertOk()
+                ->json('token');
+            $this->tokens[$employee->id] = (bool) $employee->is_developer ? $this->developerModeOn($token) : $token;
+        }
 
         return $this->withToken($this->tokens[$employee->id]);
     }

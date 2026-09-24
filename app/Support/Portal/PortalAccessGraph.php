@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -16,6 +17,12 @@ use Illuminate\Support\Facades\DB;
  * admin manage fellow admins (an executive fellow executives); between equals a gift or limit is
  * judged against the maker's base powers (role plus what came from above), never against what
  * equals gave them, so two admins can never keep each other's powers alive in a loop.
+ *
+ * Developers: is_developer grants nothing by itself. Everyone, a developer included, starts from
+ * their role (tier), and that default config is what anyone editing them changes. Only the viewer
+ * with Developer mode on ($liveDeveloper) holds every rule and acts as a developer. A gift or limit
+ * a developer made is judged as a developer's, so it survives their signing out of Developer mode
+ * and nobody can end it by limiting them.
  */
 final class PortalAccessGraph
 {
@@ -64,9 +71,16 @@ final class PortalAccessGraph
         private readonly array $employees,
         private readonly array $grants,
         private readonly array $limits,
+        private readonly ?int $liveDeveloper,
     ) {}
 
-    public static function load(): self
+    // The graph as this viewer sees it: every rule when their Developer mode is on.
+    public static function forViewer(Employee $viewer, Request $request): self
+    {
+        return self::load(PortalDeveloperMode::isOn($viewer, $request) ? (int) $viewer->getKey() : null);
+    }
+
+    public static function load(?int $liveDeveloper = null): self
     {
         $connection = DB::connection('portal');
 
@@ -94,23 +108,32 @@ final class PortalAccessGraph
             $employees,
             $connection->table('access_grants')->orderBy('id')->get()->all(),
             $connection->table('access_limits')->orderBy('id')->get()->all(),
+            $liveDeveloper,
         );
     }
 
     /**
-     * The preset a person starts from: developer, then executive, then admin, then member. The
-     * retired ProjectAdmin role is a plain member.
+     * The preset a person starts from, by role alone: executive, then admin, then member. The
+     * retired ProjectAdmin role is a plain member, and is_developer changes nothing here.
      */
     public static function tier(Employee $employee): string
     {
-        if ((bool) $employee->is_developer) {
-            return self::TIER_DEVELOPER;
-        }
         if (PortalRole::isExecutive($employee->role, $employee->role_level)) {
             return self::TIER_EXECUTIVE;
         }
 
         return PortalRole::isAdmin($employee->role, $employee->role_level) ? self::TIER_ADMIN : self::TIER_MEMBER;
+    }
+
+    // Developer only for the viewer whose Developer mode is on; everyone else acts as their role.
+    public function actingTier(int $employeeId): string
+    {
+        $employee = $this->employees[$employeeId] ?? null;
+        if ($employee === null) {
+            return self::TIER_MEMBER;
+        }
+
+        return $employeeId === $this->liveDeveloper ? self::TIER_DEVELOPER : self::tier($employee);
     }
 
     public static function reachRank(?string $reach): int
@@ -169,7 +192,7 @@ final class PortalAccessGraph
         $employee = $this->employees[$employeeId] ?? null;
         $minimum = $this->catalog[$key]->min_tier ?? null;
 
-        return $employee !== null && ($minimum === null || self::TIER_RANK[self::tier($employee)] >= (self::TIER_RANK[$minimum] ?? PHP_INT_MAX));
+        return $employee !== null && ($minimum === null || self::TIER_RANK[$this->actingTier($employeeId)] >= (self::TIER_RANK[$minimum] ?? PHP_INT_MAX));
     }
 
     /**
@@ -191,6 +214,10 @@ final class PortalAccessGraph
         $employee = $this->employees[$employeeId] ?? null;
         if ($employee === null || ! self::isActive($employee)) {
             return $this->memo[$slot] = [];
+        }
+
+        if ($employeeId === $this->liveDeveloper) {
+            return $this->memo[$slot] = $this->everything();
         }
 
         $this->computing[$slot] = true;
@@ -252,7 +279,8 @@ final class PortalAccessGraph
             return false;
         }
 
-        $makerRank = self::TIER_RANK[self::tier($maker)];
+        // A developer is managed as their role, so an admin edits a member developer's default config.
+        $makerRank = self::TIER_RANK[$this->actingTier($makerId)];
         $targetRank = self::TIER_RANK[self::tier($target)];
         if ($makerRank > $targetRank) {
             $rules = $this->effective($makerId);
@@ -399,6 +427,9 @@ final class PortalAccessGraph
      */
     public function validMaker(int $makerId, int $targetId, string $key): ?array
     {
+        if ($this->isDeveloperMaker($makerId, $targetId)) {
+            return ['reach' => 'all', 'executives' => true, 'fromRole' => true, 'givenBy' => []];
+        }
         if (! $this->canManage($makerId, $targetId)) {
             return null;
         }
@@ -406,13 +437,40 @@ final class PortalAccessGraph
         return $this->powersFor($makerId, $targetId)[$key] ?? null;
     }
 
-    // Same role tier: two admins, two executives, two developers.
+    // A developer's gift or limit counts as a developer's whatever mode they are in now.
+    private function isDeveloperMaker(int $makerId, int $targetId): bool
+    {
+        $maker = $this->employees[$makerId] ?? null;
+
+        return $maker !== null && (bool) $maker->is_developer && $makerId !== $targetId
+            && isset($this->employees[$targetId]) && self::isActive($maker);
+    }
+
+    // Same role tier: two admins, two executives. A developer maker is never an equal.
     private function areEquals(int $makerId, int $targetId): bool
     {
         $maker = $this->employees[$makerId] ?? null;
         $target = $this->employees[$targetId] ?? null;
+        if ($maker === null || $target === null || $this->isDeveloperMaker($makerId, $targetId)) {
+            return false;
+        }
 
-        return $maker !== null && $target !== null && self::tier($maker) === self::tier($target);
+        return $this->actingTier($makerId) === self::tier($target);
+    }
+
+    /**
+     * Every rule in the catalog at its widest, for the viewer in Developer mode.
+     *
+     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>}>
+     */
+    private function everything(): array
+    {
+        $rules = [];
+        foreach ($this->catalog as $key => $row) {
+            $rules[$key] = ['reach' => (bool) $row->supports_reach ? 'all' : null, 'executives' => true, 'fromRole' => true, 'givenBy' => []];
+        }
+
+        return $rules;
     }
 
     private static function isActive(Employee $employee): bool

@@ -96,9 +96,15 @@ class PortalAccessTest extends TestCase
         $this->assertSame('department', $this->rule($response, 'manage.requests')['reach']);
     }
 
-    public function test_a_developer_holds_every_rule_for_every_department(): void
+    // is_developer alone grants nothing: in Default a developer holds their role's preset.
+    public function test_a_developer_holds_every_rule_for_every_department_only_in_developer_mode(): void
     {
-        $response = $this->powersOf($this->admin(developer: true))->assertOk()->assertJsonPath('tier', 'developer');
+        $token = $this->loginToken($this->admin(developer: true));
+        $default = $this->withToken($token)->getJson('/api/development/portal/access')->assertOk()->assertJsonPath('tier', 'admin');
+        $this->assertNotContains('developer.flag', $this->keys($default));
+
+        $response = $this->withToken($this->developerModeOn($token))->getJson('/api/development/portal/access')
+            ->assertOk()->assertJsonPath('tier', 'developer');
 
         $this->assertCount(DB::connection('portal')->table('access_permissions')->count(), $response->json('data'));
         $this->assertSame('all', $this->rule($response, 'manage.requests')['reach']);

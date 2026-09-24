@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class PortalEmployeePresenter
@@ -12,7 +13,7 @@ class PortalEmployeePresenter
      *
      * @return array<string, mixed>
      */
-    public static function publicEmployee(Employee $employee): array
+    public static function publicEmployee(Employee $employee, Request $request): array
     {
         return [
             'id' => $employee->getKey(),
@@ -25,8 +26,11 @@ class PortalEmployeePresenter
             'job_title' => $employee->job_title,
             'department' => $employee->department,
             'status' => $employee->status,
-            // Portal-only (separate.sql): outranks an admin. Read here so every screen agrees on it.
+            // Portal-only (separate.sql): may switch Developer mode on; it grants nothing by itself.
             'is_developer' => (bool) ($employee->is_developer ?? false),
+            'developer_mode' => PortalDeveloperMode::isOn($employee, $request),
+            // Active rule => reach, so the portal hides what cannot be opened; the server still checks.
+            'rules' => (object) PortalRules::active($employee, $request),
             'photo_url' => self::photoUrl($employee),
         ];
     }

@@ -39,9 +39,38 @@ Done so far (display only, nothing enforced):
 - Project admin is retired in the portal: not offered in either role picker; existing holders
   read as Member.
 - Both places show a banner: saved, not in effect yet.
+- **Developer mode** replaces the Settings preview picker and the `X-Portal-View` header.
+  `is_developer` alone grants nothing: a developer works as their role (Default), bound by their
+  own Access Rules, which anyone who manages their role may edit. Settings (developers only) has
+  Developer / Default; Developer needs their password and lifts every rule and department scope.
+  - Tied to the sign-in: every token carries a `sid`, and `developer_modes.active_session` must
+    match it, so a new sign-in always starts in Default.
+  - Password: the default `123` works once and must be replaced in the same request (428 until
+    it is); at least 8 characters after that. Bcrypt hashes in `developer_modes`, never logged;
+    changeable only while in Developer mode; 5 attempts a minute.
+  - Graph: a developer's preset, default config and rank as a target come from their role
+    (base tier). Only the viewer with the mode on holds everything and acts as a developer. A
+    gift or limit a developer made is judged as a developer's (authority), so it survives their
+    leaving the mode, and limiting a developer never touches their Developer mode.
+  - Admins lost "preview as Member"; nothing replaced it for them.
 
-Next: templates (grant templates in the Access Rule sheet, toggle templates on the Access page,
-which replace the Settings preview picker), then moving pages onto the rules one at a time.
+- **Enforcement has started, one page at a time.**
+  - Server: `PortalRules::active()` is what someone may use right now (effective powers minus
+    what they switched off for themselves, a page above included); routes follow a rule with the
+    `portal.rule:<key>` middleware (plain 403, no security alert, since switching yourself off
+    lands there too).
+  - Session: `auth/me`, login and the Developer mode switch carry `employee.rules` (rule =>
+    reach). The portal re-reads it after saving the Access page and on every mode change.
+  - Portal: `RouteRuleConstant.enforced` maps a page to its rule. The sidebar hides a page whose
+    rule is not held; sign-in, a typed address, an inbox link or losing the rule all land on the
+    first open page in sidebar order (Access always stays on).
+  - Switching your own power off blocks it for you (decided: e.g. turn off a delete power until
+    needed).
+  - **Enforced so far: Home.** The Access page and Access Rule sheet banners name the enforced
+    pages; the banner goes when every page is done.
+
+Next: the next page to enforce, one at a time as the user names them (Missing Reports stays
+with the other developer). Templates later.
 
 ## Context
 

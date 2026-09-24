@@ -141,7 +141,7 @@ class PortalAuthController extends Controller
         }
 
         return response()->json([
-            'employee' => PortalEmployeePresenter::publicEmployee($employee),
+            'employee' => PortalEmployeePresenter::publicEmployee($employee, $request),
         ]);
     }
 
@@ -184,7 +184,7 @@ class PortalAuthController extends Controller
             'token_type' => 'Bearer',
             'expires_in' => $ttl,
             'expires_at' => now()->addSeconds($ttl)->toIso8601String(),
-            'employee' => PortalEmployeePresenter::publicEmployee($employee),
+            'employee' => PortalEmployeePresenter::publicEmployee($employee, $request),
         ]);
     }
 }

@@ -64,12 +64,13 @@ final class PortalManageUsers
 
         $viewer = $request->attributes->get('portalEmployee');
         $viewerId = $viewer instanceof Employee ? (int) $viewer->getKey() : 0;
+        $live = $viewer instanceof Employee && PortalDeveloperMode::isOn($viewer, $request) ? $viewerId : null;
 
-        // The viewer is part of the key: whose Access Rules they may open differs per viewer.
+        // The viewer and their Developer mode are part of the key: whose Access Rules they may open differs.
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:manage:users:'.$version.':'.$viewerId.':'.$page.':'.$perPage.':'.md5($search).':'.md5($department).':'.$sort.':'.$dir;
+        $key = 'portal:manage:users:'.$version.':'.$viewerId.':'.($live === null ? 'd' : 'dev').':'.$page.':'.$perPage.':'.md5($search).':'.md5($department).':'.$sort.':'.$dir;
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($viewerId, $perPage, $page, $search, $department, $sort, $dir): array {
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($viewerId, $live, $perPage, $page, $search, $department, $sort, $dir): array {
             $query = $this->rosterQuery();
             $this->applyDepartment($query, $department);
             $this->applySearch($query, $search);
@@ -78,7 +79,7 @@ final class PortalManageUsers
             $pageResult = $query
                 ->paginate($perPage, PortalManageUserPresenter::rosterColumns(), 'page', $page);
 
-            $graph = PortalAccessGraph::load();
+            $graph = PortalAccessGraph::load($live);
             $rows = [];
             foreach ($pageResult->items() as $employee) {
                 if ($employee instanceof Employee) {
@@ -325,6 +326,7 @@ final class PortalManageUsers
             PortalRole::isAdmin($target->role, $target->role_level),
             PortalRole::isRemovingAdminRights($target->role, $target->role_level, $newRole),
             $this->adminCount(),
+            PortalDeveloperMode::isOn($actor, $request),
         );
         if ($block !== null) {
             abort(403, $block);

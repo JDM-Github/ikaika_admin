@@ -15,7 +15,7 @@ class AccessController extends Controller
 
     public function show(Request $request, int $id): JsonResponse
     {
-        return response()->json($this->access->show($this->editor($request), $id));
+        return response()->json($this->access->show($this->editor($request), $id, $request));
     }
 
     public function update(Request $request, int $id): JsonResponse

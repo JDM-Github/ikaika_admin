@@ -179,6 +179,19 @@ WHERE id_no IN (
     '260701-0019'  -- Jhon Noriel Malabanan
 );
 
+-- Developer mode: is_developer alone grants nothing any more. A developer uses the portal
+-- as their plain role until they switch Developer mode on in Settings with their own
+-- password, and it lasts until they sign out (active_session is the signed-in token's
+-- sid). No row yet, or a NULL password_hash, means the default password 123 still
+-- stands and must be replaced on first use. Kept off employees so the hash never reaches
+-- the admin grid or the Airtable sync.
+CREATE TABLE IF NOT EXISTS developer_modes (
+    employee_id    INT          NOT NULL PRIMARY KEY,
+    password_hash  VARCHAR(255) NULL,
+    active_session VARCHAR(64)  NULL,
+    updated_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 
 
 -- ============================================================================

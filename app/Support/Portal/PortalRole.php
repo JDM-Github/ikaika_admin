@@ -60,7 +60,8 @@ final class PortalRole
     }
 
     /**
-     * Why this role change is refused, or null when it may proceed.
+     * Why this role change is refused, or null when it may proceed. A developer in Developer mode
+     * may remove their own admin role: Developer mode keeps them able to put it back.
      */
     public static function roleChangeBlock(
         string|int $actorId,
@@ -69,12 +70,13 @@ final class PortalRole
         bool $targetIsAdmin,
         bool $demoting,
         int $adminCount,
+        bool $actorInDeveloperMode = false,
     ): ?string {
         if ($targetLocked) {
             return 'The executive role cannot be changed.';
         }
 
-        if ($demoting && (string) $actorId === (string) $targetId) {
+        if ($demoting && ! $actorInDeveloperMode && (string) $actorId === (string) $targetId) {
             return 'You cannot remove your own administrator role.';
         }
 

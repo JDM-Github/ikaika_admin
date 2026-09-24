@@ -18,12 +18,12 @@ final class PortalAccess
     /**
      * @return array{section: string, resource: string, tier: string, data: list<array<string, mixed>>}
      */
-    public function powers(Employee $actor): array
+    public function powers(Employee $actor, Request $request): array
     {
-        $graph = PortalAccessGraph::load();
+        $graph = PortalAccessGraph::forViewer($actor, $request);
         $held = $graph->effective((int) $actor->getKey());
         $catalog = $graph->catalog();
-        $off = $this->switchedOff($actor);
+        $off = PortalRules::switchedOff($actor);
 
         $data = [];
         foreach ($held as $key => $rule) {
@@ -38,7 +38,7 @@ final class PortalAccess
                 'includeExecutives' => $rule['executives'],
                 'canToggle' => (bool) $row->can_toggle,
                 'isSwitchedOn' => ! isset($off[$key]),
-                'isActive' => $this->isActive($catalog, $off, $key),
+                'isActive' => PortalRules::isSwitchedOn($catalog, $off, $key),
                 'fromRole' => $rule['fromRole'],
                 'givenBy' => $graph->names($rule['givenBy']),
             ];
@@ -47,7 +47,7 @@ final class PortalAccess
         return [
             'section' => 'access',
             'resource' => 'powers',
-            'tier' => PortalAccessGraph::tier($actor),
+            'tier' => $graph->actingTier((int) $actor->getKey()),
             'data' => $data,
         ];
     }
@@ -60,7 +60,7 @@ final class PortalAccess
      */
     public function setSwitch(Employee $actor, string $key, bool $on, Request $request): array
     {
-        $graph = PortalAccessGraph::load();
+        $graph = PortalAccessGraph::forViewer($actor, $request);
         if (! isset($graph->effective((int) $actor->getKey())[$key])) {
             abort(404, 'You do not hold that power.');
         }
@@ -85,34 +85,6 @@ final class PortalAccess
             );
         }
 
-        return $this->powers($actor);
-    }
-
-    /**
-     * @return array<string, true>
-     */
-    private function switchedOff(Employee $actor): array
-    {
-        return array_fill_keys(
-            DB::connection('portal')->table('access_toggles')->where('employee_id', $actor->getKey())->pluck('permission_key')->all(),
-            true,
-        );
-    }
-
-    /**
-     * On only while its own switch and every ancestor's switch are on.
-     *
-     * @param  array<string, object>  $catalog
-     * @param  array<string, true>  $off
-     */
-    private function isActive(array $catalog, array $off, string $key): bool
-    {
-        for ($current = $key; $current !== null; $current = $catalog[$current]->parent_key ?? null) {
-            if (isset($off[$current])) {
-                return false;
-            }
-        }
-
-        return true;
+        return $this->powers($actor, $request);
     }
 }

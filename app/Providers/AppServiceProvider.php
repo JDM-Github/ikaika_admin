@@ -59,6 +59,11 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(30)->by('user-notifications-write:'.$this->portalLimiterKey($request));
         });
 
+        // A password is checked here, so guesses are held to a handful a minute.
+        RateLimiter::for('portal-developer', function (Request $request) {
+            return Limit::perMinute(5)->by('developer:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-access', function (Request $request) {
             return Limit::perMinute(60)->by('access:'.$this->portalLimiterKey($request));
         });

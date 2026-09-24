@@ -648,7 +648,10 @@ class PortalReimbursementRequestsTest extends TestCase
             ->first();
         $this->assertNotNull($employee);
 
-        return $this->loginToken($employee);
+        // A developer in Developer mode reaches every department, whoever owns the claim.
+        $employee->forceFill(['is_developer' => true])->save();
+
+        return $this->developerModeOn($this->loginToken($employee));
     }
 
     private function otherActiveMember(Employee $actor): Employee
