@@ -70,6 +70,14 @@ function Get-DevDependency {
     return $rows
 }
 
+# A version string as something [version] will accept: "17" becomes 17.0, "8.4"
+# stays 8.4. Anything already valid is returned unchanged.
+function ConvertTo-ComparableVersion([string]$Text) {
+    $trimmed = "$Text".Trim()
+    if ($trimmed -notmatch '\.') { $trimmed = "$trimmed.0" }
+    return [version]$trimmed
+}
+
 # Whether a found version satisfies a declared one. A floor and a series are different
 # questions and both are real here: Node needs "this or newer", while PHP needs "the 8.4
 # line" because 8.5 is a different set of extensions and a different Apache module.
@@ -82,7 +90,13 @@ function Test-DevVersion {
     if ($null -eq $Found) { return $false }
     if ($Series) { return "$Found".StartsWith("$Series.") -or "$Found" -eq $Series }
     if ($MinVersion) {
-        try { return ([version]"$Found") -ge ([version]$MinVersion) } catch { return $false }
+        # "17" is a perfectly reasonable thing to write in dev.json and NOT a valid
+        # [version] - that cast needs major.minor and throws on a bare major, which the
+        # catch below then read as "the tool is too old". A JDK 17.0.20 was reported
+        # missing on a machine that had it. Both sides are padded before comparing.
+        try {
+            return (ConvertTo-ComparableVersion "$Found") -ge (ConvertTo-ComparableVersion $MinVersion)
+        } catch { return $false }
     }
     return $true
 }

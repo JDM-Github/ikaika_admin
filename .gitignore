@@ -56,3 +56,8 @@ msal_test/
 # Which servers run-servers started, and their pids. Machine state, not a
 # project fact - it is meaningless on any other machine.
 .ikaika_scripts_configs/.servers.json
+
+# Which sql/ files update-database -Idempotent has already applied, and to which
+# database. Machine state, not a project fact - another machine's databases are
+# in a different state and must be judged on their own.
+.ikaika_scripts_configs/.sql-applied.json

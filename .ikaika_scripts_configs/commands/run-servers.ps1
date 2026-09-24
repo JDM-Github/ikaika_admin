@@ -274,6 +274,16 @@ if ($Stop) {
             # real server as a child, and killing only the launcher leaves the port held
             # by an orphan nothing has a handle on any more.
             & taskkill.exe '/PID' "$($tracked.Id)" '/T' '/F' 2>&1 | Out-Null
+
+            # STOPPED MEANS THE PORT IS FREE, for the same reason started means it
+            # answers: taskkill returns when the request is made, not when the socket is
+            # released, so the status printed straight after reported the server as
+            # still running - from its own dying process.
+            $deadline = (Get-Date).AddSeconds(10)
+            while ((Get-Date) -lt $deadline -and (Test-PortListening $server.Port)) {
+                Start-Sleep -Milliseconds 250
+            }
+
             Write-ServerLine $server.Label 'stopped' "pid $($tracked.Id)"
             $state.Remove($server.Key)
         } catch {
@@ -362,6 +372,13 @@ foreach ($server in $wanted) {
             $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
             if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
             if (-not $npm) { throw 'npm is not on PATH - install Node.js' }
+            # Named before it is attempted. Without node_modules, npm run dev fails with
+            # "'vite' is not recognized", which reads as a broken PATH or a missing
+            # global install - neither of which is the problem, and neither of which is
+            # fixed by anything the message suggests.
+            if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'node_modules'))) {
+                throw 'node_modules is missing - run "npm install" in the repo root first'
+            }
             $process = Start-Process -FilePath $npm.Source -WorkingDirectory $repoRoot -PassThru `
                 -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $errPath `
                 -ArgumentList @('run', 'dev')

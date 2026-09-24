@@ -254,6 +254,14 @@
             "default": ""
           },
           {
+            "flag": "Idempotent",
+            "label": "-Idempotent   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Bring every database up to date and skip whatever is already there, so running it again does nothing.",
+            "default": ""
+          },
+          {
             "flag": "Migrate",
             "label": "-Migrate   [SwitchParameter]",
             "type": "boolean",
@@ -263,7 +271,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Core ${update-database.args.Core} -Portal ${update-database.args.Portal} -Estimator ${update-database.args.Estimator} -AllProducts ${update-database.args.AllProducts} -Schema ${update-database.args.Schema} -Separate ${update-database.args.Separate} -Indexes ${update-database.args.Indexes} -Data ${update-database.args.Data} -DropAndRecreate ${update-database.args.DropAndRecreate} -Migrate ${update-database.args.Migrate}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Core ${update-database.args.Core} -Portal ${update-database.args.Portal} -Estimator ${update-database.args.Estimator} -AllProducts ${update-database.args.AllProducts} -Schema ${update-database.args.Schema} -Separate ${update-database.args.Separate} -Indexes ${update-database.args.Indexes} -Data ${update-database.args.Data} -DropAndRecreate ${update-database.args.DropAndRecreate} -Idempotent ${update-database.args.Idempotent} -Migrate ${update-database.args.Migrate}"
         ]
       }
     },

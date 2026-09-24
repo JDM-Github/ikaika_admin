@@ -436,6 +436,20 @@ function Read-Grades {
         Set-Row 'PHP extensions' 'SKIP' 'nothing to grade until PHP is installed'
     }
 
+    # WampServer picks MyISAM in my.ini; Laravel's first migration needs InnoDB. Graded
+    # from the file rather than from the running server, because the file is what
+    # survives a restart and what this command can fix.
+    $activeMysqlDir = $(if ($activeMysql) { Join-Path $root "bin\mysql\mysql$activeMysql" } else { '' })
+    $myIni = Get-MyIniPath $root $activeMysqlDir
+    $engine = Get-DefaultStorageEngine $myIni
+    if (-not $myIni) {
+        Set-Row 'MySQL engine' 'SKIP' 'no my.ini to read until MySQL is installed'
+    } elseif ($engine -and $engine.ToLower() -eq 'innodb') {
+        Set-Row 'MySQL engine' 'OK' "InnoDB  $myIni"
+    } else {
+        Set-Row 'MySQL engine' 'MISSING' "$engine - Laravel's first migration fails on MyISAM (key longer than 1000 bytes)"
+    }
+
     $composerVersion = Get-ExternalVersion 'composer' @('--version', '--no-interaction')
     Set-Row 'Composer' $(if ($composerVersion) { 'OK' } else { 'MISSING' }) `
         $(if ($composerVersion) { "$composerVersion" } else { "will install to $composerDir" })
@@ -646,6 +660,35 @@ if ($MachineOnly) {
 # Deliberately after the elevated child has returned, and deliberately not inside it.
 # A PATH entry written while elevated lands in the administrator's profile, and a
 # Composer installed there is a Composer the ordinary user cannot see.
+
+# my.ini, and NOT in the elevated half. It is an ordinary writable file, so asking for
+# administrator to edit it would be asking for a password the work does not need - and
+# it sat in that half for one draft, where it never ran at all on a machine that needed
+# nothing else installed. If a locked-down install does refuse the write, that is said
+# rather than assumed.
+if (Test-Missing 'MySQL engine') {
+    Write-Host ''
+    Write-Host '  MySQL storage engine' -ForegroundColor Cyan
+    $activeMysqlVersion = Get-WampActiveVersion $state.WampRoot 'mysqlVersion'
+    $myIniPath = Get-MyIniPath $state.WampRoot $(if ($activeMysqlVersion) { Join-Path $state.WampRoot "bin\mysql\mysql$activeMysqlVersion" } else { '' })
+    if (-not $myIniPath) {
+        Set-Row 'MySQL engine' 'SKIP' 'no my.ini found for the active MySQL'
+    } else {
+        try {
+            Set-DefaultStorageEngine $myIniPath 'InnoDB'
+            Write-Host "    InnoDB in $myIniPath"
+            # The running server keeps whatever it started with, so a correct file is
+            # only half of it - and a migration run before the restart fails exactly as
+            # it did before, which is the confusing kind of half-fixed.
+            Write-Host '    MySQL must be restarted before this takes effect:' -ForegroundColor Yellow
+            Write-Host '      .\script.ps1 run-servers -MySQL -Stop' -ForegroundColor DarkGray
+            Write-Host '      .\script.ps1 run-servers -MySQL' -ForegroundColor DarkGray
+            Set-Row 'MySQL engine' 'FIXED' "InnoDB in $myIniPath - restart MySQL for it to take effect"
+        } catch {
+            Set-Row 'MySQL engine' 'FAILED' "could not write $myIniPath - $($_.Exception.Message)"
+        }
+    }
+}
 
 # Composer BEFORE the PATH step, and verified after it. The shim it writes calls `php`
 # off PATH rather than an absolute php.exe, so composer cannot answer until PATH exists -

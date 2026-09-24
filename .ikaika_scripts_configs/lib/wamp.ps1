@@ -374,3 +374,51 @@ function Set-ComposerHome([string]$Path) {
     $env:COMPOSER_HOME = $Path
     return $Path
 }
+
+# =====================[ the storage engine MySQL defaults to ]================
+# WHY THIS IS GRADED AT ALL. WampServer ships my.ini with default_storage_engine=MYISAM
+# and the InnoDB line commented out directly beneath it. MySQL 8's own default is
+# InnoDB, so this is WampServer's choice rather than the server's, and it is the wrong
+# one for anything using Laravel: MyISAM caps an index at 1000 bytes, Laravel's
+# users_email_unique is a utf8mb4 varchar(255) needing 1020, and the very first
+# migration dies with "Specified key was too long" - an error that names neither MyISAM
+# nor the file that selected it.
+#
+# It also has no foreign keys and no transactions, which this schema uses throughout.
+function Get-MyIniPath([string]$Root, [string]$MysqlDir) {
+    if ($MysqlDir) {
+        $candidate = Join-Path $MysqlDir 'my.ini'
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    return ''
+}
+
+function Get-DefaultStorageEngine([string]$IniPath) {
+    if (-not $IniPath -or -not (Test-Path -LiteralPath $IniPath)) { return '' }
+    foreach ($line in (Get-Content -LiteralPath $IniPath)) {
+        if ($line -match '^\s*default[-_]storage[-_]engine\s*=\s*([A-Za-z]+)') { return $Matches[1] }
+    }
+    return ''
+}
+
+# Rewritten in WampServer's own idiom: the setting is a pair of lines, one live and one
+# commented, and flipping which is which is what its documentation tells you to do. The
+# alternative - appending a second assignment - leaves two in the file, and which one
+# wins is then a question about ordering nobody should have to ask.
+function Set-DefaultStorageEngine([string]$IniPath, [string]$Engine) {
+    $lines = @(Get-Content -LiteralPath $IniPath)
+    $changed = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*default[-_]storage[-_]engine\s*=') {
+            $lines[$i] = "default_storage_engine=$Engine"
+            $changed = $true
+            continue
+        }
+        # The commented twin, left commented so the file still documents the choice.
+        if ($lines[$i] -match '^\s*;\s*default[-_]storage[-_]engine\s*=') {
+            $lines[$i] = ";default_storage_engine=$(if ($Engine -eq 'InnoDB') { 'MYISAM' } else { 'InnoDB' })"
+        }
+    }
+    if (-not $changed) { $lines += "default_storage_engine=$Engine" }
+    [IO.File]::WriteAllLines($IniPath, $lines, [System.Text.UTF8Encoding]::new($false))
+}
