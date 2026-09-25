@@ -79,6 +79,16 @@ final class PortalActivityCopy
         return self::YOU.' restored the project '.$name;
     }
 
+    public static function chargedReimbursement(string $memberName, string $envelopeName, string $amount): string
+    {
+        return self::YOU.' charged '.$amount.' to '.$envelopeName.' for '.$memberName."'s reimbursement";
+    }
+
+    public static function releasedReimbursementCharge(string $envelopeName, string $amount): string
+    {
+        return self::YOU.' returned '.$amount.' to '.$envelopeName.' when a reimbursement stopped being approved';
+    }
+
     public static function restoredReport(string $kind, string $date): string
     {
         return self::YOU.' restored a '.self::reportKind($kind).' for '.self::date($date);

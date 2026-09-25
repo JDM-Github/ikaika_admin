@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 /**
- * Manage / Requests: every member's leave, overtime, offset and claims for Admin/Executive.
+ * Manage / Requests: every member's leave, overtime, offset, claims and late reports for
+ * Admin/Executive.
  *
  * Ownership on `requests` is the composed name Airtable stored. Claims join through
  * `employees_reimbursements` when that row exists, and fall back to `employee_name_input`.
@@ -33,6 +34,8 @@ final class PortalManageRequests
         private readonly PortalOvertimeRequests $overtime,
         private readonly PortalOffsetRequests $offset,
         private readonly PortalReimbursementRequests $reimbursements,
+        private readonly PortalBudgetEnvelopes $budget,
+        private readonly PortalSubmittedReports $reports,
     ) {}
 
     /**
@@ -44,6 +47,7 @@ final class PortalManageRequests
      *     overtime: list<array<string, mixed>>,
      *     offset: list<array<string, mixed>>,
      *     reimbursements: list<array<string, mixed>>,
+     *     lateReports: list<array<string, mixed>>,
      *     range: array{from: string, to: string}
      * }
      */
@@ -51,7 +55,7 @@ final class PortalManageRequests
     {
         [$from, $to] = $this->dateRange($request);
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:manage:requests:'.$version.':'.$from.':'.$to;
+        $key = 'portal:manage:requests:'.$version.':'.$this->reports->cacheVersion().':'.$from.':'.$to;
 
         return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($from, $to): array {
             [$data, $leave, $overtime, $offset] = $this->requestLists($from, $to);
@@ -64,6 +68,7 @@ final class PortalManageRequests
                 'overtime' => $overtime,
                 'offset' => $offset,
                 'reimbursements' => $this->claims($from, $to),
+                'lateReports' => $this->reports->lateQueue($from, $to),
                 'range' => ['from' => $from, 'to' => $to],
             ];
         });
@@ -77,20 +82,44 @@ final class PortalManageRequests
         $validated = $request->validate([
             'changes' => ['required', 'array', 'min:1', 'max:50'],
             'changes.*.id' => ['required', 'string', 'max:32'],
-            'changes.*.kind' => ['required', 'in:leave,overtime,holiday-work,offset,reimbursement'],
+            'changes.*.kind' => ['required', 'in:leave,overtime,holiday-work,offset,reimbursement,late'],
             'changes.*.status' => ['required', 'in:pending,approved,rejected'],
             'changes.*.approverRemarks' => ['nullable', 'string', 'max:2000'],
+            // Reimbursement approvals only: the envelope the claim is charged to, and the approver's
+            // explicit go-ahead when the claim is larger than what that envelope has left.
+            'changes.*.envelopeId' => ['nullable', 'integer', 'min:1'],
+            'changes.*.allowOverspend' => ['nullable', 'boolean'],
         ]);
 
-        $saved = $this->connection()->transaction(function () use ($validated, $actor, $request): int {
-            $count = 0;
-            foreach ($validated['changes'] as $change) {
-                $this->notifyOwnerOfDecision($actor, $this->applyChange($change), $request);
-                $count++;
-            }
+        // Charges made or removed in this batch, logged once the batch has actually committed.
+        $ledger = [];
+        $saved = $this->budget->withinLedger(function () use ($validated, $actor, $request, &$ledger): int {
+            return $this->connection()->transaction(function () use ($validated, $actor, $request, &$ledger): int {
+                $count = 0;
+                foreach ($validated['changes'] as $change) {
+                    $applied = $this->applyChange($actor, $change);
+                    if (($applied['ledger'] ?? null) !== null) {
+                        $ledger[] = $applied['ledger'];
+                    }
+                    $this->notifyOwnerOfDecision($actor, $applied, $request);
+                    $count++;
+                }
 
-            return $count;
+                return $count;
+            });
         });
+
+        foreach ($ledger as $entry) {
+            $this->audit->record(
+                $actor,
+                $entry['action'],
+                'manage.budget-envelopes',
+                $entry['message'],
+                $entry['recordId'],
+                $request,
+                $entry['payload'],
+            );
+        }
 
         $this->audit->record(
             $actor,
@@ -107,6 +136,7 @@ final class PortalManageRequests
         $this->overtime->bumpCache();
         $this->offset->bumpCache();
         $this->reimbursements->bumpCache();
+        $this->reports->bumpCache();
 
         return [
             'section' => 'manage',
@@ -122,21 +152,45 @@ final class PortalManageRequests
     }
 
     /**
-     * @param  array{id: string, kind: string, status: string, approverRemarks?: string|null}  $change
-     * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
+     * @param  array{id: string, kind: string, status: string, approverRemarks?: string|null, envelopeId?: int|null, allowOverspend?: bool|null}  $change
+     * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string, ledger?: array<string, mixed>|null}
      */
-    private function applyChange(array $change): array
+    private function applyChange(Employee $actor, array $change): array
     {
+        $status = $this->storedStatus($change['status']);
+        $remarks = $this->text($change['approverRemarks'] ?? null);
+
+        // A late report is named by its member and day rather than by a row, so it is the one kind
+        // whose id is not a number.
+        if ($change['kind'] === 'late') {
+            $decided = $this->reports->decideLate($change['id'], $status, $remarks);
+
+            return [
+                'owner' => $decided['owner'],
+                'kind' => 'late',
+                'date' => $decided['date'],
+                'recordId' => $change['id'],
+                'status' => $change['status'],
+            ];
+        }
+
         $id = (int) $change['id'];
         if ($id < 1 || (string) $id !== $change['id']) {
             abort(422, 'Each change needs a numeric id.');
         }
 
-        $status = $this->storedStatus($change['status']);
-        $remarks = $this->text($change['approverRemarks'] ?? null);
-
         if ($change['kind'] === 'reimbursement') {
-            return $this->applyClaim($id, $status, $remarks, $change['status']);
+            $envelopeId = $change['envelopeId'] ?? null;
+
+            return $this->applyClaim(
+                $actor,
+                $id,
+                $status,
+                $remarks,
+                $change['status'],
+                $envelopeId === null ? null : (int) $envelopeId,
+                (bool) ($change['allowOverspend'] ?? false),
+            );
         }
 
         return $this->applyQueuedRequest($id, $change['kind'], $status, $remarks, $change['status']);
@@ -160,6 +214,7 @@ final class PortalManageRequests
         $kind = $this->kindLabel($applied['kind']);
         $resource = $this->resourceForKind($applied['kind']);
         $subject = $kind.' for '.PortalActivityCopy::date($applied['date']);
+        $noun = $applied['kind'] === 'late' ? 'Late report' : 'Request';
 
         $this->audit->record(
             $owner,
@@ -180,9 +235,9 @@ final class PortalManageRequests
             $actor,
             $resource.'.'.$applied['status'],
             match ($applied['status']) {
-                'approved' => 'Request approved',
-                'rejected' => 'Request rejected',
-                default => 'Request updated',
+                'approved' => $noun.' approved',
+                'rejected' => $noun.' rejected',
+                default => $noun.' updated',
             },
             PortalActivityCopy::notifyDecided($kind, $applied['date'], $verb, PortalActivityCopy::displayName($actor)),
             PortalShellPath::USER_REQUESTS,
@@ -240,10 +295,17 @@ final class PortalManageRequests
     }
 
     /**
-     * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string}
+     * @return array{owner: ?Employee, kind: string, date: string, recordId: string, status: string, ledger: array<string, mixed>|null}
      */
-    private function applyClaim(int $id, string $status, ?string $remarks, string $apiStatus): array
-    {
+    private function applyClaim(
+        Employee $actor,
+        int $id,
+        string $status,
+        ?string $remarks,
+        string $apiStatus,
+        ?int $envelopeId,
+        bool $allowOverspend,
+    ): array {
         $seed = $this->connection()
             ->table('reimbursements')
             ->select(['id', 'date_created', 'employee_name_input', 'reimb_date', 'status'])
@@ -253,42 +315,195 @@ final class PortalManageRequests
             abort(404, 'That reimbursement is not on the queue.');
         }
 
-        $query = $this->connection()
-            ->table('reimbursements')
-            ->where('date_created', $seed->date_created);
         $name = $this->text($seed->employee_name_input ?? null);
-        if ($name === null) {
-            $query->where(function ($inner): void {
-                $inner->whereNull('employee_name_input')->orWhere('employee_name_input', '');
-            });
-        } else {
-            $query->where('employee_name_input', $seed->employee_name_input);
-        }
+        $claim = function () use ($seed, $name) {
+            $query = $this->connection()
+                ->table('reimbursements')
+                ->where('date_created', $seed->date_created);
+            if ($name === null) {
+                $query->where(function ($inner): void {
+                    $inner->whereNull('employee_name_input')->orWhere('employee_name_input', '');
+                });
+            } else {
+                $query->where('employee_name_input', $seed->employee_name_input);
+            }
 
-        $updated = $query->update([
-            'status' => $status,
-            'approver_remarks' => $remarks,
-        ]);
-        if ($updated === 0) {
+            return $query;
+        };
+
+        // Read before the update: the charge is the claim as it stood when the approver decided it.
+        $rows = $claim()->get(['id', 'item', 'cost', 'qty']);
+        if ($rows->isEmpty()) {
             abort(404, 'That reimbursement is not on the queue.');
         }
 
+        // Existence is settled by the read above, not by the update's row count: MySQL counts only
+        // rows it changed, so a second item of an already-decided claim updated nothing and used to
+        // come back as a 404 for a claim that was plainly there.
+        $claim()->update([
+            'status' => $status,
+            'approver_remarks' => $remarks,
+        ]);
+
+        $owner = $this->claimOwner($id, $name);
+
+        $filedOn = $this->calendarDate($seed->reimb_date ?? null) ?? '';
+        $memberName = $owner instanceof Employee
+            ? PortalActivityCopy::displayName($owner)
+            : ($name ?? 'Member');
+
+        return [
+            'owner' => $owner,
+            'kind' => 'reimbursement',
+            'date' => $filedOn,
+            'recordId' => (string) $id,
+            'status' => $apiStatus,
+            'ledger' => $this->settleClaimCharge(
+                $actor,
+                $rows->all(),
+                $apiStatus,
+                $envelopeId,
+                $allowOverspend,
+                $memberName,
+                $filedOn,
+                $owner === null ? null : $this->text($owner->department ?? null),
+            ),
+        ];
+    }
+
+    /**
+     * The department of whoever filed a claim, found by the claim's id -- its lowest row id, the same
+     * one its charge carries. Null when the claimant cannot be found or has no department.
+     */
+    public function claimantDepartment(int $claimId): ?string
+    {
+        $seed = $this->connection()
+            ->table('reimbursements')
+            ->where('id', $claimId)
+            ->first(['id', 'employee_name_input']);
+        if ($seed === null) {
+            return null;
+        }
+        $owner = $this->claimOwner($claimId, $this->text($seed->employee_name_input ?? null));
+
+        return $owner === null ? null : $this->text($owner->department ?? null);
+    }
+
+    // The employee a reimbursement row is linked to, or failing a link, the one its name belongs to.
+    private function claimOwner(int $id, ?string $name): ?Employee
+    {
         $linkedId = $this->connection()
             ->table('employees_reimbursements')
             ->where('reimbursement_id', $id)
             ->value('employee_id');
         $owner = is_numeric($linkedId) ? Employee::query()->find((int) $linkedId) : null;
-        if (! $owner instanceof Employee) {
-            $owner = $this->employeeNamed($name);
+
+        return $owner instanceof Employee ? $owner : $this->employeeNamed($name);
+    }
+
+    /**
+     * Keeps a claim's envelope charge in step with its decision: charged while approved, removed the
+     * moment it stops being approved.
+     *
+     * The backend decides a whole claim at once, so the charge is the claim's full total however many
+     * of its items the approver staged. Two items of one claim in one save therefore charge once.
+     *
+     * @param  list<object>  $rows
+     * @return array{action: string, message: string, recordId: string, payload: array<string, mixed>}|null
+     */
+    private function settleClaimCharge(
+        Employee $actor,
+        array $rows,
+        string $apiStatus,
+        ?int $envelopeId,
+        bool $allowOverspend,
+        string $memberName,
+        string $filedOn,
+        ?string $department,
+    ): ?array {
+        if (! $this->budget->isAvailable() || $rows === []) {
+            return null;
         }
 
+        // The same identity the queue gives the claim, so the portal and the ledger name one thing.
+        $claimId = (int) min(array_map(static fn (object $row): int => (int) $row->id, $rows));
+        $existing = $this->budget->chargeFor($claimId);
+
+        if ($apiStatus !== 'approved') {
+            $released = $existing === null ? null : $this->budget->release($claimId);
+            if ($released === null) {
+                return null;
+            }
+
+            return [
+                'action' => PortalLogAction::DELETE,
+                'message' => PortalActivityCopy::releasedReimbursementCharge(
+                    $released['envelopeName'],
+                    $this->peso($released['amount']),
+                ),
+                'recordId' => (string) $released['transactionId'],
+                'payload' => [
+                    'claimId' => (string) $claimId,
+                    'envelopeId' => (string) $released['envelopeId'],
+                    'envelope' => $released['envelopeName'],
+                    'amount' => $released['amount'],
+                ],
+            ];
+        }
+
+        if ($existing !== null) {
+            if ($envelopeId !== null && $envelopeId !== $existing['envelopeId']) {
+                abort(422, 'This claim is already charged to '.$existing['envelopeName'].'. One claim is charged to one envelope.');
+            }
+
+            return null;
+        }
+
+        if ($envelopeId === null) {
+            abort(422, 'Choose a budget envelope to charge this reimbursement to.');
+        }
+
+        $amountCents = 0;
+        $items = [];
+        foreach ($rows as $row) {
+            $amountCents += (int) round(((float) ($row->cost ?? 0)) * 100) * $this->quantity($row->qty ?? null);
+            $items[] = $this->text($row->item ?? null) ?? 'Item';
+        }
+
+        $charge = $this->budget->charge($actor, [
+            'id' => $claimId,
+            'memberName' => $memberName,
+            'filedOn' => $filedOn,
+            'amountCents' => $amountCents,
+            'items' => $items,
+            'department' => $department,
+        ], $envelopeId, $allowOverspend);
+
         return [
-            'owner' => $owner instanceof Employee ? $owner : null,
-            'kind' => 'reimbursement',
-            'date' => $this->calendarDate($seed->reimb_date ?? null) ?? '',
-            'recordId' => (string) $id,
-            'status' => $apiStatus,
+            'action' => PortalLogAction::POST,
+            'message' => PortalActivityCopy::chargedReimbursement(
+                $memberName,
+                $charge['envelopeName'],
+                $this->peso($charge['amount']),
+            ),
+            'recordId' => (string) $charge['transactionId'],
+            'payload' => [
+                'claimId' => (string) $claimId,
+                'envelopeId' => (string) $charge['envelopeId'],
+                'envelope' => $charge['envelopeName'],
+                'amount' => $charge['amount'],
+                'remainingAfter' => $charge['remainingAfter'],
+                'overspent' => $charge['overspent'],
+                'accountId' => $charge['accountId'],
+                'account' => $charge['accountName'],
+                'team' => $charge['team'],
+            ],
         ];
+    }
+
+    private function peso(float $amount): string
+    {
+        return ($amount < 0 ? '-' : '').'₱'.number_format(abs($amount), 2);
     }
 
     private function employeeNamed(?string $name): ?Employee
@@ -313,6 +528,7 @@ final class PortalManageRequests
             'overtime' => 'overtime request',
             'holiday-work' => 'holiday work request',
             'offset' => 'offset request',
+            'late' => 'late report',
             default => 'reimbursement request',
         };
     }
@@ -323,6 +539,7 @@ final class PortalManageRequests
             'leave' => 'requests.leave',
             'overtime', 'holiday-work' => 'requests.overtime',
             'offset' => 'requests.offset',
+            'late' => 'reports.submitted',
             default => 'requests.reimbursement',
         };
     }

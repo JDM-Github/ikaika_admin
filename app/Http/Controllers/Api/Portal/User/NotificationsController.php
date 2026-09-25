@@ -22,6 +22,17 @@ class NotificationsController extends Controller
         return response()->json($this->inbox->list($actor, $request));
     }
 
+    // Every unread notice, for the marks on the navigation and the request tables.
+    public function unread(Request $request): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->inbox->unread($actor));
+    }
+
     public function markRead(Request $request, int $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');

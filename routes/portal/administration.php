@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Portal\Administration\AllLogsController;
 use App\Http\Controllers\Api\Portal\Administration\EmailBlocksController;
 use App\Http\Controllers\Api\Portal\Administration\EmailMessagesController;
+use App\Http\Controllers\Api\Portal\Administration\MissingReportsController;
 use App\Http\Controllers\Api\Portal\Administration\RecycleBinController;
 use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
@@ -12,6 +13,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::get('administration/all-logs', [AllLogsController::class, 'index']);
         Route::get('administration/all-logs/{id}', [AllLogsController::class, 'show'])->whereNumber('id');
     });
+
+    // Everybody's filed days: the same read Manage Reports makes, for every member at once.
+    Route::middleware(['portal.admin', 'throttle:portal-manage-reports'])
+        ->get('administration/missing-reports', [MissingReportsController::class, 'index']);
 
     Route::middleware('throttle:portal-administration-recycle-bin')->group(function (): void {
         Route::get('administration/recycle-bin', [RecycleBinController::class, 'index']);

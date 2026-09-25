@@ -690,7 +690,8 @@ class PortalSubmittedReportsTest extends TestCase
         $activity = $this->firstActivity();
         $earn = $this->firstEarnCode();
         $free = $this->freeDate($actor, 2);
-        $taken = $this->freeDate($actor, 3);
+        // Behind the first, so skipping a weekend can never hand both the same Friday.
+        $taken = $this->freeDate($actor, $this->daysAgo($free) + 1);
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
 
         $this->insertLine($actor, ['report_date' => $taken, 'hours_rendered' => 8], $project, $activity, $earn);
@@ -759,6 +760,46 @@ class PortalSubmittedReportsTest extends TestCase
         ], $headers)->assertCreated();
     }
 
+    public function test_filing_refuses_a_saturday_or_a_sunday_of_either_kind(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        // The portal's own day, so both weekend days fall inside the daily window it checks.
+        $today = app(PortalTimezone::class)->today();
+        $saturday = $today->copy()->previous(Carbon::SATURDAY)->toDateString();
+        $sunday = $today->copy()->previous(Carbon::SUNDAY)->toDateString();
+        $entries = [[
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                $project->project_number ?? null,
+                $project->project_name ?? null,
+            ),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                $activity->name ?? null,
+                $activity->id_no ?? null,
+            ),
+            'hoursRendered' => 4,
+            'elementChange' => 0,
+        ]];
+
+        foreach ([['daily', $saturday], ['daily', $sunday], ['late', $saturday], ['late', $sunday]] as [$kind, $day]) {
+            $this->postJson('/api/development/portal/reports/submitted', [
+                'kind' => $kind,
+                'reports' => [['reportDate' => $day, 'remarks' => 'Came in for a deadline', 'entries' => $entries]],
+            ], $headers)
+                ->assertStatus(422)
+                ->assertJsonPath('message', 'Reports are not filed for Saturdays or Sundays.');
+        }
+
+        $this->assertSame(0, DB::connection('portal')->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->whereIn('user_reports.report_date', [$saturday, $sunday])
+            ->whereNull('user_reports.airtable_record_id')
+            ->count());
+    }
+
     public function test_leave_blocks_a_filing_unless_the_request_was_rejected(): void
     {
         $actor = $this->activeMember();
@@ -767,7 +808,8 @@ class PortalSubmittedReportsTest extends TestCase
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
 
         $onLeave = $this->freeDate($actor, 1);
-        $refused = $this->freeDate($actor, 2);
+        // Behind the first, so skipping a weekend can never hand both the same Friday.
+        $refused = $this->freeDate($actor, $this->daysAgo($onLeave) + 1);
         $this->insertRequest($actor, ['request_date' => $onLeave, 'status' => 'Pending']);
         $this->insertRequest($actor, ['request_date' => $refused, 'status' => 'Rejected']);
 
@@ -974,24 +1016,43 @@ class PortalSubmittedReportsTest extends TestCase
     }
 
     /**
-     * A day inside the filing window that this member has not already used. The seeded database
-     * carries real timesheets, so a hard-coded offset is not reliably free.
+     * A weekday inside the filing window that this member has neither reported nor taken leave on.
+     * The seeded database carries real timesheets and leave, so a hard-coded offset is not reliably
+     * free, and a report is never filed for a Saturday or a Sunday.
      */
     private function freeDate(Employee $actor, int $daysAgo): string
     {
+        $name = PortalSubmittedReportPresenter::memberName(
+            is_string($actor->first_name) ? $actor->first_name : null,
+            is_string($actor->last_name) ? $actor->last_name : null,
+        );
         for ($offset = $daysAgo; $offset < $daysAgo + 400; $offset++) {
-            $candidate = Carbon::today()->subDays($offset)->toDateString();
+            $day = Carbon::today()->subDays($offset);
+            if ($day->isWeekend()) {
+                continue;
+            }
+            $candidate = $day->toDateString();
             $taken = DB::connection('portal')->table('user_reports')
                 ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
                 ->where('employees_user_reports.employee_id', $actor->getKey())
                 ->where('user_reports.report_date', $candidate)
                 ->exists();
-            if (! $taken) {
+            $onLeave = DB::connection('portal')->table('requests')
+                ->where('name', $name)
+                ->where('request_date', $candidate)
+                ->exists();
+            if (! $taken && ! $onLeave) {
                 return $candidate;
             }
         }
 
         $this->fail('No free report date was available for this member.');
+    }
+
+    // How many days back a date is, so a second free day can be looked for behind the first.
+    private function daysAgo(string $date): int
+    {
+        return (int) Carbon::parse($date)->startOfDay()->diffInDays(Carbon::today(), true);
     }
 
     private function firstProject(): object

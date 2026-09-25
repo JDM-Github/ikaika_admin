@@ -13,6 +13,7 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         // Before the list route, so /days is not read as a submitted-report id.
         Route::get('reports/submitted/days', [SubmittedController::class, 'days']);
         Route::get('reports/submitted', [SubmittedController::class, 'index']);
+        Route::get('reports/late', [SubmittedController::class, 'late']);
     });
 
     Route::middleware('throttle:portal-reports-submitted-write')->group(function (): void {

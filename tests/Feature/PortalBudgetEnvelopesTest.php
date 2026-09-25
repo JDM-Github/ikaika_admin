@@ -1,0 +1,566 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalLog;
+use App\Support\Portal\PortalSubmittedReportPresenter;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Testing\TestResponse;
+use Tests\TestCase;
+
+/**
+ * Charging an approved reimbursement to a budget envelope in the transaction tracker.
+ *
+ * Runs against the real tracker database inside a transaction, so the live envelopes are present
+ * alongside the ones seeded here. Assertions name the seeded envelopes rather than totals, which the
+ * live data would move.
+ */
+class PortalBudgetEnvelopesTest extends TestCase
+{
+    use DatabaseTransactions;
+
+    /**
+     * @var list<string>
+     */
+    protected array $connectionsToTransact = ['portal', 'tracker', 'core'];
+
+    private int $claimSequence = 0;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::flush();
+        Mail::fake();
+        // Said outright rather than inherited from .env, so the suite means the same thing anywhere.
+        config(['products.catalog.transaction-tracker.enabled' => true]);
+    }
+
+    public function test_the_summary_lists_active_envelopes_with_their_balances(): void
+    {
+        $open = $this->envelope('Seeded Office Supplies', 1000.00);
+        $closed = $this->envelope('Seeded Closed Envelope', 500.00, active: false);
+
+        $response = $this->getJson('/api/development/portal/manage/budget-envelopes', $this->admin())
+            ->assertOk()
+            ->assertJsonPath('available', true)
+            ->assertJsonPath('currency', 'PHP');
+
+        $envelopes = collect($response->json('data'))->keyBy('id');
+        $this->assertTrue($envelopes->has((string) $open));
+        $this->assertFalse($envelopes->has((string) $closed));
+        $this->assertEqualsWithDelta(1000.00, $envelopes[(string) $open]['funded'], 0.001);
+        $this->assertEqualsWithDelta(0.00, $envelopes[(string) $open]['spent'], 0.001);
+        $this->assertEqualsWithDelta(1000.00, $envelopes[(string) $open]['remaining'], 0.001);
+
+        // Remaining is allocated less spent, never a figure that fails to reconcile with the other two.
+        $totals = $response->json('totals');
+        $this->assertEqualsWithDelta($totals['allocated'] - $totals['spent'], $totals['remaining'], 0.001);
+    }
+
+    public function test_approving_one_item_charges_the_whole_claim_to_the_chosen_envelope(): void
+    {
+        $envelope = $this->envelope('Seeded Team Amenities', 2000.00);
+        [$first, $second] = $this->claim([['Paper towel', 300.00, 1], ['Air freshener', 150.00, 2]]);
+
+        $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+            ->assertOk();
+
+        // The backend decides a whole claim at once, so the charge is both items: 300 + 150 x 2.
+        $charge = $this->chargeOf($first);
+        $this->assertNotNull($charge);
+        $this->assertSame('Expense', $charge->type);
+        $this->assertSame('600.00', $charge->amount);
+        $this->assertSame((string) $envelope, (string) $charge->envelope_id);
+        $this->assertEqualsWithDelta(1400.00, $this->remaining($envelope), 0.001);
+        $this->assertSame(['Approved', 'Approved'], $this->statuses([$first, $second]));
+    }
+
+    public function test_an_approval_without_an_envelope_is_refused_and_changes_nothing(): void
+    {
+        [$item] = $this->claim([['Monthly grocery', 1644.25, 1]]);
+
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved']])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Choose a budget envelope to charge this reimbursement to.');
+
+        $this->assertNull($this->chargeOf($item));
+        $this->assertSame(['Pending'], $this->statuses([$item]));
+    }
+
+    public function test_an_overspend_is_refused_until_the_approver_confirms_it(): void
+    {
+        $envelope = $this->envelope('Seeded Travel', 100.00);
+        [$item] = $this->claim([['Bus fare', 250.00, 1]]);
+
+        $refused = $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]]);
+        $refused->assertStatus(422);
+        $this->assertStringContainsString('has ₱100.00 left, but this claim is ₱250.00', (string) $refused->json('message'));
+        $this->assertNull($this->chargeOf($item));
+        $this->assertSame(['Pending'], $this->statuses([$item]));
+
+        $this->decide([[
+            'id' => (string) $item,
+            'kind' => 'reimbursement',
+            'status' => 'approved',
+            'envelopeId' => $envelope,
+            'allowOverspend' => true,
+        ]])->assertOk();
+
+        $charge = $this->chargeOf($item);
+        $this->assertNotNull($charge);
+        $this->assertStringContainsString('Charged over the envelope', (string) $charge->description);
+        $this->assertEqualsWithDelta(-150.00, $this->remaining($envelope), 0.001);
+    }
+
+    public function test_two_items_of_one_claim_in_one_save_charge_it_once(): void
+    {
+        $envelope = $this->envelope('Seeded Pantry', 5000.00);
+        [$first, $second] = $this->claim([['Coffee', 400.00, 1], ['Sugar', 100.00, 1]]);
+
+        $this->decide([
+            ['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope],
+            ['id' => (string) $second, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope],
+        ])->assertOk();
+
+        $this->assertSame(1, $this->chargeCount($first));
+        $this->assertEqualsWithDelta(4500.00, $this->remaining($envelope), 0.001);
+    }
+
+    public function test_setting_an_approved_claim_back_to_pending_returns_its_charge(): void
+    {
+        $envelope = $this->envelope('Seeded Housekeeping', 1000.00);
+        [$item] = $this->claim([['Mop', 350.00, 1]]);
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+            ->assertOk();
+        $this->assertEqualsWithDelta(650.00, $this->remaining($envelope), 0.001);
+
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'pending']])->assertOk();
+
+        $this->assertNull($this->chargeOf($item));
+        $this->assertEqualsWithDelta(1000.00, $this->remaining($envelope), 0.001);
+        $this->assertTrue(PortalLog::query()
+            ->where('resource', 'manage.budget-envelopes')
+            ->where('message', 'like', '%returned ₱350.00 to Seeded Housekeeping%')
+            ->exists());
+    }
+
+    public function test_an_inactive_envelope_cannot_be_charged(): void
+    {
+        $envelope = $this->envelope('Seeded Retired Envelope', 1000.00, active: false);
+        [$item] = $this->claim([['Stapler', 90.00, 1]]);
+
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Seeded Retired Envelope is not an active budget envelope.');
+
+        $this->assertNull($this->chargeOf($item));
+    }
+
+    /*
+     * The charge to the first envelope is written to the tracker before the second change fails.
+     * Both databases have to roll back together, or the ledger keeps a charge for a claim that the
+     * portal never approved.
+     */
+    public function test_a_refused_change_rolls_back_a_charge_already_written_in_the_same_save(): void
+    {
+        $first = $this->envelope('Seeded Envelope A', 5000.00);
+        $second = $this->envelope('Seeded Envelope B', 5000.00);
+        [$one, $two] = $this->claim([['Chair', 1200.00, 1], ['Desk', 800.00, 1]]);
+
+        $this->decide([
+            ['id' => (string) $one, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $first],
+            ['id' => (string) $two, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $second],
+        ])->assertStatus(422)
+            ->assertJsonPath('message', 'This claim is already charged to Seeded Envelope A. One claim is charged to one envelope.');
+
+        $this->assertNull($this->chargeOf($one));
+        $this->assertEqualsWithDelta(5000.00, $this->remaining($first), 0.001);
+        $this->assertSame(['Pending', 'Pending'], $this->statuses([$one, $two]));
+    }
+
+    public function test_the_charge_is_logged_with_its_envelope_and_amount(): void
+    {
+        $envelope = $this->envelope('Seeded Office Maintenance', 3000.00);
+        [$item] = $this->claim([['Light bulbs', 120.00, 3]]);
+
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+            ->assertOk();
+
+        $log = PortalLog::query()
+            ->where('resource', 'manage.budget-envelopes')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertStringContainsString('charged ₱360.00 to Seeded Office Maintenance', (string) $log->message);
+        $this->assertSame((string) $envelope, $log->payload['envelopeId']);
+        $this->assertEqualsWithDelta(2640.00, $log->payload['remainingAfter'], 0.001);
+        $this->assertFalse($log->payload['overspent']);
+    }
+
+    public function test_with_the_tracker_switched_off_an_approval_charges_nothing(): void
+    {
+        config(['products.catalog.transaction-tracker.enabled' => false]);
+        [$item] = $this->claim([['Printer ink', 780.00, 1]]);
+
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved']])->assertOk();
+
+        $this->assertNull($this->chargeOf($item));
+        $this->assertSame(['Approved'], $this->statuses([$item]));
+        $this->getJson('/api/development/portal/manage/budget-envelopes', $this->admin())
+            ->assertOk()
+            ->assertJsonPath('available', false)
+            ->assertJsonPath('totals', null);
+    }
+
+    public function test_an_approval_books_the_charge_to_the_claimants_team_account(): void
+    {
+        [$member, $account] = $this->teamHolder('Seeded Design');
+        $envelope = $this->envelope('Seeded Design Supplies', 2000.00);
+        [$item] = $this->claim([['Sketchbook', 250.00, 2]], $member);
+
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+            ->assertOk();
+
+        $charge = $this->chargeOf($item);
+        $this->assertNotNull($charge);
+        $this->assertSame([$account], $this->bookedAccounts((int) $charge->id));
+        $this->assertEqualsWithDelta(-500.00, $this->accountRemaining($account), 0.001);
+        $log = PortalLog::query()
+            ->where('resource', 'manage.budget-envelopes')
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($log);
+        $this->assertSame((string) $account, $log->payload['accountId']);
+        $this->assertSame('Seeded Design Account', $log->payload['account']);
+        $this->assertSame('Seeded Design', $log->payload['team']);
+    }
+
+    public function test_a_claimant_whose_team_holds_no_account_is_charged_to_the_envelope_alone(): void
+    {
+        [$member] = $this->teamHolder('Seeded Unfunded Team', holdsAccount: false);
+        $envelope = $this->envelope('Seeded Unfunded Supplies', 1000.00);
+        [$item] = $this->claim([['Tape', 50.00, 1]], $member);
+
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+            ->assertOk();
+
+        $charge = $this->chargeOf($item);
+        $this->assertNotNull($charge);
+        $this->assertSame([], $this->bookedAccounts((int) $charge->id));
+        $this->assertEqualsWithDelta(950.00, $this->remaining($envelope), 0.001);
+    }
+
+    public function test_setting_an_approved_claim_back_to_pending_returns_it_to_the_team_account(): void
+    {
+        [$member, $account] = $this->teamHolder('Seeded Ops');
+        $envelope = $this->envelope('Seeded Ops Supplies', 1000.00);
+        [$item] = $this->claim([['Batteries', 300.00, 1]], $member);
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+            ->assertOk();
+        $chargeId = (int) $this->chargeOf($item)?->id;
+        $this->assertEqualsWithDelta(-300.00, $this->accountRemaining($account), 0.001);
+
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'pending']])->assertOk();
+
+        $this->assertSame([], $this->bookedAccounts($chargeId));
+        $this->assertEqualsWithDelta(0.00, $this->accountRemaining($account), 0.001);
+    }
+
+    /*
+     * Charges written before a charge carried its team account are booked once, to the claimant's
+     * team; running the command again books nothing more.
+     */
+    public function test_the_booking_command_books_an_earlier_charge_to_the_claimants_team_once(): void
+    {
+        [$member, $account] = $this->teamHolder('Seeded Finance');
+        $envelope = $this->envelope('Seeded Petty Cash', 1000.00);
+        [$item] = $this->claim([['Receipt book', 120.00, 1]], $member);
+        $claimId = $this->claimIdOf($item);
+        $chargeId = $this->unbookedCharge($claimId, $envelope, 120.00);
+
+        $this->artisan('portal:book-team-charges')
+            ->expectsOutputToContain(sprintf('Charge %d (claim %d): booked to Seeded Finance Account (Seeded Finance).', $chargeId, $claimId))
+            ->assertExitCode(0);
+        $this->assertSame([$account], $this->bookedAccounts($chargeId));
+
+        $this->artisan('portal:book-team-charges')->assertExitCode(0);
+        $this->assertSame([$account], $this->bookedAccounts($chargeId));
+    }
+
+    public function test_the_booking_command_leaves_a_charge_whose_team_holds_no_account(): void
+    {
+        [$member] = $this->teamHolder('Seeded Lonely Team', holdsAccount: false);
+        $envelope = $this->envelope('Seeded Lonely Envelope', 1000.00);
+        [$item] = $this->claim([['Glue', 40.00, 1]], $member);
+        $claimId = $this->claimIdOf($item);
+        $chargeId = $this->unbookedCharge($claimId, $envelope, 40.00);
+
+        $this->artisan('portal:book-team-charges')
+            ->expectsOutputToContain(sprintf('Charge %d (claim %d): no team account for Seeded Lonely Team, left as it was.', $chargeId, $claimId))
+            ->assertExitCode(0);
+        $this->assertSame([], $this->bookedAccounts($chargeId));
+    }
+
+    public function test_the_booking_command_does_nothing_with_the_tracker_switched_off(): void
+    {
+        config(['products.catalog.transaction-tracker.enabled' => false]);
+
+        $this->artisan('portal:book-team-charges')
+            ->expectsOutputToContain('The transaction tracker is switched off here')
+            ->assertExitCode(0);
+    }
+
+    public function test_only_an_admin_reads_the_envelopes(): void
+    {
+        $this->getJson('/api/development/portal/manage/budget-envelopes', [
+            'Authorization' => 'Bearer '.$this->loginToken($this->activeMember()),
+        ])->assertForbidden();
+    }
+
+    private function envelope(string $name, float $funded, bool $active = true): int
+    {
+        $tracker = DB::connection('tracker');
+        $id = (int) $tracker->table('envelopes_budget')->insertGetId([
+            'envelope_name' => $name,
+            'budget_amount' => $funded,
+            'group_name' => 'Maintenance',
+            'time_period' => 'Monthly',
+            'active' => $active,
+        ]);
+        $credit = (int) $tracker->table('transactions')->insertGetId([
+            'transaction_name' => 'Credit',
+            'transaction_date' => '2026-09-01 00:00:00',
+            'amount' => $funded,
+            'type' => 'Credit',
+        ]);
+        $tracker->table('transactions_envelopes')->insert(['transaction_id' => $credit, 'envelope_id' => $id]);
+
+        return $id;
+    }
+
+    /**
+     * One claim: every row shares a date_created and a name, which is what makes them one claim.
+     *
+     * @param  list<array{0: string, 1: float, 2: int}>  $items
+     * @return list<int>
+     */
+    private function claim(array $items, ?Employee $member = null): array
+    {
+        $member ??= $this->activeMember();
+        // Years out and sequenced, so a seeded claim can never merge with a real one.
+        $createdAt = Carbon::create(2031, 1, 1, 9)->addMinutes(++$this->claimSequence)->format('Y-m-d H:i:s');
+        $ids = [];
+        foreach ($items as [$label, $cost, $qty]) {
+            $id = (int) DB::connection('portal')->table('reimbursements')->insertGetId([
+                'reimb_date' => '2026-09-01',
+                'item' => $label,
+                'cost' => $cost,
+                'qty' => $qty,
+                'purpose' => 'seeded',
+                'employee_name_input' => $this->memberName($member),
+                'team' => 'Angeles Pampanga Office',
+                'status' => 'Pending',
+                'date_created' => $createdAt,
+            ]);
+            DB::connection('portal')->table('employees_reimbursements')->insert([
+                'employee_id' => $member->getKey(),
+                'reimbursement_id' => $id,
+            ]);
+            $ids[] = $id;
+        }
+
+        return $ids;
+    }
+
+    /**
+     * A member of a team of their own, and -- unless told otherwise -- that team's account in the
+     * tracker, held in their name the way the live accounts are. No id_no, so no other helper picks
+     * them as the member or the admin.
+     *
+     * @return array{0: Employee, 1: int|null}
+     */
+    private function teamHolder(string $team, bool $holdsAccount = true): array
+    {
+        $email = strtolower(str_replace(' ', '.', $team)).'.holder@example.test';
+        $id = (int) DB::connection('portal')->table('employees')->insertGetId([
+            'first_name' => 'Holder',
+            'last_name' => $team,
+            'email' => $email,
+            'status' => 'Active',
+            'role' => 'user',
+            'department' => $team,
+        ]);
+        $member = Employee::query()->findOrFail($id);
+
+        return [$member, $holdsAccount ? $this->trackerAccount($team.' Account', $email) : null];
+    }
+
+    private function trackerAccount(string $name, string $email, bool $active = true): int
+    {
+        return (int) DB::connection('tracker')->table('accounts')->insertGetId([
+            'account_name' => $name,
+            'email' => $email,
+            'active' => $active,
+        ]);
+    }
+
+    // A charge as the portal wrote it before charges carried a team account: envelope only.
+    private function unbookedCharge(int $claimId, int $envelopeId, float $amount): int
+    {
+        $tracker = DB::connection('tracker');
+        $id = (int) $tracker->table('transactions')->insertGetId([
+            'transaction_name' => 'Reimbursement',
+            'transaction_date' => '2026-09-23 00:00:00',
+            'amount' => $amount,
+            'type' => 'Expense',
+            'source_key' => 'portal:reimbursement-claim:'.$claimId,
+        ]);
+        $tracker->table('transactions_envelopes')->insert(['transaction_id' => $id, 'envelope_id' => $envelopeId]);
+
+        return $id;
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function bookedAccounts(int $transactionId): array
+    {
+        return DB::connection('tracker')
+            ->table('transactions_accounts')
+            ->where('transaction_id', $transactionId)
+            ->orderBy('account_id')
+            ->pluck('account_id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    private function accountRemaining(int $accountId): float
+    {
+        $row = DB::connection('tracker')
+            ->table('transactions_accounts as ta')
+            ->join('transactions as t', 't.id', '=', 'ta.transaction_id')
+            ->where('ta.account_id', $accountId)
+            ->selectRaw("COALESCE(SUM(CASE WHEN t.type = 'Credit' THEN t.amount END), 0) - COALESCE(SUM(CASE WHEN t.type = 'Expense' THEN t.amount END), 0) AS remaining")
+            ->first();
+
+        return (float) $row->remaining;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $changes
+     */
+    private function decide(array $changes): TestResponse
+    {
+        return $this->patchJson('/api/development/portal/manage/requests', ['changes' => $changes], $this->admin());
+    }
+
+    private function chargeOf(int $itemId): ?object
+    {
+        return DB::connection('tracker')
+            ->table('transactions as t')
+            ->leftJoin('transactions_envelopes as te', 'te.transaction_id', '=', 't.id')
+            ->where('t.source_key', 'portal:reimbursement-claim:'.$this->claimIdOf($itemId))
+            ->first(['t.*', 'te.envelope_id']);
+    }
+
+    private function chargeCount(int $itemId): int
+    {
+        return DB::connection('tracker')
+            ->table('transactions')
+            ->where('source_key', 'portal:reimbursement-claim:'.$this->claimIdOf($itemId))
+            ->count();
+    }
+
+    // The claim's identity is its lowest row id -- the same one the queue gives it.
+    private function claimIdOf(int $itemId): int
+    {
+        $seed = DB::connection('portal')->table('reimbursements')->where('id', $itemId)->first();
+
+        return (int) DB::connection('portal')
+            ->table('reimbursements')
+            ->where('date_created', $seed->date_created)
+            ->where('employee_name_input', $seed->employee_name_input)
+            ->min('id');
+    }
+
+    private function remaining(int $envelopeId): float
+    {
+        $row = DB::connection('tracker')
+            ->table('transactions_envelopes as te')
+            ->join('transactions as t', 't.id', '=', 'te.transaction_id')
+            ->where('te.envelope_id', $envelopeId)
+            ->selectRaw("COALESCE(SUM(CASE WHEN t.type = 'Credit' THEN t.amount END), 0) - COALESCE(SUM(CASE WHEN t.type = 'Expense' THEN t.amount END), 0) AS remaining")
+            ->first();
+
+        return (float) $row->remaining;
+    }
+
+    /**
+     * @param  list<int>  $ids
+     * @return list<string>
+     */
+    private function statuses(array $ids): array
+    {
+        return DB::connection('portal')
+            ->table('reimbursements')
+            ->whereIn('id', $ids)
+            ->orderBy('id')
+            ->pluck('status')
+            ->all();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function admin(): array
+    {
+        $employee = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role, '')) = 'admin'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->first();
+        $this->assertNotNull($employee);
+
+        return ['Authorization' => 'Bearer '.$this->loginToken($employee)];
+    }
+
+    private function loginToken(Employee $employee): string
+    {
+        $token = $this->postJson('/api/development/portal/auth/login', [
+            'id_no' => $employee->id_no,
+        ])->json('token');
+        $this->assertIsString($token);
+
+        return $token;
+    }
+
+    private function activeMember(): Employee
+    {
+        $employee = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role, '')) = 'user'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->whereNotNull('first_name')
+            ->first();
+        $this->assertNotNull($employee);
+
+        return $employee;
+    }
+
+    private function memberName(Employee $actor): string
+    {
+        return PortalSubmittedReportPresenter::memberName(
+            is_string($actor->first_name) ? $actor->first_name : null,
+            is_string($actor->last_name) ? $actor->last_name : null,
+        );
+    }
+}

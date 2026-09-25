@@ -22,6 +22,17 @@ class SubmittedController extends Controller
         return response()->json($this->reports->list($actor, $request));
     }
 
+    // The member's own late reports and where each one's approval stands.
+    public function late(Request $request): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->reports->ownLate($actor, $request));
+    }
+
     public function days(Request $request): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');

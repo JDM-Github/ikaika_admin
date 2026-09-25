@@ -261,6 +261,19 @@ class PortalModule implements ProductModule
                             ],
                         ],
                     ],
+                    'late' => [
+                        'label' => 'Late Reports',
+                        'path' => 'reports/late',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'reports/late',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
                 ],
             ],
             'requests' => [
@@ -463,6 +476,19 @@ class PortalModule implements ProductModule
                                 'method' => 'POST',
                                 'path' => 'administration/recycle-bin/{id}/restore',
                                 'label' => 'Restore',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
+                    'missing-reports' => [
+                        'label' => 'Missing Reports',
+                        'path' => 'administration/missing-reports',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/missing-reports',
+                                'label' => 'List',
                                 'auth' => true,
                             ],
                         ],

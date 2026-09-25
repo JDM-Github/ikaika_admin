@@ -376,8 +376,7 @@ CREATE TABLE user_reports (
     end_date                    DATE,
     project_test_summary        TEXT,
     project_test_summary_2      TEXT,
-    duration                    NUMERIC(10,2),
-    INDEX idx_user_reports_date (report_date)
+    duration                    NUMERIC(10,2)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 

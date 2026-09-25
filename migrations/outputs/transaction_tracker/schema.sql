@@ -182,7 +182,12 @@ CREATE TABLE transactions (
     auto_extracted_details TEXT,           -- aiText
     created_at             DATETIME,
     updated_at             DATETIME,
-    INDEX idx_tt_transactions_date (transaction_date)
+    -- Where a row written by another system came from, e.g. portal:reimbursement-claim:41. Unique so
+    -- one reimbursement claim can never be charged to an envelope twice, even when two approvers
+    -- save at once; NULL on everything imported from Airtable. Not in the Airtable base.
+    source_key             VARCHAR(191) NULL,
+    INDEX idx_tt_transactions_date (transaction_date),
+    UNIQUE KEY uniq_tt_transactions_source_key (source_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 

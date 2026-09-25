@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
@@ -14,6 +15,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->whereNumber('id');
     Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
         ->get('manage/requests', [RequestsController::class, 'index']);
+    // Read by the reimbursement queue, so it shares that queue's admin gate and limiter.
+    Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
+        ->get('manage/budget-envelopes', [BudgetEnvelopesController::class, 'index']);
     Route::middleware(['portal.admin', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
     Route::middleware(['portal.admin', 'throttle:portal-manage-reports'])
