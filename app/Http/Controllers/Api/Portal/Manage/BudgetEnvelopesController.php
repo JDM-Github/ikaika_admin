@@ -14,4 +14,10 @@ class BudgetEnvelopesController extends Controller
     {
         return response()->json($this->envelopes->summary());
     }
+
+    // The whole tracker ledger, for the Budget Tracker tab.
+    public function transactions(): JsonResponse
+    {
+        return response()->json($this->envelopes->transactions());
+    }
 }

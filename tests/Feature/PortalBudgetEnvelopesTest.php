@@ -315,6 +315,107 @@ class PortalBudgetEnvelopesTest extends TestCase
             ->assertExitCode(0);
     }
 
+    /*
+     * The Budget Tracker tab's ledger: every transaction, newest first, with the envelope it sits in
+     * and the team account it moved through.
+     */
+    public function test_the_ledger_lists_every_transaction_with_its_envelope_and_team(): void
+    {
+        [, $account] = $this->teamHolder('Seeded Ledger');
+        $envelope = $this->envelope('Seeded Ledger Envelope', 1000.00, active: false);
+        $expense = $this->ledgerTransaction([
+            'transaction_name' => 'Printer ink',
+            'transaction_date' => '2031-01-02 09:30:00',
+            'amount' => 250.50,
+            'type' => 'Expense',
+            'payor_payee' => 'Seeded Supplier',
+            'created_by' => 'Seeded Clerk',
+        ], $envelope, $account);
+        $charge = $this->ledgerTransaction([
+            'transaction_name' => 'Reimbursement',
+            'transaction_date' => '2031-01-01 08:00:00',
+            'amount' => 99.00,
+            'type' => 'Expense',
+            'source_key' => 'portal:reimbursement-claim:999999',
+        ]);
+
+        $data = $this->getJson('/api/development/portal/manage/budget-transactions', $this->admin())
+            ->assertOk()
+            ->assertJsonPath('available', true)
+            ->assertJsonPath('currency', 'PHP')
+            ->json('data');
+
+        $this->assertSame([(string) $expense, (string) $charge], [$data[0]['id'], $data[1]['id']]);
+        $row = $data[0];
+        $this->assertSame('Printer ink', $row['name']);
+        $this->assertSame('2031-01-02', $row['date']);
+        $this->assertSame('Expense', $row['type']);
+        $this->assertEqualsWithDelta(250.50, $row['amount'], 0.001);
+        $this->assertSame('Seeded Supplier', $row['payorPayee']);
+        // A closed envelope's history is still part of the ledger.
+        $this->assertSame(['Seeded Ledger Envelope'], $row['envelopes']);
+        $this->assertSame('Seeded Ledger Account', $row['accountName']);
+        $this->assertSame('Seeded Ledger', $row['team']);
+        $this->assertSame('Seeded Clerk', $row['recordedBy']);
+        $this->assertFalse($row['isPortalCharge']);
+        $this->assertTrue($data[1]['isPortalCharge']);
+        $this->assertSame([], $data[1]['envelopes']);
+        $this->assertNull($data[1]['accountName']);
+    }
+
+    public function test_the_ledger_is_empty_with_the_tracker_switched_off(): void
+    {
+        config(['products.catalog.transaction-tracker.enabled' => false]);
+
+        $this->getJson('/api/development/portal/manage/budget-transactions', $this->admin())
+            ->assertOk()
+            ->assertJsonPath('available', false)
+            ->assertJsonPath('teams', [])
+            ->assertJsonPath('data', []);
+    }
+
+    // What each team has left: its account's Credits less its Expenses, summed from the same ledger.
+    public function test_the_ledger_carries_each_active_team_account_balance(): void
+    {
+        [, $account] = $this->teamHolder('Seeded Balance Team');
+        $this->ledgerTransaction(['transaction_name' => 'Funds Received', 'transaction_date' => '2031-02-01 00:00:00', 'amount' => 5000.00, 'type' => 'Credit'], null, $account);
+        $this->ledgerTransaction(['transaction_name' => 'Supplies', 'transaction_date' => '2031-02-02 00:00:00', 'amount' => 1250.50, 'type' => 'Expense'], null, $account);
+        $closed = $this->trackerAccount('Seeded Closed Balance', 'closed.balance@example.test', active: false);
+
+        $teams = collect($this->getJson('/api/development/portal/manage/budget-transactions', $this->admin())
+            ->assertOk()
+            ->json('teams'))->keyBy('accountId');
+
+        $team = $teams[(string) $account];
+        $this->assertSame('Seeded Balance Team', $team['team']);
+        $this->assertSame('Seeded Balance Team Account', $team['accountName']);
+        $this->assertEqualsWithDelta(5000.00, $team['received'], 0.001);
+        $this->assertEqualsWithDelta(1250.50, $team['spent'], 0.001);
+        $this->assertEqualsWithDelta(3749.50, $team['remaining'], 0.001);
+        $this->assertFalse($teams->has((string) $closed));
+    }
+
+    public function test_only_an_admin_reads_the_ledger(): void
+    {
+        $this->getJson('/api/development/portal/manage/budget-transactions', [
+            'Authorization' => 'Bearer '.$this->loginToken($this->activeMember()),
+        ])->assertForbidden();
+    }
+
+    // A closed account keeps its history but takes no new charges, even from its own team.
+    public function test_a_closed_team_account_is_not_charged(): void
+    {
+        [$member, $account] = $this->teamHolder('Seeded Closed Team');
+        DB::connection('tracker')->table('accounts')->where('id', $account)->update(['active' => false]);
+        $envelope = $this->envelope('Seeded Closed Team Supplies', 1000.00);
+        [$item] = $this->claim([['Pens', 60.00, 1]], $member);
+
+        $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+            ->assertOk();
+
+        $this->assertSame([], $this->bookedAccounts((int) $this->chargeOf($item)?->id));
+    }
+
     public function test_only_an_admin_reads_the_envelopes(): void
     {
         $this->getJson('/api/development/portal/manage/budget-envelopes', [
@@ -407,6 +508,23 @@ class PortalBudgetEnvelopesTest extends TestCase
             'email' => $email,
             'active' => $active,
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $columns
+     */
+    private function ledgerTransaction(array $columns, ?int $envelopeId = null, ?int $accountId = null): int
+    {
+        $tracker = DB::connection('tracker');
+        $id = (int) $tracker->table('transactions')->insertGetId($columns);
+        if ($envelopeId !== null) {
+            $tracker->table('transactions_envelopes')->insert(['transaction_id' => $id, 'envelope_id' => $envelopeId]);
+        }
+        if ($accountId !== null) {
+            $tracker->table('transactions_accounts')->insert(['transaction_id' => $id, 'account_id' => $accountId]);
+        }
+
+        return $id;
     }
 
     // A charge as the portal wrote it before charges carried a team account: envelope only.

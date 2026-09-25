@@ -46,9 +46,10 @@ final class PortalBudgetEnvelopes
     private const TYPE_EXPENSE = 'Expense';
 
     /**
-     * The active accounts and the team each one's money belongs to, read once per request.
+     * Every account, whether it is still active, and the team its money belongs to. Read once per
+     * request.
      *
-     * @var list<array{id: int, name: string, team: ?string}>|null
+     * @var list<array{id: int, name: string, team: ?string, active: bool}>|null
      */
     private ?array $accounts = null;
 
@@ -111,6 +112,97 @@ final class PortalBudgetEnvelopes
             'spent' => $this->amount($spent),
             'remaining' => $this->amount($allocated - $spent),
         ], $data);
+    }
+
+    /**
+     * Every transaction in the tracker, newest first -- Credits and Expenses, on every envelope and
+     * account, active or closed -- with the envelopes it is linked to and the team account it moved
+     * through, and each active team account's balance. The ledger the Budget Tracker page reads.
+     *
+     * The balances are summed from these same rows -- every Credit linked to the account less every
+     * Expense -- so the figures above the ledger always add up from the lines under them.
+     *
+     * @return array{section: string, resource: string, available: bool, currency: string, teams: list<array<string, mixed>>, data: list<array<string, mixed>>}
+     */
+    public function transactions(): array
+    {
+        $page = ['section' => 'manage', 'resource' => 'budget-transactions', 'currency' => 'PHP'];
+        if (! $this->isAvailable()) {
+            return $page + ['available' => false, 'teams' => [], 'data' => []];
+        }
+
+        try {
+            $rows = $this->connection()
+                ->table('transactions')
+                ->orderByDesc('transaction_date')
+                ->orderByDesc('id')
+                ->get(['id', 'transaction_name', 'transaction_date', 'amount', 'type', 'payor_payee', 'description', 'created_by', 'source_key']);
+            $envelopes = $this->connection()
+                ->table('transactions_envelopes as te')
+                ->join('envelopes_budget as e', 'e.id', '=', 'te.envelope_id')
+                ->orderBy('e.envelope_name')
+                ->get(['te.transaction_id', 'e.envelope_name'])
+                ->groupBy('transaction_id');
+            $links = $this->connection()
+                ->table('transactions_accounts')
+                ->orderBy('account_id')
+                ->get(['transaction_id', 'account_id'])
+                ->groupBy('transaction_id');
+            $accounts = collect($this->teamAccounts())->keyBy('id');
+        } catch (QueryException) {
+            abort(503, 'Budget transactions are unavailable right now.');
+        }
+
+        $data = [];
+        $received = [];
+        $spent = [];
+        foreach ($rows as $row) {
+            foreach ($links->get($row->id) ?? [] as $linked) {
+                $accountId = (int) $linked->account_id;
+                if ((string) $row->type === self::TYPE_CREDIT) {
+                    $received[$accountId] = ($received[$accountId] ?? 0) + $this->cents($row->amount);
+                } elseif ((string) $row->type === self::TYPE_EXPENSE) {
+                    $spent[$accountId] = ($spent[$accountId] ?? 0) + $this->cents($row->amount);
+                }
+            }
+            $link = $links->get($row->id)?->first();
+            $account = $link === null ? null : $accounts->get((int) $link->account_id);
+            $date = substr((string) ($row->transaction_date ?? ''), 0, 10);
+            $data[] = [
+                'id' => (string) $row->id,
+                'name' => $this->text($row->transaction_name) ?? (string) $row->type,
+                'date' => preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1 ? $date : null,
+                'type' => (string) $row->type,
+                'amount' => $this->amount($this->cents($row->amount)),
+                'payorPayee' => $this->text($row->payor_payee),
+                'description' => $this->text($row->description),
+                'envelopes' => $envelopes->get($row->id)?->map(fn (object $envelope): string => $this->text($envelope->envelope_name) ?? 'Envelope')->values()->all() ?? [],
+                'accountName' => $account['name'] ?? null,
+                'team' => $account['team'] ?? null,
+                'recordedBy' => $this->text($row->created_by),
+                // Charged by an approval in the portal, rather than entered in the tracker itself.
+                'isPortalCharge' => str_starts_with((string) ($row->source_key ?? ''), self::SOURCE_PREFIX),
+            ];
+        }
+
+        $teams = [];
+        foreach ($this->teamAccounts() as $account) {
+            if (! $account['active']) {
+                continue;
+            }
+            $in = $received[$account['id']] ?? 0;
+            $out = $spent[$account['id']] ?? 0;
+            $teams[] = [
+                'accountId' => (string) $account['id'],
+                'accountName' => $account['name'],
+                'team' => $account['team'],
+                'received' => $this->amount($in),
+                'spent' => $this->amount($out),
+                'remaining' => $this->amount($in - $out),
+            ];
+        }
+
+        return $page + ['available' => true, 'teams' => $teams, 'data' => $data];
     }
 
     /**
@@ -301,7 +393,7 @@ final class PortalBudgetEnvelopes
      * The account a claimant's department draws on: the first active account held by someone in
      * that department. Null when the department holds none.
      *
-     * @return array{id: int, name: string, team: ?string}|null
+     * @return array{id: int, name: string, team: ?string, active: bool}|null
      */
     private function accountForTeam(?string $department): ?array
     {
@@ -310,7 +402,8 @@ final class PortalBudgetEnvelopes
             return null;
         }
         foreach ($this->teamAccounts() as $account) {
-            if ($this->teamKey($account['team']) === $team) {
+            // A closed account takes no new charges, whoever holds it.
+            if ($account['active'] && $this->teamKey($account['team']) === $team) {
                 return $account;
             }
         }
@@ -319,7 +412,7 @@ final class PortalBudgetEnvelopes
     }
 
     /**
-     * @return list<array{id: int, name: string, team: ?string}>
+     * @return list<array{id: int, name: string, team: ?string, active: bool}>
      */
     private function teamAccounts(): array
     {
@@ -330,9 +423,8 @@ final class PortalBudgetEnvelopes
         $accounts = [];
         $rows = $this->connection()
             ->table('accounts')
-            ->where('active', true)
             ->orderBy('id')
-            ->get(['id', 'account_name', 'email']);
+            ->get(['id', 'account_name', 'email', 'active']);
         foreach ($rows as $row) {
             $email = strtolower(trim((string) ($row->email ?? '')));
             $department = $email === ''
@@ -342,6 +434,7 @@ final class PortalBudgetEnvelopes
                 'id' => (int) $row->id,
                 'name' => $this->text($row->account_name) ?? 'Account '.$row->id,
                 'team' => $this->text($department),
+                'active' => (bool) $row->active,
             ];
         }
 
