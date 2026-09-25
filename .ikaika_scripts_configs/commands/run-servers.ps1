@@ -36,6 +36,11 @@
 # why a run that touches only those never asks for it.
 
 # ============================[ start: Parameters ]============================
+# [CmdletBinding()] so a mistyped switch is an ERROR, not a no-op. In a simple param
+# block PowerShell silently IGNORES a parameter it does not recognise - measured, not
+# assumed - so `.\script.ps1 run-servers -Appache` would start the default set and say
+# nothing about the flag that did nothing. Advanced binding refuses it by name.
+[CmdletBinding()]
 param(
     # Start WampServer itself - wampmanager.exe, the tray application - and let it bring
     # up Apache and the database the way it does when a person double-clicks it. This is
@@ -61,6 +66,13 @@ param(
     [switch]$Stop,
     # Say what is running and stop. Nothing is started, stopped or opened.
     [switch]$Status,
+    # The port the API binds, overriding serve.apiPort for this run. Offered as a list
+    # rather than a box: the choices are the configured one plus the usual alternatives,
+    # and each says whether anything is already listening on it - which is the only
+    # question anybody actually has when they change a port.
+    [string]$ApiPort = '',
+    # The same for Vite.
+    [string]$VitePort = '',
     [switch]$Help
 )
 # =============================[ end: Parameters ]==============================
@@ -108,7 +120,40 @@ Start-BuildLog 'run-servers'
 
 $wampRoot = Find-WampRoot (Get-ProjectValue 'setup.wampRoot' 'C:\wamp64')
 $dbFlavor = "$(Get-ProjectValue 'setup.dbFlavor' 'mysql')".ToLower()
-$apiPort = [int](Get-ProjectValue 'serve.apiPort' '8000')
+# The switch wins over the file, and the file over the built-in - the ordinary
+# precedence, and the reason a port can be changed for one run without editing anything
+# that is committed. Only a number is accepted: a typo reaching Start-Process becomes an
+# argument artisan reads as a host name.
+# READ BEFORE ANYTHING ELSE, and this is not fussiness. PowerShell variable names are
+# CASE-INSENSITIVE, so a local named $apiPort and the parameter $ApiPort are ONE variable
+# reads the configured default was overwriting the parameter before the check could see
+# it. The switch was silently ignored, and a value of 'eighty' passed validation because
+# by then it had already become 8000. Hence the separate names.
+$requestedApiPort = "$ApiPort".Trim()
+$requestedVitePort = "$VitePort".Trim()
+
+# Refused in the command's own voice rather than thrown. A throw here reaches the screen
+# as a PowerShell exception with a source line and a squiggle under the code, which is a
+# stack trace for somebody who simply mistyped a port.
+function Resolve-Port([string]$Requested, [string]$Key, [string]$Fallback, [string]$Flag) {
+    $port = [int](Get-ProjectValue $Key $Fallback)
+    if (-not $Requested) { return $port }
+    if ($Requested -notmatch '^\d+$' -or [int]$Requested -lt 1 -or [int]$Requested -gt 65535) {
+        Write-Host ''
+        Write-Host "  $Flag takes a port number between 1 and 65535, not '$Requested'." -ForegroundColor Yellow
+        Write-Host ''
+        exit 1
+    }
+    return [int]$Requested
+}
+
+# $apiPortNumber, not $apiPort - the latter IS the [string]$ApiPort parameter, because
+# PowerShell matches variable names case-insensitively. It did not crash the way $status
+# did, only because an int assigned to a [string] converts silently - so the parameter
+# was quietly destroyed and the port travelled on as a string that happened to work.
+# Found by the AST audit rather than by anything failing, which is the point of it.
+$apiPortNumber = Resolve-Port $requestedApiPort 'serve.apiPort' '8000' '-ApiPort'
+$vitePortNumber = Resolve-Port $requestedVitePort 'serve.vitePort' '5173' '-VitePort'
 $phpMyAdminUrl = Get-ProjectValue 'serve.phpMyAdminUrl' 'http://localhost/phpmyadmin'
 $startTimeout = [int](Get-ProjectValue 'serve.startTimeoutSeconds' '30')
 $statePath = Join-Path $configsDir '.servers.json'
@@ -138,6 +183,12 @@ if ($nothingPicked -and -not $Stop -and -not $Status) {
         $Apache = $true
         if ($dbFlavor -eq 'mariadb') { $MariaDB = $true } else { $MySQL = $true }
     }
+    # AND THE API, because this repository IS the API. A bare run that brought up Apache
+    # and the database served phpMyAdmin and nothing of the project, and the first thing
+    # anybody does after starting the servers is open localhost:8000 - which was not
+    # there. Vite stays opt-in: the backend has no node_modules and the asset build is
+    # not what this project is.
+    $Api = $true
 }
 
 # --------------------------------------------------------------- the servers
@@ -158,11 +209,11 @@ $Servers = @(
     }
     [pscustomobject]@{
         Key = 'api'; Label = 'Laravel API'; Wanted = [bool]$Api
-        Service = ''; Port = $apiPort; Command = 'api'
+        Service = ''; Port = $apiPortNumber; Command = 'api'
     }
     [pscustomobject]@{
         Key = 'vite'; Label = 'Vite'; Wanted = [bool]$Vite
-        Service = ''; Port = 5173; Command = 'vite'
+        Service = ''; Port = $vitePortNumber; Command = 'vite'
     }
 )
 
@@ -191,6 +242,23 @@ function Save-ServerState([hashtable]$State) {
 # The process this command started, or $null. The start time is what makes this safe:
 # Windows reuses pids, and killing whatever inherited one would be a bug nobody could
 # reproduce.
+
+# The port a pid is ACTUALLY listening on, asked of the OS. Used when the recorded state
+# predates the Port field: falling back to the port this run happens to request would
+# print a number the process has nothing to do with, which is the failure this whole
+# function exists to avoid. $null when the pid holds no listening socket.
+function Get-ListeningPort([int]$ProcessId) {
+    try {
+        $found = @(Get-NetTCPConnection -State Listen -OwningProcess $ProcessId -ErrorAction Stop)
+        if ($found.Count) { return $found[0].LocalPort }
+    } catch {
+        # No NetTCPIP module, or the pid holds no socket. Both mean the same thing to the
+        # caller - there is no port to report - and neither is worth a warning.
+        return $null
+    }
+    return $null
+}
+
 function Get-TrackedProcess([object]$Entry) {
     if (-not $Entry -or -not $Entry.Pid) { return $null }
     $process = Get-Process -Id ([int]$Entry.Pid) -ErrorAction SilentlyContinue
@@ -238,15 +306,26 @@ function Write-Status {
         $(if ($manager.Count) { "wampmanager pid $($manager[0].Id)" } else { 'the tray application is not up' })
     foreach ($server in $Servers) {
         if ($server.Service) {
-            $status = Get-ServiceState $server.Service
-            $detail = $(if ($status -eq 'absent') { "no $($server.Service) service - is WampServer installed?" }
+            # $serviceState rather than $status. Inside a function a local would in fact
+            # shadow the [switch]$Status parameter safely - that was measured - so this
+            # rename is for consistency with the two loops below, where the same
+            # assignment IS at script scope and throws "Cannot convert System.String to
+            # SwitchParameter". One name for one thing, so moving the code cannot break
+            # it.
+            $serviceState = Get-ServiceState $server.Service
+            $detail = $(if ($serviceState -eq 'absent') { "no $($server.Service) service - is WampServer installed?" }
                 else { "$($server.Service)  port $($server.Port)" })
-            Write-ServerLine $server.Label $status $detail
+            Write-ServerLine $server.Label $serviceState $detail
             continue
         }
         $tracked = Get-TrackedProcess $state[$server.Key]
         if ($tracked) {
-            Write-ServerLine $server.Label 'running' "pid $($tracked.Id)  port $($server.Port)"
+            # Recorded first, then the OS, then the request - most trustworthy first.
+            $onPort = $state[$server.Key].Port
+            if (-not $onPort) { $onPort = Get-ListeningPort $tracked.Id }
+            if (-not $onPort) { $onPort = $server.Port }
+            $note = $(if ("$onPort" -ne "$($server.Port)") { "  (this run asked for $($server.Port))" } else { '' })
+            Write-ServerLine $server.Label 'running' "pid $($tracked.Id)  port $onPort$note"
         } elseif (Test-PortListening $server.Port) {
             # Something answers on the port but this command did not start it. Said
             # plainly rather than called stopped: starting a second copy would fail on
@@ -287,9 +366,15 @@ if ($Stop) {
 
     foreach ($server in @($Servers | Where-Object { $nothingPicked -or $_.Wanted })) {
         if ($server.Service) {
-            $status = Get-ServiceState $server.Service
-            if ($status -eq 'absent') { Write-ServerLine $server.Label 'absent' 'no such service'; continue }
-            if ($status -eq 'stopped') { Write-ServerLine $server.Label 'stopped' 'already'; continue }
+            # $serviceState, NOT $status. PowerShell variable names are case-insensitive,
+            # so $status IS the [switch]$Status parameter - and assigning a string to it
+            # threw "Cannot convert System.String to SwitchParameter" from the assignment
+            # itself. The whole service branch of -Stop died there, silently, because the
+            # dispatcher reports a crashed command as exit 0. Second time this exact trap
+            # has bitten in this file; the port parameters were the first.
+            $serviceState = Get-ServiceState $server.Service
+            if ($serviceState -eq 'absent') { Write-ServerLine $server.Label 'absent' 'no such service'; continue }
+            if ($serviceState -eq 'stopped') { Write-ServerLine $server.Label 'stopped' 'already'; continue }
             if (-not (Test-Elevated)) {
                 Write-ServerLine $server.Label 'skipped' 'a service needs an admin terminal'
                 $failures++
@@ -412,13 +497,13 @@ if ($servicesNeeded.Count -and -not (Test-Elevated)) {
 
 foreach ($server in $wanted) {
     if ($server.Service) {
-        $status = Get-ServiceState $server.Service
-        if ($status -eq 'absent') {
+        $serviceState = Get-ServiceState $server.Service
+        if ($serviceState -eq 'absent') {
             Write-ServerLine $server.Label 'absent' "no $($server.Service) - run development-setup"
             $failures++
             continue
         }
-        if ($status -eq 'running') { Write-ServerLine $server.Label 'running' 'already'; continue }
+        if ($serviceState -eq 'running') { Write-ServerLine $server.Label 'running' 'already'; continue }
         try {
             Start-Service -Name $server.Service -ErrorAction Stop
             Write-ServerLine $server.Label 'started' "$($server.Service)  port $($server.Port)"
@@ -451,7 +536,7 @@ foreach ($server in $wanted) {
             if (-not $php) { throw 'php is not on PATH - run environment-variables' }
             $process = Start-Process -FilePath $php.Source -WorkingDirectory $repoRoot -PassThru `
                 -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $errPath `
-                -ArgumentList @('artisan', 'serve', '--host=127.0.0.1', "--port=$apiPort")
+                -ArgumentList @('artisan', 'serve', '--host=127.0.0.1', "--port=$apiPortNumber")
         } else {
             $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
             if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
@@ -500,6 +585,11 @@ foreach ($server in $wanted) {
             Pid     = $process.Id
             Started = $process.StartTime.ToString('o')
             Log     = $logPath
+            # THE PORT IT WAS STARTED ON, not the one asked for now. With -ApiPort the
+            # two differ, and a status that printed the requested port beside a pid
+            # listening on the old one was stating something untrue about a running
+            # process - the exact class of thing this file keeps trying not to do.
+            Port    = $server.Port
         }
         if ($listening) {
             Write-ServerLine $server.Label 'started' "pid $($process.Id)  port $($server.Port)  $logPath"
@@ -537,8 +627,74 @@ if ($failures) {
 } else {
     Write-Host '  Running.' -ForegroundColor Green
 }
-Write-Host "    http://localhost:$apiPort            the API" -ForegroundColor DarkGray
+Write-Host "    http://localhost:$apiPortNumber            the API" -ForegroundColor DarkGray
 Write-Host "    $phpMyAdminUrl   the database, in a browser" -ForegroundColor DarkGray
 Write-Host '    .\script.ps1 run-servers -Stop       stop what this started' -ForegroundColor DarkGray
 Write-Host ''
 exit $failures
+
+# =========================[ start: What the app asks ]========================
+# LIFTED OUT OF THIS FILE AND RUN ALONE, so nothing here may call anything above it -
+# not Get-ProjectValue, not Test-PortListening, not one of this file's own helpers. That
+# is why the walk up to ikaika_scripts.env is written out again here rather than shared.
+#
+# A PORT IS NOT A TEXT BOX. It is a number somebody has to recall, and a wrong one fails
+# much later as "connection refused" pointing at the client. Offered as a list, each
+# entry saying whether anything is already listening, it becomes recognition: the
+# configured port first, then the usual alternatives, and the busy ones marked so the
+# one mistake that matters - picking a port something else already holds - is visible
+# before it is made.
+#
+# DECLARED EVEN THOUGH THE LIST IS COMPUTED. Without Get-DialogChoiceParameters a
+# manifest generated before the provider ever returned anything records "no choices
+# here", and the app draws a box that stays a box.
+function Get-DialogChoiceParameters { return , @('ApiPort', 'VitePort') }
+
+function Get-DialogChoices([string]$Parameter) {
+    if ($Parameter -notin @('ApiPort', 'VitePort')) { return @() }
+
+    $key = $(if ($Parameter -eq 'ApiPort') { 'serve.apiPort' } else { 'serve.vitePort' })
+    $fallback = $(if ($Parameter -eq 'ApiPort') { '8000' } else { '5173' })
+
+    $configured = ''
+    $dir = Get-Item -LiteralPath (Get-Location).Path
+    while ($null -ne $dir) {
+        $file = Join-Path $dir.FullName 'ikaika_scripts.env'
+        if (Test-Path -LiteralPath $file) {
+            foreach ($line in (Get-Content -LiteralPath $file)) {
+                if ("$line" -match "^\s*$([regex]::Escape($key))\s*=\s*(.*)$") {
+                    $configured = "$($Matches[1])".Trim()
+                }
+            }
+            break
+        }
+        $dir = $dir.Parent
+    }
+    if (-not $configured) { $configured = $fallback }
+
+    $candidates = @($configured)
+    foreach ($port in @($fallback, '8000', '8001', '8080', '3000', '5173', '5174', '4200')) {
+        if ($candidates -notcontains $port) { $candidates += $port }
+    }
+
+    # BARE NUMBERS, never annotated. Whatever a row says is what the app sends back, so
+    # "8000 (in use)" would arrive at -ApiPort as exactly that and fail validation. The
+    # busy check therefore changes the ORDER instead of the text: the configured port
+    # stays first because it is the answer unless somebody has a reason, and the rest are
+    # sorted free-before-busy so the first one anybody scrolls to is one that will work.
+    $free = @()
+    $busy = @()
+    foreach ($port in $candidates) {
+        $taken = $false
+        try {
+            $taken = @(Get-NetTCPConnection -State Listen -LocalPort ([int]$port) -ErrorAction Stop).Count -gt 0
+        } catch {
+            # No NetTCPIP module, or nothing listening - both mean "no reason to demote".
+            $taken = $false
+        }
+        if ($port -eq $configured) { continue }
+        if ($taken) { $busy += $port } else { $free += $port }
+    }
+    return , @(@($configured) + $free + $busy)
+}
+# ==========================[ end: What the app asks ]=========================

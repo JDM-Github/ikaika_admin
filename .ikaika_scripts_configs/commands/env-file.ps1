@@ -34,6 +34,11 @@
 # Requires PowerShell 7+.
 
 # ============================[ start: Parameters ]============================
+# [CmdletBinding()] so a mistyped switch is an ERROR, not a no-op. In a simple param
+# block PowerShell silently IGNORES a parameter it does not recognise - measured, not
+# assumed - so `.\script.ps1 env-file -Revael` would start the default set and say
+# nothing about the flag that did nothing. Advanced binding refuses it by name.
+[CmdletBinding()]
 param(
     # Which keys to list. A fact about the command rather than about this machine, so it
     # is a ValidateSet and reaches the app as a dropdown.

@@ -213,10 +213,28 @@
             "required": false,
             "description": "Say what is running and stop. Nothing is started, stopped or opened.",
             "default": ""
+          },
+          {
+            "flag": "ApiPort",
+            "label": "-ApiPort   [String]",
+            "type": "string",
+            "required": false,
+            "description": "The port the API binds, overriding serve.apiPort for this run.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/run-servers ApiPort"
+          },
+          {
+            "flag": "VitePort",
+            "label": "-VitePort   [String]",
+            "type": "string",
+            "required": false,
+            "description": "The same for Vite.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/run-servers VitePort"
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/run-servers -WampServer ${run-servers.args.WampServer} -Apache ${run-servers.args.Apache} -MySQL ${run-servers.args.MySQL} -MariaDB ${run-servers.args.MariaDB} -PhpMyAdmin ${run-servers.args.PhpMyAdmin} -Api ${run-servers.args.Api} -Vite ${run-servers.args.Vite} -All ${run-servers.args.All} -Stop ${run-servers.args.Stop} -Status ${run-servers.args.Status}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/run-servers -WampServer ${run-servers.args.WampServer} -Apache ${run-servers.args.Apache} -MySQL ${run-servers.args.MySQL} -MariaDB ${run-servers.args.MariaDB} -PhpMyAdmin ${run-servers.args.PhpMyAdmin} -Api ${run-servers.args.Api} -Vite ${run-servers.args.Vite} -All ${run-servers.args.All} -Stop ${run-servers.args.Stop} -Status ${run-servers.args.Status} -ApiPort ${run-servers.args.ApiPort} -VitePort ${run-servers.args.VitePort}"
         ]
       },
       "update-database": {
