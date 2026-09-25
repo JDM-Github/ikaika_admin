@@ -24,6 +24,7 @@ final class PortalAccess
         $held = $graph->effective((int) $actor->getKey());
         $catalog = $graph->catalog();
         $off = PortalRules::switchedOff($actor);
+        $narrowed = PortalRules::selfReach($actor);
 
         $data = [];
         foreach ($held as $key => $rule) {
@@ -34,7 +35,8 @@ final class PortalAccess
                 'label' => $row->label,
                 'description' => $row->description,
                 'supportsReach' => (bool) $row->supports_reach,
-                'reach' => $rule['reach'],
+                'reach' => PortalRules::narrower($rule['reach'], $narrowed[$key] ?? null),
+                'heldReach' => $rule['reach'],
                 'includeExecutives' => $rule['executives'],
                 'canToggle' => (bool) $row->can_toggle,
                 'isSwitchedOn' => ! isset($off[$key]),
@@ -82,6 +84,48 @@ final class PortalAccess
                 $key,
                 $request,
                 ['key' => $key, 'on' => $on],
+            );
+        }
+
+        return $this->powers($actor, $request);
+    }
+
+    /**
+     * Narrows one of the actor's own reach rules, or widens it back up to what they hold. The
+     * reach they hold means no narrowing, so that row goes; repeating the current reach logs nothing.
+     *
+     * @return array{section: string, resource: string, tier: string, data: list<array<string, mixed>>}
+     */
+    public function setReach(Employee $actor, string $key, string $reach, Request $request): array
+    {
+        $held = PortalAccessGraph::forViewer($actor, $request)->effective((int) $actor->getKey())[$key] ?? null;
+        if ($held === null) {
+            abort(404, 'You do not hold that power.');
+        }
+        if ($held['reach'] === null) {
+            abort(422, 'That power has no reach to choose.');
+        }
+        if (PortalAccessGraph::reachRank($reach) === 0 || PortalAccessGraph::reachRank($reach) > PortalAccessGraph::reachRank($held['reach'])) {
+            abort(422, 'You cannot reach further than you hold that power.');
+        }
+
+        $rows = DB::connection('portal')->table('access_self_reach');
+        $before = PortalRules::selfReach($actor)[$key] ?? $held['reach'];
+        if ($reach === $held['reach']) {
+            $rows->where('employee_id', $actor->getKey())->where('permission_key', $key)->delete();
+        } else {
+            $rows->updateOrInsert(['employee_id' => $actor->getKey(), 'permission_key' => $key], ['reach' => $reach]);
+        }
+
+        if ($before !== $reach) {
+            $this->audit->record(
+                $actor,
+                PortalLogAction::PATCH,
+                'access.reach',
+                '{UserName|You} set '.PortalAccessGraph::load()->path($key).' to reach '.$reach,
+                $key,
+                $request,
+                ['key' => $key, 'reach' => $reach],
             );
         }
 

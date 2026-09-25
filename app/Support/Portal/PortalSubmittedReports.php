@@ -467,6 +467,7 @@ final class PortalSubmittedReports
     public function create(Employee $actor, Request $request): array
     {
         $kind = $this->validatedKind($request);
+        PortalRules::require($actor, $request, $kind === PortalSubmittedReportPresenter::KIND_LATE ? 'reports.late' : 'reports.daily');
         $groups = $this->validatedGroups($request, $kind);
         $employeeId = (int) $actor->getKey();
 

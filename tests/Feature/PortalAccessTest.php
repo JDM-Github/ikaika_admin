@@ -171,7 +171,8 @@ class PortalAccessTest extends TestCase
 
         $this->assertSame(
             '{UserName|You} switched off Manage / Requests / Leave Requests / Approve or reject',
-            PortalLog::query()->where('employee_id', $admin->getKey())->where('resource', 'access.switches')->value('message'),
+            // The newest row: a real account may already have switches of its own in the log.
+            PortalLog::query()->where('employee_id', $admin->getKey())->where('resource', 'access.switches')->orderByDesc('id')->value('message'),
         );
     }
 

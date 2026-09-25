@@ -3,7 +3,8 @@
 Status: **parked.** Enforce only once View Projects, Add Project and Manage Scopes are finished
 and tested. Until then the page keeps opening by role, as it does today.
 
-Lines marked `?` are open questions to settle before building.
+Lines marked `?` are still open. Everything else was decided on 2026-09-25; the reasoning sits
+next to each decision.
 
 ## Why this is parked
 
@@ -21,7 +22,7 @@ placeholder button would only have to be redone.
 | Project Manager | Does not exist anywhere yet: no column, no role. |
 | Creation approval | Columns exist but nothing uses them: `project_creation_status`, `project_creation_approver`, `project_approver_email`, `project_creation_approver_remarks`. |
 
-## The rules (as understood)
+## The rules
 
 Reach words map onto the existing reaches:
 - "Their department only" → `department`
@@ -29,73 +30,96 @@ Reach words map onto the existing reaches:
 - "Only on their project" → `own`
 
 ```text
-projects.view                    View Projects
-│   reach: department | all      which projects the list shows ("Scope")
-├── projects.lead                Project Lead          reach: department | all
-├── projects.manager             Project Manager       reach: department | all
-├── projects.create              Add New Projects      reach: department | all
-│   └── projects.create.direct   No need for a Project Manager's permission
-├── projects.edit                Edit Projects         reach: own | department | all
-└── projects.scopes              Manage Scopes         reach: own | department | all
+projects.view                       View Projects
+│   reach: department | all         which projects the list shows ("Scope")
+├── projects.lead                   Project Lead         reach: department | all
+└── projects.manager                Project Manager      reach: department | all
+    ├── projects.create             Add New Projects     reach: department | all
+    │   └── projects.create.direct  No need for a Project Manager's permission
+    ├── projects.edit               Edit Projects        reach: own | department | all
+    ├── projects.scopes             Manage Scopes        reach: own | department | all
+    └── projects.delete             Delete Projects      reach: own | department | all
 ```
 
-- **Scope** (`projects.view` reach): the list shows projects of their department, or every
-  department.
-  - `?` Is "department" on top of membership (their department **plus** any project they are
-    a member of), or instead of it? Recommendation: on top of it, so nobody loses a project
-    they work on.
-- **Project Lead** (`projects.lead` reach): who may **be picked as lead** on a project of their
+- **Scope** (`projects.view` reach): the list shows every project they are a member of **plus**
+  the projects of their department, or of every department. Membership is never lost.
+- **Project Lead** (`projects.lead` reach): who may **be chosen as lead** on a project of their
   department, or of any department. The lead picker in Add / Edit lists only people holding it
   at a reach that covers the project's department.
-  - `?` Or does it mean the power to *choose* the lead? That reading changes the whole rule.
-- **Project Manager** (`projects.manager` reach): who approves new projects for their department,
-  or for all departments.
-  - A project created by someone who is not a Project Manager waits for a Project Manager's
-    approval.
-  - That uses the existing `project_creation_status` / `_approver` / `_approver_email` /
-    `_approver_remarks` columns.
-- **Add New Projects** (`projects.create` reach): which departments they may create a project
-  for.
-  - Holding `projects.create.direct` ("No need for a Project Manager's permission") skips
-    approval.
-  - A Project Manager never needs approval for projects inside their own reach.
-- **Edit Projects** (`projects.edit` reach):
+- **Project Manager** (`projects.manager` reach): the parent of adding, editing, managing
+  scopes and deleting, for their department or every department.
+  - Approving new projects belongs to it too.
+  - Approval will most likely get its own page, **Manage / Projects**. `?` Not decided yet.
+- **Add New Projects** (`projects.create` reach, under Project Manager): which departments they
+  may create a project for.
+- **Edit / Manage Scopes / Delete** (`projects.edit`, `projects.scopes`, `projects.delete`, all
+  under Project Manager):
   - `own` = projects where they are the lead;
   - `department` = projects of their department;
   - `all` = every project.
-- **Manage Scopes** (`projects.scopes` reach): same three reaches as Edit.
 
-Standing decision (FINE_GRAINED_RULES.md): **a project's lead can always edit and delete their
-own project**, whatever their rules say.
+### Two consequences of putting these under Project Manager (decided)
 
-## "Editable in Access" for Scope and Project Manager
+**1. When a new project needs a Project Manager's permission.**
 
-Reach is already changeable by whoever manages the person, from the reach picker on the Access
-Rule sheet. That works today for any rule with `supports_reach = 1`.
+Only someone holding Project Manager can hold Add New Projects at all. So "needs permission"
+cannot mean "a member asks a manager". It means a manager adding a project **outside their
+own manager reach** waits for a manager who does cover it. How it plays out:
 
-`?` Does "editable in Access" also mean the person may **narrow their own reach** on their own
-Access page? For example, a Project Manager set to All drops themselves to their department.
+| Adding a project for... | Their Project Manager reach | Holds `create.direct`? | Result |
+|---|---|---|---|
+| Their own department | department or all | either | Created straight away |
+| Another department | department | no | Created as **waiting for approval** by a manager who covers that department |
+| Another department | department | yes | Created straight away |
+| Any department | all | either | Created straight away |
 
-That would be new: a self-reach, like the self on/off switch, but it may only ever narrow. It
-would be stored in a new separate.sql table (e.g. `access_self_reach`). Recommendation: yes,
-for any reach rule, built once for every page.
+- Add New Projects has its own reach (department or all). It says which departments they may
+  even *start* a project for.
+- The Project Manager reach says which of those they can *approve* on their own.
+- `create.direct` ("No need for a Project Manager's permission") lets a trusted person skip the
+  wait anyway.
+- **Why this reading:** it keeps the tree the way it was decided, gives the permission rule a
+  real job, and uses the approval columns already in the projects table.
+- If members should one day *request* a project, move Add New Projects back beside Project
+  Manager. Every other part of this plan stays the same.
+
+**2. A project's lead can always edit, manage scopes on, and delete their own project.**
+
+The standing decision in FINE_GRAINED_RULES.md is kept, even for a lead who does not hold
+Project Manager.
+
+- **Why:** today the portal already lets the lead edit their own project. Without this
+  exception, leads who are not managers would lose that the day the rules go live.
+- A manager can still stop one person with a **limit** on them. A limit removes the lead
+  exception too, so "always" means "unless someone above them said no".
+- The person can also switch it off for themselves on the Access page, like any other power.
+
+## Everyone can change their own reach ("editable in Access")
+
+Decided: a person may **narrow their own reach** on their Access page, for any reach rule on
+every page, not only projects. For example, a Project Manager set to All drops themselves to
+their department until they need more.
+
+- It may only ever narrow, never widen past what they hold.
+- It is stored in a new separate.sql table (e.g. `access_self_reach`).
+- `PortalRules::active()` applies it the way it applies the self on/off switch.
+- It lives on the Access page next to the switch. It needs Save Changes like the switches.
+- Build it once, as a shared step, before the first reach rule is enforced.
+
+Whoever manages the person already changes their reach from the Access Rule sheet.
 
 ## Catalog changes (separate.sql)
 
-- **Keep:** `projects`, `projects.view`, `projects.track`, `projects.create`.
-- **Rework:**
-  - `projects.view.edit` → `projects.edit`, with `supports_reach`.
-  - A new `projects.scopes`, split out of edit.
-  - `projects.create` gets `supports_reach`.
-- **Add:** `projects.lead`, `projects.manager`, `projects.create.direct`.
-- **`projects.view.delete`:** `?` Keep as its own rule with the same own/department/all reach as
-  Edit? It is not in the list above.
+- **Keep:** `projects`, `projects.view`, `projects.track`.
+- **Move / rework:**
+  - `projects.create` moves under `projects.manager` and gets `supports_reach`.
+  - `projects.view.edit` → `projects.edit`, with reach, under `projects.manager`.
+  - `projects.view.delete` → `projects.delete`, with reach, under `projects.manager`.
+- **Add:** `projects.lead`, `projects.manager`, `projects.scopes`, `projects.create.direct`.
 - **Presets, chosen to match today's behaviour:**
-  - Members: view at their department plus membership, and edit/scopes at `own` (as lead).
-  - Admins: `all` everywhere, plus manager.
+  - Members: view (membership plus department), and lead at `department`.
+  - Admins: `all` everywhere, including manager and every child.
   - Executives and developers: `all`.
-- `?` Tree placement. The list above nests Add / Edit / Manage Scopes under View Projects.
-  Should they sit under Project Manager instead? That would make them unreachable without it.
 - `own` reach support needs a meaning per rule; for projects it is "I am the project lead".
   The graph already carries `own` as a reach value.
 
@@ -109,10 +133,20 @@ for any reach rule, built once for every page.
   - create: `projects.create`
   - update: `projects.edit`
   - scopes: `projects.scopes`
-  - delete: delete rule
+  - delete: `projects.delete`
   - approve: `projects.manager`
 - Lead matching by **email or employee id**, never by name (the portal's name match is a bug
   waiting to happen).
+- **The lead exception, in code.** Edit, Manage Scopes and Delete are allowed when:
+  - the person holds the rule at a reach covering the project, **or**
+  - they are the project's lead, with no valid limit on that rule and not switched off by
+    themselves.
+- So the Access Rule sheet must let a manager limit `projects.edit` / `.scopes` / `.delete`
+  on someone who does not hold them. Today a switch-off only limits a power the person
+  holds.
+  - A small change: allow a limit on a held-or-lead-exception rule.
+  - The Access page shows the exception as "Yours as project lead", so the person can switch
+    it off.
 
 **Portal**
 - `RouteRuleConstant.enforced`: `projects` → `projects.view`. The sidebar hides View Projects
@@ -121,28 +155,30 @@ for any reach rule, built once for every page.
   holds the rule at a reach that covers the selected project.
 - The Add Project form offers only departments inside `projects.create` reach, and the lead
   picker lists only people holding `projects.lead` covering that department.
-- A new "waiting for approval" state on created projects, and an approve/reject action for
-  Project Managers.
-  - `?` Where do managers see pending projects: a filter on View Projects, or Manage /
-    Requests?
+- A "waiting for approval" state on created projects, and approve / reject for Project
+  Managers, most likely on a new **Manage / Projects** page (its own plan when decided).
 
 ## Order of work (after the page is finished)
 
-1. Settle the `?` questions above.
-2. Catalog + presets in separate.sql. Parity test: every role still sees exactly what it sees
+1. Decide where approvals live (most likely a new Manage / Projects page, with its own plan).
+2. Self-reach on the Access page (shared, every page).
+3. Catalog + presets in separate.sql. Parity test: every role still sees exactly what it sees
    today.
-3. Server: rule middleware and reach filters on each project endpoint.
-4. Portal: route rule, buttons, form pickers, approval state.
-5. Self-reach on the Access page, if chosen.
+4. Server: rule middleware and reach filters on each project endpoint.
+5. Portal: route rule, buttons, form pickers, approval state.
 6. Update the Access banners' enforced list and FINE_GRAINED_RULES.md.
 
 ## Verification
 
 - Feature tests per endpoint:
   - own / department / all reach
-  - lead always edits their own project
-  - non-manager creation waits for approval; `create.direct` and managers skip it
+  - membership never lost
+  - lead picker filtered by `projects.lead`
+  - approval: each row of the "needs permission" table above
+  - lead exception: a lead edits, manages scopes on and deletes their own project without
+    Project Manager, and loses it under a limit or their own switch
   - executives and developers see all
+- Self-reach: narrows only, never widens, and applies to enforcement and to the session.
 - Parity test: presets reproduce today's list per role before any rule is changed.
 - Portal: sidebar and landing without `projects.view`, buttons hidden per reach, pickers
   filtered.

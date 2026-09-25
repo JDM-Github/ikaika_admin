@@ -157,6 +157,7 @@ class PortalSubmittedReportsTest extends TestCase
             '/api/development/portal/reports/submitted?from=2025-02-01&to=2025-02-28',
             ['Authorization' => "Bearer {$token}"],
         )->assertOk()->assertJsonPath('counts.reports', 5);
+        $queries = $this->withoutRuleCheck($queries);
 
         $this->assertLessThanOrEqual(9, count($queries));
         $this->assertSame(1, $this->countContaining($queries, 'offset_work_day'));
@@ -1162,7 +1163,7 @@ class PortalSubmittedReportsTest extends TestCase
         )->assertOk();
         // The token check reads the employee row; the payload itself is the two below.
         $queries = array_values(array_filter(
-            $queries,
+            $this->withoutRuleCheck($queries),
             static fn (string $sql): bool => ! str_contains($sql, 'from `employees` '),
         ));
 

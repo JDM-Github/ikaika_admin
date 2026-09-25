@@ -66,8 +66,24 @@ Done so far (display only, nothing enforced):
     first open page in sidebar order (Access always stays on).
   - Switching your own power off blocks it for you (decided: e.g. turn off a delete power until
     needed).
-  - **Enforced so far: Home.** The Access page and Access Rule sheet banners name the enforced
-    pages; the banner goes when every page is done.
+  - **Self reach:** anyone can narrow a reach rule of their own on the Access page (reach picker
+    beside the switch, saved with Save Changes), never wider than they hold. Stored in
+    `access_self_reach` (no row = as far as held); `PortalRules::active()` applies it, so
+    enforcement and the session both see the narrowed reach. `PATCH /portal/access/reach`.
+  - **Enforced so far: Home, Track Projects, Reports.** The Access page and Access Rule sheet banners
+    name the enforced pages; the banner goes when every page is done.
+  - Track Projects: `projects.track` now has a reach (member preset `own`, everyone else
+    `all`, exactly today's lists). Its own read, `GET /portal/projects/track`
+    (`portal.rule:projects.track`): own = projects they are on, department = those plus their
+    department's, all = every project. Export keeps its rule. View Projects is parked in
+    `docs/power/view-projects-plan.md`.
+  - Reports: Daily and Late filing check their rule by the kind sent; Submitted Reports, Edit
+    (PATCH) and Delete (DELETE) follow theirs. The filing forms' shared reads (report projects,
+    submitted list, filed days) accept any one of the rules that need them
+    (`portal.rule:a|b|c`). In the portal each page is in the route map; Edit, Delete and Export
+    buttons and the New report choices follow their own rules. Export is hidden only (the file
+    is built in the portal from a list already allowed).
+  - Sub-powers (Export, Edit, Delete) are wired with their page from now on, not later.
 
 Next: the next page to enforce, one at a time as the user names them (Missing Reports stays
 with the other developer). Templates later.

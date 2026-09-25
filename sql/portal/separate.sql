@@ -176,7 +176,8 @@ UPDATE employees
 SET is_developer = 1
 WHERE id_no IN (
     '260701-0020', -- John Dave Pega
-    '260701-0019'  -- Jhon Noriel Malabanan
+    '260701-0019', -- Jhon Noriel Malabanan
+    '260701-0018'  -- Jolas Mendez
 );
 
 -- Developer mode: is_developer alone grants nothing any more. A developer uses the portal
@@ -209,6 +210,8 @@ CREATE TABLE IF NOT EXISTS developer_modes (
 -- executives' rows, which only developers and executives see, on All Logs only.
 -- access_toggles: a person's own switched-off rules; no row means on. A toggle is
 -- their convenience only: it never adds a power and never touches what they gave.
+-- access_self_reach: how far a person narrowed a reach rule for themselves; no row means
+-- as far as they hold it. It only ever narrows, and never touches what they gave.
 -- access_grants: a power one person gave another. It counts only while the giver
 -- may still manage them and still holds that power, and never wider than the
 -- giver's own reach, so taking a power from someone silently ends everything they
@@ -245,6 +248,16 @@ CREATE TABLE access_toggles (
     employee_id    INT          NOT NULL,
     permission_key VARCHAR(191) NOT NULL,
     created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (employee_id, permission_key),
+    FOREIGN KEY (employee_id)    REFERENCES employees(id)                      ON DELETE CASCADE,
+    FOREIGN KEY (permission_key) REFERENCES access_permissions(permission_key) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE access_self_reach (
+    employee_id    INT          NOT NULL,
+    permission_key VARCHAR(191) NOT NULL,
+    reach          VARCHAR(16)  NOT NULL,
+    updated_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (employee_id, permission_key),
     FOREIGN KEY (employee_id)    REFERENCES employees(id)                      ON DELETE CASCADE,
     FOREIGN KEY (permission_key) REFERENCES access_permissions(permission_key) ON DELETE CASCADE
@@ -287,7 +300,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.view.edit', 'projects.view', 'Edit projects', 'Edit project details and manage scopes. A project''s lead can always edit their own project.', 0, 1, 211),
 ('projects.view.delete', 'projects.view', 'Delete projects', 'Move a project to the recycle bin. A project''s lead can always delete their own project.', 0, 1, 212),
 ('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project.', 0, 1, 220),
-('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department.', 0, 1, 230),
+('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
 
 ('reports', NULL, 'Reports', 'Open the Reports section of the sidebar.', 0, 1, 300),
@@ -383,9 +396,9 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 INSERT INTO access_permissions (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order) VALUES
 ('manage.users.access.peers', 'manage.users.access', 'Manage other admins', 'Change the role and Access Rules of fellow administrators in {UserName|Your} reach, not only members. Only administrators can hold it.', 0, 1, 'admin', 846);
 
--- Members: their own work only. View Projects shows only the projects they are on.
+-- Members: their own work only. View Projects and Track Projects show only the projects they are on.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
-SELECT 'member', permission_key, CASE WHEN permission_key = 'projects.view' THEN 'own' END, 0
+SELECT 'member', permission_key, CASE WHEN permission_key IN ('projects.view', 'projects.track') THEN 'own' END, 0
 FROM access_permissions
 WHERE permission_key IN (
     'home',
@@ -405,7 +418,7 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT roles.role, permissions.permission_key,
        CASE
            WHEN permissions.supports_reach = 0 THEN NULL
-           WHEN permissions.permission_key = 'projects.view' THEN 'all'
+           WHEN permissions.permission_key IN ('projects.view', 'projects.track') THEN 'all'
            ELSE 'department'
        END,
        roles.role = 'executive' AND permissions.permission_key = 'administration.logs'
