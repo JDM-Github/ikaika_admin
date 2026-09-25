@@ -122,7 +122,7 @@ class PortalAccessControlTest extends TestCase
         $this->assertNull($this->power($this->member, 'manage.requests.overtime'));
         $this->assertSame(
             '{UserName|You} switched on Manage / Requests / Leave Requests for '.$this->displayName($this->member),
-            PortalLog::query()->where('employee_id', $this->admin->id)->where('resource', 'manage.access')->value('message'),
+            PortalLog::query()->where('employee_id', $this->admin->id)->where('resource', 'manage.access')->orderByDesc('id')->value('message'),
         );
     }
 

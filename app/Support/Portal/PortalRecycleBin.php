@@ -64,6 +64,10 @@ final class PortalRecycleBin
         $canViewAll = $this->canViewAll($actor, $request);
         $department = PortalPreview::departmentScope($actor, $request);
         $scope = $this->scope($request, $canViewAll);
+        // Their own bin follows User / Recycle Bin; All Recycle stays with the admin gate for now.
+        if ($scope === self::SCOPE_OWN) {
+            PortalRules::require($actor, $request, 'user.recycle');
+        }
         $employeeId = $this->employeeId($request, $canViewAll, $scope);
         $perPage = $this->perPage($request);
         $page = max(1, $request->integer('page', 1));
@@ -109,6 +113,7 @@ final class PortalRecycleBin
     public function show(Employee $actor, int $id, Request $request): array
     {
         $row = $this->itemForActor($actor, $id, $request);
+        $this->requireOwn($actor, $row, $request, 'user.recycle');
         $employeeId = is_numeric($row->deleted_by) ? (int) $row->deleted_by : 0;
         $names = $this->employeeDirectory($employeeId > 0 ? [$employeeId] : []);
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
@@ -121,6 +126,14 @@ final class PortalRecycleBin
                 'data' => PortalRecycleBinPresenter::detail($row, $names),
             ];
         });
+    }
+
+    // Their own item follows their User / Recycle Bin rules; someone else's stays with the admin reach.
+    public function requireOwn(Employee $actor, Recycle $row, Request $request, string $key): void
+    {
+        if (is_numeric($row->deleted_by) && (int) $row->deleted_by === (int) $actor->getKey()) {
+            PortalRules::require($actor, $request, $key);
+        }
     }
 
     /**

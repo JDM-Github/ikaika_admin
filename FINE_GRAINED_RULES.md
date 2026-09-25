@@ -70,7 +70,7 @@ Done so far (display only, nothing enforced):
     beside the switch, saved with Save Changes), never wider than they hold. Stored in
     `access_self_reach` (no row = as far as held); `PortalRules::active()` applies it, so
     enforcement and the session both see the narrowed reach. `PATCH /portal/access/reach`.
-  - **Enforced so far: Home, Track Projects, Reports.** The Access page and Access Rule sheet banners
+  - **Enforced so far: Home, Track Projects, Reports, Requests, User, Event Calendar.** The Access page and Access Rule sheet banners
     name the enforced pages; the banner goes when every page is done.
   - Track Projects: `projects.track` now has a reach (member preset `own`, everyone else
     `all`, exactly today's lists). Its own read, `GET /portal/projects/track`
@@ -83,6 +83,21 @@ Done so far (display only, nothing enforced):
     (`portal.rule:a|b|c`). In the portal each page is in the route map; Edit, Delete and Export
     buttons and the New report choices follow their own rules. Export is hidden only (the file
     is built in the portal from a list already allowed).
+  - Requests: each own list allows User Requests or its filing form (the forms and the Edit
+    pages read them); filing follows its form's rule; PATCH follows Edit and `/cancel` follows
+    Cancel; receipt upload allows filing a reimbursement or Edit. In the portal the seven pages
+    are in the route map (Edit Overtime and Edit Offset follow Edit). Editing a leave or
+    reimbursement reopens its filing form, so it needs that form's power as well as Edit. Edit,
+    Cancel, Export and the filing buttons hide per rule; Manage Requests keeps its own until it
+    follows its rules.
+  - User: `user/logs` follows Logs. The recycle bin's own view follows Recycle Bin; opening
+    their own item follows Recycle Bin and restoring it follows Restore (someone else's item
+    stays with the admin reach, All Recycle unchanged). Portal: Logs and Recycle Bin in the
+    route map; Restore and both Exports hide per rule.
+  - Event Calendar: `calendar/events` follows Event Calendar; adding an event and its form's
+    audience choices follow Add events (admin and above by default, so members lost adding
+    events unless given it, as decided); Download is hidden per rule (still a placeholder).
+    Holidays stay open, since the report forms mark them too.
   - Sub-powers (Export, Edit, Delete) are wired with their page from now on, not later.
 
 Next: the next page to enforce, one at a time as the user names them (Missing Reports stays

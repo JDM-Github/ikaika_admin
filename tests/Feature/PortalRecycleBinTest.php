@@ -642,6 +642,28 @@ class PortalRecycleBinTest extends TestCase
             ->assertUnauthorized();
     }
 
+    // Their own bin follows User / Recycle Bin, and restoring their own item follows its Restore rule.
+    public function test_the_own_bin_follows_its_rules(): void
+    {
+        $member = $this->activeMember();
+        $member->forceFill(['is_developer' => false])->save();
+        DB::connection('portal')->table('access_toggles')->where('employee_id', $member->id)->delete();
+        $this->emptyPortalBin();
+        $theirs = $this->putInBin($member);
+        $token = $this->loginToken($member);
+        $switch = fn (string $key) => $this->withToken($token)
+            ->patchJson('/api/development/portal/access/switches', ['key' => $key, 'on' => false])->assertOk();
+
+        $switch('user.recycle.restore');
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$theirs)->assertOk();
+        $this->withToken($token)->postJson('/api/development/portal/administration/recycle-bin/'.$theirs.'/restore')
+            ->assertForbidden()->assertJsonPath('message', 'You do not have access to this page.');
+
+        $switch('user.recycle');
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin')->assertForbidden();
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$theirs)->assertForbidden();
+    }
+
     private function activeMember(): Employee
     {
         $employee = Employee::query()

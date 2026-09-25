@@ -187,6 +187,82 @@ class PortalRulesTest extends TestCase
         $this->withToken($token)->postJson('/api/development/portal/reports/submitted', ['kind' => 'late', 'reports' => []])->assertForbidden();
     }
 
+    // Requests follow their rules from day one without anyone losing anything: every role holds them all.
+    public function test_every_role_holds_every_request_rule(): void
+    {
+        $keys = [
+            'requests', 'requests.own', 'requests.own.edit', 'requests.own.cancel', 'requests.own.export',
+            'requests.leave', 'requests.overtime', 'requests.offset', 'requests.reimbursement',
+        ];
+        foreach (['member', 'admin', 'executive', 'developer'] as $role) {
+            $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
+            $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing a request rule.");
+        }
+    }
+
+    public function test_each_request_route_refuses_once_its_rule_is_off(): void
+    {
+        $token = $this->login($this->member());
+        $this->withToken($token)->getJson('/api/development/portal/requests/leave')->assertOk();
+
+        foreach (['requests.leave', 'requests.own.edit', 'requests.own.cancel'] as $key) {
+            $this->switchOff($token, $key);
+        }
+
+        $this->withToken($token)->postJson('/api/development/portal/requests/leave', [])->assertForbidden();
+        $this->withToken($token)->patchJson('/api/development/portal/requests/overtime/1', [])->assertForbidden();
+        $this->withToken($token)->postJson('/api/development/portal/requests/offset/1/cancel')->assertForbidden();
+        // User Requests still lists every kind, and the other forms still file.
+        $this->withToken($token)->getJson('/api/development/portal/requests/leave')->assertOk();
+        $this->withToken($token)->postJson('/api/development/portal/requests/overtime', [])->assertStatus(422);
+
+        $this->switchOff($token, 'requests.own');
+        $this->withToken($token)->getJson('/api/development/portal/requests/leave')->assertForbidden();
+        $this->withToken($token)->getJson('/api/development/portal/requests/overtime')->assertOk();
+
+        $this->switchOff($token, 'requests');
+        foreach (['leave', 'overtime', 'offset', 'reimbursement'] as $kind) {
+            $this->withToken($token)->getJson('/api/development/portal/requests/'.$kind)->assertForbidden();
+        }
+        $this->withToken($token)->postJson('/api/development/portal/requests/reimbursement/receipts', [])->assertForbidden();
+    }
+
+    // User follows its rules from day one without anyone losing anything: every role holds them all.
+    public function test_every_role_holds_every_user_rule_and_logs_follow_theirs(): void
+    {
+        $keys = ['user', 'user.logs', 'user.logs.export', 'user.recycle', 'user.recycle.restore', 'user.recycle.export'];
+        foreach (['member', 'admin', 'executive', 'developer'] as $role) {
+            $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
+            $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing a User rule.");
+        }
+
+        $token = $this->login($this->member());
+        $this->withToken($token)->getJson('/api/development/portal/user/logs')->assertOk();
+        $this->switchOff($token, 'user.logs');
+        $this->withToken($token)->getJson('/api/development/portal/user/logs')->assertForbidden();
+        $this->withToken($token)->getJson('/api/development/portal/user/logs/1')->assertForbidden();
+    }
+
+    // Event Calendar: everyone sees it and may download it; adding events is admin and above by default.
+    public function test_event_calendar_follows_its_rules(): void
+    {
+        foreach (['member', 'admin', 'executive', 'developer'] as $role) {
+            $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', ['calendar', 'calendar.create', 'calendar.download'])->pluck('permission_key')->all();
+            $expected = $role === 'member' ? ['calendar', 'calendar.download'] : ['calendar', 'calendar.create', 'calendar.download'];
+            $this->assertEqualsCanonicalizing($expected, $held, "The {$role} preset has the wrong Event Calendar rules.");
+        }
+
+        $token = $this->login($this->member());
+        $this->withToken($token)->getJson('/api/development/portal/calendar/events?from=2026-09-01&to=2026-09-30')->assertOk();
+        $this->withToken($token)->getJson('/api/development/portal/calendar/event-options')->assertForbidden();
+        $this->withToken($token)->postJson('/api/development/portal/calendar/events', [])->assertForbidden();
+
+        $this->switchOff($token, 'calendar');
+        $this->withToken($token)->getJson('/api/development/portal/calendar/events?from=2026-09-01&to=2026-09-30')->assertForbidden();
+        // Holidays stay open: the report forms mark them too.
+        $this->withToken($token)->getJson('/api/development/portal/calendar/holidays')->assertOk();
+    }
+
     private function switchOff(string $token, string $key): void
     {
         $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => $key, 'on' => false])->assertOk();
