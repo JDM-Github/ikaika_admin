@@ -17,6 +17,9 @@ final class PortalRules
 {
     public const REFUSAL = 'You do not have access to this page.';
 
+    // A rule's ignore power is the rule's key with this suffix: holding it skips every list on the rule.
+    public const UNLISTED = 'unlisted';
+
     private const ATTRIBUTE = 'portalActiveRules';
 
     /**
@@ -84,6 +87,57 @@ final class PortalRules
         }
 
         return (int) $owner->getKey() === (int) $actor->getKey();
+    }
+
+    /**
+     * Whether the white and black lists set on this person's rule let them see someone: anyone's
+     * black list hides a person, and every white list must name them. The rule's ignore power
+     * (<key>.unlisted), which Developer mode holds, skips every list.
+     *
+     * @return callable(Employee): bool
+     */
+    public static function listed(Employee $employee, Request $request, string $key): callable
+    {
+        if (self::holds($employee, $request, $key.'.'.self::UNLISTED)) {
+            return static fn (): bool => true;
+        }
+        $lists = PortalAccessGraph::forViewer($employee, $request)->listsOn((int) $employee->getKey(), $key);
+
+        return static function (Employee $person) use ($lists): bool {
+            $named = static fn (array $list): bool => in_array((int) $person->getKey(), $list['ids'], true);
+            foreach ($lists as $list) {
+                if ($list['mode'] === 'block' ? $named($list) : ! $named($list)) {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+    }
+
+    /**
+     * The active people a rule lets this person open right now: whoever its reach covers and the
+     * lists leave in, and always themselves. Never an executive, themselves included: the portal
+     * keeps no executive's records on these pages.
+     *
+     * @return list<Employee>
+     */
+    public static function people(Employee $actor, Request $request, string $key): array
+    {
+        $reach = self::reach($actor, $request, $key);
+        $listed = self::listed($actor, $request, $key);
+
+        return Employee::query()
+            ->select(['id', 'first_name', 'last_name', 'department', 'role', 'role_level'])
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->orderBy('id')
+            ->get()
+            ->filter(static fn (Employee $person): bool => ! PortalRole::isExecutive($person->role, $person->role_level)
+                && ($person->is($actor) || (self::covers($reach, $actor, $person) && $listed($person))))
+            ->values()
+            ->all();
     }
 
     /**

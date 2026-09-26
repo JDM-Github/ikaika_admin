@@ -72,6 +72,16 @@ class PortalRulesTest extends TestCase
         $this->assertFalse(DB::connection('portal')->table('access_presets')->whereIn('role', ['member', 'admin', 'executive'])->where('permission_key', 'like', 'developer%')->exists());
     }
 
+    // Reports takes white and black lists; admins start bound by them, executives and developers ignore them.
+    public function test_reports_takes_lists_that_only_executives_and_developers_ignore_by_default(): void
+    {
+        $this->assertSame(['manage.reports'], DB::connection('portal')->table('access_permissions')->where('supports_list', 1)->pluck('permission_key')->all());
+        $this->assertEqualsCanonicalizing(
+            ['developer', 'executive'],
+            DB::connection('portal')->table('access_presets')->where('permission_key', 'manage.reports.unlisted')->pluck('role')->all(),
+        );
+    }
+
     // Grouping rows scope nothing themselves, so they offer no reach: each page or kind under them has its own.
     public function test_grouping_rows_carry_no_reach(): void
     {

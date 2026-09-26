@@ -23,9 +23,12 @@ class AccessController extends Controller
         $editor = $this->editor($request);
         $validated = $request->validate([
             'key' => ['required', 'string', 'max:191'],
-            'action' => ['required', Rule::in([PortalAccessControl::ON, PortalAccessControl::OFF, PortalAccessControl::REACH])],
+            'action' => ['required', Rule::in([PortalAccessControl::ON, PortalAccessControl::OFF, PortalAccessControl::REACH, PortalAccessControl::LIST])],
             'reach' => ['nullable', 'string', Rule::in(['own', 'team', 'department', 'all'])],
             'includeExecutives' => ['nullable', 'boolean'],
+            'mode' => ['nullable', 'required_if:action,'.PortalAccessControl::LIST, Rule::in([PortalAccessControl::LIST_NONE, PortalAccessControl::LIST_ALLOW, PortalAccessControl::LIST_BLOCK])],
+            'people' => ['nullable', 'array', 'max:500'],
+            'people.*' => ['integer', 'min:1'],
         ]);
 
         return response()->json($this->access->change($editor, $id, [
@@ -33,6 +36,8 @@ class AccessController extends Controller
             'action' => $validated['action'],
             'reach' => $validated['reach'] ?? null,
             'includeExecutives' => (bool) ($validated['includeExecutives'] ?? false),
+            'mode' => $validated['mode'] ?? null,
+            'people' => array_map('intval', $validated['people'] ?? []),
         ], $request));
     }
 

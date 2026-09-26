@@ -43,6 +43,8 @@ final class PortalAccess
                 'isActive' => PortalRules::isSwitchedOn($catalog, $off, $key),
                 'fromRole' => $rule['fromRole'],
                 'givenBy' => $graph->names($rule['givenBy']),
+                'lists' => $graph->supportsList($key) ? $this->lists($graph, (int) $actor->getKey(), $key) : [],
+                'ignoresLists' => $graph->supportsList($key) && PortalRules::holds($actor, $request, $key.'.'.PortalRules::UNLISTED),
             ];
         }
 
@@ -52,6 +54,22 @@ final class PortalAccess
             'tier' => $graph->actingTier((int) $actor->getKey()),
             'data' => $data,
         ];
+    }
+
+    /**
+     * Who narrowed the actor's rule with a white or black list, so the Access page can say why a
+     * person is missing.
+     *
+     * @return list<array{name: string, mode: string}>
+     */
+    private function lists(PortalAccessGraph $graph, int $actorId, string $key): array
+    {
+        $lists = [];
+        foreach ($graph->listsOn($actorId, $key) as $list) {
+            $lists[] = ['name' => $graph->names([$list['maker']])[0] ?? '', 'mode' => $list['mode']];
+        }
+
+        return $lists;
     }
 
     /**

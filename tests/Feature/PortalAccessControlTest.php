@@ -54,7 +54,7 @@ class PortalAccessControlTest extends TestCase
         $this->outsider->forceFill(['is_developer' => false, 'department' => 'Engineering'])->save();
         $this->executive->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
 
-        foreach (['access_grants', 'access_limits', 'access_toggles'] as $table) {
+        foreach (['access_grants', 'access_limits', 'access_toggles', 'access_self_reach', 'access_lists'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
     }
@@ -315,6 +315,246 @@ class PortalAccessControlTest extends TestCase
         $this->assertNull($this->power($this->admin, 'developer'));
         $this->assertNull($this->power($this->admin, 'developer.rules'));
         $this->assertNotNull($this->power($this->developer, 'developer.rules'));
+    }
+
+    // A black list hides the people on it from that person's Reports, and the Access page says who set it.
+    public function test_a_black_list_hides_people_from_reports(): void
+    {
+        $this->list($this->developer, $this->admin, 'block', [$this->member])->assertOk();
+
+        $this->assertNotContains((string) $this->member->id, $this->roster($this->admin));
+        $this->assertContains((string) $this->fellow->id, $this->roster($this->admin));
+        $this->as($this->admin)->getJson("/api/development/portal/manage/reports?employee_id={$this->member->id}")->assertNotFound();
+        $this->assertSame(
+            [['name' => $this->displayName($this->developer), 'mode' => 'block']],
+            $this->power($this->admin, 'manage.reports')['lists'] ?? null,
+        );
+        $this->assertSame(
+            '{UserName|You} set a black list of 1 person on Manage / Reports for '.$this->displayName($this->admin),
+            PortalLog::query()->where('employee_id', $this->developer->id)->where('resource', 'manage.access')->orderByDesc('id')->value('message'),
+        );
+    }
+
+    // A white list shows only the people it names; the viewer always keeps their own timesheets.
+    public function test_a_white_list_shows_only_the_people_it_names(): void
+    {
+        $this->list($this->developer, $this->admin, 'allow', [$this->fellow])->assertOk();
+
+        $this->assertEqualsCanonicalizing([(string) $this->admin->id, (string) $this->fellow->id], $this->roster($this->admin));
+    }
+
+    // Every maker's list counts at once, and Ignore white and black lists skips them all.
+    public function test_every_list_counts_until_the_person_ignores_lists(): void
+    {
+        $this->list($this->developer, $this->admin, 'allow', [$this->fellow, $this->member])->assertOk();
+        $this->list($this->executive, $this->admin, 'block', [$this->fellow])->assertOk();
+
+        $this->assertEqualsCanonicalizing([(string) $this->admin->id, (string) $this->member->id], $this->roster($this->admin));
+        $sheet = $this->rule($this->as($this->developer)->getJson("/api/development/portal/manage/access/{$this->admin->id}"), 'manage.reports');
+        $this->assertSame('allow', $sheet['list']['mode']);
+        $this->assertEqualsCanonicalizing([(string) $this->fellow->id, (string) $this->member->id], $sheet['list']['people']);
+        $this->assertSame([['name' => $this->displayName($this->executive), 'mode' => 'block']], $sheet['list']['others']);
+        $this->assertFalse($sheet['list']['ignores']);
+
+        $this->change($this->developer, $this->admin, ['key' => 'manage.reports.unlisted', 'action' => 'on'])->assertOk();
+
+        $this->assertContains((string) $this->fellow->id, $this->roster($this->admin));
+        $this->assertTrue($this->power($this->admin, 'manage.reports')['ignoresLists']);
+    }
+
+    // Admins start without Ignore white and black lists; executives and developers hold it.
+    public function test_only_executives_and_developers_ignore_lists_by_default(): void
+    {
+        $this->assertNull($this->power($this->admin, 'manage.reports.unlisted'));
+        $this->assertNotNull($this->power($this->executive, 'manage.reports.unlisted'));
+        $this->assertNotNull($this->power($this->developer, 'manage.reports.unlisted'));
+    }
+
+    // The editor lists only people they can see themselves, themselves included, and a blocked person stays out of their picker.
+    public function test_an_editor_lists_only_people_they_can_see(): void
+    {
+        $this->change($this->admin, $this->member, ['key' => 'manage.reports', 'action' => 'list', 'mode' => 'block', 'people' => [$this->fellow->id]])
+            ->assertStatus(422)->assertJsonPath('message', 'Switch the power on before choosing who it shows.');
+        $this->change($this->admin, $this->member, ['key' => 'manage.reports', 'action' => 'on', 'reach' => 'department'])->assertOk();
+        $this->list($this->developer, $this->admin, 'block', [$this->fellow])->assertOk();
+
+        $picker = collect($this->as($this->admin)->getJson("/api/development/portal/manage/access/{$this->member->id}")->assertOk()->json('listPeople')['manage.reports'] ?? [])->pluck('id')->all();
+        $this->assertContains((string) $this->admin->id, $picker);
+        $this->assertNotContains((string) $this->fellow->id, $picker);
+        $this->assertNotContains((string) $this->outsider->id, $picker);
+
+        foreach ([$this->fellow, $this->outsider] as $hidden) {
+            $this->list($this->admin, $this->member, 'block', [$hidden])
+                ->assertStatus(422)->assertJsonPath('message', 'You can only list people you can see yourself.');
+        }
+        $this->list($this->admin, $this->member, 'block', [$this->admin])->assertOk();
+        $this->assertNotContains((string) $this->admin->id, $this->roster($this->member));
+    }
+
+    // Your example: an admin who manages a fellow admin puts themselves on that admin's black list.
+    public function test_an_admin_hides_themself_from_a_fellow_admin_s_reports(): void
+    {
+        $this->change($this->developer, $this->admin, ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
+
+        $this->list($this->admin, $this->fellow, 'block', [$this->admin])->assertOk();
+
+        $this->assertNotContains((string) $this->admin->id, $this->roster($this->fellow));
+        $this->assertContains((string) $this->member->id, $this->roster($this->fellow));
+    }
+
+    // Like a limit, a list counts only while its maker still holds the power.
+    public function test_a_list_stops_counting_once_its_maker_loses_the_power(): void
+    {
+        $this->list($this->admin, $this->member, 'block', [$this->fellow])->assertStatus(422);
+        $this->change($this->developer, $this->member, ['key' => 'manage.reports', 'action' => 'on', 'reach' => 'department'])->assertOk();
+        $this->assertNull($this->power($this->member, 'manage.reports.unlisted'));
+        $this->list($this->admin, $this->member, 'block', [$this->fellow])->assertOk();
+        $this->assertNotContains((string) $this->fellow->id, $this->roster($this->member));
+
+        $this->change($this->developer, $this->admin, ['key' => 'manage.reports', 'action' => 'off'])->assertOk();
+
+        $this->assertContains((string) $this->fellow->id, $this->roster($this->member));
+    }
+
+    // Saving replaces the editor's list, a new kind starts over, and none clears it.
+    public function test_saving_replaces_switches_kind_and_clears_the_list(): void
+    {
+        $rows = fn () => DB::connection('portal')->table('access_lists')->where('employee_id', $this->admin->id)->orderBy('subject_id')->get(['mode', 'subject_id'])
+            ->map(static fn (object $row): string => $row->mode.':'.$row->subject_id)->all();
+
+        $this->list($this->developer, $this->admin, 'allow', [$this->fellow, $this->member])->assertOk();
+        $this->list($this->developer, $this->admin, 'allow', [$this->member])->assertOk();
+        $this->assertSame(['allow:'.$this->member->id], $rows());
+
+        $this->list($this->developer, $this->admin, 'block', [$this->fellow])->assertOk();
+        $this->assertSame(['block:'.$this->fellow->id], $rows());
+
+        $this->list($this->developer, $this->admin, 'block', [])->assertStatus(422)->assertJsonPath('message', 'Choose at least one person for the list.');
+        $this->list($this->developer, $this->admin, 'none', [])->assertOk();
+        $this->assertSame([], $rows());
+        $this->change($this->developer, $this->admin, ['key' => 'home', 'action' => 'list', 'mode' => 'block', 'people' => [$this->member->id]])
+            ->assertStatus(422)->assertJsonPath('message', 'That power has no white or black list.');
+    }
+
+    // Manage other admins from a fellow admin manages every other admin, never the giver, and cannot be passed on.
+    public function test_manage_other_admins_from_a_fellow_admin_skips_the_giver_and_never_passes_on(): void
+    {
+        $third = $this->active("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'", 4)[3];
+        $third->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+        $this->change($this->developer, $this->admin, ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
+        $this->change($this->admin, $this->fellow, ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
+
+        $editable = $this->editable($this->fellow);
+        $this->assertTrue($editable[$third->id]);
+        $this->assertFalse($editable[$this->admin->id]);
+        $this->as($this->fellow)->getJson("/api/development/portal/manage/access/{$this->admin->id}")->assertNotFound();
+
+        $keys = array_column($this->as($this->fellow)->getJson("/api/development/portal/manage/access/{$third->id}")->assertOk()->json('data'), 'key');
+        $this->assertContains('manage.requests', $keys);
+        $this->assertNotContains('manage.users.access.peers', $keys);
+        $this->change($this->fellow, $third, ['key' => 'manage.users.access.peers', 'action' => 'on'])
+            ->assertNotFound()->assertJsonPath('message', 'You do not hold that power.');
+
+        // Taken back by the giver, the borrowed power ends and so does the hold over everyone else.
+        $this->change($this->admin, $this->fellow, ['key' => 'manage.users.access.peers', 'action' => 'off'])->assertOk();
+        $this->assertFalse($this->editable($this->fellow)[$third->id]);
+    }
+
+    // Your scenario: John (developer) and Nathaniel (developer) are both admins.
+    public function test_default_mode_never_undoes_developer_mode_and_a_default_gift_is_an_equal_s(): void
+    {
+        [$john, $nathaniel] = [$this->developer, $this->fellow];
+        $nathaniel->forceFill(['is_developer' => true])->save();
+        $third = $this->active("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'", 4)[3];
+        $third->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+
+        // John in Developer mode gives Nathaniel Manage other admins; Nathaniel in Default gives it back.
+        $this->change($john, $nathaniel, ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
+        $this->asDefault($nathaniel)->patchJson("/api/development/portal/manage/access/{$john->id}", ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
+
+        // John in Default borrowed it from Nathaniel: every other admin, never Nathaniel, never passed on.
+        $editable = $this->editableBy($this->asDefault($john));
+        $this->assertTrue($editable[$third->id]);
+        $this->assertFalse($editable[$nathaniel->id]);
+        $this->asDefault($john)->getJson("/api/development/portal/manage/access/{$nathaniel->id}")->assertNotFound();
+        $keys = array_column($this->asDefault($john)->getJson("/api/development/portal/manage/access/{$third->id}")->assertOk()->json('data'), 'key');
+        $this->assertNotContains('manage.users.access.peers', $keys);
+
+        // In Developer mode John still manages Nathaniel and can take the power back.
+        $this->change($john, $nathaniel, ['key' => 'manage.users.access.peers', 'action' => 'off'])->assertOk();
+        $this->assertNull(collect($this->asDefault($nathaniel)->getJson('/api/development/portal/access')->assertOk()->json('data'))->firstWhere('key', 'manage.users.access.peers'));
+    }
+
+    // What you gave in Developer mode is not "given by you" in Default, and Default cannot change it.
+    public function test_a_developer_mode_gift_is_locked_in_default(): void
+    {
+        $this->change($this->developer, $this->member, ['key' => 'calendar.create', 'action' => 'on'])->assertOk();
+
+        $rule = $this->rule($this->asDefault($this->developer)->getJson("/api/development/portal/manage/access/{$this->member->id}"), 'calendar.create');
+        $this->assertTrue($rule['holds']);
+        $this->assertNull($rule['givenByYou']);
+        $this->assertTrue($rule['lockedToDeveloperMode']);
+        foreach (['off', 'on'] as $action) {
+            $this->asDefault($this->developer)->patchJson("/api/development/portal/manage/access/{$this->member->id}", ['key' => 'calendar.create', 'action' => $action])
+                ->assertStatus(422)->assertJsonPath('message', 'You made this in Developer mode. Switch to Developer mode to change it.');
+        }
+        $this->assertNotNull($this->power($this->member, 'calendar.create'));
+
+        $mine = $this->rule($this->as($this->developer)->getJson("/api/development/portal/manage/access/{$this->member->id}"), 'calendar.create');
+        $this->assertNotNull($mine['givenByYou']);
+        $this->assertFalse($mine['lockedToDeveloperMode']);
+    }
+
+    // A developer's Default gift is judged as their role: it ends once they no longer manage the person.
+    public function test_a_developer_s_default_gift_counts_only_as_their_role(): void
+    {
+        $this->asDefault($this->developer)->patchJson("/api/development/portal/manage/access/{$this->member->id}", ['key' => 'calendar.create', 'action' => 'on'])->assertOk();
+        $this->change($this->developer, $this->outsider, ['key' => 'calendar.create', 'action' => 'on'])->assertOk();
+        $this->assertNotNull($this->power($this->member, 'calendar.create'));
+
+        $this->member->forceFill(['department' => 'Engineering'])->save();
+
+        $this->assertNull($this->power($this->member, 'calendar.create'));
+        $this->assertNotNull($this->power($this->outsider, 'calendar.create'));
+    }
+
+    // A fresh Default sign-in, even for a developer.
+    private function asDefault(Employee $employee): self
+    {
+        $token = (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
+
+        return $this->withToken($token);
+    }
+
+    /**
+     * @return array<int, bool>
+     */
+    private function editableBy(self $viewer): array
+    {
+        $rows = $viewer->getJson('/api/development/portal/manage/users?per_page=100')->assertOk()->json('data');
+
+        return collect($rows)->mapWithKeys(fn (array $row): array => [(int) $row['id'] => $row['canEditAccess']])->all();
+    }
+
+    /**
+     * @param  list<Employee>  $people
+     */
+    private function list(Employee $editor, Employee $target, string $mode, array $people): TestResponse
+    {
+        return $this->change($editor, $target, [
+            'key' => 'manage.reports',
+            'action' => 'list',
+            'mode' => $mode,
+            'people' => array_map(static fn (Employee $person): int => (int) $person->id, $people),
+        ]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function roster(Employee $viewer): array
+    {
+        return $this->as($viewer)->getJson('/api/development/portal/manage/reports')->assertOk()->json('employees.*.value');
     }
 
     private function change(Employee $editor, Employee $target, array $body): TestResponse

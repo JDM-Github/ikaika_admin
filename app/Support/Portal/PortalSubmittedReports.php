@@ -97,7 +97,7 @@ final class PortalSubmittedReports
      */
     public function listManaged(Employee $actor, Request $request): array
     {
-        $roster = $this->roster($actor, PortalRules::reach($actor, $request, 'manage.reports'));
+        $roster = PortalRules::people($actor, $request, 'manage.reports');
         $subject = $this->managedSubject($actor, $request, $roster);
         $page = $this->list($subject, $request);
         $page['section'] = 'manage';
@@ -2041,26 +2041,5 @@ final class PortalSubmittedReports
         }
 
         return $subject;
-    }
-
-    /**
-     * Active members the picker can open: whoever the Reports reach covers, and the viewer themself.
-     * Never an executive, the viewer included: the portal carries no executive's timesheets.
-     *
-     * @return list<Employee>
-     */
-    private function roster(Employee $actor, ?string $reach): array
-    {
-        return Employee::query()
-            ->select(['id', 'first_name', 'last_name', 'department', 'role', 'role_level'])
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->orderBy('last_name')
-            ->orderBy('first_name')
-            ->orderBy('id')
-            ->get()
-            ->filter(static fn (Employee $employee): bool => ! PortalRole::isExecutive($employee->role, $employee->role_level)
-                && ($employee->is($actor) || PortalRules::covers($reach, $actor, $employee)))
-            ->values()
-            ->all();
     }
 }

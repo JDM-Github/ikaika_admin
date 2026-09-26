@@ -221,6 +221,14 @@ CREATE TABLE IF NOT EXISTS developer_modes (
 -- gave from it (PortalAccessGraph).
 -- access_limits: a power taken from someone, with everything under it, whatever
 -- gave it to them. Counts under the same conditions as a grant.
+-- access_lists: a white list (allow: only these people) or black list (block: never these
+-- people) one maker set on someone's rule, for a rule marked supports_list. Counts under the
+-- same conditions as a limit; every black list hides and every white list must name a person.
+-- A maker lists only people they can see themselves, and keeps one kind of list per rule. The
+-- rule's ignore power (<key>.unlisted) skips every list, as Developer mode does.
+-- as_developer on a grant, limit or list: made in Developer mode. Only those count as a
+-- developer's; one made in Default is judged as the maker's role like anyone's, and a maker in
+-- Default can see but never change what they made in Developer mode.
 -- Portal-only: no airtable_record_id, never synced, read-only in the admin grid.
 -- Pages switch over to their rules one at a time (FINE_GRAINED_RULES.md, Enforced so far).
 -- ============================================================================
@@ -231,6 +239,7 @@ CREATE TABLE access_permissions (
     label          VARCHAR(191) NOT NULL,
     description    TEXT         NOT NULL,
     supports_reach TINYINT(1)   NOT NULL DEFAULT 0,
+    supports_list  TINYINT(1)   NOT NULL DEFAULT 0,
     can_toggle     TINYINT(1)   NOT NULL DEFAULT 1,
     min_tier       VARCHAR(16)  NULL,
     sort_order     INT          NOT NULL DEFAULT 0,
@@ -273,8 +282,9 @@ CREATE TABLE access_grants (
     reach              VARCHAR(16)  NULL,
     include_executives TINYINT(1)   NOT NULL DEFAULT 0,
     granted_by         INT          NOT NULL,
+    as_developer       TINYINT(1)   NOT NULL DEFAULT 0,
     created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_access_grants (employee_id, permission_key, granted_by),
+    UNIQUE KEY uq_access_grants (employee_id, permission_key, granted_by, as_developer),
     INDEX idx_access_grants_granted_by (granted_by),
     FOREIGN KEY (employee_id)    REFERENCES employees(id)                      ON DELETE CASCADE,
     FOREIGN KEY (granted_by)     REFERENCES employees(id)                      ON DELETE CASCADE,
@@ -286,11 +296,29 @@ CREATE TABLE access_limits (
     employee_id    INT          NOT NULL,
     permission_key VARCHAR(191) NOT NULL,
     limited_by     INT          NOT NULL,
+    as_developer   TINYINT(1)   NOT NULL DEFAULT 0,
     created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_access_limits (employee_id, permission_key, limited_by),
+    UNIQUE KEY uq_access_limits (employee_id, permission_key, limited_by, as_developer),
     INDEX idx_access_limits_limited_by (limited_by),
     FOREIGN KEY (employee_id)    REFERENCES employees(id)                      ON DELETE CASCADE,
     FOREIGN KEY (limited_by)     REFERENCES employees(id)                      ON DELETE CASCADE,
+    FOREIGN KEY (permission_key) REFERENCES access_permissions(permission_key) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE access_lists (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id    INT          NOT NULL,
+    permission_key VARCHAR(191) NOT NULL,
+    mode           VARCHAR(8)   NOT NULL,
+    subject_id     INT          NOT NULL,
+    set_by         INT          NOT NULL,
+    as_developer   TINYINT(1)   NOT NULL DEFAULT 0,
+    created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_access_lists (employee_id, permission_key, set_by, as_developer, subject_id),
+    INDEX idx_access_lists_set_by (set_by),
+    FOREIGN KEY (employee_id)    REFERENCES employees(id)                      ON DELETE CASCADE,
+    FOREIGN KEY (subject_id)     REFERENCES employees(id)                      ON DELETE CASCADE,
+    FOREIGN KEY (set_by)         REFERENCES employees(id)                      ON DELETE CASCADE,
     FOREIGN KEY (permission_key) REFERENCES access_permissions(permission_key) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -354,6 +382,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.requests.export', 'manage.requests', 'Export', 'Download the request queue.', 0, 1, 823),
 ('manage.reports', 'manage', 'Reports', 'Open the timesheets of the people in {UserName|Your} reach.', 1, 1, 830),
 ('manage.reports.export', 'manage.reports', 'Export', 'Download their reports.', 0, 1, 831),
+('manage.reports.unlisted', 'manage.reports', 'Ignore white and black lists', 'Open everyone {UserName|Your} reach covers on Reports, whatever white or black list anyone set on it.', 0, 1, 832),
 ('manage.users', 'manage', 'Users', 'See the member roster.', 1, 1, 840),
 ('manage.users.role', 'manage.users', 'Change roles', 'Set a member''s role.', 0, 1, 841),
 ('manage.users.export', 'manage.users', 'Export', 'Download the roster.', 0, 1, 842),
@@ -399,6 +428,9 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('developer.flag', 'developer', 'Developer flag', 'Mark or unmark someone as a developer.', 0, 1, 'developer', 1120),
 ('developer.performance', 'developer', 'Performance page', 'Open the performance debug page.', 0, 1, 'developer', 1130);
 
+-- Reports can be narrowed to chosen people with a white or black list (access_lists).
+UPDATE access_permissions SET supports_list = 1 WHERE permission_key = 'manage.reports';
+
 -- Members: their own work only. View Projects and Track Projects show only the projects they are on.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'member', permission_key, CASE WHEN permission_key IN ('projects.view', 'projects.track') THEN 'own' END, 0
@@ -415,7 +447,8 @@ WHERE permission_key IN (
     'access'
 );
 
--- Admins: everything but the developer tools, Backup, the Airtable sync and Manage other admins,
+-- Admins: everything but the developer tools, Backup, the Airtable sync, Manage other admins and
+-- Ignore white and black lists,
 -- for their own department. Every project, as today.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'admin', permission_key,
@@ -429,7 +462,8 @@ FROM access_permissions
 WHERE permission_key NOT LIKE 'developer%'
   AND permission_key NOT LIKE 'administration.backup%'
   AND permission_key <> 'administration.actions.sync'
-  AND permission_key <> 'manage.users.access.peers';
+  AND permission_key <> 'manage.users.access.peers'
+  AND permission_key <> 'manage.reports.unlisted';
 
 -- Executives: every department and executives' logs, without the developer tools and without the
 -- pages that are a member's own work (Home, Reports, Requests, User) or housekeeping (All Recycle,

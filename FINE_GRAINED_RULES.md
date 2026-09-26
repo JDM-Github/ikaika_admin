@@ -122,6 +122,28 @@ Done so far (display only, nothing enforced):
     whoever the Reports reach covers plus the viewer, never an executive (the viewer included: the
     portal carries no executive's timesheets); an executive opens the first person listed. Anyone
     outside the roster answers 404. Export follows `manage.reports.export` (hidden only).
+  - **White and black lists** (2026-09-26, Manage / Reports only for now): a rule marked
+    `supports_list` can be narrowed per person by anyone who may edit that power for them
+    (`access_lists`: allow = white list, block = black list, one kind per maker). Every black list
+    hides a person and every white list must name them; the viewer always keeps their own
+    timesheets. A list counts like a limit, only while its maker still manages them and holds the
+    rule. The maker lists only people they can see themselves (their own roster, themselves
+    included); people already listed whom they can no longer see are kept on save, unless the kind
+    changes or the list is cleared. **Ignore white and black lists** (`manage.reports.unlisted`)
+    skips every list: executives and developers start with it (Developer mode holds it anyway),
+    and it is given only on its own, never as a tab of Reports. Lists do not travel with a gift.
+    Access Rule sheet: a list button on the row (kind + people picker, saved with Save Changes after
+    the switches); the Access page names who narrowed the power.
+  - **Manage other admins from an equal** (2026-09-26): an admin given it by a fellow admin can
+    manage every other admin, never the one who gave it, and cannot pass it on (it is not a base
+    power). The giver must hold it from their role or from above; taking the gift back ends it.
+  - **Developer mode and Default are two makers** (2026-09-26): every grant, limit and list stores
+    `as_developer`. Only rows made in Developer mode count as a developer's; rows a developer made
+    in Default are judged on their role like anyone's (so two developer-admins in Default are
+    equals). On the Access Rule sheet "yours" means made in the mode you are in; in Default,
+    anything you set in Developer mode on that power or under it is locked ("Set by you in
+    Developer mode"), and the server refuses changing it (422). Existing rows by developers were
+    marked as made in Developer mode.
   - Sub-powers (Export, Edit, Delete) are wired with their page from now on, not later.
 
 Next: the next page to enforce, one at a time as the user names them (Missing Reports stays
