@@ -8,6 +8,7 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Collection;
 
 /**
  * Budget envelopes from the transaction tracker, and the charge an approved reimbursement makes
@@ -62,7 +63,8 @@ final class PortalBudgetEnvelopes
     }
 
     /**
-     * Active envelopes with their balances, and the totals across them.
+     * Active envelopes with their balances, and the totals across them. Each envelope names the
+     * budget codes it was raised under, so the review's picker can lay the envelopes out under them.
      *
      * @return array{
      *     section: string,
@@ -81,6 +83,7 @@ final class PortalBudgetEnvelopes
 
         try {
             $rows = $this->balances();
+            $codes = $this->envelopeCodes(array_map(fn (object $row): int => (int) $row->id, $rows));
         } catch (QueryException) {
             abort(503, 'Budget envelopes are unavailable right now.');
         }
@@ -102,6 +105,7 @@ final class PortalBudgetEnvelopes
                 'funded' => $this->amount($funded),
                 'spent' => $this->amount($used),
                 'remaining' => $this->amount($funded - $used),
+                'codes' => $codes[(int) $row->id] ?? [],
             ];
         }
 
@@ -206,6 +210,77 @@ final class PortalBudgetEnvelopes
     }
 
     /**
+     * Every envelope, open or closed, under the budget code it was raised for -- the Budget Tracker's
+     * Envelopes tab, laid out the way the tracker's own Envelopes - Budget view groups them. An
+     * envelope linked to no code is listed under unassigned; one linked to two would sit under both.
+     *
+     * @return array{section: string, resource: string, available: bool, currency: string, data: list<array<string, mixed>>, unassigned: list<array<string, mixed>>}
+     */
+    public function budgetCodes(): array
+    {
+        $page = ['section' => 'manage', 'resource' => 'budget-codes', 'currency' => 'PHP'];
+        if (! $this->isAvailable()) {
+            return $page + ['available' => false, 'data' => [], 'unassigned' => []];
+        }
+
+        try {
+            $envelopes = collect($this->connection()
+                ->table('envelopes_budget as e')
+                ->leftJoin('transactions_envelopes as te', 'te.envelope_id', '=', 'e.id')
+                ->leftJoin('transactions as t', 't.id', '=', 'te.transaction_id')
+                ->groupBy('e.id', 'e.envelope_name', 'e.group_name', 'e.time_period', 'e.budget_amount', 'e.active')
+                ->orderBy('e.group_name')
+                ->orderBy('e.envelope_name')
+                ->select(['e.id', 'e.envelope_name', 'e.group_name', 'e.time_period', 'e.budget_amount', 'e.active'])
+                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS funded', [self::TYPE_CREDIT])
+                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS spent', [self::TYPE_EXPENSE])
+                ->get()
+                ->all())
+                ->mapWithKeys(fn (object $row): array => [(int) $row->id => $this->presentEnvelope($row)]);
+            $codes = $this->connection()
+                ->table('budget_codes')
+                ->orderBy('name')
+                ->get(['id', 'name', 'description', 'transfer_date_received', 'expected_amount_quotation']);
+            $links = $this->connection()
+                ->table('envelopes_budget_codes')
+                ->get(['envelope_id', 'budget_code_id'])
+                ->groupBy('budget_code_id');
+        } catch (QueryException) {
+            abort(503, 'Budget codes are unavailable right now.');
+        }
+
+        $linked = [];
+        $data = [];
+        foreach ($codes as $code) {
+            $members = [];
+            foreach ($links->get($code->id) ?? [] as $link) {
+                $envelope = $envelopes->get((int) $link->envelope_id);
+                if ($envelope !== null) {
+                    $members[] = $envelope;
+                    $linked[(int) $link->envelope_id] = true;
+                }
+            }
+            $received = (string) ($code->transfer_date_received ?? '');
+            $data[] = [
+                'id' => (string) $code->id,
+                'name' => $this->text($code->name) ?? 'Budget code '.$code->id,
+                'description' => $this->text($code->description),
+                'receivedOn' => preg_match('/^\d{4}-\d{2}-\d{2}/', $received) === 1 ? substr($received, 0, 10) : null,
+                'expectedAmount' => $code->expected_amount_quotation === null
+                    ? null
+                    : $this->amount($this->cents($code->expected_amount_quotation)),
+                'envelopes' => $members,
+            ];
+        }
+
+        return $page + [
+            'available' => true,
+            'data' => $data,
+            'unassigned' => $envelopes->reject(fn (array $envelope, int $id): bool => isset($linked[$id]))->values()->all(),
+        ];
+    }
+
+    /**
      * Runs a batch of decisions inside a tracker transaction, so a charge and the approval that caused
      * it commit or roll back together. The two databases cannot share one transaction; the portal's
      * is opened inside this one, which narrows the gap to the instant between the two commits.
@@ -222,27 +297,60 @@ final class PortalBudgetEnvelopes
     /**
      * The charge already standing against a claim, if any.
      *
-     * @return array{transactionId: int, envelopeId: int, envelopeName: string, amount: float}|null
+     * @return array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}|null
      */
     public function chargeFor(int $claimId): ?array
     {
-        $row = $this->connection()
-            ->table('transactions as t')
-            ->leftJoin('transactions_envelopes as te', 'te.transaction_id', '=', 't.id')
-            ->leftJoin('envelopes_budget as e', 'e.id', '=', 'te.envelope_id')
-            ->where('t.source_key', self::SOURCE_PREFIX.$claimId)
-            ->first(['t.id', 't.amount', 'e.id as envelope_id', 'e.envelope_name']);
+        return $this->chargeForAny([$claimId]);
+    }
 
-        if ($row === null) {
+    /**
+     * The one charge standing against a claim whose items are these rows. A charge carries the
+     * lowest of its claim's approved items, which moves as items are approved and set back, so it is
+     * looked for under every item rather than under one.
+     *
+     * @param  list<int>  $itemIds
+     * @return array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}|null
+     */
+    public function chargeForAny(array $itemIds): ?array
+    {
+        if ($itemIds === []) {
             return null;
         }
 
-        return [
-            'transactionId' => (int) $row->id,
-            'envelopeId' => (int) $row->envelope_id,
-            'envelopeName' => $this->text($row->envelope_name) ?? 'Envelope',
-            'amount' => $this->amount($this->cents($row->amount)),
-        ];
+        $row = $this->chargeRows($itemIds)->first();
+
+        return $row === null ? null : $this->presentCharge($row);
+    }
+
+    /**
+     * The charges standing against any of these items, keyed by the item each one carries -- the
+     * queue sends every claim's own, so a further approval grows it rather than asking for an
+     * envelope again. Empty with the tracker switched off or unreadable: the queue must never fail
+     * on the tracker's account.
+     *
+     * @param  list<int>  $itemIds
+     * @return array<int, array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}>
+     */
+    public function chargesFor(array $itemIds): array
+    {
+        if ($itemIds === [] || ! $this->isAvailable()) {
+            return [];
+        }
+
+        try {
+            $rows = $this->chargeRows($itemIds)->all();
+        } catch (QueryException) {
+            return [];
+        }
+
+        $charges = [];
+        foreach ($rows as $row) {
+            $charge = $this->presentCharge($row);
+            $charges[$charge['claimId']] ??= $charge;
+        }
+
+        return $charges;
     }
 
     /**
@@ -327,6 +435,63 @@ final class PortalBudgetEnvelopes
     }
 
     /**
+     * Moves a claim's charge to the total of the items now approved in it, on the envelope it is
+     * already charged to, and hands it to the lowest of those items. Growing it is checked like a new
+     * charge -- the envelope has to be open, and more than it has left needs the approver's
+     * go-ahead -- while shrinking it never needs either.
+     *
+     * @param  array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}  $existing
+     * @param  array{id: int, memberName: string, filedOn: string, amountCents: int, items: list<string>, department?: ?string}  $claim
+     * @return array{transactionId: int, envelopeId: int, envelopeName: string, previousAmount: float, amount: float, remainingAfter: float, overspent: bool}
+     */
+    public function adjust(Employee $actor, array $existing, array $claim, bool $allowOverspend): array
+    {
+        $envelope = $this->connection()
+            ->table('envelopes_budget')
+            ->where('id', $existing['envelopeId'])
+            ->lockForUpdate()
+            ->first(['id', 'envelope_name', 'active']);
+        $name = $envelope === null
+            ? $existing['envelopeName']
+            : ($this->text($envelope->envelope_name) ?? $existing['envelopeName']);
+
+        $previous = $this->cents($existing['amount']);
+        $growth = $claim['amountCents'] - $previous;
+        if ($growth > 0 && ($envelope === null || ! (bool) $envelope->active)) {
+            abort(422, $name.' is not an active budget envelope.');
+        }
+
+        // The balance already has the charge taken out, so only what it grows by has to fit.
+        $remaining = $this->remainingCents($existing['envelopeId']);
+        $overspent = $growth > 0 && $growth > $remaining;
+        if ($overspent && ! $allowOverspend) {
+            abort(422, sprintf(
+                '%s has %s left, but this adds %s to the claim. Confirm the overspend to charge it anyway.',
+                $name,
+                $this->peso($remaining),
+                $this->peso($growth),
+            ));
+        }
+
+        $this->connection()->table('transactions')->where('id', $existing['transactionId'])->update([
+            'amount' => number_format($claim['amountCents'] / 100, 2, '.', ''),
+            'description' => $this->description($claim, PortalActivityCopy::displayName($actor), $overspent),
+            'updated_at' => now('UTC')->format('Y-m-d H:i:s'),
+            'source_key' => self::SOURCE_PREFIX.$claim['id'],
+        ]);
+
+        return [
+            'transactionId' => $existing['transactionId'],
+            'envelopeId' => $existing['envelopeId'],
+            'envelopeName' => $name,
+            'previousAmount' => $this->amount($previous),
+            'amount' => $this->amount($claim['amountCents']),
+            'remainingAfter' => $this->amount($remaining - $growth),
+            'overspent' => $overspent,
+        ];
+    }
+
+    /**
      * Books the charges recorded before a charge carried its team account, each to the account of
      * the claimant's team. A charge already booked is skipped, so running this again books nothing
      * more; one whose claimant's team holds no account is reported and left as it was.
@@ -364,21 +529,69 @@ final class PortalBudgetEnvelopes
     }
 
     /**
-     * Removes a claim's charge once it is no longer approved. The junction row goes with it through
-     * its ON DELETE CASCADE.
+     * Removes a claim's charge once none of its items is approved any more. The junction rows go
+     * with it through their ON DELETE CASCADE.
      *
-     * @return array{transactionId: int, envelopeId: int, envelopeName: string, amount: float}|null
+     * @param  array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}  $charge
+     * @return array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}
      */
-    public function release(int $claimId): ?array
+    public function release(array $charge): array
     {
-        $charge = $this->chargeFor($claimId);
-        if ($charge === null) {
-            return null;
-        }
-
         $this->connection()->table('transactions')->where('id', $charge['transactionId'])->delete();
 
         return $charge;
+    }
+
+    /**
+     * @param  list<int>  $itemIds
+     * @return Collection<int, object>
+     */
+    private function chargeRows(array $itemIds): Collection
+    {
+        return $this->connection()
+            ->table('transactions as t')
+            ->leftJoin('transactions_envelopes as te', 'te.transaction_id', '=', 't.id')
+            ->leftJoin('envelopes_budget as e', 'e.id', '=', 'te.envelope_id')
+            ->whereIn('t.source_key', array_map(fn (int $id): string => self::SOURCE_PREFIX.$id, $itemIds))
+            ->orderBy('t.id')
+            ->get(['t.id', 't.amount', 't.source_key', 'e.id as envelope_id', 'e.envelope_name']);
+    }
+
+    /**
+     * @return array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}
+     */
+    private function presentCharge(object $row): array
+    {
+        return [
+            'transactionId' => (int) $row->id,
+            'claimId' => (int) substr((string) $row->source_key, strlen(self::SOURCE_PREFIX)),
+            'envelopeId' => (int) $row->envelope_id,
+            'envelopeName' => $this->text($row->envelope_name) ?? 'Envelope',
+            'amount' => $this->amount($this->cents($row->amount)),
+        ];
+    }
+
+    /**
+     * One envelope and its balance, open or closed, as the Envelopes tab draws it.
+     *
+     * @return array<string, mixed>
+     */
+    private function presentEnvelope(object $row): array
+    {
+        $funded = $this->cents($row->funded);
+        $used = $this->cents($row->spent);
+
+        return [
+            'id' => (string) $row->id,
+            'name' => $this->text($row->envelope_name) ?? 'Envelope '.$row->id,
+            'group' => $this->text($row->group_name),
+            'timePeriod' => $this->text($row->time_period),
+            'planAmount' => $row->budget_amount === null ? null : $this->amount($this->cents($row->budget_amount)),
+            'funded' => $this->amount($funded),
+            'spent' => $this->amount($used),
+            'remaining' => $this->amount($funded - $used),
+            'active' => (bool) $row->active,
+        ];
     }
 
     private function book(int $transactionId, int $accountId): void
@@ -460,6 +673,37 @@ final class PortalBudgetEnvelopes
             ->first();
 
         return $this->cents($row->funded ?? 0) - $this->cents($row->spent ?? 0);
+    }
+
+    /**
+     * The budget codes each envelope was raised under, keyed by envelope, in name order. Most sit
+     * under one code; an envelope raised under none gets no entry.
+     *
+     * @param  list<int>  $envelopeIds
+     * @return array<int, list<array{id: string, name: string, description: ?string}>>
+     */
+    private function envelopeCodes(array $envelopeIds): array
+    {
+        if ($envelopeIds === []) {
+            return [];
+        }
+
+        $codes = [];
+        $rows = $this->connection()
+            ->table('envelopes_budget_codes as ebc')
+            ->join('budget_codes as c', 'c.id', '=', 'ebc.budget_code_id')
+            ->whereIn('ebc.envelope_id', $envelopeIds)
+            ->orderBy('c.name')
+            ->get(['ebc.envelope_id', 'c.id', 'c.name', 'c.description']);
+        foreach ($rows as $row) {
+            $codes[(int) $row->envelope_id][] = [
+                'id' => (string) $row->id,
+                'name' => $this->text($row->name) ?? 'Budget code '.$row->id,
+                'description' => $this->text($row->description),
+            ];
+        }
+
+        return $codes;
     }
 
     /**

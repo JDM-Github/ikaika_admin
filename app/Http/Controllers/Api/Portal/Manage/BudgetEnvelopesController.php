@@ -15,9 +15,15 @@ class BudgetEnvelopesController extends Controller
         return response()->json($this->envelopes->summary());
     }
 
-    // The whole tracker ledger, for the Budget Tracker tab.
+    // The whole tracker ledger and the team balances, for the Budget Tracker page.
     public function transactions(): JsonResponse
     {
         return response()->json($this->envelopes->transactions());
+    }
+
+    // Every envelope under its budget code, for the Budget Tracker's Envelopes tab.
+    public function codes(): JsonResponse
+    {
+        return response()->json($this->envelopes->budgetCodes());
     }
 }

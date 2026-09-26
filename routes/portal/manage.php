@@ -20,6 +20,8 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->get('manage/budget-envelopes', [BudgetEnvelopesController::class, 'index']);
     Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
         ->get('manage/budget-transactions', [BudgetEnvelopesController::class, 'transactions']);
+    Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
+        ->get('manage/budget-codes', [BudgetEnvelopesController::class, 'codes']);
     Route::middleware(['portal.admin', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
     Route::middleware(['portal.admin', 'throttle:portal-manage-reports'])

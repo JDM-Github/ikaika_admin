@@ -84,6 +84,11 @@ final class PortalActivityCopy
         return self::YOU.' charged '.$amount.' to '.$envelopeName.' for '.$memberName."'s reimbursement";
     }
 
+    public static function adjustedReimbursementCharge(string $memberName, string $envelopeName, string $from, string $to): string
+    {
+        return self::YOU.' moved '.$memberName."'s reimbursement charge on ".$envelopeName.' from '.$from.' to '.$to;
+    }
+
     public static function releasedReimbursementCharge(string $envelopeName, string $amount): string
     {
         return self::YOU.' returned '.$amount.' to '.$envelopeName.' when a reimbursement stopped being approved';
