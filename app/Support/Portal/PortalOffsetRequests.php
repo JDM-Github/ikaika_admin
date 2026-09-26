@@ -170,6 +170,7 @@ final class PortalOffsetRequests
             );
             $this->audit->notifyManagers(
                 $actor,
+                'manage.requests.offset',
                 PortalNotificationType::REQUEST_FILED_OFFSET,
                 'New offset request',
                 PortalActivityCopy::notifyFiled(
@@ -358,6 +359,7 @@ final class PortalOffsetRequests
         );
         $this->audit->notifyManagers(
             $actor,
+            'manage.requests.offset',
             PortalNotificationType::REQUEST_CANCELLED_OFFSET,
             'Offset request cancelled',
             PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'offset request', $day),

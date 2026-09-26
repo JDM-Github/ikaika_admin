@@ -53,6 +53,14 @@ Done so far (display only, nothing enforced):
     gift or limit a developer made is judged as a developer's (authority), so it survives their
     leaving the mode, and limiting a developer never touches their Developer mode.
   - Admins lost "preview as Member"; nothing replaced it for them.
+  - **Developer tools are developer-only** (2026-09-26): `developer.*` carry `min_tier` =
+    `developer`, so only a developer in Developer mode holds them. The Access Rule sheet never
+    lists them, switching one on or off for anyone is refused (422), and a stored gift of one
+    counts for nobody, whoever made it.
+  - **Executive preset** (2026-09-26): every department, without the developer tools, a member's
+    own pages (Home, Reports, Requests, User) and All Recycle, All Actions and Backup. Executives
+    who are developers open those in Developer mode. Developers now also include 220101-0001 (the
+    president) and 220202-0002 (the MIS manager).
 
 - **Enforcement has started, one page at a time.**
   - Server: `PortalRules::active()` is what someone may use right now (effective powers minus
@@ -70,7 +78,7 @@ Done so far (display only, nothing enforced):
     beside the switch, saved with Save Changes), never wider than they hold. Stored in
     `access_self_reach` (no row = as far as held); `PortalRules::active()` applies it, so
     enforcement and the session both see the narrowed reach. `PATCH /portal/access/reach`.
-  - **Enforced so far: Home, Track Projects, Reports, Requests, User, Event Calendar.** The Access page and Access Rule sheet banners
+  - **Enforced so far: Home, Track Projects, Reports, Requests, User, Event Calendar, Manage / Requests, Manage / Reports.** The Access page and Access Rule sheet banners
     name the enforced pages; the banner goes when every page is done.
   - Track Projects: `projects.track` now has a reach (member preset `own`, everyone else
     `all`, exactly today's lists). Its own read, `GET /portal/projects/track`
@@ -96,8 +104,24 @@ Done so far (display only, nothing enforced):
     route map; Restore and both Exports hide per rule.
   - Event Calendar: `calendar/events` follows Event Calendar; adding an event and its form's
     audience choices follow Add events (admin and above by default, so members lost adding
-    events unless given it, as decided); Download is hidden per rule (still a placeholder).
-    Holidays stay open, since the report forms mark them too.
+    events unless given it, as decided); Download is hidden per rule and builds the .ics in the
+    portal from what the filters show. Holidays stay open, since the report forms mark them too.
+  - Manage / Requests: the page follows `manage.requests` (`portal.rule`, replacing
+    `portal.admin`). Each kind follows its own rule and reach: a kind not held comes back empty,
+    and its rows are only those its reach covers (`PortalRules::covers`: all, department, or own;
+    executives' rows stay on nobody's queue; an owner nobody matches only with all). Deciding needs
+    the kind's `.decide` (the whole batch is checked before anything is written, 403 by kind);
+    payout proof follows `manage.requests.reimbursement.payout` on its route. Every row carries its
+    owner's `department`, and the portal filters on it (toolbar, kept across tabs). Request alerts
+    (`notifyManagers`) go to whoever holds `manage.requests.notified` and the kind's rule with a
+    reach covering the filer (`PortalRules::holders`), not to every admin any more. Portal: tabs,
+    Approve or reject, Submit Changes, payout proof and Export hide per rule; a member given the
+    page by rule sees Manage with only Requests under it (only a rule the session named lets an
+    admin page past the role).
+  - Manage / Reports: the page follows `manage.reports` (replacing `portal.admin`). The roster is
+    whoever the Reports reach covers plus the viewer, never an executive (the viewer included: the
+    portal carries no executive's timesheets); an executive opens the first person listed. Anyone
+    outside the roster answers 404. Export follows `manage.reports.export` (hidden only).
   - Sub-powers (Export, Edit, Delete) are wired with their page from now on, not later.
 
 Next: the next page to enforce, one at a time as the user names them (Missing Reports stays
@@ -277,8 +301,8 @@ Descriptions (what the Access page shows on each row) live in the SQL.
   - `calendar.create` Add events — AED
   - `calendar.download` Download calendar — MAED
 - `access` Access [always on] — MAED
-- `manage` Manage [R] — AED
-  - `manage.requests` Requests [R] — AED
+- `manage` Manage — AED
+  - `manage.requests` Requests — AED (each kind below has its own reach)
     - `manage.requests.leave` Leave Requests [R] — AED
       - `manage.requests.leave.decide` Approve or reject — AED
     - `manage.requests.overtime` Overtime Requests [R] — AED
@@ -301,13 +325,13 @@ Descriptions (what the Access page shows on each row) live in the SQL.
       - `manage.users.access.give` Give powers — AED
       - `manage.users.access.limit` Limit powers — AED
       - `manage.users.access.peers` Manage other admins — ED (admin and above only)
-- `administration` Administration [R] — AED
+- `administration` Administration — AED
   - `administration.recycle` All Recycle [R] — AED
     - `administration.recycle.export` Export — AED
   - `administration.logs` All Logs [R] — AED
     - `administration.logs.export` Export — AED
   - `administration.actions` All Actions [R] — AED
-    - `administration.actions.sync` Sync to Airtable — D
+    - `administration.actions.sync` Sync to Airtable — ED
     - `administration.actions.export` Export — AED
   - `administration.missing` Missing Reports [R] — AED
     - `administration.missing.email` Email reminders — AED
@@ -318,17 +342,17 @@ Descriptions (what the Access page shows on each row) live in the SQL.
     - `administration.email.library` Templates and footers — AED
     - `administration.email.outbox` Outbox — AED
     - `administration.email.export` Export — AED
-  - `administration.backup` Backup — D
-    - `administration.backup.create` Create backups — D
-    - `administration.backup.download` Download backups — D
-    - `administration.backup.restore` Restore backups — D
-    - `administration.backup.export` Export — D
+  - `administration.backup` Backup — ED
+    - `administration.backup.create` Create backups — ED
+    - `administration.backup.download` Download backups — ED
+    - `administration.backup.restore` Restore backups — ED
+    - `administration.backup.export` Export — ED
   - `administration.alerts` Access alerts — AED
 - `workspace` Data Workspace — AED
   - `workspace.private` Private columns — AED
   - `workspace.edit` Edit cells — AED
   - `workspace.views` Shared views — AED
-- `developer` Developer — D
+- `developer` Developer — D (Developer mode only, never given)
   - `developer.rules` Rule catalog — D
   - `developer.flag` Developer flag — D
   - `developer.performance` Performance page — D
@@ -338,8 +362,9 @@ Descriptions (what the Access page shows on each row) live in the SQL.
 | Rule group | Member | Admin | Executive | Developer |
 |---|---|---|---|---|
 | Baseline [B] | yes | yes | yes | yes |
-| Manage/* | — | department | department | all |
-| Administration/* (non-dev) | — | department | department | all |
+| Manage/* | — | department | all | all |
+| Administration/* (non-dev) | — | department | all | all |
+| Backup, Airtable sync | — | — | yes | yes |
 | All Logs executives flag | — | off | on | on |
 | access (the Access page) | yes | yes | yes | yes |
 | developer.* | — | — | — | yes |

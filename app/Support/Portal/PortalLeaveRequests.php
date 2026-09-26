@@ -182,6 +182,7 @@ final class PortalLeaveRequests
         );
         $this->audit->notifyManagers(
             $actor,
+            'manage.requests.leave',
             PortalNotificationType::REQUEST_FILED_LEAVE,
             'New leave request',
             PortalActivityCopy::notifyFiled(
@@ -333,6 +334,7 @@ final class PortalLeaveRequests
         );
         $this->audit->notifyManagers(
             $actor,
+            'manage.requests.leave',
             PortalNotificationType::REQUEST_CANCELLED_LEAVE,
             'Leave request cancelled',
             PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'leave request', $day),

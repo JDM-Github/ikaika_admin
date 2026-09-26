@@ -172,6 +172,7 @@ final class PortalOvertimeRequests
             );
             $this->audit->notifyManagers(
                 $actor,
+                'manage.requests.overtime',
                 PortalNotificationType::REQUEST_FILED_OVERTIME,
                 'New overtime request',
                 PortalActivityCopy::notifyFiled(
@@ -347,6 +348,7 @@ final class PortalOvertimeRequests
         );
         $this->audit->notifyManagers(
             $actor,
+            'manage.requests.overtime',
             PortalNotificationType::REQUEST_CANCELLED_OVERTIME,
             'Overtime request cancelled',
             PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'overtime request', $day),

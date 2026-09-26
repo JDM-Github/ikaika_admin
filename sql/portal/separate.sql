@@ -177,7 +177,9 @@ SET is_developer = 1
 WHERE id_no IN (
     '260701-0020', -- John Dave Pega
     '260701-0019', -- Jhon Noriel Malabanan
-    '260701-0018'  -- Jolas Mendez
+    '260701-0018', -- Jolas Mendez
+    '220101-0001', -- Don De Guzman, the president
+    '220202-0002'  -- Nathaniel Tanglao, the MIS manager
 );
 
 -- Developer mode: is_developer alone grants nothing any more. A developer uses the portal
@@ -200,7 +202,8 @@ CREATE TABLE IF NOT EXISTS developer_modes (
 -- access_permissions: the rule catalog, one row per page, tab or action. parent_key
 -- builds the tree; supports_reach marks a rule that shows other people's records
 -- (own / department / all); min_tier is the lowest role that may hold it at all (NULL
--- means anyone), so a member is never given it; can_toggle 0 keeps a rule its holder may never switch
+-- means anyone), so a member is never given it; 'developer' means only a developer in Developer
+-- mode, which no gift can reach; can_toggle 0 keeps a rule its holder may never switch
 -- off (the Access page itself, or nobody could switch anything back on). A description
 -- never says "you" doing something: {UserName|Your} reads "Your" on the Access page and
 -- "Jolas Mendez's" on someone's Access Rule sheet, so each sentence fits both.
@@ -219,7 +222,7 @@ CREATE TABLE IF NOT EXISTS developer_modes (
 -- access_limits: a power taken from someone, with everything under it, whatever
 -- gave it to them. Counts under the same conditions as a grant.
 -- Portal-only: no airtable_record_id, never synced, read-only in the admin grid.
--- Nothing enforces these rules yet; the pages still decide access the old way.
+-- Pages switch over to their rules one at a time (FINE_GRAINED_RULES.md, Enforced so far).
 -- ============================================================================
 
 CREATE TABLE access_permissions (
@@ -334,8 +337,8 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 
 ('access', NULL, 'Access', 'See {UserName|Your} powers and switch them off and on. This page itself always stays on.', 0, 0, 700),
 
-('manage', NULL, 'Manage', 'Work on other people''s records.', 1, 1, 800),
-('manage.requests', 'manage', 'Requests', 'Review the requests filed by the people in {UserName|Your} reach.', 1, 1, 810),
+('manage', NULL, 'Manage', 'Work on other people''s records.', 0, 1, 800),
+('manage.requests', 'manage', 'Requests', 'Review other people''s requests. Each kind below reaches only as far as its own setting.', 0, 1, 810),
 ('manage.requests.leave', 'manage.requests', 'Leave Requests', 'See leave requests.', 1, 1, 811),
 ('manage.requests.leave.decide', 'manage.requests.leave', 'Approve or reject', 'Approve or reject leave requests, with remarks.', 0, 1, 812),
 ('manage.requests.overtime', 'manage.requests', 'Overtime Requests', 'See overtime requests.', 1, 1, 813),
@@ -358,7 +361,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.users.access.give', 'manage.users.access', 'Give powers', 'Switch a power on for someone: only one held here, never wider than {UserName|Your} own reach. It ends if that power is ever lost.', 0, 1, 844),
 ('manage.users.access.limit', 'manage.users.access', 'Limit powers', 'Switch a power off for someone, with everything under it, whoever gave it to them.', 0, 1, 845),
 
-('administration', NULL, 'Administration', 'Keep the portal in order: logs, trash, emails and backups.', 1, 1, 900),
+('administration', NULL, 'Administration', 'Keep the portal in order: logs, trash, emails and backups.', 0, 1, 900),
 ('administration.recycle', 'administration', 'All Recycle', 'See what the people in {UserName|Your} reach deleted. View only: restoring someone else''s item could backfire on them.', 1, 1, 910),
 ('administration.recycle.export', 'administration.recycle', 'Export', 'Download the recycle list.', 0, 1, 911),
 ('administration.logs', 'administration', 'All Logs', 'See what the people in {UserName|Your} reach did in the portal.', 1, 1, 920),
@@ -385,16 +388,16 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('workspace', NULL, 'Data Workspace', 'Open the admin spreadsheet of portal tables.', 0, 1, 1000),
 ('workspace.private', 'workspace', 'Private columns', 'Read private columns: tax and government numbers, bank details, address and birthday.', 0, 1, 1010),
 ('workspace.edit', 'workspace', 'Edit cells', 'Change values in the spreadsheet.', 0, 1, 1020),
-('workspace.views', 'workspace', 'Shared views', 'Save and delete views everyone can use.', 0, 1, 1030),
-
-('developer', NULL, 'Developer', 'Tools for the people who build the portal.', 0, 1, 1100),
-('developer.rules', 'developer', 'Rule catalog', 'Change the rule list and what each role starts with.', 0, 1, 1110),
-('developer.flag', 'developer', 'Developer flag', 'Mark or unmark someone as a developer.', 0, 1, 1120),
-('developer.performance', 'developer', 'Performance page', 'Open the performance debug page.', 0, 1, 1130);
+('workspace.views', 'workspace', 'Shared views', 'Save and delete views everyone can use.', 0, 1, 1030);
 
 -- Administrators and above only: an admin holding it manages fellow admins, and passes it only to them.
+-- Developers only: held solely in Developer mode, so nobody can give them, not even another developer.
 INSERT INTO access_permissions (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order) VALUES
-('manage.users.access.peers', 'manage.users.access', 'Manage other admins', 'Change the role and Access Rules of fellow administrators in {UserName|Your} reach, not only members. Only administrators can hold it.', 0, 1, 'admin', 846);
+('manage.users.access.peers', 'manage.users.access', 'Manage other admins', 'Change the role and Access Rules of fellow administrators in {UserName|Your} reach, not only members. Only administrators can hold it.', 0, 1, 'admin', 846),
+('developer', NULL, 'Developer', 'Tools for the people who build the portal.', 0, 1, 'developer', 1100),
+('developer.rules', 'developer', 'Rule catalog', 'Change the rule list and what each role starts with.', 0, 1, 'developer', 1110),
+('developer.flag', 'developer', 'Developer flag', 'Mark or unmark someone as a developer.', 0, 1, 'developer', 1120),
+('developer.performance', 'developer', 'Performance page', 'Open the performance debug page.', 0, 1, 'developer', 1130);
 
 -- Members: their own work only. View Projects and Track Projects show only the projects they are on.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
@@ -412,22 +415,38 @@ WHERE permission_key IN (
     'access'
 );
 
--- Admins and executives: everything but the developer tools, Backup and the Airtable sync,
--- for their own department. Every project, as today. Only executives see executives' logs.
+-- Admins: everything but the developer tools, Backup, the Airtable sync and Manage other admins,
+-- for their own department. Every project, as today.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
-SELECT roles.role, permissions.permission_key,
+SELECT 'admin', permission_key,
        CASE
-           WHEN permissions.supports_reach = 0 THEN NULL
-           WHEN permissions.permission_key IN ('projects.view', 'projects.track') THEN 'all'
+           WHEN supports_reach = 0 THEN NULL
+           WHEN permission_key IN ('projects.view', 'projects.track') THEN 'all'
            ELSE 'department'
        END,
-       roles.role = 'executive' AND permissions.permission_key = 'administration.logs'
-FROM access_permissions AS permissions
-CROSS JOIN (SELECT 'admin' AS role UNION ALL SELECT 'executive') AS roles
-WHERE permissions.permission_key NOT LIKE 'developer%'
-  AND permissions.permission_key NOT LIKE 'administration.backup%'
-  AND permissions.permission_key <> 'administration.actions.sync'
-  AND NOT (roles.role = 'admin' AND permissions.permission_key = 'manage.users.access.peers');
+       0
+FROM access_permissions
+WHERE permission_key NOT LIKE 'developer%'
+  AND permission_key NOT LIKE 'administration.backup%'
+  AND permission_key <> 'administration.actions.sync'
+  AND permission_key <> 'manage.users.access.peers';
+
+-- Executives: every department and executives' logs, without the developer tools and without the
+-- pages that are a member's own work (Home, Reports, Requests, User) or housekeeping (All Recycle,
+-- All Actions, Backup). An executive who is a developer still opens those in Developer mode.
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT 'executive', permission_key,
+       CASE WHEN supports_reach = 1 THEN 'all' END,
+       permission_key = 'administration.logs'
+FROM access_permissions
+WHERE permission_key NOT LIKE 'developer%'
+  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup')
+  AND permission_key NOT LIKE 'reports.%'
+  AND permission_key NOT LIKE 'requests.%'
+  AND permission_key NOT LIKE 'user.%'
+  AND permission_key NOT LIKE 'administration.recycle.%'
+  AND permission_key NOT LIKE 'administration.actions.%'
+  AND permission_key NOT LIKE 'administration.backup.%';
 
 -- Developers: every rule, every department, and executives' logs.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)

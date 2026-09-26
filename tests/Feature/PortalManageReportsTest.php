@@ -3,7 +3,7 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
-use App\Support\Portal\PortalAccessDenied;
+use App\Support\Portal\PortalRules;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
@@ -25,6 +25,9 @@ class PortalManageReportsTest extends TestCase
         parent::setUp();
         Cache::flush();
         Mail::fake();
+        foreach (['access_grants', 'access_limits', 'access_toggles', 'access_self_reach', 'developer_modes'] as $table) {
+            DB::connection('portal')->table($table)->delete();
+        }
     }
 
     public function test_catalog_lists_manage_reports_under_portal_sections(): void
@@ -116,13 +119,57 @@ class PortalManageReportsTest extends TestCase
         ])->assertNotFound();
     }
 
+    // The page follows its rule: a plain refusal, not a security alert.
     public function test_a_member_cannot_read_managed_reports(): void
     {
         $this->getJson('/api/development/portal/manage/reports', [
             'Authorization' => 'Bearer '.$this->tokenForMember(),
         ])
             ->assertForbidden()
-            ->assertJsonPath('warning', PortalAccessDenied::WARNING_NOTIFIED);
+            ->assertJsonPath('message', PortalRules::REFUSAL)
+            ->assertJsonMissingPath('warning');
+    }
+
+    // Switched off, the page refuses even an admin.
+    public function test_switching_reports_off_closes_the_page(): void
+    {
+        $token = $this->loginToken($this->departmentAdmin());
+        $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => 'manage.reports', 'on' => false])->assertOk();
+
+        $this->withToken($token)->getJson('/api/development/portal/manage/reports')->assertForbidden();
+    }
+
+    // Narrowed to own, the roster holds only the viewer.
+    public function test_an_own_reach_opens_only_their_own_timesheets(): void
+    {
+        $inside = $this->activeMember();
+        $inside->forceFill(['department' => 'MIS'])->save();
+        $admin = $this->departmentAdmin();
+        $token = $this->loginToken($admin);
+        $this->withToken($token)->patchJson('/api/development/portal/access/reach', ['key' => 'manage.reports', 'reach' => 'own'])->assertOk();
+
+        $this->assertSame(
+            [(string) $admin->id],
+            $this->withToken($token)->getJson('/api/development/portal/manage/reports')->assertOk()->json('employees.*.value'),
+        );
+        $this->withToken($token)->getJson('/api/development/portal/manage/reports?employee_id='.$inside->id)->assertNotFound();
+    }
+
+    // A member given Reports by their admin opens their department's timesheets.
+    public function test_a_member_given_reports_opens_their_department(): void
+    {
+        $member = $this->activeMember();
+        $other = $this->otherActiveMember($member);
+        $member->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+        $other->forceFill(['department' => 'MIS'])->save();
+        $this->withToken($this->loginToken($this->departmentAdmin()))
+            ->patchJson("/api/development/portal/manage/access/{$member->id}", ['key' => 'manage.reports', 'action' => 'on', 'reach' => 'department'])
+            ->assertOk();
+
+        $this->withToken($this->loginToken($member))
+            ->getJson('/api/development/portal/manage/reports?employee_id='.$other->id)
+            ->assertOk()
+            ->assertJsonPath('employeeId', (string) $other->id);
     }
 
     public function test_managed_reports_require_a_bearer_token(): void
@@ -205,16 +252,21 @@ class PortalManageReportsTest extends TestCase
             ->assertNotFound();
     }
 
-    // An executive who opens this page still reads their own timesheets.
-    public function test_an_executive_still_opens_their_own_timesheets(): void
+    // No executive's timesheets are in the portal, their own included: an executive opens the first person listed.
+    public function test_an_executive_opens_everyone_but_never_themself(): void
     {
         $executive = $this->executive();
+        $outside = $this->activeMember();
+        $outside->forceFill(['department' => 'Engineering'])->save();
+        $token = $this->loginToken($executive);
 
-        $this->withToken($this->loginToken($executive))
-            ->getJson('/api/development/portal/manage/reports')
-            ->assertOk()
-            ->assertJsonPath('employeeId', (string) $executive->id)
-            ->assertJsonPath('employees.0.value', (string) $executive->id);
+        $response = $this->withToken($token)->getJson('/api/development/portal/manage/reports')->assertOk();
+
+        $roster = $response->json('employees.*.value');
+        $this->assertNotContains((string) $executive->id, $roster);
+        $this->assertContains((string) $outside->id, $roster);
+        $this->assertSame($roster[0], $response->json('employeeId'));
+        $this->withToken($token)->getJson('/api/development/portal/manage/reports?employee_id='.$executive->id)->assertNotFound();
     }
 
     private function executive(): Employee

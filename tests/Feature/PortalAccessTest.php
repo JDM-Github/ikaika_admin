@@ -83,7 +83,7 @@ class PortalAccessTest extends TestCase
         $this->assertNotContains('developer', $keys);
         $this->assertNotContains('administration.backup', $keys);
         $this->assertNotContains('administration.actions.sync', $keys);
-        $this->assertSame('department', $this->rule($response, 'manage.requests')['reach']);
+        $this->assertSame('department', $this->rule($response, 'manage.requests.leave')['reach']);
         $this->assertSame('all', $this->rule($response, 'projects.view')['reach']);
         $this->assertFalse($this->rule($response, 'administration.logs')['includeExecutives']);
     }
@@ -93,7 +93,7 @@ class PortalAccessTest extends TestCase
         $response = $this->powersOf($this->executive())->assertOk()->assertJsonPath('tier', 'executive');
 
         $this->assertTrue($this->rule($response, 'administration.logs')['includeExecutives']);
-        $this->assertSame('department', $this->rule($response, 'manage.requests')['reach']);
+        $this->assertSame('all', $this->rule($response, 'manage.requests.leave')['reach']);
     }
 
     // is_developer alone grants nothing: in Default a developer holds their role's preset.
@@ -107,7 +107,7 @@ class PortalAccessTest extends TestCase
             ->assertOk()->assertJsonPath('tier', 'developer');
 
         $this->assertCount(DB::connection('portal')->table('access_permissions')->count(), $response->json('data'));
-        $this->assertSame('all', $this->rule($response, 'manage.requests')['reach']);
+        $this->assertSame('all', $this->rule($response, 'manage.requests.leave')['reach']);
         $this->assertNull($this->rule($response, 'developer.flag')['reach']);
     }
 

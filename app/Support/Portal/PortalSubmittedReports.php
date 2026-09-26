@@ -97,12 +97,18 @@ final class PortalSubmittedReports
      */
     public function listManaged(Employee $actor, Request $request): array
     {
-        $scope = PortalPreview::departmentScope($actor, $request);
-        $subject = $this->managedSubject($actor, $request, $scope);
+        $roster = $this->roster($actor, PortalRules::reach($actor, $request, 'manage.reports'));
+        $subject = $this->managedSubject($actor, $request, $roster);
         $page = $this->list($subject, $request);
         $page['section'] = 'manage';
         $page['resource'] = 'reports';
-        $page['employees'] = $this->roster($actor, $scope);
+        $page['employees'] = array_map(static fn (Employee $employee): array => [
+            'value' => (string) $employee->getKey(),
+            'label' => PortalSubmittedReportPresenter::memberName(
+                is_string($employee->first_name) ? $employee->first_name : null,
+                is_string($employee->last_name) ? $employee->last_name : null,
+            ),
+        ], $roster);
         $page['employeeId'] = (string) $subject->getKey();
 
         return $page;
@@ -2004,19 +2010,33 @@ final class PortalSubmittedReports
         return strtolower(trim($label));
     }
 
-    private function managedSubject(Employee $actor, Request $request, ?string $scope): Employee
+    /**
+     * @param  list<Employee>  $roster
+     */
+    private function managedSubject(Employee $actor, Request $request, array $roster): Employee
     {
         $raw = trim((string) $request->query('employee_id', ''));
         if ($raw === '') {
-            return $actor;
+            // Their own timesheets first; an executive, who has none here, opens the first person listed.
+            $first = $roster[0] ?? null;
+            foreach ($roster as $employee) {
+                if ($employee->is($actor)) {
+                    return $actor;
+                }
+            }
+            if ($first === null) {
+                abort(404, 'Nobody is in your reach.');
+            }
+            $raw = (string) $first->getKey();
         }
         if (preg_match('/^\d{1,11}$/', $raw) !== 1) {
             abort(404, 'That member was not found.');
         }
 
-        $subject = Employee::query()->find((int) $raw);
-        // Someone outside the admin's department answers exactly like someone who does not exist.
-        if (! $subject instanceof Employee || (! $subject->is($actor) && ! PortalPreview::inScope($scope, $subject))) {
+        // Someone outside the reach answers exactly like someone who does not exist.
+        $listed = array_filter($roster, static fn (Employee $employee): bool => (string) $employee->getKey() === $raw);
+        $subject = $listed === [] ? null : Employee::query()->find((int) $raw);
+        if (! $subject instanceof Employee) {
             abort(404, 'That member was not found.');
         }
 
@@ -2024,39 +2044,23 @@ final class PortalSubmittedReports
     }
 
     /**
-     * Active members the picker can open: the admin's department, never an executive (they are
-     * managed from their own portal), and always the admin themself. Skinny: an id and a name.
+     * Active members the picker can open: whoever the Reports reach covers, and the viewer themself.
+     * Never an executive, the viewer included: the portal carries no executive's timesheets.
      *
-     * @return list<array{value: string, label: string}>
+     * @return list<Employee>
      */
-    private function roster(Employee $actor, ?string $scope): array
+    private function roster(Employee $actor, ?string $reach): array
     {
-        $rows = Employee::query()
-            ->select(['id', 'first_name', 'last_name'])
-            ->where(fn ($query) => $query
-                ->where('id', $actor->getKey())
-                ->orWhere(fn ($managed) => $managed
-                    ->whereRaw("LOWER(TRIM(COALESCE(role, ''))) != 'executive'")
-                    ->whereRaw("LOWER(TRIM(COALESCE(role_level, ''))) != 'executive'")
-                    ->when($scope !== null, fn ($inDepartment) => $inDepartment
-                        ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ? AND ? != ''", [$scope, $scope]))))
+        return Employee::query()
+            ->select(['id', 'first_name', 'last_name', 'department', 'role', 'role_level'])
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->orderBy('id')
-            ->get();
-
-        $employees = [];
-        foreach ($rows as $row) {
-            $employees[] = [
-                'value' => (string) $row->getKey(),
-                'label' => PortalSubmittedReportPresenter::memberName(
-                    is_string($row->first_name) ? $row->first_name : null,
-                    is_string($row->last_name) ? $row->last_name : null,
-                ),
-            ];
-        }
-
-        return $employees;
+            ->get()
+            ->filter(static fn (Employee $employee): bool => ! PortalRole::isExecutive($employee->role, $employee->role_level)
+                && ($employee->is($actor) || PortalRules::covers($reach, $actor, $employee)))
+            ->values()
+            ->all();
     }
 }

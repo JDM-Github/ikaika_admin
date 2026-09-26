@@ -40,6 +40,10 @@ final class PortalAccessControl
 
         $data = [];
         foreach ($graph->powersFor($editorId, $targetId) as $key => $mine) {
+            // Developer tools come only with Developer mode, so the sheet never offers them.
+            if ($graph->isDeveloperOnly($key)) {
+                continue;
+            }
             $row = $graph->catalog()[$key];
             $their = $theirs[$key] ?? null;
             $myGrant = $this->first($grants, static fn (object $grant): bool => $grant->permission_key === $key && (int) $grant->granted_by === $editorId);
@@ -96,6 +100,9 @@ final class PortalAccessControl
         $editorId = (int) $editor->getKey();
         $target = $this->manageable($graph, $editorId, $targetId);
         $key = $change['key'];
+        if ($graph->isDeveloperOnly($key)) {
+            abort(422, 'Developer tools come only with Developer mode, so nobody can give or limit them.');
+        }
         if (! isset($graph->powersFor($editorId, $targetId)[$key])) {
             abort(404, 'You do not hold that power.');
         }

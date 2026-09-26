@@ -17,6 +17,8 @@ use InvalidArgumentException;
  */
 final class PortalAudit
 {
+    public const ALERTS_RULE = 'manage.requests.notified';
+
     public const LOG_CACHE_VERSION_KEY = 'portal:user:logs:version';
 
     public const NOTIFICATION_CACHE_VERSION_KEY = 'portal:user:notifications:version';
@@ -183,12 +185,14 @@ final class PortalAudit
     }
 
     /**
-     * Inbox rows for every active Admin and Executive except the actor.
+     * Inbox rows for everyone, the actor aside, who holds Request alerts and whose rule for this
+     * kind of request ($kindRule, e.g. manage.requests.leave) reaches the actor.
      *
      * @param  array<string, mixed>  $payload
      */
     public function notifyManagers(
         Employee $actor,
+        string $kindRule,
         string $type,
         string $title,
         string $message,
@@ -196,17 +200,12 @@ final class PortalAudit
         ?string $linkLabel = null,
         array $payload = [],
     ): void {
-        $recipients = Employee::query()
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->where(function ($query): void {
-                $query->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
-                    ->orWhereRaw("LOWER(COALESCE(role, '')) = 'admin'");
-            })
-            ->get();
-
-        foreach ($recipients as $recipient) {
+        foreach (PortalRules::holders([self::ALERTS_RULE, $kindRule]) as $holder) {
+            if (! PortalRules::covers($holder['reaches'][$kindRule], $holder['employee'], $actor)) {
+                continue;
+            }
             $this->notifyIfOther(
-                $recipient,
+                $holder['employee'],
                 $actor,
                 $type,
                 $title,

@@ -134,7 +134,7 @@ class WorkspaceWriteTest extends TestCase
     // A developer outranks an admin, so an admin must not be able to grant it from the grid.
     public function test_is_developer_is_shown_but_never_editable_from_the_grid(): void
     {
-        $employee = DB::connection('portal')->table('employees')->orderBy('id')->first();
+        $employee = DB::connection('portal')->table('employees')->where('is_developer', 0)->orderBy('id')->first();
         $this->assertNotNull($employee);
         $headers = $this->headersFor($this->administrator());
 

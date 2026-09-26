@@ -101,7 +101,7 @@ class PortalAccessControlTest extends TestCase
         $this->assertTrue($daily['holds']);
         $this->assertTrue($daily['fromRole']);
         $this->assertTrue($daily['heldWithoutYou']);
-        $requests = $this->rule($response, 'manage.requests');
+        $requests = $this->rule($response, 'manage.requests.leave');
         $this->assertFalse($requests['holds']);
         $this->assertFalse($requests['heldWithoutYou']);
         $this->assertSame('department', $requests['yourReach']);
@@ -128,9 +128,9 @@ class PortalAccessControlTest extends TestCase
 
     public function test_a_switch_is_refused_when_too_wide_not_held_or_unknown(): void
     {
-        $this->change($this->admin, $this->member, ['key' => 'manage.requests', 'action' => 'on', 'reach' => 'all'])
+        $this->change($this->admin, $this->member, ['key' => 'manage.requests.leave', 'action' => 'on', 'reach' => 'all'])
             ->assertStatus(422)->assertJsonPath('message', 'You cannot give a power wider than you hold it.');
-        $this->change($this->admin, $this->member, ['key' => 'manage.requests', 'action' => 'on', 'includeExecutives' => true])
+        $this->change($this->admin, $this->member, ['key' => 'manage.requests.leave', 'action' => 'on', 'includeExecutives' => true])
             ->assertStatus(422);
         $this->change($this->admin, $this->member, ['key' => 'administration.backup', 'action' => 'on'])->assertNotFound();
         $this->change($this->admin, $this->member, ['key' => 'home', 'action' => 'give'])
@@ -201,18 +201,18 @@ class PortalAccessControlTest extends TestCase
     // A gift never reaches further than its giver does right now.
     public function test_changing_reach_reshapes_the_gift_and_narrows_what_was_given_from_it(): void
     {
-        $this->change($this->admin, $this->member, ['key' => 'manage.requests', 'action' => 'reach', 'reach' => 'own'])
+        $this->change($this->admin, $this->member, ['key' => 'manage.requests.leave', 'action' => 'reach', 'reach' => 'own'])
             ->assertStatus(422)->assertJsonPath('message', 'Switch the power on before choosing how far it reaches.');
 
-        $this->change($this->developer, $this->admin, ['key' => 'manage.requests', 'action' => 'reach', 'reach' => 'all'])->assertOk();
-        $this->change($this->admin, $this->member, ['key' => 'manage.requests', 'action' => 'on', 'reach' => 'own'])->assertOk();
-        $this->change($this->admin, $this->member, ['key' => 'manage.requests', 'action' => 'reach', 'reach' => 'all'])->assertOk();
-        $this->assertSame('all', $this->power($this->member, 'manage.requests')['reach'] ?? null);
+        $this->change($this->developer, $this->admin, ['key' => 'manage.requests.leave', 'action' => 'reach', 'reach' => 'all'])->assertOk();
+        $this->change($this->admin, $this->member, ['key' => 'manage.requests.leave', 'action' => 'on', 'reach' => 'own'])->assertOk();
+        $this->change($this->admin, $this->member, ['key' => 'manage.requests.leave', 'action' => 'reach', 'reach' => 'all'])->assertOk();
+        $this->assertSame('all', $this->power($this->member, 'manage.requests.leave')['reach'] ?? null);
 
-        $this->change($this->developer, $this->admin, ['key' => 'manage.requests', 'action' => 'reach', 'reach' => 'department'])->assertOk();
+        $this->change($this->developer, $this->admin, ['key' => 'manage.requests.leave', 'action' => 'reach', 'reach' => 'department'])->assertOk();
 
-        $this->assertSame('department', $this->power($this->member, 'manage.requests')['reach'] ?? null);
-        $this->assertSame('department', $this->rule($this->as($this->developer)->getJson("/api/development/portal/manage/access/{$this->admin->id}"), 'manage.requests')['reachWithoutYou']);
+        $this->assertSame('department', $this->power($this->member, 'manage.requests.leave')['reach'] ?? null);
+        $this->assertSame('department', $this->rule($this->as($this->developer)->getJson("/api/development/portal/manage/access/{$this->admin->id}"), 'manage.requests.leave')['reachWithoutYou']);
     }
 
     // Moving the member out of the admin's department ends the admin's hold over them.
@@ -282,6 +282,39 @@ class PortalAccessControlTest extends TestCase
         $this->assertNotNull($this->power($this->executive, 'manage.users.access.peers'));
         $this->assertNotNull($this->power($this->developer, 'manage.users.access.peers'));
         $this->assertNull($this->power($this->admin, 'manage.users.access.peers'));
+    }
+
+    // Developer tools come only with Developer mode: the sheet never offers them, and nobody, a developer included, can give or limit them.
+    public function test_developer_tools_can_never_be_given_or_limited(): void
+    {
+        $keys = array_column($this->as($this->developer)->getJson("/api/development/portal/manage/access/{$this->admin->id}")->assertOk()->json('data'), 'key');
+        $this->assertContains('manage.requests', $keys);
+        foreach ($keys as $key) {
+            $this->assertStringStartsNotWith('developer', $key);
+        }
+
+        foreach (['developer', 'developer.rules'] as $key) {
+            foreach (['on', 'off'] as $action) {
+                $this->change($this->developer, $this->admin, ['key' => $key, 'action' => $action])
+                    ->assertStatus(422)
+                    ->assertJsonPath('message', 'Developer tools come only with Developer mode, so nobody can give or limit them.');
+            }
+        }
+        $this->assertSame(0, DB::connection('portal')->table('access_grants')->count());
+        $this->assertSame(0, DB::connection('portal')->table('access_limits')->count());
+    }
+
+    // A gift of a developer tool written straight into the table still gives nothing, even from a developer.
+    public function test_a_stored_gift_of_a_developer_tool_counts_for_nobody(): void
+    {
+        DB::connection('portal')->table('access_grants')->insert([
+            ['employee_id' => $this->admin->id, 'permission_key' => 'developer', 'granted_by' => $this->developer->id],
+            ['employee_id' => $this->admin->id, 'permission_key' => 'developer.rules', 'granted_by' => $this->developer->id],
+        ]);
+
+        $this->assertNull($this->power($this->admin, 'developer'));
+        $this->assertNull($this->power($this->admin, 'developer.rules'));
+        $this->assertNotNull($this->power($this->developer, 'developer.rules'));
     }
 
     private function change(Employee $editor, Employee $target, array $body): TestResponse

@@ -32,14 +32,64 @@ class PortalRulesTest extends TestCase
         }
     }
 
-    // Switching a page over changes nothing on day one: every role starts with Home.
+    // Every role but executive starts with Home; executives leave a member's own pages out by design.
     public function test_every_role_holds_home_by_default(): void
     {
-        foreach (['member', 'admin', 'executive', 'developer'] as $role) {
+        foreach (['member', 'admin', 'developer'] as $role) {
             $this->assertTrue(
                 DB::connection('portal')->table('access_presets')->where('role', $role)->where('permission_key', 'home')->exists(),
                 "The {$role} preset is missing Home.",
             );
+        }
+    }
+
+    // Executives start with every department, less the developer tools, a member's own pages and the housekeeping pages.
+    public function test_executives_start_with_everything_but_the_left_out_pages_at_every_department(): void
+    {
+        $catalog = DB::connection('portal')->table('access_permissions')->get()->keyBy('permission_key');
+        $presets = DB::connection('portal')->table('access_presets')->where('role', 'executive')->get()->keyBy('permission_key');
+        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup'];
+
+        foreach ($catalog as $key => $rule) {
+            $isLeftOut = collect($leftOut)->contains(static fn (string $root): bool => $key === $root || str_starts_with((string) $key, $root.'.'));
+            if ($isLeftOut) {
+                $this->assertFalse($presets->has($key), "Executives should not start with {$key}.");
+
+                continue;
+            }
+            $this->assertTrue($presets->has($key), "Executives are missing {$key}.");
+            $this->assertSame((bool) $rule->supports_reach ? 'all' : null, $presets[$key]->reach, "{$key} should reach every department.");
+        }
+    }
+
+    // Only a developer in Developer mode holds the developer tools; no role starts with them and no gift reaches them.
+    public function test_the_developer_tools_are_for_developers_only(): void
+    {
+        $tiers = DB::connection('portal')->table('access_permissions')->where('permission_key', 'like', 'developer%')->pluck('min_tier', 'permission_key');
+
+        $this->assertCount(4, $tiers);
+        $this->assertSame(['developer'], $tiers->unique()->values()->all());
+        $this->assertFalse(DB::connection('portal')->table('access_presets')->whereIn('role', ['member', 'admin', 'executive'])->where('permission_key', 'like', 'developer%')->exists());
+    }
+
+    // Grouping rows scope nothing themselves, so they offer no reach: each page or kind under them has its own.
+    public function test_grouping_rows_carry_no_reach(): void
+    {
+        $reach = DB::connection('portal')->table('access_permissions')->whereIn('permission_key', ['manage', 'manage.requests', 'administration'])->pluck('supports_reach', 'permission_key');
+
+        $this->assertSame(['administration' => 0, 'manage' => 0, 'manage.requests' => 0], $reach->map(static fn ($value): int => (int) $value)->sortKeys()->all());
+    }
+
+    // Manage / Requests switches over without changing an admin's queue: every kind and decision, for their department.
+    public function test_admins_keep_every_manage_requests_rule_for_their_department(): void
+    {
+        $catalog = DB::connection('portal')->table('access_permissions')->where('permission_key', 'like', 'manage.requests%')->pluck('supports_reach', 'permission_key');
+        $presets = DB::connection('portal')->table('access_presets')->where('role', 'admin')->where('permission_key', 'like', 'manage.requests%')->pluck('reach', 'permission_key');
+
+        $this->assertCount(14, $catalog);
+        foreach ($catalog as $key => $supportsReach) {
+            $this->assertTrue($presets->has($key), "Admins are missing {$key}.");
+            $this->assertSame((bool) $supportsReach ? 'department' : null, $presets[$key]);
         }
     }
 
@@ -157,7 +207,7 @@ class PortalRulesTest extends TestCase
     public function test_every_role_holds_every_report_rule(): void
     {
         $keys = ['reports', 'reports.daily', 'reports.late', 'reports.submitted', 'reports.submitted.edit', 'reports.submitted.delete', 'reports.submitted.export'];
-        foreach (['member', 'admin', 'executive', 'developer'] as $role) {
+        foreach (['member', 'admin', 'developer'] as $role) {
             $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
             $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing a report rule.");
         }
@@ -194,7 +244,7 @@ class PortalRulesTest extends TestCase
             'requests', 'requests.own', 'requests.own.edit', 'requests.own.cancel', 'requests.own.export',
             'requests.leave', 'requests.overtime', 'requests.offset', 'requests.reimbursement',
         ];
-        foreach (['member', 'admin', 'executive', 'developer'] as $role) {
+        foreach (['member', 'admin', 'developer'] as $role) {
             $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
             $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing a request rule.");
         }
@@ -231,7 +281,7 @@ class PortalRulesTest extends TestCase
     public function test_every_role_holds_every_user_rule_and_logs_follow_theirs(): void
     {
         $keys = ['user', 'user.logs', 'user.logs.export', 'user.recycle', 'user.recycle.restore', 'user.recycle.export'];
-        foreach (['member', 'admin', 'executive', 'developer'] as $role) {
+        foreach (['member', 'admin', 'developer'] as $role) {
             $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
             $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing a User rule.");
         }

@@ -195,6 +195,12 @@ final class PortalAccessGraph
         return $employee !== null && ($minimum === null || self::TIER_RANK[$this->actingTier($employeeId)] >= (self::TIER_RANK[$minimum] ?? PHP_INT_MAX));
     }
 
+    // Held only in Developer mode, so no gift or limit can ever reach it, even from another developer.
+    public function isDeveloperOnly(string $key): bool
+    {
+        return ($this->catalog[$key]->min_tier ?? null) === self::TIER_DEVELOPER;
+    }
+
     /**
      * The person's rules, from their role and the people above them; with $withEquals, also from
      * the equals who may manage them. Equals are judged on these base rules alone.

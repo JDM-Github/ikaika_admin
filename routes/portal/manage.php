@@ -13,14 +13,15 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.admin', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/role', [UsersController::class, 'updateRole'])
         ->whereNumber('id');
-    Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
+    // Each kind on the queue and its Approve or reject follow their own rule inside PortalManageRequests.
+    Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests'])
         ->get('manage/requests', [RequestsController::class, 'index']);
-    Route::middleware(['portal.admin', 'throttle:portal-manage-requests-write'])
+    Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
-    Route::middleware(['portal.admin', 'throttle:portal-manage-requests-write'])
+    Route::middleware(['portal.rule:manage.requests.reimbursement.payout', 'throttle:portal-manage-requests-write'])
         ->post('manage/requests/reimbursement/{id}/payout-receipt', [RequestsController::class, 'storePayoutReceipt'])
         ->whereNumber('id');
-    Route::middleware(['portal.admin', 'throttle:portal-manage-reports'])
+    Route::middleware(['portal.rule:manage.reports', 'throttle:portal-manage-reports'])
         ->get('manage/reports', [ReportsController::class, 'index']);
     Route::middleware(['portal.admin', 'throttle:portal-manage-access'])
         ->get('manage/access/{id}', [AccessController::class, 'show'])

@@ -52,6 +52,78 @@ final class PortalRules
         return array_key_exists($key, self::active($employee, $request));
     }
 
+    // A reach rule's reach, or null when it is not held right now; a rule carrying none reads as own, the narrowest.
+    public static function reach(Employee $employee, Request $request, string $key): ?string
+    {
+        $rules = self::active($employee, $request);
+
+        return array_key_exists($key, $rules) ? ($rules[$key] ?? 'own') : null;
+    }
+
+    /**
+     * Whether a reach lets the actor work on the owner's record: all is everyone, department their
+     * own department, and own (or team, until the hierarchy is read) only themselves. Executives are
+     * managed from their own portal, so their rows are in nobody's reach; a record whose owner is
+     * unknown has no department, so only an all reach sees it.
+     */
+    public static function covers(?string $reach, Employee $actor, ?Employee $owner): bool
+    {
+        if ($reach === null || ($owner !== null && PortalRole::isExecutive($owner->role, $owner->role_level))) {
+            return false;
+        }
+        if ($reach === 'all') {
+            return true;
+        }
+        if ($owner === null) {
+            return false;
+        }
+        if ($reach === 'department') {
+            $department = PortalPreview::department($actor->department);
+
+            return $department !== '' && $department === PortalPreview::department($owner->department);
+        }
+
+        return (int) $owner->getKey() === (int) $actor->getKey();
+    }
+
+    /**
+     * Everyone who holds every one of the rules right now, as their role: nobody's Developer mode
+     * counts outside their own requests. Each with the reach of each rule, for alerts that go to
+     * whoever may act on a record.
+     *
+     * @param  list<string>  $keys
+     * @return list<array{employee: Employee, reaches: array<string, ?string>}>
+     */
+    public static function holders(array $keys): array
+    {
+        $graph = PortalAccessGraph::load();
+        $catalog = $graph->catalog();
+        $connection = DB::connection('portal');
+        $off = [];
+        foreach ($connection->table('access_toggles')->whereIn('permission_key', self::withAncestors($graph, $keys))->get() as $row) {
+            $off[(int) $row->employee_id][(string) $row->permission_key] = true;
+        }
+        $narrowed = [];
+        foreach ($connection->table('access_self_reach')->whereIn('permission_key', $keys)->get() as $row) {
+            $narrowed[(int) $row->employee_id][(string) $row->permission_key] = (string) $row->reach;
+        }
+
+        $holders = [];
+        foreach ($graph->employees() as $id => $employee) {
+            $effective = $graph->effective($id);
+            $reaches = [];
+            foreach ($keys as $key) {
+                if (! isset($effective[$key]) || ! self::isSwitchedOn($catalog, $off[$id] ?? [], $key)) {
+                    continue 2;
+                }
+                $reaches[$key] = self::narrower($effective[$key]['reach'], $narrowed[$id][$key] ?? null);
+            }
+            $holders[] = ['employee' => $employee, 'reaches' => $reaches];
+        }
+
+        return $holders;
+    }
+
     /**
      * Refuses unless they hold at least one of the rules: a plain 403, not a security alert, since
      * switching a power off yourself lands here too.
@@ -98,6 +170,20 @@ final class PortalRules
             DB::connection('portal')->table('access_toggles')->where('employee_id', $employee->getKey())->pluck('permission_key')->all(),
             true,
         );
+    }
+
+    /**
+     * @param  list<string>  $keys
+     * @return list<string>
+     */
+    private static function withAncestors(PortalAccessGraph $graph, array $keys): array
+    {
+        $all = [];
+        foreach ($keys as $key) {
+            array_push($all, ...[...$graph->ancestors($key), $key]);
+        }
+
+        return array_values(array_unique($all));
     }
 
     /**
