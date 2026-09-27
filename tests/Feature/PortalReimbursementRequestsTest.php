@@ -28,6 +28,8 @@ class PortalReimbursementRequestsTest extends TestCase
     {
         parent::setUp();
         Cache::flush();
+        // Envelope charging is PortalBudgetEnvelopesTest's; with the tracker off an approval needs no envelope.
+        config(['products.catalog.transaction-tracker.enabled' => false]);
     }
 
     public function test_catalog_lists_reimbursement_under_portal_sections(): void

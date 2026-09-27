@@ -131,6 +131,8 @@ final class PortalViewProjects
     {
         $query = $this->connection()
             ->table('projects')
+            // A deleted project is in the Recycle Bin until somebody restores or purges it.
+            ->whereNull('projects.deleted_at')
             ->leftJoin('employees_projects as membership', function ($join) use ($employeeId): void {
                 $join->on('membership.project_id', '=', 'projects.id')
                     ->where('membership.employee_id', '=', $employeeId);

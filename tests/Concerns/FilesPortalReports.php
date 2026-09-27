@@ -16,7 +16,12 @@ trait FilesPortalReports
     protected function freeReportDate(Employee $employee, int $daysAgo = 0): string
     {
         for ($offset = $daysAgo; $offset < $daysAgo + 400; $offset++) {
-            $candidate = Carbon::today()->subDays($offset)->toDateString();
+            $day = Carbon::today()->subDays($offset);
+            // Reports are never filed for a Saturday or a Sunday.
+            if ($day->isWeekend()) {
+                continue;
+            }
+            $candidate = $day->toDateString();
             $taken = DB::connection('portal')->table('user_reports')
                 ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
                 ->where('employees_user_reports.employee_id', $employee->getKey())

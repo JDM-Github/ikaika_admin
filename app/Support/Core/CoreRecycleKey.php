@@ -31,4 +31,14 @@ final class CoreRecycleKey
     {
         return $employeeId.':'.$date.'-reimbursement-'.$claimId;
     }
+
+    /**
+     * Keyed on the project alone, not the actor. A project belongs to the company rather than to
+     * whoever deleted it, and the unique key on (product, recycle_key) is what stops the same
+     * project sitting in the bin twice after two people delete and restore it in turn.
+     */
+    public static function project(int $projectId): string
+    {
+        return 'project-'.$projectId;
+    }
 }

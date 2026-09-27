@@ -30,10 +30,13 @@ graphify-out/
 msal_test/
 *.private.*
 __pycache__/
+*.pyc
 # Generated exports: raw Airtable JSON, downloaded bank certificates, SSS/PhilHealth/TIN
-# scans and employee photos, plus the SQL built from them. Never commit any of it.
+# scans and employee photos, plus the SQL built from them. Never commit any of it. The
+# Airtable token authenticates to the live base.
 migrations/outputs/
 migrations/export_*/
 migrations/*.sql
-migrations/.token.private.txt
+/migrations/.token*
+/migrations/generate/__pycache__/
 graphify-out/

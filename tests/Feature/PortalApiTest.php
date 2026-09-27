@@ -4,11 +4,21 @@ namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
 use App\Support\ApiPath;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
 class PortalApiTest extends TestCase
 {
+    use DatabaseTransactions;
+
+    /**
+     * The sign-in below writes a log row, which must not stay in the real portal database.
+     *
+     * @var list<string>
+     */
+    protected array $connectionsToTransact = ['portal'];
+
     public function test_playground_loads(): void
     {
         $this->get('/')->assertOk();

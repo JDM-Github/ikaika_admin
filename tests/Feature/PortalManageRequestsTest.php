@@ -38,6 +38,8 @@ class PortalManageRequestsTest extends TestCase
         foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'access_self_reach', 'developer_modes'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
+        // Envelope charging is PortalBudgetEnvelopesTest's; with the tracker off an approval needs no envelope.
+        config(['products.catalog.transaction-tracker.enabled' => false]);
     }
 
     public function test_catalog_lists_manage_requests_under_portal_sections(): void
@@ -777,6 +779,38 @@ class PortalManageRequestsTest extends TestCase
         $this->assertSame('Approved', DB::connection('portal')->table('reimbursements')->where('id', $claim)->value('status'));
     }
 
+    // Late reports follow manage.requests.late like every other kind: its reach, and its own Approve or reject.
+    public function test_late_reports_follow_their_own_rule_and_reach(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $mine = $this->insertLateLine($inside, $date);
+        $theirs = $this->insertLateLine($outside, $date);
+        $token = $this->loginToken($this->departmentAdmin());
+        $decide = fn (Employee $member, string $status): mixed => $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => $member->id.':'.$date, 'kind' => 'late', 'status' => $status, 'approverRemarks' => 'Checked.']],
+        ]);
+
+        $ids = $this->withToken($token)->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date)->assertOk()->json('lateReports.*.id');
+        $this->assertContains($inside->id.':'.$date, $ids);
+        $this->assertNotContains($outside->id.':'.$date, $ids);
+
+        $decide($outside, 'approved')->assertNotFound()->assertJsonPath('message', 'That late report is not on the queue.');
+        $this->assertSame('Pending', DB::connection('portal')->table('user_reports')->where('id', $theirs)->value('late_submission_approval'));
+
+        $decide($inside, 'approved')->assertOk()->assertJsonPath('saved', 1);
+        $this->assertSame('Approved', DB::connection('portal')->table('user_reports')->where('id', $mine)->value('late_submission_approval'));
+        // Ledgered apart from reports.submitted, which the sync sends as the filing itself.
+        $action = Action::query()->where('resource', 'reports.late')->where('record_id', $inside->id.':'.$date)->first();
+        $this->assertNotNull($action);
+        $this->assertSame('portal.user_reports', $action->database_target);
+        $this->assertSame([$mine], $action->parameters['parameters']['userReportIds']);
+
+        $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => 'manage.requests.late.decide', 'on' => false])->assertOk();
+        $decide($inside, 'rejected')->assertForbidden()->assertJsonPath('message', 'You cannot approve or reject late reports.');
+        $this->assertSame('Approved', DB::connection('portal')->table('user_reports')->where('id', $mine)->value('late_submission_approval'));
+    }
+
     // Switching a kind off takes its list away and every decision on it with it.
     public function test_switching_a_kind_off_takes_its_list_away(): void
     {
@@ -1177,6 +1211,26 @@ class PortalManageRequestsTest extends TestCase
             is_string($actor->first_name) ? $actor->first_name : null,
             is_string($actor->last_name) ? $actor->last_name : null,
         );
+    }
+
+    private function insertLateLine(Employee $member, string $date): int
+    {
+        $id = (int) DB::connection('portal')->table('user_reports')->insertGetId([
+            'report_date' => $date,
+            'hours_rendered' => 8,
+            'change_in_elements' => 0,
+            'remarks' => 'Filed late',
+            'late_submission' => 'Yes',
+            'late_submission_approval' => 'Pending',
+            'approval' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_user_reports')->insert([
+            'employee_id' => $member->getKey(),
+            'user_report_id' => $id,
+        ]);
+
+        return $id;
     }
 
     private function insertFlaggedLine(Employee $member, string $date, bool $isFlag = true): int

@@ -87,10 +87,53 @@ class PortalInboxTest extends TestCase
         $this->assertIsArray($row);
         $this->assertSame('Request approved', $row['title']);
         $this->assertSame('/requests/user-requests', $row['linkPath']);
+        // The record the notice is about, and nothing else out of its payload.
+        $this->assertSame('41', $row['recordId']);
         $this->assertFalse($row['isRead']);
         $this->assertArrayNotHasKey('payload', $row);
         $this->assertArrayNotHasKey('token', $row);
         $this->assertDoesNotMatchRegularExpression('/Someone else should not see this/', json_encode($response->json('data')));
+    }
+
+    public function test_the_unread_list_names_each_notice_its_type_record_and_link(): void
+    {
+        $actor = $this->activeMember();
+        $other = $this->otherActiveMember($actor);
+        $audit = app(PortalAudit::class);
+        $unreadId = $audit->notify(
+            (int) $actor->getKey(),
+            'reports.late.filed',
+            'New late report',
+            'Someone filed a late report.',
+            '/manage/manage-requests',
+            'Open queue',
+            ['recordId' => '12:2026-09-01'],
+            (int) $other->getKey(),
+        );
+        $readId = $audit->notify(
+            (int) $actor->getKey(),
+            'requests.leave.filed',
+            'New leave request',
+            'Someone filed leave.',
+            '/manage/manage-requests',
+            'Open queue',
+            ['recordId' => '77'],
+            (int) $other->getKey(),
+        );
+        $audit->markRead($readId, (int) $actor->getKey());
+
+        $rows = collect($this->withToken($this->loginToken($actor))
+            ->getJson('/api/development/portal/user/notifications/unread')
+            ->assertOk()
+            ->json('data'))->keyBy('id');
+
+        $this->assertSame([
+            'id' => (string) $unreadId,
+            'type' => 'reports.late.filed',
+            'recordId' => '12:2026-09-01',
+            'linkPath' => '/manage/manage-requests',
+        ], $rows[(string) $unreadId]);
+        $this->assertArrayNotHasKey((string) $readId, $rows->all());
     }
 
     public function test_the_inbox_returns_five_rows_per_page(): void

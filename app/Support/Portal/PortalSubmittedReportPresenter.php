@@ -3,7 +3,8 @@
 namespace App\Support\Portal;
 
 /**
- * Skinny Submitted Reports payload. Approval, bank, and identity fields never leave this class.
+ * Skinny Submitted Reports payload. Bank and identity fields never leave this class. The late-filing
+ * approval leaves only on the late report payloads, where the decision is what is being read.
  */
 final class PortalSubmittedReportPresenter
 {
@@ -17,6 +18,12 @@ final class PortalSubmittedReportPresenter
 
     public const OCCUPANCY_OVERTIME = 'overtime';
 
+    /**
+     * What late_submission holds on a report filed on time: Airtable wrote NO, the portal leaves it
+     * empty. Public so the approval queue narrows its query by the same list kind() reads.
+     */
+    public const ON_TIME_VALUES = ['', 'no', 'n', 'false', '0', 'on time', 'ontime', 'daily'];
+
     private const UNASSIGNED = 'Unassigned';
 
     /**
@@ -25,7 +32,7 @@ final class PortalSubmittedReportPresenter
     public static function kind(mixed $lateSubmission): string
     {
         $value = strtolower(trim((string) $lateSubmission));
-        if ($value === '' || in_array($value, ['no', 'n', 'false', '0', 'on time', 'ontime', 'daily'], true)) {
+        if (in_array($value, self::ON_TIME_VALUES, true)) {
             return self::KIND_DAILY;
         }
 
@@ -209,6 +216,49 @@ final class PortalSubmittedReportPresenter
             'kind' => $kind,
             'submittedOn' => $submittedOn,
             'reason' => $reason,
+            'entries' => $entries,
+        ];
+    }
+
+    /**
+     * A late report as the approval queue and its filer's own list read it: the report, the day it
+     * was filed (createdOn, named as the request payloads name it), and where its approval stands. memberName is null on the filer's own
+     * list, the convention every own list follows.
+     *
+     * @param  list<array<string, mixed>>  $entries
+     * @return array{
+     *     id: string,
+     *     referenceCode: string,
+     *     memberName: ?string,
+     *     createdOn: string,
+     *     submittedOn: string,
+     *     reason: ?string,
+     *     status: string,
+     *     approverRemarks: ?string,
+     *     entries: list<array<string, mixed>>
+     * }
+     */
+    public static function lateReport(
+        string $id,
+        string $referenceCode,
+        ?string $memberName,
+        string $createdOn,
+        string $submittedOn,
+        ?string $reason,
+        mixed $approval,
+        ?string $approverRemarks,
+        array $entries,
+    ): array {
+        return [
+            'id' => $id,
+            'referenceCode' => $referenceCode,
+            'memberName' => $memberName,
+            'createdOn' => $createdOn,
+            'submittedOn' => $submittedOn,
+            'reason' => $reason,
+            // Never decided reads as pending: a late filing waits on an approver until one answers.
+            'status' => self::requestStatus($approval),
+            'approverRemarks' => $approverRemarks,
             'entries' => $entries,
         ];
     }

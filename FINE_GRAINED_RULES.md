@@ -217,6 +217,10 @@ Done so far (display only, nothing enforced):
     department. Sync to Airtable stays a power of its own (Nathaniel's personal default); the portal
     button is shown only to holders but still says the sync is not implemented, since the sync runs
     as `php artisan portal:airtable-sync`. Tests: `PortalAllActionsRulesTest.php`.
+  - **Late Reports** (2026-09-28, from the nj merge): a Manage / Requests kind like the others,
+    `manage.requests.late` (reach) and its `.decide`; the queue, decisions and late-filing alerts
+    follow that reach. A decision is ledgered as `reports.late`, which the Airtable sync leaves
+    unmapped for now. Tests: `PortalManageRequestsTest`, `PortalLateReportsTest`.
   - Sub-powers (Export, Edit, Delete) are wired with their page from now on, not later.
 
 Next: the next page to enforce, one at a time as the user names them (Missing Reports stays
@@ -410,6 +414,8 @@ Descriptions (what the Access page shows on each row) live in the SQL.
       - `manage.requests.reimbursement.payout` Attach payout receipts — AED
     - `manage.requests.flagged` Flag Reports [R] — AED
       - `manage.requests.flagged.decide` Approve or reject — AED
+    - `manage.requests.late` Late Reports [R] — AED
+      - `manage.requests.late.decide` Approve or reject — AED
     - `manage.requests.notified` Request alerts — AED
     - `manage.requests.export` Export — AED
   - `manage.reports` Reports [R] — AED

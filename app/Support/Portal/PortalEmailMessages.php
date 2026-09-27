@@ -116,6 +116,23 @@ final class PortalEmailMessages
     }
 
     /**
+     * Where the recipients' inbox notice opens, if anywhere: a report reminder opens the form the
+     * missing report is filed on. Only a page every member can reach is accepted.
+     */
+    private function validatedLinkPath(Request $request): ?string
+    {
+        $value = trim((string) $request->input('linkPath', ''));
+        if ($value === '') {
+            return null;
+        }
+        if (! in_array($value, PortalShellPath::EMAIL_LINKS, true)) {
+            abort(422, 'That is not a page an email notice can open.');
+        }
+
+        return $value;
+    }
+
+    /**
      * Send one email to the chosen audience, then answer with the row that records it.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
@@ -135,6 +152,7 @@ final class PortalEmailMessages
         }
         $filter = $this->audience->validatedFilter($audience, $request);
         $footerId = $this->validatedFooterId($request);
+        $linkPath = $this->validatedLinkPath($request);
         $footer = $footerId === null ? null : $this->blocks->footer($footerId);
         $footerBody = $footer === null ? null : trim((string) $footer->body);
 
@@ -184,8 +202,8 @@ final class PortalEmailMessages
                 PortalNotificationType::EMAIL_SENT,
                 'New email',
                 PortalActivityCopy::notifyEmailArrived($subject, PortalActivityCopy::actorName($actor, $request, true)),
-                null,
-                null,
+                $linkPath,
+                $linkPath === null ? null : 'Open',
                 ['emailId' => (string) $messageId, 'category' => $category],
                 $employeeId,
             );

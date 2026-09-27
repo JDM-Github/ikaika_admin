@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Portal\Manage\AccessController;
+use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
@@ -20,6 +21,14 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // Each kind on the queue and its Approve or reject follow their own rule inside PortalManageRequests.
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests'])
         ->get('manage/requests', [RequestsController::class, 'index']);
+    // Read by the reimbursement queue and the Budget Tracker, so they keep the admin gate until the
+    // tracker has rules of its own.
+    Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
+        ->get('manage/budget-envelopes', [BudgetEnvelopesController::class, 'index']);
+    Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
+        ->get('manage/budget-transactions', [BudgetEnvelopesController::class, 'transactions']);
+    Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
+        ->get('manage/budget-codes', [BudgetEnvelopesController::class, 'codes']);
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
     Route::middleware(['portal.rule:manage.requests.reimbursement.payout', 'throttle:portal-manage-requests-write'])

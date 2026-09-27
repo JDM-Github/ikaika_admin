@@ -18,6 +18,8 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
             Route::get('reports/submitted/days', [SubmittedController::class, 'days']);
             Route::get('reports/submitted', [SubmittedController::class, 'index']);
         });
+        // User Requests' Late tab: their own late reports, read by that page or the Late Report form.
+        Route::get('reports/late', [SubmittedController::class, 'late'])->middleware('portal.rule:requests.own|reports.late');
         // Same data source (PortalSubmittedReports), same throttle -- a filtered read, not a
         // separate resource.
         Route::get('reports/flagged', [FlaggedController::class, 'index']);

@@ -212,6 +212,7 @@ class PortalEmailTest extends TestCase
         Mail::fake();
         $headers = $this->authHeaders();
         $expected = $this->reachableCount();
+        $noticesBefore = $this->emailNotices();
 
         $sent = $this->postJson(self::BASE.'/administration/emails', [
             'category' => 'notice',
@@ -235,13 +236,11 @@ class PortalEmailTest extends TestCase
         $this->assertSame(0, (int) $row->failed_count);
         $this->assertNotNull($row->date_sent);
 
-        $this->assertSame(
-            $expected,
-            PortalNotification::query()->where('type', PortalNotificationType::EMAIL_SENT)->count(),
-        );
+        $this->assertSame($noticesBefore + $expected, $this->emailNotices());
         $log = PortalLog::query()
             ->where('resource', 'administration.email')
             ->where('action', 'POST')
+            ->latest('id')
             ->first();
         $this->assertNotNull($log);
         $this->assertIsArray($log->payload);
@@ -252,6 +251,40 @@ class PortalEmailTest extends TestCase
         $this->assertSame($expected, $log->payload['sent']);
         $this->assertSame(0, $log->payload['failed']);
         $this->assertArrayNotHasKey('body', $log->payload);
+    }
+
+    // A report reminder's notice opens the form the missing report is filed on.
+    public function test_a_notice_can_open_a_page_every_member_can_reach_and_nothing_else(): void
+    {
+        Mail::fake();
+        $headers = $this->authHeaders();
+        $member = $this->member();
+
+        $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Reminder: report not yet filed',
+            'body' => 'Please file it.',
+            'audience' => 'members',
+            'memberIds' => [(string) $member->getKey()],
+            'linkPath' => '/reports/late-report',
+        ], $headers)->assertCreated();
+
+        $notice = PortalNotification::query()
+            ->where('employee_id', $member->getKey())
+            ->where('type', PortalNotificationType::EMAIL_SENT)
+            ->latest('id')
+            ->first();
+        $this->assertNotNull($notice);
+        $this->assertSame('/reports/late-report', $notice->link_path);
+
+        $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Look here',
+            'body' => 'Go.',
+            'audience' => 'members',
+            'memberIds' => [(string) $member->getKey()],
+            'linkPath' => '/manage/user-management',
+        ], $headers)->assertStatus(422);
     }
 
     public function test_it_sends_to_a_department_and_keeps_the_footer_it_used(): void
@@ -312,6 +345,7 @@ class PortalEmailTest extends TestCase
     {
         Mail::fake();
         $headers = $this->authHeaders();
+        $countsBefore = $this->getJson(self::BASE.'/administration/emails', $headers)->json('counts');
 
         $this->postJson(self::BASE.'/administration/emails', [
             'category' => 'other',
@@ -322,14 +356,15 @@ class PortalEmailTest extends TestCase
 
         $listed = $this->getJson(self::BASE.'/administration/emails', $headers)
             ->assertOk()
-            ->assertJsonPath('counts.total', 1)
-            ->assertJsonPath('counts.sent', 1)
+            ->assertJsonPath('counts.total', $countsBefore['total'] + 1)
+            ->assertJsonPath('counts.sent', $countsBefore['sent'] + 1)
             ->json('data');
         $this->assertIsArray($listed);
-        $this->assertArrayNotHasKey('body', $listed[0]);
-        $this->assertSame('Parking reminder', $listed[0]['subject']);
+        $row = collect($listed)->firstWhere('subject', 'Parking reminder');
+        $this->assertIsArray($row);
+        $this->assertArrayNotHasKey('body', $row);
 
-        $this->getJson(self::BASE.'/administration/emails/'.$listed[0]['id'], $headers)
+        $this->getJson(self::BASE.'/administration/emails/'.$row['id'], $headers)
             ->assertOk()
             ->assertJsonPath('data.body', 'Visitors park at the rear.')
             ->assertJsonPath('data.failures', []);
@@ -346,6 +381,7 @@ class PortalEmailTest extends TestCase
         $this->assertNotNull($unreachable);
         $address = trim((string) $unreachable->email);
         $memberId = (int) $unreachable->getKey();
+        $noticesBefore = $this->emailNotices();
 
         Mail::shouldReceive('to')->andReturnUsing(function ($to) use ($address) {
             $pending = Mockery::mock();
@@ -383,15 +419,15 @@ class PortalEmailTest extends TestCase
         $this->assertIsString($stored);
         $this->assertStringNotContainsString($address, $stored);
         $this->assertStringNotContainsString('@', $stored);
-        $this->assertSame(0, PortalNotification::query()
-            ->where('type', PortalNotificationType::EMAIL_SENT)
-            ->count());
+        // Nobody was reached, so nobody was told an email arrived.
+        $this->assertSame($noticesBefore, $this->emailNotices());
     }
 
     public function test_it_refuses_an_audience_it_cannot_reach_or_does_not_offer(): void
     {
         Mail::fake();
         $headers = $this->authHeaders();
+        $messagesBefore = EmailMessage::query()->count();
 
         $this->postJson(self::BASE.'/administration/emails', [
             'category' => 'notice',
@@ -440,7 +476,12 @@ class PortalEmailTest extends TestCase
         ], $headers)->assertStatus(422);
 
         Mail::assertNothingSent();
-        $this->assertSame(0, EmailMessage::query()->count());
+        $this->assertSame($messagesBefore, EmailMessage::query()->count());
+    }
+
+    private function emailNotices(): int
+    {
+        return PortalNotification::query()->where('type', PortalNotificationType::EMAIL_SENT)->count();
     }
 
     private function reachableCount(?string $audience = null, ?string $value = null): int
