@@ -183,7 +183,7 @@ final class PortalEmailMessages
                 $reached,
                 PortalNotificationType::EMAIL_SENT,
                 'New email',
-                PortalActivityCopy::notifyEmailArrived($subject, PortalActivityCopy::displayName($actor)),
+                PortalActivityCopy::notifyEmailArrived($subject, PortalActivityCopy::actorName($actor, $request, true)),
                 null,
                 null,
                 ['emailId' => (string) $messageId, 'category' => $category],

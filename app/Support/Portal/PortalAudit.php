@@ -46,6 +46,7 @@ final class PortalAudit
         ?string $locationSource = null,
         ?float $locationLat = null,
         ?float $locationLng = null,
+        bool $asDeveloper = false,
     ): int {
         $action = trim($action);
         $resource = trim($resource);
@@ -65,6 +66,7 @@ final class PortalAudit
         $log->location_source = $locationSource;
         $log->location_lat = $locationLat;
         $log->location_lng = $locationLng;
+        $log->as_developer = $asDeveloper;
         $log->payload = CorePayloadFilter::clean($payload);
         $log->created_at = Carbon::now();
         $log->save();
@@ -84,6 +86,7 @@ final class PortalAudit
         ?string $recordId = null,
         ?Request $request = null,
         array $payload = [],
+        ?bool $asDeveloper = null,
     ): int {
         $location = $this->locationResolver->resolve($request);
 
@@ -100,6 +103,8 @@ final class PortalAudit
             $location['source'],
             $location['lat'],
             $location['lng'],
+            // Only the signed-in person's own row can be in Developer mode: another's session never matches.
+            $asDeveloper ?? ($request !== null && PortalDeveloperMode::isOn($owner, $request) && PortalRules::isDevelopersAct($request)),
         );
     }
 
@@ -119,7 +124,7 @@ final class PortalAudit
         array $payload = [],
     ): void {
         $verb = $approved ? 'approved' : 'rejected';
-        $approverName = PortalActivityCopy::displayName($approver);
+        $approverName = PortalActivityCopy::actorName($approver, $request);
         $requesterName = PortalActivityCopy::displayName($requester);
 
         $this->record(

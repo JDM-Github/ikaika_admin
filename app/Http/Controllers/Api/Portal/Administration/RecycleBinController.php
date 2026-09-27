@@ -44,7 +44,7 @@ class RecycleBinController extends Controller
         }
 
         $row = $this->recycleBin->itemForActor($actor, $id, $request);
-        $this->recycleBin->requireOwn($actor, $row, $request, 'user.recycle.restore');
+        $this->recycleBin->requireRestorable($actor, $row, $request);
         $this->reports->restoreFromBin($actor, $row, $request);
 
         return response()->json(null, 204);

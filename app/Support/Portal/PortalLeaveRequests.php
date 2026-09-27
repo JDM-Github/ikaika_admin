@@ -186,7 +186,7 @@ final class PortalLeaveRequests
             PortalNotificationType::REQUEST_FILED_LEAVE,
             'New leave request',
             PortalActivityCopy::notifyFiled(
-                PortalActivityCopy::displayName($actor),
+                PortalActivityCopy::actorName($actor, $request, true),
                 'leave request',
                 $dates[0] ?? '',
                 $dates[array_key_last($dates)] ?? '',
@@ -337,7 +337,7 @@ final class PortalLeaveRequests
             'manage.requests.leave',
             PortalNotificationType::REQUEST_CANCELLED_LEAVE,
             'Leave request cancelled',
-            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'leave request', $day),
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::actorName($actor, $request, true), 'leave request', $day),
             PortalShellPath::MANAGE_REQUESTS,
             'Open queue',
             ['recordId' => (string) (int) $row->id],

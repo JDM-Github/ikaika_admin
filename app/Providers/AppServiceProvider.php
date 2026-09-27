@@ -4,6 +4,8 @@ namespace App\Providers;
 
 use App\Modules\Portal\Models\Employee;
 use App\Support\ApiPath;
+use App\Support\Core\CoreDeveloperActs;
+use App\Support\Portal\PortalCoreDeveloperActs;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -16,7 +18,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(CoreDeveloperActs::class, PortalCoreDeveloperActs::class);
     }
 
     /**

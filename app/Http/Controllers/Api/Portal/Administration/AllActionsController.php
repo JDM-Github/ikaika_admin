@@ -17,8 +17,8 @@ class AllActionsController extends Controller
         return response()->json($this->actions->listAll($request));
     }
 
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
-        return response()->json(PortalAllActionsPresenter::withObjectPayload($this->actions->showAll($id)));
+        return response()->json(PortalAllActionsPresenter::withObjectPayload($this->actions->showAll($id, $request)));
     }
 }

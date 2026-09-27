@@ -27,7 +27,7 @@ class PortalAccessTest extends TestCase
         Mail::fake();
 
         // Presets alone: grants made while testing by hand must not change what a role starts with.
-        foreach (['access_grants', 'access_limits', 'access_toggles'] as $table) {
+        foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
     }
@@ -128,10 +128,12 @@ class PortalAccessTest extends TestCase
         $this->assertSame([], $orphans);
     }
 
-    public function test_switching_a_parent_off_turns_its_children_off_and_is_logged_once(): void
+    // Their own choice about powers they already hold, so it is never logged.
+    public function test_switching_a_parent_off_turns_its_children_off_and_is_not_logged(): void
     {
         $member = $this->member();
         $token = $this->loginToken($member);
+        $startedAt = now()->subSecond();
 
         $off = $this->withToken($token)
             ->patchJson('/api/development/portal/access/switches', ['key' => 'reports', 'on' => false])
@@ -142,38 +144,12 @@ class PortalAccessTest extends TestCase
         $this->assertTrue($this->rule($off, 'reports.submitted.edit')['isSwitchedOn']);
         $this->assertFalse($this->rule($off, 'reports.submitted.edit')['isActive']);
         $this->assertTrue($this->rule($off, 'requests')['isActive']);
-        $log = PortalLog::query()->where('employee_id', $member->getKey())->where('resource', 'access.switches')->sole();
-        $this->assertSame('{UserName|You} switched off Reports', $log->message);
-
-        $this->withToken($token)
-            ->patchJson('/api/development/portal/access/switches', ['key' => 'reports', 'on' => false])
-            ->assertOk();
-        $this->assertSame(1, PortalLog::query()->where('employee_id', $member->getKey())->where('resource', 'access.switches')->count());
 
         $on = $this->withToken($token)
             ->patchJson('/api/development/portal/access/switches', ['key' => 'reports', 'on' => true])
             ->assertOk();
         $this->assertTrue($this->rule($on, 'reports.submitted.edit')['isActive']);
-        $this->assertSame(
-            '{UserName|You} switched on Reports',
-            PortalLog::query()->where('employee_id', $member->getKey())->where('resource', 'access.switches')->latest('id')->value('message'),
-        );
-    }
-
-    // Labels repeat across branches, so the log names the whole path to the switch.
-    public function test_a_nested_switch_is_logged_with_its_full_path(): void
-    {
-        $admin = $this->admin();
-
-        $this->withToken($this->loginToken($admin))
-            ->patchJson('/api/development/portal/access/switches', ['key' => 'manage.requests.leave.decide', 'on' => false])
-            ->assertOk();
-
-        $this->assertSame(
-            '{UserName|You} switched off Manage / Requests / Leave Requests / Approve or reject',
-            // The newest row: a real account may already have switches of its own in the log.
-            PortalLog::query()->where('employee_id', $admin->getKey())->where('resource', 'access.switches')->orderByDesc('id')->value('message'),
-        );
+        $this->assertSame(0, PortalLog::query()->where('employee_id', $member->getKey())->where('created_at', '>=', $startedAt)->where('resource', 'like', 'access.%')->count());
     }
 
     public function test_a_switch_is_refused_for_a_power_not_held_or_always_on(): void

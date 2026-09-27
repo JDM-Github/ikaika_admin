@@ -288,14 +288,14 @@ final class PortalManageRequests
             $owner,
             PortalLogAction::PATCH,
             $resource,
-            PortalActivityCopy::YOUR.' '.$subject.' has been '.$verb.' by '.PortalActivityCopy::displayName($actor),
+            PortalActivityCopy::YOUR.' '.$subject.' has been '.$verb.' by '.PortalActivityCopy::actorName($actor, $request),
             $applied['recordId'],
             $request,
             [
                 'kind' => $applied['kind'],
                 'requestedFor' => $applied['date'],
                 'status' => $applied['status'],
-                'decidedBy' => PortalActivityCopy::displayName($actor),
+                'decidedBy' => PortalActivityCopy::actorName($actor, $request, true),
             ],
         );
         $this->audit->notifyIfOther(
@@ -307,7 +307,7 @@ final class PortalManageRequests
                 'rejected' => 'Request rejected',
                 default => 'Request updated',
             },
-            PortalActivityCopy::notifyDecided($kind, $applied['date'], $verb, PortalActivityCopy::displayName($actor)),
+            PortalActivityCopy::notifyDecided($kind, $applied['date'], $verb, PortalActivityCopy::actorName($actor, $request)),
             PortalShellPath::USER_REQUESTS,
             'Open requests',
             ['recordId' => $applied['recordId']],

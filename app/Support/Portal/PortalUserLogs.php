@@ -36,6 +36,8 @@ final class PortalUserLogs
         'employee' => ['last_name', 'first_name', 'created_at', 'id'],
     ];
 
+    private const ALL_RULE = 'administration.logs';
+
     public function __construct(private readonly PortalTimezone $timezone) {}
 
     /**
@@ -109,7 +111,9 @@ final class PortalUserLogs
     }
 
     /**
-     * Administration / All Logs: every member's stream. Admin or Executive only.
+     * Administration / All Logs: the streams administration.logs reaches. A developer's rows show only
+     * to someone holding See developers' activity, and their Developer mode rows read "a developer"
+     * to anyone not in Developer mode.
      *
      * @return array{
      *     section: string,
@@ -144,9 +148,10 @@ final class PortalUserLogs
         $dir = strtolower(trim((string) $request->query('dir', 'desc'))) === 'asc' ? 'asc' : 'desc';
         $timezone = $this->timezone->zone();
         $timezoneKey = md5($timezone->getName());
-        $visible = $this->visibleEmployeeIds($request);
+        $visible = $this->visible($request);
+        $viewerIsDeveloper = $this->viewerIsDeveloper($request);
         $version = (int) Cache::get(PortalAudit::LOG_CACHE_VERSION_KEY, 1);
-        $key = 'portal:administration:all-logs:'.$version.':'.$timezoneKey.':'.md5(json_encode($visible) ?: '*').':'.$page.':'.$perPage
+        $key = 'portal:administration:all-logs:'.$version.':'.($viewerIsDeveloper ? 'dev' : 'role').':'.$timezoneKey.':'.md5(json_encode($visible) ?: '*').':'.$page.':'.$perPage
             .':'.md5($search).':'.($action ?? 'all').':'.($resource ?? 'all').':'.md5($ipAddress ?? 'all')
             .':'.($year ?? 'all').':'.($month ?? 'all').':'.($day ?? 'all').':'.($employeeId ?? 'all')
             .':'.$sort.':'.$dir;
@@ -164,10 +169,12 @@ final class PortalUserLogs
             $search,
             $sort,
             $timezone,
+            $viewerIsDeveloper,
             $visible,
             $year,
         ): array {
             return $this->buildAll(
+                $viewerIsDeveloper,
                 $visible,
                 $action,
                 $resource,
@@ -223,14 +230,17 @@ final class PortalUserLogs
      */
     public function showAll(int $id, Request $request): array
     {
-        $visible = $this->visibleEmployeeIds($request);
-        if ($visible !== null && ! in_array((int) PortalLog::query()->whereKey($id)->value('employee_id'), $visible, true)) {
+        $visible = $this->visible($request);
+        $query = PortalLog::query()->whereKey($id);
+        PortalVisibleActors::apply($query, $visible, 'employee_id');
+        if (! $query->exists()) {
             abort(404, 'That log entry was not found.');
         }
+        $viewerIsDeveloper = $this->viewerIsDeveloper($request);
         $version = (int) Cache::get(PortalAudit::LOG_CACHE_VERSION_KEY, 1);
-        $key = 'portal:administration:all-logs:detail:'.$version.':'.$id;
+        $key = 'portal:administration:all-logs:detail:'.$version.':'.($viewerIsDeveloper ? 'dev' : 'role').':'.$id;
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($id): array {
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($id, $viewerIsDeveloper): array {
             $row = PortalLog::query()
                 ->select(array_map(static fn (string $column): string => 'logs.'.$column, PortalUserLogPresenter::columns()))
                 ->addSelect(['employees.first_name', 'employees.last_name', 'logs.payload'])
@@ -244,7 +254,7 @@ final class PortalUserLogs
             return [
                 'section' => 'administration',
                 'resource' => 'all-logs',
-                'data' => PortalUserLogPresenter::detail($row, $this->timezone->zone()),
+                'data' => PortalUserLogPresenter::detail($row, $this->timezone->zone(), $viewerIsDeveloper),
             ];
         });
     }
@@ -268,7 +278,8 @@ final class PortalUserLogs
      * }
      */
     private function buildAll(
-        ?array $visible,
+        bool $viewerIsDeveloper,
+        array $visible,
         ?string $action,
         ?string $resource,
         ?string $ipAddress,
@@ -290,14 +301,16 @@ final class PortalUserLogs
         $query = PortalLog::query()
             ->select(array_merge($columns, ['employees.first_name', 'employees.last_name']))
             ->leftJoin('employees', 'employees.id', '=', 'logs.employee_id');
-        if ($visible !== null) {
-            $query->whereIn('logs.employee_id', $visible);
-        }
+        PortalVisibleActors::apply($query, $visible, 'logs.employee_id');
         $total = (int) (clone $query)->toBase()->count();
-        $filters = $this->filters(null, $timezone, true, $visible);
+        $filters = $this->filters(null, $timezone, true, $visible, $viewerIsDeveloper);
 
         if ($employeeId !== null) {
             $query->where('logs.employee_id', $employeeId);
+            // Someone's name never leads to what they did in Developer mode, for a viewer who cannot see it.
+            if (! $viewerIsDeveloper) {
+                $query->where('logs.as_developer', false);
+            }
         }
         if ($action !== null) {
             $query->where('logs.action', $action);
@@ -309,7 +322,7 @@ final class PortalUserLogs
             $query->where('logs.ip_address', $ipAddress);
         }
         $this->applyDate($query, $year, $month, $day, $timezone, $filters['years'], 'logs.created_at');
-        $this->applySearch($query, $search, true);
+        $this->applySearch($query, $search, true, $viewerIsDeveloper);
         $this->applyOrder($query, $sort, $dir, true);
 
         $pageResult = $query->paginate(
@@ -321,7 +334,7 @@ final class PortalUserLogs
         $rows = [];
         foreach ($pageResult->items() as $row) {
             if ($row instanceof PortalLog) {
-                $rows[] = PortalUserLogPresenter::item($row, $timezone);
+                $rows[] = PortalUserLogPresenter::item($row, $timezone, $viewerIsDeveloper);
             }
         }
 
@@ -416,7 +429,7 @@ final class PortalUserLogs
         ];
     }
 
-    private function applySearch(Builder $query, string $search, bool $includeNames = false): void
+    private function applySearch(Builder $query, string $search, bool $includeNames = false, bool $namesDeveloperRows = true): void
     {
         if ($search === '') {
             return;
@@ -426,7 +439,7 @@ final class PortalUserLogs
 
         foreach (preg_split('/\s+/', $search, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
             $like = '%'.$word.'%';
-            $query->where(function (Builder $builder) use ($like, $prefix, $includeNames): void {
+            $query->where(function (Builder $builder) use ($like, $prefix, $includeNames, $namesDeveloperRows): void {
                 $builder
                     ->where($prefix.'action', 'like', $like)
                     ->orWhere($prefix.'resource', 'like', $like)
@@ -434,9 +447,14 @@ final class PortalUserLogs
                     ->orWhere($prefix.'message', 'like', $like)
                     ->orWhere($prefix.'ip_address', 'like', $like);
                 if ($includeNames) {
-                    $builder
-                        ->orWhere('employees.first_name', 'like', $like)
-                        ->orWhere('employees.last_name', 'like', $like);
+                    $builder->orWhere(static function (Builder $named) use ($like, $namesDeveloperRows): void {
+                        $named->where(static fn (Builder $name): Builder => $name
+                            ->where('employees.first_name', 'like', $like)
+                            ->orWhere('employees.last_name', 'like', $like));
+                        if (! $namesDeveloperRows) {
+                            $named->where('logs.as_developer', false);
+                        }
+                    });
                 }
             });
         }
@@ -538,9 +556,9 @@ final class PortalUserLogs
      * }
      */
     /**
-     * @param  list<int>|null  $visible
+     * @param  array{ids: list<int>, unknownToo: bool, everyone: list<int>}|null  $visible
      */
-    private function filters(?int $employeeId, DateTimeZone $timezone, bool $includeUsers = false, ?array $visible = null): array
+    private function filters(?int $employeeId, DateTimeZone $timezone, bool $includeUsers = false, ?array $visible = null, bool $namesDeveloperRows = true): array
     {
         $query = PortalLog::query();
         if ($includeUsers) {
@@ -550,6 +568,7 @@ final class PortalUserLogs
                 'logs.ip_address',
                 'logs.created_at',
                 'logs.employee_id',
+                'logs.as_developer',
                 'employees.first_name',
                 'employees.last_name',
             ])->leftJoin('employees', 'employees.id', '=', 'logs.employee_id');
@@ -560,7 +579,7 @@ final class PortalUserLogs
             $query->where($includeUsers ? 'logs.employee_id' : 'employee_id', $employeeId);
         }
         if ($visible !== null) {
-            $query->whereIn($includeUsers ? 'logs.employee_id' : 'employee_id', $visible);
+            PortalVisibleActors::apply($query, $visible, $includeUsers ? 'logs.employee_id' : 'employee_id');
         }
 
         $rows = $query->toBase()->get();
@@ -582,11 +601,13 @@ final class PortalUserLogs
             if ($resource !== '') {
                 $resources[$resource] = true;
             }
+            // A Developer mode row offers neither its name nor its address to a viewer who cannot see who it was.
+            $hidden = ! $namesDeveloperRows && (bool) ($row->as_developer ?? false);
             $ipAddress = trim((string) ($row->ip_address ?? ''));
-            if ($ipAddress !== '') {
+            if ($ipAddress !== '' && ! $hidden) {
                 $ipAddresses[$ipAddress] = true;
             }
-            if ($includeUsers) {
+            if ($includeUsers && ! $hidden) {
                 $id = (int) ($row->employee_id ?? 0);
                 if ($id > 0 && ! isset($users[$id])) {
                     $users[$id] = PortalSubmittedReportPresenter::memberName(
@@ -658,36 +679,24 @@ final class PortalUserLogs
         ];
     }
 
-    /**
-     * The employees whose rows this viewer may read, or null for every row (a developer, including
-     * rows tied to no employee). Anyone else reads their department and themself; an executive also
-     * reads every executive, and nobody else ever reads an executive's rows, logins included.
-     *
-     * @return list<int>|null
-     */
-    private function visibleEmployeeIds(Request $request): ?array
+    private function viewerIsDeveloper(Request $request): bool
     {
         $actor = $request->attributes->get('portalEmployee');
-        if (! $actor instanceof Employee) {
+
+        return $actor instanceof Employee && PortalDeveloperMode::isOn($actor, $request);
+    }
+
+    /**
+     * @return array{ids: list<int>, unknownToo: bool, everyone: list<int>}
+     */
+    private function visible(Request $request): array
+    {
+        $viewer = $request->attributes->get('portalEmployee');
+        if (! $viewer instanceof Employee) {
             abort(401, 'Authentication is required.');
         }
-        $scope = PortalPreview::departmentScope($actor, $request);
-        if ($scope === null) {
-            return null;
-        }
 
-        $viewerIsExecutive = PortalRole::isExecutive($actor->role, $actor->role_level);
-        $ids = [(int) $actor->getKey()];
-        foreach (Employee::query()->get(['id', 'department', 'role', 'role_level']) as $employee) {
-            $isExecutive = PortalRole::isExecutive($employee->role, $employee->role_level);
-            if (PortalPreview::inScope($scope, $employee) || ($viewerIsExecutive && $isExecutive)) {
-                $ids[] = (int) $employee->getKey();
-            }
-        }
-        $ids = array_values(array_unique($ids));
-        sort($ids);
-
-        return $ids;
+        return PortalVisibleActors::for($viewer, $request, self::ALL_RULE);
     }
 
     private function applyOrder(Builder $query, string $sort, string $dir, bool $joined = false): void

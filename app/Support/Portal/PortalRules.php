@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -20,7 +21,20 @@ final class PortalRules
     // A rule's ignore power is the rule's key with this suffix: holding it skips every list on the rule.
     public const UNLISTED = 'unlisted';
 
+    // Lets All Logs show what developers did; nobody gets it by being given All Logs.
+    public const DEVELOPERS_ACTIVITY = 'administration.logs.developers';
+
+    // Sent with a write the developer confirmed after being told it goes past their Default powers.
+    public const CONFIRM_HEADER = 'X-Portal-Developer-Confirmed';
+
+    // The 428 body's code, so the portal can tell this apart from any other precondition.
+    public const CONFIRM_CODE = 'developer_confirmation';
+
     private const ATTRIBUTE = 'portalActiveRules';
+
+    private const DEFAULT_ATTRIBUTE = 'portalDefaultRules';
+
+    private const BEYOND_ATTRIBUTE = 'portalBeyondDefault';
 
     /**
      * Active rule => reach, in catalog order. Worked out once per request.
@@ -35,7 +49,38 @@ final class PortalRules
             return $cached['rules'];
         }
 
-        $graph = PortalAccessGraph::forViewer($employee, $request);
+        $rules = self::evaluate(PortalAccessGraph::forViewer($employee, $request), $employee);
+        $request->attributes->set(self::ATTRIBUTE, ['key' => $cacheKey, 'rules' => $rules]);
+
+        return $rules;
+    }
+
+    /**
+     * What the person may use in Default, whatever mode they are in right now.
+     *
+     * @return array<string, ?string>
+     */
+    public static function activeInDefault(Employee $employee, Request $request): array
+    {
+        if (! PortalDeveloperMode::isOn($employee, $request)) {
+            return self::active($employee, $request);
+        }
+        $cached = $request->attributes->get(self::DEFAULT_ATTRIBUTE);
+        if (is_array($cached) && ($cached['id'] ?? null) === (int) $employee->getKey()) {
+            return $cached['rules'];
+        }
+
+        $rules = self::evaluate(PortalAccessGraph::load(), $employee);
+        $request->attributes->set(self::DEFAULT_ATTRIBUTE, ['id' => (int) $employee->getKey(), 'rules' => $rules]);
+
+        return $rules;
+    }
+
+    /**
+     * @return array<string, ?string>
+     */
+    private static function evaluate(PortalAccessGraph $graph, Employee $employee): array
+    {
         $catalog = $graph->catalog();
         $off = self::switchedOff($employee);
         $narrowed = self::selfReach($employee);
@@ -45,7 +90,6 @@ final class PortalRules
                 $rules[$key] = self::narrower($rule['reach'], $narrowed[$key] ?? null);
             }
         }
-        $request->attributes->set(self::ATTRIBUTE, ['key' => $cacheKey, 'rules' => $rules]);
 
         return $rules;
     }
@@ -66,12 +110,12 @@ final class PortalRules
     /**
      * Whether a reach lets the actor work on the owner's record: all is everyone, department their
      * own department, and own (or team, until the hierarchy is read) only themselves. Executives are
-     * managed from their own portal, so their rows are in nobody's reach; a record whose owner is
-     * unknown has no department, so only an all reach sees it.
+     * managed from their own portal, so their rows are in nobody's reach unless $withExecutives; a
+     * record whose owner is unknown has no department, so only an all reach sees it.
      */
-    public static function covers(?string $reach, Employee $actor, ?Employee $owner): bool
+    public static function covers(?string $reach, Employee $actor, ?Employee $owner, bool $withExecutives = false): bool
     {
-        if ($reach === null || ($owner !== null && PortalRole::isExecutive($owner->role, $owner->role_level))) {
+        if ($reach === null || (! $withExecutives && $owner !== null && PortalRole::isExecutive($owner->role, $owner->role_level))) {
             return false;
         }
         if ($reach === 'all') {
@@ -191,6 +235,58 @@ final class PortalRules
         }
 
         abort(403, self::REFUSAL);
+    }
+
+    /**
+     * The rule check for someone's own work (their reports, requests, calendar). Within what Default
+     * allows, it is theirs by name even in Developer mode. Past it (a boss limited it, or their role
+     * lacks it) Developer mode still lets it through, but a write waits for their confirmation and is
+     * logged as a developer's, since that is what went past the limit. A power they switched off
+     * themselves stays off in both modes, so it never gets this far.
+     */
+    public static function requireOwn(Employee $employee, Request $request, string ...$keys): void
+    {
+        self::require($employee, $request, ...$keys);
+        $inDefault = self::activeInDefault($employee, $request);
+        $beyond = true;
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $inDefault)) {
+                $beyond = false;
+                break;
+            }
+        }
+        $request->attributes->set(self::BEYOND_ATTRIBUTE, $beyond);
+
+        if ($beyond && ! $request->isMethodSafe() && $request->header(self::CONFIRM_HEADER) !== '1') {
+            throw new HttpResponseException(response()->json([
+                'message' => self::confirmation($keys),
+                'code' => self::CONFIRM_CODE,
+            ], 428));
+        }
+    }
+
+    // An ignore power, or See developers' activity: given only on its own, never as a tab of its page.
+    public static function givenAlone(string $key): bool
+    {
+        return str_ends_with($key, '.'.self::UNLISTED) || $key === self::DEVELOPERS_ACTIVITY;
+    }
+
+    // False only for someone's own work within Default; everything else a developer does in Developer mode is a developer's act.
+    public static function isDevelopersAct(Request $request): bool
+    {
+        return $request->attributes->get(self::BEYOND_ATTRIBUTE, true) !== false;
+    }
+
+    /**
+     * @param  list<string>  $keys
+     */
+    private static function confirmation(array $keys): string
+    {
+        // The whole path, since a bare label like "Restore" does not say which power it is.
+        $label = PortalAccessGraph::load()->path($keys[0] ?? '');
+
+        return 'You cannot use "'.$label.'" in Default: someone limited it, or your role does not include it. '
+            .'Developer mode can still do it, but the log will read "A developer" instead of your name.';
     }
 
     /**

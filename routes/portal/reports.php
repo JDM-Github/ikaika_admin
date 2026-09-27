@@ -24,13 +24,14 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     });
 
     Route::middleware('throttle:portal-reports-submitted-write')->group(function (): void {
-        // Filing checks Daily or Late by the kind it is sent, once the kind is read.
+        // Filing checks Daily or Late by the kind it is sent, once the kind is read. Each is the
+        // person's own work, so Developer mode past Default waits for confirmation (portal.own).
         Route::post('reports/submitted', [SubmittedController::class, 'store']);
         Route::patch('reports/submitted/{id}', [SubmittedController::class, 'update'])
-            ->middleware('portal.rule:reports.submitted.edit')
+            ->middleware('portal.own:reports.submitted.edit')
             ->where('id', '[0-9]{4}-[0-9]{2}-[0-9]{2}-(daily|late)');
         Route::delete('reports/submitted/{id}', [SubmittedController::class, 'destroy'])
-            ->middleware('portal.rule:reports.submitted.delete')
+            ->middleware('portal.own:reports.submitted.delete')
             ->where('id', '[0-9]{4}-[0-9]{2}-[0-9]{2}-(daily|late)');
     });
 });

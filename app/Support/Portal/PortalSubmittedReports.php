@@ -473,7 +473,7 @@ final class PortalSubmittedReports
     public function create(Employee $actor, Request $request): array
     {
         $kind = $this->validatedKind($request);
-        PortalRules::require($actor, $request, $kind === PortalSubmittedReportPresenter::KIND_LATE ? 'reports.late' : 'reports.daily');
+        PortalRules::requireOwn($actor, $request, $kind === PortalSubmittedReportPresenter::KIND_LATE ? 'reports.late' : 'reports.daily');
         $groups = $this->validatedGroups($request, $kind);
         $employeeId = (int) $actor->getKey();
 
@@ -746,7 +746,7 @@ final class PortalSubmittedReports
                 $actor,
                 PortalNotificationType::BIN_RESTORED,
                 'Report restored',
-                PortalActivityCopy::notifyReportRestored($kind, $date, PortalActivityCopy::displayName($actor)),
+                PortalActivityCopy::notifyReportRestored($kind, $date, PortalActivityCopy::actorName($actor, $request)),
                 PortalShellPath::SUBMITTED_REPORTS,
                 'Open reports',
                 ['recordId' => (string) $row->record_id],

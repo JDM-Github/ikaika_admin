@@ -8,9 +8,13 @@ use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
-    Route::middleware(['portal.admin', 'throttle:portal-manage-users'])
+    // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.
+    Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
         ->get('manage/users', [UsersController::class, 'index']);
-    Route::middleware(['portal.admin', 'throttle:portal-manage-users-write'])
+    Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
+        ->get('manage/users/{id}', [UsersController::class, 'show'])
+        ->whereNumber('id');
+    Route::middleware(['portal.rule:manage.users.role', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/role', [UsersController::class, 'updateRole'])
         ->whereNumber('id');
     // Each kind on the queue and its Approve or reject follow their own rule inside PortalManageRequests.
@@ -23,10 +27,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->whereNumber('id');
     Route::middleware(['portal.rule:manage.reports', 'throttle:portal-manage-reports'])
         ->get('manage/reports', [ReportsController::class, 'index']);
-    Route::middleware(['portal.admin', 'throttle:portal-manage-access'])
+    Route::middleware(['portal.rule:manage.users.access', 'throttle:portal-manage-access'])
         ->get('manage/access/{id}', [AccessController::class, 'show'])
         ->whereNumber('id');
-    Route::middleware(['portal.admin', 'throttle:portal-manage-access-write'])
+    Route::middleware(['portal.rule:manage.users.access', 'throttle:portal-manage-access-write'])
         ->patch('manage/access/{id}', [AccessController::class, 'update'])
         ->whereNumber('id');
 });

@@ -78,7 +78,9 @@ Done so far (display only, nothing enforced):
     beside the switch, saved with Save Changes), never wider than they hold. Stored in
     `access_self_reach` (no row = as far as held); `PortalRules::active()` applies it, so
     enforcement and the session both see the narrowed reach. `PATCH /portal/access/reach`.
-  - **Enforced so far: Home, Track Projects, Reports, Requests, User, Event Calendar, Manage / Requests, Manage / Reports.** The Access page and Access Rule sheet banners
+  - Your own switches and self reach are not logged (2026-09-27): your own choice about powers you
+    already hold, which can never gain you a new one.
+  - **Enforced so far: Home, Track Projects, Reports, Requests, User, Event Calendar, Manage / Requests, Manage / Reports, Manage / Users, Administration / All Recycle, Administration / All Logs, Administration / All Actions.** The Access page and Access Rule sheet banners
     name the enforced pages; the banner goes when every page is done.
   - Track Projects: `projects.track` now has a reach (member preset `own`, everyone else
     `all`, exactly today's lists). Its own read, `GET /portal/projects/track`
@@ -140,10 +142,81 @@ Done so far (display only, nothing enforced):
   - **Developer mode and Default are two makers** (2026-09-26): every grant, limit and list stores
     `as_developer`. Only rows made in Developer mode count as a developer's; rows a developer made
     in Default are judged on their role like anyone's (so two developer-admins in Default are
-    equals). On the Access Rule sheet "yours" means made in the mode you are in; in Default,
-    anything you set in Developer mode on that power or under it is locked ("Set by you in
-    Developer mode"), and the server refuses changing it (422). Existing rows by developers were
-    marked as made in Developer mode.
+    equals). Developer mode sees and changes what you made in either mode (switching off takes back
+    both gifts, a gift or list replaces your Default one, it lifts your Default limits). In Default
+    only Default rows are yours; anything you set in Developer mode on that power or under it, or a
+    Developer mode limit on a page above it, is shown read only and locked ("Set by you in
+    Developer mode"), and the server refuses changing it (422). A borrowed Manage other admins
+    counts only while it survives every limit. `tests/Feature/PortalDeveloperMakersTest.php` walks
+    the scenarios. The local DB was reset afterwards, so no row's mode is guessed.
+  - **Developer mode acts read as "a developer"** (2026-09-26): to anyone not in Developer mode a
+    gift, limit, list, refusal or All Logs row made in Developer mode names "a developer" (All Logs
+    also hides its id, IP and location, and keeps it out of the user filter and name search);
+    to someone in Developer mode it reads "Name (Developer mode)". `logs.as_developer` records it.
+  - **Own work in Developer mode** (2026-09-27): a developer's own work (reports, requests, adding
+    an event, restoring their own row) is logged by name while Default holds its rule. Past Default (limited by a boss, or not in the role) it still
+    goes through in Developer mode, but each write first answers 428 `developer_confirmation` and
+    needs `X-Portal-Developer-Confirmed: 1`; that act is logged as "A developer". Routes use
+    `portal.own:<keys>`; filing a report and restoring your own row call `PortalRules::requireOwn`
+    in code. Receipt uploads keep `portal.rule` (they write no log). Tests: `PortalOwnActivityTest.php`.
+    Alerts and other people's texts name the actor through `PortalActivityCopy::actorName`, so they
+    read "a developer" exactly when the log does. Exports are built in the portal, so a Developer
+    mode session carries `default_rules` and the portal asks before an own-view export past them.
+    Administration / All Actions masks the same way through `core.actions.as_developer` (set by
+    `CoreLedger` via `CoreDeveloperActs`), filter and search included. Tests:
+    `PortalAllActionsDeveloperTest.php`.
+  - **Locked to others, Override for developers** (2026-09-26): a power held on only through
+    someone else's gift, or held off by someone else's limit (here or on a page above), is locked
+    to every editor (off and reach refused 422, on refused by the limiter's name). Switching off
+    your own gift no longer limits someone else's. A developer in Developer mode presses Override:
+    the switch unlocks, and saving (even untouched) makes that power and every tab under it theirs:
+    earlier gifts and limits on the branch go; on gives it at the chosen or kept reach, off limits
+    it where the role would still give it. A tab under a page someone limited is overridden
+    through the page. Tests: `PortalOverrideTest.php`.
+  - In Developer mode your own Default gift or limit reads "Given/Limited by you in Default" and can be
+    overridden into a Developer mode act (2026-09-27). Every `developer.mode` log is written as a
+    developer's act, with no record id, so switching Developer mode off never names who did it.
+  - **Manage / Users** (2026-09-27): the page follows `manage.users` (replacing `portal.admin`);
+    the roster, counts and departments follow its reach (department = same department plus
+    yourself). Change roles follows `manage.users.role`, Export `manage.users.export`, the Access
+    Rule sheet `manage.users.access`; anyone outside the reach answers 404. Every row opens a
+    profile (`GET manage/users/{id}`): who they are and their photo, for anyone who can open Users.
+  - **Show employee information** (`manage.users.information`, reach, admin and above, executives
+    by default): adds the private details (birthday, address, contact, government and tax numbers,
+    bank, emergency contact) for the people its reach covers. An executive's details show only to
+    executives and Developer mode. Each view of someone else's details is logged (`VIEW`).
+  - **Held only by MIS** (`only_department`): Manage other admins and Change roles are holdable
+    only by executives and MIS admins (Developer mode exempt). A power someone can never hold is
+    left off their Access Rule sheet unless they already hold it.
+  - **Personal defaults** (`access_personal`): per-person starting powers beside the role preset,
+    seeded in separate.sql like the developers list: Nathaniel Tanglao (220202-0002) gets Manage
+    other admins; he and Steven Gaurano (220302-0003) get Show employee information at every
+    department. They read "From their defaults" / "From your defaults", and a limit takes them away
+    like a preset. Tests: `PortalManageUsersRulesTest.php`.
+  - **All Recycle** (2026-09-27): the "all" view follows `administration.recycle` (replacing the
+    admin role gate and the old department helper): whoever its reach covers and its white and
+    black lists leave in, plus the viewer, never an executive; former staff's items count, and at
+    every-department reach with no list, rows with no known deleter too. It takes lists
+    (`supports_list`) with its own ignore power `administration.recycle.unlisted` (developers only
+    by preset). View only (decision 18): restoring someone else's item answers 403. Export follows
+    `administration.recycle.export`. Tests: `PortalAllRecycleRulesTest.php`.
+  - The Access Rule sheet leaves out always-on powers (`can_toggle` 0: the Access page), and
+    giving or limiting one answers 422.
+  - **All Logs** (2026-09-27): follows `administration.logs` (replacing `portal.admin` and the old
+    department helper): its reach, its executives flag (executives start at every department with
+    executives; admins at their department without), always the viewer, and at every-department
+    reach rows tied to no employee. **See developers' activity** (`administration.logs.developers`,
+    min tier admin, MIS only, Nathaniel's personal default, never given as a tab): without it
+    nothing a developer did shows, sign-ins included, not even to a developer in Default; with it
+    their Default rows are named and their Developer mode rows read "a developer" to anyone not
+    in Developer mode. Export follows `administration.logs.export`. Tests: `PortalAllLogsRulesTest.php`.
+  - **All Actions** (2026-09-28): follows `administration.actions` (replacing `portal.admin`) the same
+    way through `PortalVisibleActors`: reach, executives flag, rows with no actor at every-department
+    reach, and developers' changes only with See developers' activity (the same power as All Logs).
+    It is MIS only (`only_department`, min tier admin, with Sync and Export), admins start at every
+    department. Sync to Airtable stays a power of its own (Nathaniel's personal default); the portal
+    button is shown only to holders but still says the sync is not implemented, since the sync runs
+    as `php artisan portal:airtable-sync`. Tests: `PortalAllActionsRulesTest.php`.
   - Sub-powers (Export, Edit, Delete) are wired with their page from now on, not later.
 
 Next: the next page to enforce, one at a time as the user names them (Missing Reports stays
@@ -224,8 +297,9 @@ reach (an MIS admin limits MIS members only).
 
 ### Where a person's rules come from
 
-1. **Role preset** (in code, not rows): member, admin, executive, developer. Day one reproduces
-   exactly today's behaviour.
+1. **Role preset** (`access_presets`): member, admin, executive, developer. Day one reproduces
+   exactly today's behaviour. **Personal defaults** (`access_personal`) add per-person starting
+   powers on top, filtered like presets by `min_tier` and `only_department`.
 2. **Grants** (rows): added on top by a developer / executive / admin.
 3. **Limits** (rows): take a rule (and its sub-rules) away, even one from the preset. This is how a
    developer limits an executive, or an executive takes Manage/Requests away from an admin.
@@ -341,12 +415,13 @@ Descriptions (what the Access page shows on each row) live in the SQL.
   - `manage.reports` Reports [R] — AED
     - `manage.reports.export` Export — AED
   - `manage.users` Users [R] — AED
-    - `manage.users.role` Change roles — AED
+    - `manage.users.role` Change roles — AED (executives and MIS admins only)
     - `manage.users.export` Export — AED
     - `manage.users.access` Access Rules [R] — AED
       - `manage.users.access.give` Give powers — AED
       - `manage.users.access.limit` Limit powers — AED
-      - `manage.users.access.peers` Manage other admins — ED (admin and above only)
+      - `manage.users.access.peers` Manage other admins — ED (executives and MIS admins only)
+    - `manage.users.information` Show employee information [R] — E (admin and above only)
 - `administration` Administration — AED
   - `administration.recycle` All Recycle [R] — AED
     - `administration.recycle.export` Export — AED

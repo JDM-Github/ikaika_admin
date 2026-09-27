@@ -23,7 +23,8 @@ class AccessController extends Controller
         $editor = $this->editor($request);
         $validated = $request->validate([
             'key' => ['required', 'string', 'max:191'],
-            'action' => ['required', Rule::in([PortalAccessControl::ON, PortalAccessControl::OFF, PortalAccessControl::REACH, PortalAccessControl::LIST])],
+            'action' => ['required', Rule::in([PortalAccessControl::ON, PortalAccessControl::OFF, PortalAccessControl::REACH, PortalAccessControl::LIST, PortalAccessControl::OVERRIDE])],
+            'on' => ['nullable', 'boolean'],
             'reach' => ['nullable', 'string', Rule::in(['own', 'team', 'department', 'all'])],
             'includeExecutives' => ['nullable', 'boolean'],
             'mode' => ['nullable', 'required_if:action,'.PortalAccessControl::LIST, Rule::in([PortalAccessControl::LIST_NONE, PortalAccessControl::LIST_ALLOW, PortalAccessControl::LIST_BLOCK])],
@@ -38,6 +39,7 @@ class AccessController extends Controller
             'includeExecutives' => (bool) ($validated['includeExecutives'] ?? false),
             'mode' => $validated['mode'] ?? null,
             'people' => array_map('intval', $validated['people'] ?? []),
+            'on' => isset($validated['on']) ? (bool) $validated['on'] : null,
         ], $request));
     }
 

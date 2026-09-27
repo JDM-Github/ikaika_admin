@@ -23,6 +23,8 @@ final class PortalAccessControl
 
     public const LIST = 'list';
 
+    public const OVERRIDE = 'override';
+
     public const LIST_NONE = 'none';
 
     public const LIST_ALLOW = 'allow';
@@ -47,13 +49,14 @@ final class PortalAccessControl
         $grants = $graph->grantsOn($targetId);
         $limits = $graph->limitsOn($targetId);
         $listPeople = [];
-        // Rows are yours only in the mode you are in now.
-        $yours = static fn (object $row, string $maker): bool => (int) $row->{$maker} === $editorId && (bool) $row->as_developer === $asDeveloper;
+        // In Default only what you made in Default is yours to change; Developer mode owns both.
+        $yours = static fn (object $row, string $maker): bool => (int) $row->{$maker} === $editorId && ($asDeveloper || ! (bool) $row->as_developer);
 
         $data = [];
         foreach ($graph->powersFor($editorId, $targetId) as $key => $mine) {
-            // Developer tools come only with Developer mode, so the sheet never offers them.
-            if ($graph->isDeveloperOnly($key)) {
+            // Developer tools come only with Developer mode, a power their role or department can never hold is not
+            // theirs to see, and one that always stays on (the Access page) is nothing to give or limit.
+            if ($graph->isDeveloperOnly($key) || $this->alwaysOn($graph, $key) || (! $graph->canHold($targetId, $key) && ! isset($theirs[$key]))) {
                 continue;
             }
             $row = $graph->catalog()[$key];
@@ -73,10 +76,14 @@ final class PortalAccessControl
                 if ($yours($limit, 'limited_by')) {
                     $limitedByYou = true;
                 } elseif ((int) $limit->limited_by !== $editorId) {
-                    $limiters[] = (int) $limit->limited_by;
+                    $limiters[] = ['id' => (int) $limit->limited_by, 'asDeveloper' => (bool) $limit->as_developer];
                 }
             }
-            $without = $graph->without($targetId, $key, $editorId, $asDeveloper);
+            $without = $graph->without($targetId, $key, $editorId, $asDeveloper ? null : false);
+            $throughOthers = $this->heldThroughOthers($graph, $editorId, $asDeveloper, $targetId, $key);
+            $limitedHere = $limiters !== [];
+            // In Developer mode, what you did in Default is yours too, and Override turns it into a Developer mode act.
+            $fromDefault = $asDeveloper && $this->yoursFromDefault($graph, $editorId, $targetId, $key);
 
             $data[] = [
                 'key' => $key,
@@ -90,13 +97,18 @@ final class PortalAccessControl
                 'reach' => $their['reach'] ?? null,
                 'includeExecutives' => $their['executives'] ?? false,
                 'fromRole' => $their['fromRole'] ?? false,
-                'givenBy' => $graph->names($their['givenBy'] ?? []),
+                'fromDefault' => $their['personal'] ?? false,
+                'givenBy' => $their === null ? [] : $graph->makerNames(PortalAccessGraph::givers($their), $asDeveloper),
                 'givenByYou' => $myGrant === null ? null : [
                     'reach' => $myGrant->reach,
                     'includeExecutives' => (bool) $myGrant->include_executives,
                 ],
                 'limitedByYou' => $limitedByYou,
-                'limitedBy' => $graph->names(array_values(array_unique($limiters))),
+                'limitedBy' => $graph->makerNames($limiters, $asDeveloper),
+                // Someone else holds it in place, here or on a page above; only Override in Developer mode changes it.
+                'lockedByOthers' => $throughOthers || $limitedHere || $this->limitedAbove($graph, $editorId, $targetId, $key),
+                'canOverride' => $asDeveloper && ($throughOthers || $limitedHere || $fromDefault),
+                'yoursFromDefault' => $fromDefault,
                 // What the editor did here in Developer mode stays theirs to change only there.
                 'lockedToDeveloperMode' => ! $asDeveloper && $this->madeInDeveloperMode($graph, $editorId, $targetId, $key),
                 'canHold' => $graph->canHold($targetId, $key),
@@ -139,6 +151,9 @@ final class PortalAccessControl
         if ($graph->isDeveloperOnly($key)) {
             abort(422, 'Developer tools come only with Developer mode, so nobody can give or limit them.');
         }
+        if ($this->alwaysOn($graph, $key)) {
+            abort(422, 'That power always stays on, so nobody can give or limit it.');
+        }
         if (! isset($graph->powersFor($editorId, $targetId)[$key])) {
             abort(404, 'You do not hold that power.');
         }
@@ -146,11 +161,19 @@ final class PortalAccessControl
         if ($live === null && $this->madeInDeveloperMode($graph, $editorId, $targetId, $key)) {
             abort(422, 'You made this in Developer mode. Switch to Developer mode to change it.');
         }
+        if ($change['action'] === self::OVERRIDE && $live === null) {
+            abort(403, 'Only a developer in Developer mode can override.');
+        }
+        // Held on only through someone else's gift: nobody but a developer's Override moves it.
+        if (in_array($change['action'], [self::OFF, self::REACH], true) && $this->heldThroughOthers($graph, $editorId, $live !== null, $targetId, $key)) {
+            abort(422, 'Someone else gave this power, so only a developer can change it, with Override.');
+        }
 
         $message = match ($change['action']) {
             self::ON => $this->switchOn($editorId, $live, $targetId, $key, $change),
             self::OFF => $this->switchOff($editorId, $live, $targetId, $key),
             self::LIST => $this->setList($graph, $editor, $live !== null, $targetId, $key, $change, $request),
+            self::OVERRIDE => $this->override($editorId, (int) $live, $targetId, $key, $change),
             default => $this->reach($graph, $editorId, $live !== null, $targetId, $key, $change),
         };
         // Whose Access Rules each viewer may open is part of the cached Users roster.
@@ -163,32 +186,32 @@ final class PortalAccessControl
             sprintf($message, PortalAccessGraph::name($target), $graph->path($key)),
             (string) $targetId,
             $request,
-            ['employeeId' => $targetId, 'key' => $key, 'action' => $change['action'], 'reach' => $change['reach'] ?? null, 'mode' => $change['mode'] ?? null, 'people' => $change['people'] ?? null],
+            ['employeeId' => $targetId, 'key' => $key, 'action' => $change['action'], 'reach' => $change['reach'] ?? null, 'mode' => $change['mode'] ?? null, 'people' => $change['people'] ?? null, 'on' => $change['on'] ?? null],
         );
 
         return $this->show($editor, $targetId, $request);
     }
 
     /**
-     * Lifts the editor's limits on the power and the pages above it (a developer lifts everyone's),
-     * then gives it if the person still lacks it. Someone else's limit still standing is refused
-     * by name, because giving under it would change nothing.
+     * Lifts the editor's own limits on the power and the pages above it (in Developer mode their
+     * Default ones too), then gives it if the person still lacks it. Someone else's limit still
+     * standing is refused by name: only Override lifts it.
      *
      * @param  array{key: string, action: string, reach?: string|null, includeExecutives?: bool}  $change
      */
     private function switchOn(int $editorId, ?int $live, int $targetId, string $key, array $change): string
     {
         $before = PortalAccessGraph::load($live);
-        if (! $before->canHold($targetId, $key)) {
-            abort(422, 'Only an administrator or above can hold that power.');
+        $refusal = $before->holdRefusal($targetId, $key);
+        if ($refusal !== null) {
+            abort(422, $refusal);
         }
         $lift = DB::connection('portal')->table('access_limits')
             ->where('employee_id', $targetId)
             ->whereIn('permission_key', [...$before->ancestors($key), $key]);
-        if ($live === null) {
-            $lift->where('limited_by', $editorId)->where('as_developer', false);
-        }
-        $lift->delete();
+        $lift->where('limited_by', $editorId)
+            ->when($live === null, static fn ($query) => $query->where('as_developer', false))
+            ->delete();
 
         $graph = PortalAccessGraph::load($live);
         if (isset($graph->effective($targetId)[$key])) {
@@ -199,12 +222,12 @@ final class PortalAccessControl
         foreach ([...$graph->ancestors($key), $key] as $current) {
             foreach ($graph->limitsOn($targetId) as $limit) {
                 if ($limit->permission_key === $current && $graph->validMaker((int) $limit->limited_by, $targetId, $current, (bool) $limit->as_developer) !== null) {
-                    $blockers[] = (int) $limit->limited_by;
+                    $blockers[] = ['id' => (int) $limit->limited_by, 'asDeveloper' => (bool) $limit->as_developer];
                 }
             }
         }
         if ($blockers !== []) {
-            abort(422, implode(', ', $graph->names(array_values(array_unique($blockers)))).' limited that power, so it cannot be switched on.');
+            abort(422, ucfirst(implode(', ', $graph->makerNames($blockers, $live !== null))).' limited that power, so it cannot be switched on.');
         }
 
         $this->give($graph, $editorId, $live !== null, $targetId, $key, $change);
@@ -214,19 +237,20 @@ final class PortalAccessControl
 
     /**
      * Takes back the editor's gift of the power and everything under it, then limits the power if
-     * their role or someone else still gives it.
+     * their role still gives it. Someone else's gift stays: only Override takes that.
      */
     private function switchOff(int $editorId, ?int $live, int $targetId, string $key): string
     {
         $before = PortalAccessGraph::load($live);
+        // Developer mode takes back what the editor gave in either mode; Default only its own.
         DB::connection('portal')->table('access_grants')
             ->where('employee_id', $targetId)
             ->where('granted_by', $editorId)
-            ->where('as_developer', $live !== null)
+            ->when($live === null, static fn ($query) => $query->where('as_developer', false))
             ->whereIn('permission_key', $before->subtree($key))
             ->delete();
 
-        if (isset(PortalAccessGraph::load($live)->effective($targetId)[$key])) {
+        if ((PortalAccessGraph::load($live)->effective($targetId)[$key]['fromRole'] ?? false) === true) {
             DB::connection('portal')->table('access_limits')->insertOrIgnore([
                 'employee_id' => $targetId,
                 'permission_key' => $key,
@@ -282,13 +306,19 @@ final class PortalAccessControl
         $theirs = $graph->effective($targetId);
         $missingPages = array_filter($graph->ancestors($key), static fn (string $page): bool => ! isset($theirs[$page]));
         // A tab their role cannot hold (Manage other admins, for a member) stays behind, the rest goes;
-        // an ignore power is given only on its own, never as a tab of the rule whose lists it skips.
+        // an ignore power or See developers' activity is given only on its own, never as a tab.
         $branch = array_filter($graph->subtree($key), static fn (string $tab): bool => isset($mine[$tab]) && $graph->canHold($targetId, $tab)
-            && ($tab === $key || ! str_ends_with($tab, '.'.PortalRules::UNLISTED)));
+            && ($tab === $key || ! PortalRules::givenAlone($tab)));
         foreach ([...$missingPages, ...$branch] as $current) {
             $currentReach = (bool) $graph->catalog()[$current]->supports_reach
                 ? $this->narrower($reach ?? $mine[$current]['reach'], $mine[$current]['reach'])
                 : null;
+            // A gift made in Developer mode replaces the editor's Default gift of the same power.
+            if ($asDeveloper) {
+                DB::connection('portal')->table('access_grants')
+                    ->where(['employee_id' => $targetId, 'permission_key' => $current, 'granted_by' => $editorId, 'as_developer' => false])
+                    ->delete();
+            }
             DB::connection('portal')->table('access_grants')->updateOrInsert(
                 ['employee_id' => $targetId, 'permission_key' => $current, 'granted_by' => $editorId, 'as_developer' => $asDeveloper],
                 ['reach' => $currentReach, 'include_executives' => $executives && $mine[$current]['executives']],
@@ -325,9 +355,10 @@ final class PortalAccessControl
             ->where('employee_id', $targetId)
             ->where('permission_key', $key)
             ->where('set_by', $editor->getKey())
-            ->where('as_developer', $asDeveloper);
-        $current = $mine()->value('mode');
-        if ($mode === self::LIST_NONE || ($current !== null && $current !== $mode)) {
+            // Developer mode replaces the editor's lists from both modes with one Developer mode list.
+            ->when(! $asDeveloper, static fn ($query) => $query->where('as_developer', false));
+        $current = $mine()->distinct()->pluck('mode')->all();
+        if ($mode === self::LIST_NONE || array_diff($current, [$mode]) !== []) {
             $mine()->delete();
         } else {
             $mine()->whereIn('subject_id', $visible)->delete();
@@ -376,15 +407,17 @@ final class PortalAccessControl
      */
     private function listStanding(PortalAccessGraph $graph, int $editorId, bool $asDeveloper, int $targetId, string $key, array $visible): array
     {
-        $mine = null;
+        // The list made in this mode, else the one from the other mode: read only in Default, replaced on save in Developer mode.
+        $byMode = [];
         $others = [];
         foreach ($graph->listsOn($targetId, $key) as $list) {
-            if ($list['maker'] === $editorId && $list['asDeveloper'] === $asDeveloper) {
-                $mine = $list;
-            } elseif ($list['maker'] !== $editorId) {
-                $others[] = ['name' => $graph->names([$list['maker']])[0] ?? '', 'mode' => $list['mode']];
+            if ($list['maker'] === $editorId) {
+                $byMode[$list['asDeveloper'] ? 'dev' : 'role'] = $list;
+            } else {
+                $others[] = ['name' => $graph->makerNames([['id' => $list['maker'], 'asDeveloper' => $list['asDeveloper']]], $asDeveloper)[0] ?? '', 'mode' => $list['mode']];
             }
         }
+        $mine = $asDeveloper ? ($byMode['dev'] ?? $byMode['role'] ?? null) : ($byMode['role'] ?? $byMode['dev'] ?? null);
 
         return [
             'mode' => $mine['mode'] ?? null,
@@ -395,21 +428,108 @@ final class PortalAccessControl
     }
 
     /**
-     * Whether the editor gave, limited or listed this power, or anything under it, for the person
-     * while in Developer mode.
+     * A developer takes the power and everything under it over for the person: every earlier gift
+     * and limit on that branch goes, and what the switch shows becomes theirs. On gives it at the
+     * reach sent (or the one they had), off limits it where their role would still give it.
+     *
+     * @param  array{key: string, action: string, reach?: string|null, includeExecutives?: bool, on?: bool|null}  $change
      */
-    private function madeInDeveloperMode(PortalAccessGraph $graph, int $editorId, int $targetId, string $key): bool
+    private function override(int $editorId, int $live, int $targetId, string $key, array $change): string
     {
-        $keys = $graph->subtree($key);
-        $byEditor = static fn (object $row, string $maker): bool => (int) $row->{$maker} === $editorId
-            && (bool) $row->as_developer && in_array($row->permission_key, $keys, true);
+        $before = PortalAccessGraph::load($live);
+        $on = (bool) ($change['on'] ?? false);
+        $refusal = $on ? $before->holdRefusal($targetId, $key) : null;
+        if ($refusal !== null) {
+            abort(422, $refusal);
+        }
+        if ($on && $this->limitedAbove($before, $editorId, $targetId, $key, true)) {
+            abort(422, 'A page above this power is limited. Override that page first.');
+        }
+        $keys = $before->subtree($key);
+        $reach = $change['reach'] ?? ($before->effective($targetId)[$key]['reach'] ?? null);
+        DB::connection('portal')->table('access_grants')->where('employee_id', $targetId)->whereIn('permission_key', $keys)->delete();
+        DB::connection('portal')->table('access_limits')->where('employee_id', $targetId)->whereIn('permission_key', $keys)->delete();
+
+        $after = PortalAccessGraph::load($live);
+        if ($on) {
+            $this->give($after, $editorId, true, $targetId, $key, [...$change, 'reach' => $reach]);
+        } elseif (isset($after->effective($targetId)[$key])) {
+            DB::connection('portal')->table('access_limits')->insertOrIgnore([
+                'employee_id' => $targetId,
+                'permission_key' => $key,
+                'limited_by' => $editorId,
+                'as_developer' => true,
+            ]);
+        }
+
+        return '{UserName|You} overrode %2$s for %1$s';
+    }
+
+    // On only through gifts, none of them the editor's own in a mode they may change: someone else holds it on.
+    private function heldThroughOthers(PortalAccessGraph $graph, int $editorId, bool $asDeveloper, int $targetId, string $key): bool
+    {
+        $theirs = $graph->effective($targetId)[$key] ?? null;
+        if ($theirs === null || $theirs['fromRole']) {
+            return false;
+        }
         foreach ($graph->grantsOn($targetId) as $grant) {
-            if ($byEditor($grant, 'granted_by')) {
+            if ($grant->permission_key === $key && (int) $grant->granted_by === $editorId && ($asDeveloper || ! (bool) $grant->as_developer)) {
+                return false;
+            }
+        }
+
+        return array_diff($theirs['givenBy'], [$editorId]) !== [];
+    }
+
+    // The editor's own Default gift or limit on exactly this power.
+    private function yoursFromDefault(PortalAccessGraph $graph, int $editorId, int $targetId, string $key): bool
+    {
+        $mine = static fn (object $row, string $maker): bool => $row->permission_key === $key
+            && (int) $row->{$maker} === $editorId && ! (bool) $row->as_developer;
+        foreach ($graph->grantsOn($targetId) as $grant) {
+            if ($mine($grant, 'granted_by')) {
                 return true;
             }
         }
         foreach ($graph->limitsOn($targetId) as $limit) {
-            if ($byEditor($limit, 'limited_by')) {
+            if ($mine($limit, 'limited_by')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Someone else's limit (anyone's, with $anyone) on a page above the power holds it off too.
+    private function limitedAbove(PortalAccessGraph $graph, int $editorId, int $targetId, string $key, bool $anyone = false): bool
+    {
+        $above = $graph->ancestors($key);
+        foreach ($graph->limitsOn($targetId) as $limit) {
+            if (in_array($limit->permission_key, $above, true) && ($anyone || (int) $limit->limited_by !== $editorId)
+                && $graph->validMaker((int) $limit->limited_by, $targetId, (string) $limit->permission_key, (bool) $limit->as_developer) !== null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the editor, in Developer mode, gave or listed this power or anything under it for the
+     * person, or limited it, anything under it, or a page above it (which holds it off too).
+     */
+    private function madeInDeveloperMode(PortalAccessGraph $graph, int $editorId, int $targetId, string $key): bool
+    {
+        $keys = $graph->subtree($key);
+        $byEditor = static fn (object $row, string $maker, array $keys): bool => (int) $row->{$maker} === $editorId
+            && (bool) $row->as_developer && in_array($row->permission_key, $keys, true);
+        foreach ($graph->grantsOn($targetId) as $grant) {
+            if ($byEditor($grant, 'granted_by', $keys)) {
+                return true;
+            }
+        }
+        foreach ($graph->limitsOn($targetId) as $limit) {
+            if ($byEditor($limit, 'limited_by', [...$graph->ancestors($key), ...$keys])) {
                 return true;
             }
         }
@@ -463,5 +583,12 @@ final class PortalAccessControl
         }
 
         return null;
+    }
+
+    private function alwaysOn(PortalAccessGraph $graph, string $key): bool
+    {
+        $row = $graph->catalog()[$key] ?? null;
+
+        return $row !== null && ! (bool) $row->can_toggle;
     }
 }

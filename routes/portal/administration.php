@@ -9,12 +9,14 @@ use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
-    Route::middleware(['portal.admin', 'throttle:portal-administration-all-logs'])->group(function (): void {
+    // All Logs follows its rule and reach; who else's rows show is decided per row in PortalUserLogs.
+    Route::middleware(['portal.rule:administration.logs', 'throttle:portal-administration-all-logs'])->group(function (): void {
         Route::get('administration/all-logs', [AllLogsController::class, 'index']);
         Route::get('administration/all-logs/{id}', [AllLogsController::class, 'show'])->whereNumber('id');
     });
 
-    Route::middleware(['portal.admin', 'throttle:portal-administration-all-actions'])->group(function (): void {
+    // All Actions follows its rule and reach like All Logs; whose actions show is decided in PortalAllActions.
+    Route::middleware(['portal.rule:administration.actions', 'throttle:portal-administration-all-actions'])->group(function (): void {
         Route::get('administration/all-actions', [AllActionsController::class, 'index']);
         Route::get('administration/all-actions/{id}', [AllActionsController::class, 'show'])->whereNumber('id');
     });

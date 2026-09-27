@@ -54,7 +54,7 @@ class PortalAccessControlTest extends TestCase
         $this->outsider->forceFill(['is_developer' => false, 'department' => 'Engineering'])->save();
         $this->executive->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
 
-        foreach (['access_grants', 'access_limits', 'access_toggles', 'access_self_reach', 'access_lists'] as $table) {
+        foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'access_self_reach', 'access_lists'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
     }
@@ -71,7 +71,8 @@ class PortalAccessControlTest extends TestCase
     {
         $asAdmin = $this->editable($this->admin);
         $this->assertTrue($asAdmin[$this->member->id]);
-        $this->assertFalse($asAdmin[$this->outsider->id]);
+        // Outside the admin's department they are not on the roster at all.
+        $this->assertArrayNotHasKey($this->outsider->id, $asAdmin);
         $this->assertFalse($asAdmin[$this->admin->id]);
         $this->assertFalse($asAdmin[$this->developer->id]);
         $this->assertFalse($asAdmin[$this->executive->id]);
@@ -185,11 +186,14 @@ class PortalAccessControlTest extends TestCase
     {
         $this->change($this->developer, $this->member, ['key' => 'reports.late', 'action' => 'off'])->assertOk();
 
+        // Outside Developer mode a developer's act reads as a developer's, never by name.
         $this->change($this->admin, $this->member, ['key' => 'reports.late', 'action' => 'on'])
             ->assertStatus(422)
-            ->assertJsonPath('message', $this->displayName($this->developer).' limited that power, so it cannot be switched on.');
+            ->assertJsonPath('message', 'A developer limited that power, so it cannot be switched on.');
         $shown = $this->rule($this->as($this->admin)->getJson("/api/development/portal/manage/access/{$this->member->id}"), 'reports.late');
-        $this->assertSame([$this->displayName($this->developer)], $shown['limitedBy']);
+        $this->assertSame(['a developer'], $shown['limitedBy']);
+        $this->assertTrue($shown['lockedByOthers']);
+        $this->assertFalse($shown['canOverride']);
 
         $this->change($this->admin, $this->member, ['key' => 'reports.late', 'action' => 'off'])->assertOk();
         $this->change($this->developer, $this->member, ['key' => 'reports.late', 'action' => 'on'])->assertOk();
@@ -251,7 +255,9 @@ class PortalAccessControlTest extends TestCase
 
         $this->change($this->admin, $this->member, ['key' => 'manage.users.access.peers', 'action' => 'on'])
             ->assertStatus(422)->assertJsonPath('message', 'Only an administrator or above can hold that power.');
-        $this->assertFalse($this->rule($this->as($this->admin)->getJson("/api/development/portal/manage/access/{$this->member->id}"), 'manage.users.access.peers')['canHold']);
+        // A power their role can never hold is not on their sheet at all.
+        $keys = array_column($this->as($this->admin)->getJson("/api/development/portal/manage/access/{$this->member->id}")->assertOk()->json('data'), 'key');
+        $this->assertNotContains('manage.users.access.peers', $keys);
 
         // Switching the whole section on for a member brings everything but the admins-only rule.
         $this->change($this->admin, $this->member, ['key' => 'manage.users.access', 'action' => 'on', 'reach' => 'department'])->assertOk();
@@ -325,10 +331,7 @@ class PortalAccessControlTest extends TestCase
         $this->assertNotContains((string) $this->member->id, $this->roster($this->admin));
         $this->assertContains((string) $this->fellow->id, $this->roster($this->admin));
         $this->as($this->admin)->getJson("/api/development/portal/manage/reports?employee_id={$this->member->id}")->assertNotFound();
-        $this->assertSame(
-            [['name' => $this->displayName($this->developer), 'mode' => 'block']],
-            $this->power($this->admin, 'manage.reports')['lists'] ?? null,
-        );
+        $this->assertSame([['name' => 'a developer', 'mode' => 'block']], $this->power($this->admin, 'manage.reports')['lists'] ?? null);
         $this->assertSame(
             '{UserName|You} set a black list of 1 person on Manage / Reports for '.$this->displayName($this->admin),
             PortalLog::query()->where('employee_id', $this->developer->id)->where('resource', 'manage.access')->orderByDesc('id')->value('message'),

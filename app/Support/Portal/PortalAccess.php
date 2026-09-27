@@ -8,13 +8,11 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Access: the fine-grained rules a person effectively holds (PortalAccessGraph) and the ones they
- * switched off for themselves (access_toggles). Display only for now: no page reads these rules to
- * decide access yet, so switching one off changes nothing but this list.
+ * switched off or narrowed for themselves (access_toggles, access_self_reach). Neither is logged:
+ * it is their own choice about powers they already hold, and it can never gain them a new one.
  */
 final class PortalAccess
 {
-    public function __construct(private readonly PortalAudit $audit) {}
-
     /**
      * @return array{section: string, resource: string, tier: string, data: list<array<string, mixed>>}
      */
@@ -23,6 +21,7 @@ final class PortalAccess
         $graph = PortalAccessGraph::forViewer($actor, $request);
         $held = $graph->effective((int) $actor->getKey());
         $catalog = $graph->catalog();
+        $viewerIsDeveloper = $graph->actingTier((int) $actor->getKey()) === PortalAccessGraph::TIER_DEVELOPER;
         $off = PortalRules::switchedOff($actor);
         $narrowed = PortalRules::selfReach($actor);
 
@@ -42,8 +41,9 @@ final class PortalAccess
                 'isSwitchedOn' => ! isset($off[$key]),
                 'isActive' => PortalRules::isSwitchedOn($catalog, $off, $key),
                 'fromRole' => $rule['fromRole'],
-                'givenBy' => $graph->names($rule['givenBy']),
-                'lists' => $graph->supportsList($key) ? $this->lists($graph, (int) $actor->getKey(), $key) : [],
+                'fromDefault' => $rule['personal'] ?? false,
+                'givenBy' => $graph->makerNames(PortalAccessGraph::givers($rule), $viewerIsDeveloper),
+                'lists' => $graph->supportsList($key) ? $this->lists($graph, (int) $actor->getKey(), $key, $viewerIsDeveloper) : [],
                 'ignoresLists' => $graph->supportsList($key) && PortalRules::holds($actor, $request, $key.'.'.PortalRules::UNLISTED),
             ];
         }
@@ -62,11 +62,11 @@ final class PortalAccess
      *
      * @return list<array{name: string, mode: string}>
      */
-    private function lists(PortalAccessGraph $graph, int $actorId, string $key): array
+    private function lists(PortalAccessGraph $graph, int $actorId, string $key, bool $viewerIsDeveloper): array
     {
         $lists = [];
         foreach ($graph->listsOn($actorId, $key) as $list) {
-            $lists[] = ['name' => $graph->names([$list['maker']])[0] ?? '', 'mode' => $list['mode']];
+            $lists[] = ['name' => $graph->makerNames([['id' => $list['maker'], 'asDeveloper' => $list['asDeveloper']]], $viewerIsDeveloper)[0] ?? '', 'mode' => $list['mode']];
         }
 
         return $lists;
@@ -89,20 +89,10 @@ final class PortalAccess
         }
 
         $toggles = DB::connection('portal')->table('access_toggles');
-        $changed = $on
-            ? $toggles->where('employee_id', $actor->getKey())->where('permission_key', $key)->delete() > 0
-            : $toggles->insertOrIgnore(['employee_id' => $actor->getKey(), 'permission_key' => $key]) > 0;
-
-        if ($changed) {
-            $this->audit->record(
-                $actor,
-                PortalLogAction::PATCH,
-                'access.switches',
-                '{UserName|You} switched '.($on ? 'on' : 'off').' '.$graph->path($key),
-                $key,
-                $request,
-                ['key' => $key, 'on' => $on],
-            );
+        if ($on) {
+            $toggles->where('employee_id', $actor->getKey())->where('permission_key', $key)->delete();
+        } else {
+            $toggles->insertOrIgnore(['employee_id' => $actor->getKey(), 'permission_key' => $key]);
         }
 
         return $this->powers($actor, $request);
@@ -110,7 +100,7 @@ final class PortalAccess
 
     /**
      * Narrows one of the actor's own reach rules, or widens it back up to what they hold. The
-     * reach they hold means no narrowing, so that row goes; repeating the current reach logs nothing.
+     * reach they hold means no narrowing, so that row goes.
      *
      * @return array{section: string, resource: string, tier: string, data: list<array<string, mixed>>}
      */
@@ -128,23 +118,10 @@ final class PortalAccess
         }
 
         $rows = DB::connection('portal')->table('access_self_reach');
-        $before = PortalRules::selfReach($actor)[$key] ?? $held['reach'];
         if ($reach === $held['reach']) {
             $rows->where('employee_id', $actor->getKey())->where('permission_key', $key)->delete();
         } else {
             $rows->updateOrInsert(['employee_id' => $actor->getKey(), 'permission_key' => $key], ['reach' => $reach]);
-        }
-
-        if ($before !== $reach) {
-            $this->audit->record(
-                $actor,
-                PortalLogAction::PATCH,
-                'access.reach',
-                '{UserName|You} set '.PortalAccessGraph::load()->path($key).' to reach '.$reach,
-                $key,
-                $request,
-                ['key' => $key, 'reach' => $reach],
-            );
         }
 
         return $this->powers($actor, $request);

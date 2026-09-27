@@ -27,7 +27,7 @@ class PortalRulesTest extends TestCase
     {
         parent::setUp();
         Cache::flush();
-        foreach (['access_grants', 'access_limits', 'access_toggles', 'developer_modes'] as $table) {
+        foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'developer_modes'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
     }
@@ -43,12 +43,13 @@ class PortalRulesTest extends TestCase
         }
     }
 
-    // Executives start with every department, less the developer tools, a member's own pages and the housekeeping pages.
+    // Executives start with every department, less the developer tools, a member's own pages, the housekeeping
+    // pages and See developers' activity, which is given person by person.
     public function test_executives_start_with_everything_but_the_left_out_pages_at_every_department(): void
     {
         $catalog = DB::connection('portal')->table('access_permissions')->get()->keyBy('permission_key');
         $presets = DB::connection('portal')->table('access_presets')->where('role', 'executive')->get()->keyBy('permission_key');
-        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup'];
+        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers'];
 
         foreach ($catalog as $key => $rule) {
             $isLeftOut = collect($leftOut)->contains(static fn (string $root): bool => $key === $root || str_starts_with((string) $key, $root.'.'));
@@ -72,14 +73,16 @@ class PortalRulesTest extends TestCase
         $this->assertFalse(DB::connection('portal')->table('access_presets')->whereIn('role', ['member', 'admin', 'executive'])->where('permission_key', 'like', 'developer%')->exists());
     }
 
-    // Reports takes white and black lists; admins start bound by them, executives and developers ignore them.
-    public function test_reports_takes_lists_that_only_executives_and_developers_ignore_by_default(): void
+    // Reports and All Recycle take white and black lists; admins start bound by them. Executives ignore
+    // Reports' lists; All Recycle is not theirs by default, so only developers ignore its lists.
+    public function test_reports_and_all_recycle_take_lists_that_admins_start_bound_by(): void
     {
-        $this->assertSame(['manage.reports'], DB::connection('portal')->table('access_permissions')->where('supports_list', 1)->pluck('permission_key')->all());
+        $this->assertEqualsCanonicalizing(['manage.reports', 'administration.recycle'], DB::connection('portal')->table('access_permissions')->where('supports_list', 1)->pluck('permission_key')->all());
         $this->assertEqualsCanonicalizing(
             ['developer', 'executive'],
             DB::connection('portal')->table('access_presets')->where('permission_key', 'manage.reports.unlisted')->pluck('role')->all(),
         );
+        $this->assertSame(['developer'], DB::connection('portal')->table('access_presets')->where('permission_key', 'administration.recycle.unlisted')->pluck('role')->all());
     }
 
     // Grouping rows scope nothing themselves, so they offer no reach: each page or kind under them has its own.
@@ -193,12 +196,12 @@ class PortalRulesTest extends TestCase
             $this->assertTrue($project['isAssigned'], "{$project['name']} is not theirs.");
         }
 
-        // Back to what they hold removes the narrowing, and asking again logs nothing new.
+        // Back to what they hold removes the narrowing. Their own choice, so none of it is logged.
+        $logs = DB::connection('portal')->table('logs')->where('employee_id', $admin->id)->where('resource', 'access.reach')->count();
         $this->reach($token, 'all')->assertOk()->assertJsonPath('data.0.key', 'home');
         $this->assertCount($total, $this->tracked($token));
         $this->assertFalse(DB::connection('portal')->table('access_self_reach')->where('employee_id', $admin->id)->exists());
-        $logs = DB::connection('portal')->table('logs')->where('employee_id', $admin->id)->where('resource', 'access.reach')->count();
-        $this->reach($token, 'all')->assertOk();
+        $this->reach($token, 'own')->assertOk();
         $this->assertSame($logs, DB::connection('portal')->table('logs')->where('employee_id', $admin->id)->where('resource', 'access.reach')->count());
     }
 

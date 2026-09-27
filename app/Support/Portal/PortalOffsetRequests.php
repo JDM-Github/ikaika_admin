@@ -174,7 +174,7 @@ final class PortalOffsetRequests
                 PortalNotificationType::REQUEST_FILED_OFFSET,
                 'New offset request',
                 PortalActivityCopy::notifyFiled(
-                    PortalActivityCopy::displayName($actor),
+                    PortalActivityCopy::actorName($actor, $request, true),
                     'offset request',
                     $group['workDate'],
                     $group['workDate'],
@@ -362,7 +362,7 @@ final class PortalOffsetRequests
             'manage.requests.offset',
             PortalNotificationType::REQUEST_CANCELLED_OFFSET,
             'Offset request cancelled',
-            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'offset request', $day),
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::actorName($actor, $request, true), 'offset request', $day),
             PortalShellPath::MANAGE_REQUESTS,
             'Open queue',
             ['recordId' => (string) (int) $row->id],

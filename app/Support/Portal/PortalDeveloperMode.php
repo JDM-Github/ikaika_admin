@@ -123,8 +123,9 @@ final class PortalDeveloperMode
     /**
      * @param  array<string, bool>  $payload
      */
+    // Switching Developer mode, either way, is a developer's act: named only to someone in Developer mode, and no id that points back.
     private function log(Employee $developer, Request $request, string $resource, string $message, array $payload): void
     {
-        $this->audit->record($developer, PortalLogAction::PATCH, $resource, $message, (string) $developer->getKey(), $request, $payload);
+        $this->audit->record($developer, PortalLogAction::PATCH, $resource, $message, null, $request, $payload, true);
     }
 }

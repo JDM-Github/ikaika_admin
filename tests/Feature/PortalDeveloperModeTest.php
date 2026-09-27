@@ -25,7 +25,7 @@ class PortalDeveloperModeTest extends TestCase
     /**
      * @var list<string>
      */
-    protected array $connectionsToTransact = ['portal'];
+    protected array $connectionsToTransact = ['portal', 'core'];
 
     private Employee $developer;
 
@@ -49,7 +49,7 @@ class PortalDeveloperModeTest extends TestCase
         $this->member->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
         $this->admin->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
 
-        foreach (['access_grants', 'access_limits', 'access_toggles', 'developer_modes'] as $table) {
+        foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'developer_modes'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
     }
@@ -82,6 +82,20 @@ class PortalDeveloperModeTest extends TestCase
         $this->mode($token, ['on' => false])->assertOk();
 
         $this->assertSame(1, PortalLog::query()->where('employee_id', $this->developer->id)->where('message', 'like', '%switched off Developer mode')->count());
+    }
+
+    // Switching Developer mode either way is a developer's act, with nothing on the row that points back at them.
+    public function test_switching_developer_mode_logs_as_a_developer_either_way(): void
+    {
+        $token = $this->developerToken();
+        $this->mode($token, ['on' => false])->assertOk();
+
+        $logs = PortalLog::query()->where('employee_id', $this->developer->id)->where('resource', 'developer.mode')->get();
+        $this->assertCount(2, $logs);
+        foreach ($logs as $log) {
+            $this->assertTrue((bool) $log->as_developer);
+            $this->assertNull($log->record_id);
+        }
     }
 
     public function test_the_password_changes_only_in_developer_mode_and_is_never_logged(): void

@@ -31,6 +31,8 @@ class PortalEmployeePresenter
             'developer_mode' => PortalDeveloperMode::isOn($employee, $request),
             // Active rule => reach, so the portal hides what cannot be opened; the server still checks.
             'rules' => (object) PortalRules::active($employee, $request),
+            // In Developer mode only: what Default would allow, so the portal can warn before an export past it.
+            'default_rules' => PortalDeveloperMode::isOn($employee, $request) ? array_keys(PortalRules::activeInDefault($employee, $request)) : null,
             'photo_url' => self::photoUrl($employee),
         ];
     }
@@ -39,7 +41,7 @@ class PortalEmployeePresenter
      * The profile photo as a small square thumbnail: the avatar is at most 48px, and the stored
      * original is a full-size upload. Null when the employee has none, so the portal shows initials.
      */
-    private static function photoUrl(Employee $employee): ?string
+    public static function photoUrl(Employee $employee): ?string
     {
         $photo = DB::connection($employee->getConnectionName())
             ->table('attachments')

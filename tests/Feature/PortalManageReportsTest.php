@@ -25,7 +25,7 @@ class PortalManageReportsTest extends TestCase
         parent::setUp();
         Cache::flush();
         Mail::fake();
-        foreach (['access_grants', 'access_limits', 'access_toggles', 'access_self_reach', 'access_lists', 'developer_modes'] as $table) {
+        foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'access_self_reach', 'access_lists', 'developer_modes'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
     }

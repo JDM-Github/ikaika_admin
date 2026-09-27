@@ -203,7 +203,7 @@ final class PortalReimbursementRequests
             PortalNotificationType::REQUEST_FILED_REIMBURSEMENT,
             'New reimbursement request',
             PortalActivityCopy::notifyFiled(
-                PortalActivityCopy::displayName($actor),
+                PortalActivityCopy::actorName($actor, $request, true),
                 'reimbursement request',
                 $date,
                 $date,
@@ -395,7 +395,7 @@ final class PortalReimbursementRequests
             'manage.requests.reimbursement',
             PortalNotificationType::REQUEST_CANCELLED_REIMBURSEMENT,
             'Reimbursement request cancelled',
-            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'reimbursement request', $date),
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::actorName($actor, $request, true), 'reimbursement request', $date),
             PortalShellPath::MANAGE_REQUESTS,
             'Open queue',
             ['recordId' => $claimId],

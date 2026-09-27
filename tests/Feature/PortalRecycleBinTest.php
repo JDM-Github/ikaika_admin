@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Modules\Core\Models\Action;
 use App\Modules\Core\Models\Recycle;
 use App\Modules\Portal\Models\Employee;
-use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreLedger;
 use App\Support\Core\CoreRecycleKey;
@@ -389,7 +388,8 @@ class PortalRecycleBinTest extends TestCase
         $this->assertSame(1, Recycle::query()->where('id', $recycled->id)->count());
     }
 
-    public function test_an_admin_restores_another_members_row_to_that_member(): void
+    // All Recycle only looks: restoring someone else's item could backfire on them, so they restore their own.
+    public function test_an_admin_sees_another_members_row_but_cannot_restore_it(): void
     {
         $admin = $this->adminWhoIsNotExecutive();
         $member = $this->activeMember();
@@ -417,34 +417,25 @@ class PortalRecycleBinTest extends TestCase
             ->first();
         $this->assertNotNull($recycled);
 
+        $this->getJson('/api/development/portal/administration/recycle-bin/'.$recycled->id, $adminHeaders)->assertOk();
         $this->postJson(
             '/api/development/portal/administration/recycle-bin/'.$recycled->id.'/restore',
             [],
             $adminHeaders,
-        )->assertNoContent();
+        )->assertForbidden()->assertJsonPath('message', 'All Recycle is view only: people restore their own items.');
 
+        $this->assertSame(1, Recycle::query()->where('id', $recycled->id)->count());
         $memberList = $this->getJson(
             '/api/development/portal/reports/submitted?from='.$today.'&to='.$today,
             $memberHeaders,
         )->assertOk();
-        $this->assertContains($today.'-daily', collect($memberList->json('data'))->pluck('id')->all());
-
-        $inbox = PortalNotification::query()
-            ->where('employee_id', $member->getKey())
-            ->where('type', 'administration.recycle-bin.restored')
-            ->where('actor_id', $admin->getKey())
-            ->orderByDesc('id')
-            ->first();
-        $this->assertNotNull($inbox);
-        $this->assertStringContainsString('was restored by', (string) $inbox->message);
-
-        $added = Action::query()
+        $this->assertNotContains($today.'-daily', collect($memberList->json('data'))->pluck('id')->all());
+        $this->assertFalse(Action::query()
             ->where('product', CoreLedger::PRODUCT_PORTAL)
             ->where('recycle_key', $recycleKey)
             ->where('action_type', CoreActionType::ADD)
-            ->first();
-        $this->assertNotNull($added);
-        $this->assertSame((int) $admin->getKey(), $added->actor_id);
+            ->where('actor_id', $admin->getKey())
+            ->exists());
     }
 
     public function test_restore_is_refused_when_a_live_report_already_occupies_the_day(): void

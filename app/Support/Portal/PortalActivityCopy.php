@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
 /**
@@ -14,6 +15,20 @@ final class PortalActivityCopy
     public const YOU = '{UserName|You}';
 
     public const YOUR = '{UserName|Your}';
+
+    /**
+     * The actor's name as other people read it in an alert or in their own log: a developer's act in
+     * Developer mode (past their Default powers, or done to someone else) reads "a developer", like
+     * the log it goes with. Capitalised when the name opens the sentence.
+     */
+    public static function actorName(Employee $actor, ?Request $request, bool $capitalised = false): string
+    {
+        if ($request !== null && PortalDeveloperMode::isOn($actor, $request) && PortalRules::isDevelopersAct($request)) {
+            return $capitalised ? PortalAccessGraph::DEVELOPER_NAME_CAPITAL : PortalAccessGraph::DEVELOPER_NAME;
+        }
+
+        return self::displayName($actor);
+    }
 
     public static function displayName(Employee $employee): string
     {
@@ -148,9 +163,9 @@ final class PortalActivityCopy
         return self::YOU.' changed '.self::displayName($target)."'s role to ".$role;
     }
 
-    public static function ownRoleChanged(Employee $actor, string $role): string
+    public static function ownRoleChanged(Employee $actor, string $role, ?Request $request = null): string
     {
-        return self::YOUR.' role was changed to '.$role.' by '.self::displayName($actor);
+        return self::YOUR.' role was changed to '.$role.' by '.self::actorName($actor, $request);
     }
 
     public static function signedIn(): string

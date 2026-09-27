@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS actions (
     recycle_key       VARCHAR(191) NULL,
     actor_id          INT          NULL,
     actor_id_no       VARCHAR(100) NULL,
+    -- A developer's write in Developer mode: All Actions names them only to Developer mode viewers.
+    as_developer      TINYINT(1)   NOT NULL DEFAULT 0,
     parameters        JSON         NOT NULL,
     synced_at         TIMESTAMP    NULL,
     attempts          SMALLINT UNSIGNED NOT NULL DEFAULT 0,
