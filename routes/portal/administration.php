@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Portal\Administration\AllActionsController;
 use App\Http\Controllers\Api\Portal\Administration\AllLogsController;
 use App\Http\Controllers\Api\Portal\Administration\EmailBlocksController;
+use App\Http\Controllers\Api\Portal\Administration\EmailImagesController;
 use App\Http\Controllers\Api\Portal\Administration\EmailMessagesController;
 use App\Http\Controllers\Api\Portal\Administration\MissingReportsController;
 use App\Http\Controllers\Api\Portal\Administration\RecycleBinController;
@@ -44,6 +45,7 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::get('administration/emails/{id}', [EmailMessagesController::class, 'show'])
             ->whereNumber('id');
         Route::get('administration/email-blocks', [EmailBlocksController::class, 'index']);
+        Route::get('administration/email-images', [EmailImagesController::class, 'index']);
     });
 
     Route::middleware(['portal.admin', 'throttle:portal-administration-email-write'])->group(function (): void {
@@ -52,6 +54,8 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
             ->whereNumber('id');
         Route::delete('administration/email-blocks/{id}', [EmailBlocksController::class, 'destroy'])
             ->whereNumber('id');
+        Route::post('administration/email-images', [EmailImagesController::class, 'store']);
+        Route::delete('administration/email-images/{id}', [EmailImagesController::class, 'destroy']);
     });
 
     Route::middleware(['portal.admin', 'throttle:portal-administration-email-send'])

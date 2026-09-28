@@ -9,6 +9,7 @@ use App\Modules\Portal\Models\Employee;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Mail\SentMessage;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -39,6 +40,9 @@ final class PortalEmailMessages
 
     // A send that failed everywhere should not carry a thousand lines of transport noise.
     private const MAX_FAILURES = 25;
+
+    // What a failed CC and BCC copy is filed under; it has no one member to name.
+    private const COPY_NAME = 'CC and BCC copy';
 
     private const MAX_REASON = 191;
 
@@ -139,8 +143,9 @@ final class PortalEmailMessages
     }
 
     /**
-     * The email body exactly as a send would build it, for the composer's preview. The wording may be
-     * empty or unfinished, since it is still being written; only its length is held to a send's limit.
+     * The email body exactly as a send would build it, for the composer's preview and the Footers
+     * editor's. The wording may be empty or unfinished, since it is still being written; only its length
+     * is held to a send's limit. A draft footer comes as footerBody/footerFormat instead of a saved id.
      *
      * @return array{section: string, resource: string, data: array{html: string}}
      */
@@ -149,18 +154,22 @@ final class PortalEmailMessages
         $format = PortalEmailMarkup::validated($request->input('format'));
         $body = (string) $request->input('body', '');
         PortalEmailMarkup::holdToLimit($body, $format);
-        $footerId = $this->validatedFooterId($request);
-        $footer = $footerId === null ? null : $this->blocks->footer($footerId);
+        // A footer still being written in the Footers editor rides in as text; otherwise a saved one by id.
+        if ($request->has('footerBody')) {
+            $footerFormat = PortalEmailMarkup::validated($request->input('footerFormat'));
+            $footerBody = trim((string) $request->input('footerBody', ''));
+            PortalEmailMarkup::holdToLimit($footerBody, $footerFormat);
+        } else {
+            $footerId = $this->validatedFooterId($request);
+            $footer = $footerId === null ? null : $this->blocks->footer($footerId);
+            $footerBody = $footer === null ? null : trim((string) $footer->body);
+            $footerFormat = $this->blockFormat($footer);
+        }
 
         return [
             'section' => 'administration',
             'resource' => 'emails',
-            'data' => ['html' => PortalEmailMarkup::document(
-                trim($body),
-                $footer === null ? null : trim((string) $footer->body),
-                $format,
-                $this->blockFormat($footer),
-            )],
+            'data' => ['html' => PortalEmailMarkup::document(trim($body), $footerBody, $format, $footerFormat)],
         ];
     }
 
@@ -184,8 +193,11 @@ final class PortalEmailMessages
             abort(422, 'Choose who this email is for.');
         }
         $filter = $this->audience->validatedFilter($audience, $request);
+        $cc = PortalEmailAudience::validatedAddresses($request->input('cc', []), PortalEmailAudience::MAX_COPIES, 'CC', false);
+        $bcc = PortalEmailAudience::validatedAddresses($request->input('bcc', []), PortalEmailAudience::MAX_COPIES, 'BCC', false);
         $footerId = $this->validatedFooterId($request);
         $linkPath = $this->validatedLinkPath($request);
+        [$fromName, $replyTo] = $this->sender($actor, $request);
         $footer = $footerId === null ? null : $this->blocks->footer($footerId);
         $footerBody = $footer === null ? null : trim((string) $footer->body);
         $footerFormat = $footer === null ? null : $this->blockFormat($footer);
@@ -206,26 +218,56 @@ final class PortalEmailMessages
             $footerFormat,
             $audience,
             $filter,
-            count($recipients),
+            $cc,
+            $bcc,
+            $fromName,
+            $replyTo,
+            $recipients,
             $employeeId,
         );
 
         $sent = 0;
         $failures = [];
         $reached = [];
-        foreach ($recipients as $recipient) {
+        if ($audience === PortalEmailAudience::CUSTOM) {
+            // Typed addresses go as one email, as a mail client sends it: To and Cc on show, Bcc hidden.
             try {
-                Mail::to($recipient['email'])->send(new PortalEmailMail($subject, $body, $footerBody, $format, $footerFormat ?? PortalEmailMarkup::FORMAT_MARKUP));
-                $sent++;
-                $reached[] = $recipient['id'];
+                Mail::to(array_column($recipients, 'email'))->cc($cc)->bcc($bcc)
+                    ->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo));
+                $sent = count($recipients);
             } catch (Throwable $error) {
-                if (count($failures) < self::MAX_FAILURES) {
-                    $failures[] = [
-                        'employeeId' => $recipient['id'],
-                        'name' => $recipient['name'],
-                        'reason' => $this->reason($error),
-                    ];
+                $reason = $this->reason($error);
+                foreach (array_slice($recipients, 0, self::MAX_FAILURES) as $recipient) {
+                    $failures[] = ['employeeId' => null, 'name' => $recipient['name'], 'reason' => $reason];
                 }
+            }
+        } else {
+            foreach ($recipients as $recipient) {
+                try {
+                    Mail::to($recipient['email'])->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo));
+                    $sent++;
+                    if ($recipient['id'] !== null) {
+                        $reached[] = $recipient['id'];
+                    }
+                } catch (Throwable $error) {
+                    if (count($failures) < self::MAX_FAILURES) {
+                        $failures[] = [
+                            'employeeId' => $recipient['id'],
+                            'name' => $recipient['name'],
+                            'reason' => $this->reason($error),
+                        ];
+                    }
+                }
+            }
+        }
+
+        // A member audience keeps its private copies, so CC and BCC share one more: CC people see each other, BCC nobody.
+        if ($audience !== PortalEmailAudience::CUSTOM && ($cc !== [] || $bcc !== [])) {
+            try {
+                $copy = $cc !== [] ? Mail::to($cc)->bcc($bcc) : Mail::bcc($bcc);
+                $copy->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo));
+            } catch (Throwable $error) {
+                $failures[] = ['employeeId' => null, 'name' => self::COPY_NAME, 'reason' => $this->reason($error)];
             }
         }
 
@@ -256,7 +298,11 @@ final class PortalEmailMessages
                 'category' => $category,
                 'subject' => $subject,
                 'audience' => $audience,
-                'audienceFilter' => $filter,
+                // Typed addresses stay in the outbox row; the ledger that syncs out only counts them.
+                'audienceFilter' => [...$filter, 'emails' => count($filter['emails'])],
+                'cc' => count($cc),
+                'bcc' => count($bcc),
+                'asSender' => $fromName !== null,
                 'recipientCount' => count($recipients),
                 'sent' => $sent,
                 'failed' => $failed,
@@ -271,16 +317,92 @@ final class PortalEmailMessages
         ];
     }
 
+    // The fixed test mail `php artisan portal:mail-test` sends.
+    public static function testMail(): PortalEmailMail
+    {
+        return new PortalEmailMail(
+            'IKAIKA Portal mail test',
+            "This is a **test** from the portal.\nIf you can read this, sending works.",
+            'Sent by the portal\'s mail test.',
+        );
+    }
+
+    /**
+     * The server's own acceptance of a message ("250 OK id=..."), which a host can trace. Only that
+     * line leaves: the transcript above it holds the AUTH exchange.
+     */
+    public static function acceptance(?SentMessage $sent): ?string
+    {
+        $accepted = null;
+        foreach (preg_split('/\R/', (string) $sent?->getDebug()) ?: [] as $line) {
+            if (preg_match('/<\s*(250[ -].*(?:queued|id=).*)$/i', $line, $match) === 1) {
+                $accepted = trim($match[1]);
+            }
+        }
+
+        return $accepted;
+    }
+
     public function bumpCache(): void
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         Cache::forever(self::CACHE_VERSION_KEY, $current + 1);
     }
 
+    private function mail(
+        string $subject,
+        string $body,
+        ?string $footerBody,
+        string $format,
+        ?string $footerFormat,
+        ?string $fromName,
+        ?string $replyTo,
+    ): PortalEmailMail {
+        return new PortalEmailMail(
+            $subject,
+            $body,
+            $footerBody,
+            $format,
+            $footerFormat ?? PortalEmailMarkup::FORMAT_MARKUP,
+            $fromName,
+            $replyTo,
+        );
+    }
+
+    /**
+     * "Send as me": the sender's own name on the portal's address, and replies to their own mailbox.
+     * A developer acting in Developer mode goes out as "A developer" with no reply address, so the
+     * mail never names who stood behind it. Off, both are null and the mail is the portal's.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function sender(Employee $actor, Request $request): array
+    {
+        if (! $request->boolean('asSender')) {
+            return [null, null];
+        }
+
+        $name = PortalActivityCopy::actorName($actor, $request, true);
+        $fromName = $name.' via '.(string) config('mail.from.name');
+        if ($name === PortalAccessGraph::DEVELOPER_NAME_CAPITAL) {
+            return [$fromName, null];
+        }
+
+        $email = strtolower(trim((string) ($actor->email ?? '')));
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            abort(422, 'Your account has no email address for replies to go to.');
+        }
+
+        return [$fromName, $email];
+    }
+
     /**
      * The row exists before anything is delivered, so a run that dies mid-send is still on record.
      *
-     * @param  array{departments: list<string>, roles: list<string>, memberIds: list<int>}  $filter
+     * @param  array{departments: list<string>, roles: list<string>, memberIds: list<int>, emails: list<string>}  $filter
+     * @param  list<string>  $cc
+     * @param  list<string>  $bcc
+     * @param  list<array{id: ?int, name: string, email: string}>  $recipients
      */
     private function openRow(
         string $category,
@@ -292,7 +414,11 @@ final class PortalEmailMessages
         ?string $footerFormat,
         string $audience,
         array $filter,
-        int $recipientCount,
+        array $cc,
+        array $bcc,
+        ?string $fromName,
+        ?string $replyTo,
+        array $recipients,
         int $employeeId,
     ): int {
         return (int) $this->connection()->table('email_messages')->insertGetId([
@@ -305,7 +431,16 @@ final class PortalEmailMessages
             'footer_format' => $footerFormat,
             'audience' => $audience,
             'audience_filter' => json_encode($filter),
-            'recipient_count' => $recipientCount,
+            // Kept so All Emails can say who it went to; the ledger that syncs out never carries it.
+            'recipients' => json_encode(array_map(
+                static fn (array $recipient): array => ['name' => (string) $recipient['name'], 'email' => (string) $recipient['email']],
+                $recipients,
+            )),
+            'cc' => $cc === [] ? null : json_encode($cc),
+            'bcc' => $bcc === [] ? null : json_encode($bcc),
+            'from_name' => $fromName,
+            'reply_to' => $replyTo,
+            'recipient_count' => count($recipients),
             'sent_count' => 0,
             'failed_count' => 0,
             'failures' => null,

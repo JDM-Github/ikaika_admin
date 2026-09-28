@@ -4,6 +4,7 @@ namespace App\Mail;
 
 use App\Support\Portal\PortalEmailMarkup;
 use Illuminate\Mail\Mailable;
+use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 
@@ -11,6 +12,10 @@ use Illuminate\Mail\Mailables\Envelope;
  * One notice from Send Email: the composed body with the footer that was chosen for it, each in its
  * own format (the toolbar's markup, or HTML sent as written). PortalEmailMarkup builds it, the same
  * builder the composer's preview shows, so the preview is the email.
+ *
+ * Sent as an administrator, it still leaves from the portal's own address -- only the display name
+ * becomes "<Name> via IKAIKA Portal" and Reply-To points at them -- so it passes the domain's own
+ * sender checks rather than looking like a spoofed personal address.
  */
 class PortalEmailMail extends Mailable
 {
@@ -20,11 +25,15 @@ class PortalEmailMail extends Mailable
         public readonly ?string $footerBody = null,
         public readonly string $bodyFormat = PortalEmailMarkup::FORMAT_MARKUP,
         public readonly string $footerFormat = PortalEmailMarkup::FORMAT_MARKUP,
+        public readonly ?string $fromName = null,
+        public readonly ?string $replyToAddress = null,
     ) {}
 
     public function envelope(): Envelope
     {
         return new Envelope(
+            from: $this->fromName === null ? null : new Address((string) config('mail.from.address'), $this->fromName),
+            replyTo: $this->replyToAddress === null ? [] : [new Address($this->replyToAddress, $this->fromName)],
             subject: $this->subjectLine,
         );
     }

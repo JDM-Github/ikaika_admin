@@ -52,7 +52,7 @@ final class PortalEmailPresenter
      */
     public static function messageDetailColumns(): array
     {
-        return [...self::messageColumns(), 'body', 'format', 'footer_id', 'footer_body', 'footer_format', 'failures'];
+        return [...self::messageColumns(), 'body', 'format', 'footer_id', 'footer_body', 'footer_format', 'recipients', 'cc', 'bcc', 'from_name', 'reply_to', 'failures'];
     }
 
     /**
@@ -148,6 +148,13 @@ final class PortalEmailPresenter
             'footerId' => is_numeric($row->footer_id) ? (int) $row->footer_id : null,
             'footerBody' => self::text($row->footer_body),
             'footerFormat' => self::format($row->footer_format),
+            // Null on a send from before the list was kept, so the page can say so rather than list nobody.
+            'recipients' => self::recipients($row->recipients),
+            'cc' => self::textList($row->cc),
+            'bcc' => self::textList($row->bcc),
+            // Set only when an administrator sent it as themselves.
+            'fromName' => self::text($row->from_name),
+            'replyTo' => self::text($row->reply_to),
             // The email as the inbox got it, rebuilt from the snapshot, so All Emails can draw it.
             'html' => PortalEmailMarkup::document(
                 (string) $row->body,
@@ -187,6 +194,7 @@ final class PortalEmailPresenter
             'departments' => self::textList($filter['departments'] ?? null),
             'roles' => self::textList($filter['roles'] ?? null),
             'memberIds' => self::idList($filter['memberIds'] ?? null),
+            'emails' => self::textList($filter['emails'] ?? null),
         ];
     }
 
@@ -196,6 +204,28 @@ final class PortalEmailPresenter
      *
      * @return list<array{employeeId: ?int, name: string, reason: string}>
      */
+    /**
+     * @return list<array{name: string, email: string}>|null
+     */
+    private static function recipients(mixed $value): ?array
+    {
+        if (! is_array($value)) {
+            return null;
+        }
+
+        $recipients = [];
+        foreach ($value as $row) {
+            $email = is_array($row) ? trim((string) ($row['email'] ?? '')) : '';
+            if ($email === '') {
+                continue;
+            }
+            $name = trim((string) ($row['name'] ?? ''));
+            $recipients[] = ['name' => $name === '' ? $email : $name, 'email' => $email];
+        }
+
+        return $recipients;
+    }
+
     public static function failures(mixed $value): array
     {
         $rows = is_array($value) ? $value : [];

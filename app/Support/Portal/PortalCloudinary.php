@@ -3,13 +3,15 @@
 namespace App\Support\Portal;
 
 use Composer\CaBundle\CaBundle;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Signed uploads to Cloudinary for reimbursement receipts.
+ * Signed uploads to Cloudinary for reimbursement receipts, and the images Send Email puts in a
+ * message (listed and deleted by folder, since an email only holds their link).
  *
  * The API secret stays here. The portal only ever sees a HTTPS URL and a file name -- putting the
  * secret in the app would leak it to every member who opened a bundle.
@@ -92,6 +94,107 @@ final class PortalCloudinary
         ];
     }
 
+    /**
+     * One image under a public id the caller chose (its folder is part of it), so it can be listed
+     * and deleted by that folder later.
+     *
+     * @return array{publicId: string, url: string, width: int, height: int, bytes: int, createdAt: string}
+     */
+    public function uploadImage(UploadedFile $file, string $publicId): array
+    {
+        [$cloud, $key, $secret] = $this->credentials('Image upload is not configured.');
+        $path = $file->getRealPath();
+        $contents = is_string($path) && $path !== '' ? file_get_contents($path) : false;
+        if ($contents === false) {
+            abort(422, 'Choose an image.');
+        }
+
+        $timestamp = time();
+        try {
+            $response = $this->client()
+                ->attach('file', $contents, $file->getClientOriginalName() !== '' ? $file->getClientOriginalName() : 'image')
+                ->post('https://api.cloudinary.com/v1_1/'.$cloud.'/image/upload', [
+                    'api_key' => $key,
+                    'timestamp' => $timestamp,
+                    'public_id' => $publicId,
+                    'signature' => $this->sign(['public_id' => $publicId, 'timestamp' => $timestamp], $secret),
+                ]);
+        } catch (Throwable $error) {
+            Log::warning('portal.cloudinary.image_upload_failed', ['reason' => $error->getMessage()]);
+            abort(502, 'The image could not be stored.');
+        }
+
+        $url = $response->json('secure_url');
+        if (! $response->successful() || ! is_string($url) || ! $this->isOwnedUrl($url)) {
+            Log::warning('portal.cloudinary.image_upload_rejected', [
+                'status' => $response->status(),
+                'error' => $response->json('error.message') ?? 'Missing or foreign secure_url.',
+            ]);
+            abort(502, 'The image could not be stored.');
+        }
+
+        return self::image((array) $response->json());
+    }
+
+    /**
+     * Every image whose public id starts with $prefix, newest first. One page of 100 is the whole
+     * of a person's email images in practice.
+     *
+     * @return list<array{publicId: string, url: string, width: int, height: int, bytes: int, createdAt: string}>
+     */
+    public function listImages(string $prefix): array
+    {
+        [$cloud, $key, $secret] = $this->credentials('Image upload is not configured.');
+        try {
+            $response = $this->client()
+                ->withBasicAuth($key, $secret)
+                ->get('https://api.cloudinary.com/v1_1/'.$cloud.'/resources/image/upload', [
+                    'prefix' => $prefix,
+                    'max_results' => 100,
+                ]);
+        } catch (Throwable $error) {
+            Log::warning('portal.cloudinary.image_list_failed', ['reason' => $error->getMessage()]);
+            abort(502, 'The images could not be loaded.');
+        }
+        if (! $response->successful()) {
+            Log::warning('portal.cloudinary.image_list_rejected', ['status' => $response->status()]);
+            abort(502, 'The images could not be loaded.');
+        }
+
+        $images = [];
+        foreach ((array) $response->json('resources', []) as $resource) {
+            if (is_array($resource) && is_string($resource['secure_url'] ?? null) && $this->isOwnedUrl($resource['secure_url'])) {
+                $images[] = self::image($resource);
+            }
+        }
+        usort($images, static fn (array $a, array $b): int => strcmp($b['createdAt'], $a['createdAt']));
+
+        return $images;
+    }
+
+    public function destroyImage(string $publicId): void
+    {
+        [$cloud, $key, $secret] = $this->credentials('Image upload is not configured.');
+        $timestamp = time();
+        try {
+            $response = $this->client()->asForm()->post('https://api.cloudinary.com/v1_1/'.$cloud.'/image/destroy', [
+                'api_key' => $key,
+                'timestamp' => $timestamp,
+                'public_id' => $publicId,
+                'signature' => $this->sign(['public_id' => $publicId, 'timestamp' => $timestamp], $secret),
+            ]);
+        } catch (Throwable $error) {
+            Log::warning('portal.cloudinary.image_delete_failed', ['reason' => $error->getMessage()]);
+            abort(502, 'The image could not be deleted.');
+        }
+        // "not found" means it is already gone, which is what a delete wants.
+        $result = $response->json('result');
+        if (! $response->successful() || ! in_array($result, ['ok', 'not found'], true)) {
+            Log::warning('portal.cloudinary.image_delete_rejected', ['status' => $response->status()]);
+            abort(502, 'The image could not be deleted.');
+        }
+    }
+
     public function isOwnedUrl(string $url): bool
     {
         $cloud = $this->cloudName();
@@ -114,6 +217,57 @@ final class PortalCloudinary
         $thumb = preg_replace('#/upload/#', '/upload/c_fill,h_96,w_96,f_auto,q_auto/', $url, 1);
 
         return is_string($thumb) ? $thumb : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $resource
+     * @return array{publicId: string, url: string, width: int, height: int, bytes: int, createdAt: string}
+     */
+    private static function image(array $resource): array
+    {
+        return [
+            'publicId' => (string) ($resource['public_id'] ?? ''),
+            'url' => (string) ($resource['secure_url'] ?? ''),
+            'width' => (int) ($resource['width'] ?? 0),
+            'height' => (int) ($resource['height'] ?? 0),
+            'bytes' => (int) ($resource['bytes'] ?? 0),
+            'createdAt' => (string) ($resource['created_at'] ?? ''),
+        ];
+    }
+
+    // Cloudinary's signature: the parameters sorted by name, joined as a query string, then the secret.
+    /**
+     * @param  array<string, string|int>  $params
+     */
+    private function sign(array $params, string $secret): string
+    {
+        ksort($params);
+        $pairs = [];
+        foreach ($params as $name => $value) {
+            $pairs[] = $name.'='.$value;
+        }
+
+        return sha1(implode('&', $pairs).$secret);
+    }
+
+    /**
+     * @return array{0: string, 1: string, 2: string}
+     */
+    private function credentials(string $missing): array
+    {
+        $cloud = $this->cloudName();
+        $key = $this->apiKey();
+        $secret = $this->apiSecret();
+        if ($cloud === null || $key === null || $secret === null) {
+            abort(503, $missing);
+        }
+
+        return [$cloud, $key, $secret];
+    }
+
+    private function client(): PendingRequest
+    {
+        return Http::timeout(60)->withOptions(['verify' => CaBundle::getSystemCaRootBundlePath()]);
     }
 
     private function cloudName(): ?string

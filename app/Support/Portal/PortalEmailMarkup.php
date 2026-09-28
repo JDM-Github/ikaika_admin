@@ -30,6 +30,16 @@ final class PortalEmailMarkup
 
     private const TEXT_COLOR = '#111827';
 
+    // Inter where the mail client loads web fonts (Apple Mail, iOS, Thunderbird); elsewhere the stack.
+    public const FONT_STACK = "Inter,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+
+    /*
+     * Asks for Inter, and keeps desktop Outlook -- which drops to Times New Roman when a web font it
+     * cannot load leads the stack -- on Segoe UI instead. Clients that strip <style> simply ignore it.
+     */
+    private const FONT_HEAD = "<style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');</style>"
+        ."<!--[if mso]><style>body,table,td,div,p,a,span,li,h1,h2,h3{font-family:'Segoe UI',Arial,sans-serif !important;}</style><![endif]-->";
+
     private const MUTED_COLOR = '#4b5563';
 
     private const RULE_COLOR = '#d1d5db';
@@ -112,7 +122,8 @@ final class PortalEmailMarkup
                 : substr($body, 0, $close).$footerHtml.substr($body, $close);
         }
 
-        return '<div style="font-family:sans-serif;font-size:15px;line-height:1.6;color:'.self::TEXT_COLOR.'">'
+        return self::FONT_HEAD
+            .'<div style="font-family:'.self::FONT_STACK.';font-size:15px;line-height:1.6;color:'.self::TEXT_COLOR.'">'
             .self::fragment($body, $bodyFormat)
             .$footerHtml
             .'</div>';
@@ -136,6 +147,9 @@ final class PortalEmailMarkup
             static fn (array $tag): string => '<'.$tag[1].($tag[2] ?? '').' style="'.self::TAG_STYLES[$tag[1]].'">',
             $html,
         );
+
+        // CommonMark writes <img ... /> with no size; a large picture must not overflow the message.
+        $html = (string) preg_replace('/<img\s/', '<img style="display:block;max-width:100%;height:auto;border:0" ', $html);
 
         // Links open in a new tab and read as links in every client, dark or light.
         return (string) preg_replace(

@@ -8,9 +8,13 @@ use App\Modules\Portal\Models\EmailMessage;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Portal\PortalActivityCopy;
 use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalEmailMessages;
+use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalNotificationType;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Mail\SentMessage;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
 use Mockery;
@@ -30,10 +34,21 @@ class PortalEmailTest extends TestCase
 
     private const BASE = '/api/development/portal';
 
+    private string $diagnostics;
+
     protected function setUp(): void
     {
         parent::setUp();
         Cache::flush();
+        // Send test writes a report; a test must never add to the real one.
+        $this->diagnostics = tempnam(sys_get_temp_dir(), 'mail-test-');
+        config(['mail.diagnostics_path' => $this->diagnostics]);
+    }
+
+    protected function tearDown(): void
+    {
+        @unlink($this->diagnostics);
+        parent::tearDown();
     }
 
     public function test_catalog_lists_send_email_under_administration(): void
@@ -210,6 +225,11 @@ class PortalEmailTest extends TestCase
         $this->assertContains('Engineering', array_column($data['departments'], 'value'));
         $this->assertContains('Admin', array_column($data['roles'], 'value'));
         $this->assertNotEmpty($data['members']);
+
+        // Each member carries their work address for the composer's suggestions, never a personal one.
+        $member = $data['members'][0];
+        $this->assertSame(trim((string) Employee::query()->whereKey($member['id'])->value('email')), $member['email']);
+        $this->assertSame(['id', 'name', 'department', 'email'], array_keys($member));
     }
 
     public function test_it_sends_to_everyone_and_leaves_an_outbox_row_and_a_bell_row(): void
@@ -290,6 +310,35 @@ class PortalEmailTest extends TestCase
             'memberIds' => [(string) $member->getKey()],
             'linkPath' => '/manage/user-management',
         ], $headers)->assertStatus(422);
+    }
+
+    // All Emails lists who a send went to; a send from before the list was kept says so with null.
+    public function test_a_send_keeps_who_it_went_to_by_name_and_address(): void
+    {
+        Mail::fake();
+        $headers = $this->authHeaders();
+        $member = $this->member();
+
+        $sent = $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Who got this',
+            'body' => 'Hello.',
+            'audience' => 'members',
+            'memberIds' => [(string) $member->getKey()],
+        ], $headers)->assertCreated()->json('data');
+
+        $this->getJson(self::BASE.'/administration/emails/'.$sent['id'], $headers)
+            ->assertOk()
+            ->assertJsonPath('data.recipients', [[
+                'name' => trim($member->first_name.' '.$member->last_name),
+                'email' => trim((string) $member->email),
+            ]]);
+
+        EmailMessage::query()->whereKey($sent['id'])->update(['recipients' => null]);
+        Cache::flush();
+        $this->getJson(self::BASE.'/administration/emails/'.$sent['id'], $headers)
+            ->assertOk()
+            ->assertJsonPath('data.recipients', null);
     }
 
     public function test_it_sends_to_a_department_and_keeps_the_footer_it_used(): void
@@ -412,6 +461,47 @@ class PortalEmailTest extends TestCase
         $this->getJson(self::BASE.'/administration/emails/preview', $headers)->assertStatus(405);
     }
 
+    // The Footers editor previews a footer before it is saved, in its own format, under the message.
+    public function test_the_preview_builds_a_draft_footer_as_it_would_send(): void
+    {
+        $headers = $this->authHeaders();
+
+        $markup = $this->postJson(self::BASE.'/administration/emails/preview', [
+            'body' => 'Your message',
+            'footerBody' => "Regards,\n**MIS**",
+        ], $headers)->assertOk()->json('data.html');
+        $this->assertSame(PortalEmailMarkup::document('Your message', "Regards,\n**MIS**"), $markup);
+
+        $html = $this->postJson(self::BASE.'/administration/emails/preview', [
+            'body' => 'Your message',
+            'footerBody' => '<p style="color:red">Legal</p>',
+            'footerFormat' => 'html',
+        ], $headers)->assertOk()->json('data.html');
+        $this->assertStringContainsString('<p style="color:red">Legal</p>', (string) $html);
+
+        $this->postJson(self::BASE.'/administration/emails/preview', ['body' => 'x', 'footerBody' => str_repeat('a', 20001)], $headers)->assertStatus(422);
+        $this->postJson(self::BASE.'/administration/emails/preview', ['body' => 'x', 'footerBody' => 'x', 'footerFormat' => 'rtf'], $headers)->assertStatus(422);
+    }
+
+    // A picture in markup is capped to the message width, so a large one never overflows the email.
+    public function test_a_markup_image_is_capped_to_the_message_width(): void
+    {
+        $html = PortalEmailMarkup::document('![Banner](https://res.cloudinary.test/banner.png)', null);
+
+        $this->assertStringContainsString('<img style="display:block;max-width:100%;height:auto;border:0" src="https://res.cloudinary.test/banner.png" alt="Banner"', $html);
+    }
+
+    // Every portal email asks for Inter and falls back through a stack; a whole document keeps its own fonts.
+    public function test_the_mail_asks_for_inter_with_a_fallback_stack(): void
+    {
+        $html = PortalEmailMarkup::document('Hello', 'Regards');
+
+        $this->assertStringContainsString('family=Inter:wght@400;600;700', $html);
+        $this->assertStringContainsString('font-family:'.PortalEmailMarkup::FONT_STACK, $html);
+        $this->assertStringContainsString('<!--[if mso]>', $html);
+        $this->assertStringNotContainsString('fonts.googleapis.com', PortalEmailMarkup::document('<html><body>x</body></html>', null, 'html'));
+    }
+
     // Typed HTML and script links never reach an inbox as markup.
     public function test_the_markup_escapes_html_and_drops_unsafe_links(): void
     {
@@ -521,6 +611,258 @@ class PortalEmailTest extends TestCase
         $this->assertStringContainsString('<p>Hi</p><hr', $html);
         $this->assertStringContainsString('<strong>MIS</strong></p>'."\n".'</div></body>', $html);
         $this->assertSame('<html><p>x</p><hr', substr(PortalEmailMarkup::document('<html><p>x</p>', 'f', 'html'), 0, 17));
+    }
+
+    // Typed addresses go as one real email with its Cc and Bcc, as Outlook sends it; no member is told.
+    public function test_a_custom_audience_sends_one_email_with_real_cc_and_bcc(): void
+    {
+        Mail::fake();
+        $headers = $this->authHeaders();
+        $noticesBefore = $this->emailNotices();
+
+        $sent = $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Supplier notice',
+            'body' => 'Deliveries move to Monday.',
+            'audience' => 'custom',
+            'emails' => ['Alpha@Supplier.test', 'beta@supplier.test', 'alpha@supplier.test '],
+            'cc' => ['boss@ikaika.test'],
+            'bcc' => ['audit@ikaika.test'],
+        ], $headers)
+            ->assertCreated()
+            ->assertJsonPath('data.audience', 'custom')
+            ->assertJsonPath('data.recipientCount', 2)
+            ->assertJsonPath('data.sentCount', 2)
+            ->assertJsonPath('data.audienceFilter.emails', ['alpha@supplier.test', 'beta@supplier.test'])
+            ->assertJsonPath('data.cc', ['boss@ikaika.test'])
+            ->assertJsonPath('data.bcc', ['audit@ikaika.test'])
+            ->json('data');
+
+        Mail::assertSent(PortalEmailMail::class, 1);
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('alpha@supplier.test')
+            && $mail->hasTo('beta@supplier.test')
+            && $mail->hasCc('boss@ikaika.test')
+            && $mail->hasBcc('audit@ikaika.test'));
+        $this->assertSame($noticesBefore, $this->emailNotices());
+
+        // The ledger that syncs out counts the typed addresses and never carries them.
+        $log = PortalLog::query()->where('resource', 'administration.email')->where('record_id', (string) $sent['id'])->firstOrFail();
+        $this->assertStringNotContainsString('supplier.test', (string) json_encode($log->payload));
+        $this->assertStringNotContainsString('boss@', (string) json_encode($log->payload));
+
+        $this->getJson(self::BASE.'/administration/emails/'.$sent['id'], $headers)
+            ->assertOk()
+            ->assertJsonPath('data.recipients', [
+                ['name' => 'alpha@supplier.test', 'email' => 'alpha@supplier.test'],
+                ['name' => 'beta@supplier.test', 'email' => 'beta@supplier.test'],
+            ])
+            ->assertJsonPath('data.cc', ['boss@ikaika.test'])
+            ->assertJsonPath('data.bcc', ['audit@ikaika.test']);
+
+        // Only BCC: still the one email, to the typed address with the hidden copy riding along.
+        $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Quiet copy',
+            'body' => 'x',
+            'audience' => 'custom',
+            'emails' => ['gamma@supplier.test'],
+            'bcc' => ['audit@ikaika.test'],
+        ], $headers)->assertCreated()->assertJsonPath('data.cc', []);
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('gamma@supplier.test') && $mail->hasBcc('audit@ikaika.test'));
+    }
+
+    public function test_typed_addresses_are_validated_before_anything_is_sent(): void
+    {
+        Mail::fake();
+        $headers = $this->authHeaders();
+        $draft = ['category' => 'notice', 'subject' => 'x', 'body' => 'x', 'audience' => 'custom'];
+
+        $this->postJson(self::BASE.'/administration/emails', $draft, $headers)->assertStatus(422);
+        $this->postJson(self::BASE.'/administration/emails', [...$draft, 'emails' => ['not-an-address']], $headers)->assertStatus(422);
+        $this->postJson(self::BASE.'/administration/emails', [
+            ...$draft,
+            'emails' => array_map(static fn (int $i): string => 'p'.$i.'@supplier.test', range(1, 51)),
+        ], $headers)->assertStatus(422);
+        $this->postJson(self::BASE.'/administration/emails', [...$draft, 'emails' => ['a@supplier.test'], 'cc' => ['nope']], $headers)->assertStatus(422);
+        $this->postJson(self::BASE.'/administration/emails', [
+            ...$draft,
+            'emails' => ['a@supplier.test'],
+            'bcc' => array_map(static fn (int $i): string => 'b'.$i.'@supplier.test', range(1, 21)),
+        ], $headers)->assertStatus(422);
+
+        Mail::assertNothingSent();
+    }
+
+    // A member audience keeps private copies, so a failed CC and BCC copy is its own row, not the send's.
+    public function test_a_failed_cc_and_bcc_copy_on_a_member_send_is_recorded_without_failing_it(): void
+    {
+        $member = $this->administrator();
+        Mail::shouldReceive('to')->andReturnUsing(function ($to) {
+            $pending = Mockery::mock();
+            if ($to === ['boss@ikaika.test']) {
+                $pending->shouldReceive('bcc')->andReturnSelf();
+                $pending->shouldReceive('send')->andThrow(new RuntimeException('550 relay denied for boss@ikaika.test'));
+            } else {
+                $pending->shouldReceive('send')->andReturnNull();
+            }
+
+            return $pending;
+        });
+
+        $sent = $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Copy check',
+            'body' => 'x',
+            'audience' => 'members',
+            'memberIds' => [(int) $member->getKey()],
+            'cc' => ['boss@ikaika.test'],
+        ], $this->authHeaders())
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'sent')
+            ->assertJsonPath('data.failures.0.name', 'CC and BCC copy');
+        $this->assertStringContainsString('[address hidden]', (string) $sent->json('data.failures.0.reason'));
+    }
+
+    // One Custom email either goes or does not, so a refusal marks every typed address it carried.
+    public function test_a_refused_custom_email_marks_each_typed_address_with_the_reason(): void
+    {
+        Mail::shouldReceive('to')->andReturnUsing(function () {
+            $pending = Mockery::mock();
+            $pending->shouldReceive('cc')->andReturnSelf();
+            $pending->shouldReceive('bcc')->andReturnSelf();
+            $pending->shouldReceive('send')->andThrow(new RuntimeException('550 rejected for alpha@supplier.test'));
+
+            return $pending;
+        });
+
+        $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Refused',
+            'body' => 'x',
+            'audience' => 'custom',
+            'emails' => ['alpha@supplier.test', 'beta@supplier.test'],
+            'cc' => ['boss@ikaika.test'],
+        ], $this->authHeaders())
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'failed')
+            ->assertJsonPath('data.sentCount', 0)
+            ->assertJsonPath('data.failedCount', 2)
+            ->assertJsonPath('data.failures.0.name', 'alpha@supplier.test')
+            ->assertJsonPath('data.failures.1.name', 'beta@supplier.test')
+            ->assertJsonPath('data.failures.1.reason', '550 rejected for [address hidden]');
+    }
+
+    // Send as me: the portal's own address carries the sender's name, and replies go to them.
+    public function test_an_administrator_can_send_as_themselves_through_the_portal_address(): void
+    {
+        Mail::fake();
+        $admin = $this->administrator();
+        $email = strtolower(trim((string) $admin->email));
+        $name = PortalActivityCopy::displayName($admin);
+        $draft = [
+            'category' => 'notice',
+            'subject' => 'From me',
+            'body' => 'x',
+            'audience' => 'custom',
+            'emails' => ['alpha@supplier.test'],
+        ];
+
+        $sent = $this->postJson(self::BASE.'/administration/emails', [...$draft, 'asSender' => true], $this->headersFor($admin))
+            ->assertCreated()
+            ->assertJsonPath('data.fromName', $name.' via '.config('mail.from.name'))
+            ->assertJsonPath('data.replyTo', $email)
+            ->json('data');
+
+        Mail::assertSent(PortalEmailMail::class, function (PortalEmailMail $mail) use ($name, $email): bool {
+            $envelope = $mail->envelope();
+
+            return $envelope->from?->address === config('mail.from.address')
+                && $envelope->from->name === $name.' via '.config('mail.from.name')
+                && ($envelope->replyTo[0]->address ?? null) === $email;
+        });
+        $this->assertSame($email, EmailMessage::query()->whereKey($sent['id'])->value('reply_to'));
+
+        // Off, the mail is the portal's own: no name of its own and nowhere else for replies.
+        $this->postJson(self::BASE.'/administration/emails', $draft, $this->headersFor($admin))
+            ->assertCreated()
+            ->assertJsonPath('data.fromName', null)
+            ->assertJsonPath('data.replyTo', null);
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->envelope()->from === null && $mail->envelope()->replyTo === []);
+        // An account with no address has nowhere for replies to go, so the switch is refused.
+        $headers = $this->headersFor($admin);
+        $admin->forceFill(['email' => ''])->save();
+        $this->postJson(self::BASE.'/administration/emails', [...$draft, 'asSender' => true], $headers)->assertStatus(422);
+    }
+
+    // In Developer mode the mail never names who stood behind it, nor where replies would reach them.
+    public function test_a_developer_sending_as_themselves_goes_out_as_a_developer_with_no_reply_address(): void
+    {
+        Mail::fake();
+        $admin = $this->administrator();
+        $admin->forceFill(['is_developer' => 1])->save();
+        $token = $this->developerModeOn((string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $admin->id_no])->json('token'));
+
+        $this->withToken($token)->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Quiet',
+            'body' => 'x',
+            'audience' => 'custom',
+            'emails' => ['alpha@supplier.test'],
+            'asSender' => true,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.fromName', 'A developer via '.config('mail.from.name'))
+            ->assertJsonPath('data.replyTo', null);
+    }
+
+    public function test_the_server_acceptance_line_is_read_without_the_login(): void
+    {
+        $sent = Mockery::mock(SentMessage::class);
+        $sent->shouldReceive('getDebug')->andReturn("> AUTH LOGIN\n< 334 VXNlcm5hbWU6\n> bm9yZXBseQ==\n< 235 Authentication succeeded\n> DATA\n< 250 OK id=1abcDE-000123-XY\n");
+
+        $this->assertSame('250 OK id=1abcDE-000123-XY', PortalEmailMessages::acceptance($sent));
+        $this->assertNull(PortalEmailMessages::acceptance(null));
+    }
+
+    // The report says everything that decides a send except the password, and the login never shows.
+    public function test_the_mail_report_shows_the_settings_and_never_the_password(): void
+    {
+        config([
+            'mail.default' => 'smtp',
+            'mail.mailers.smtp.host' => 'mail.example.test',
+            'mail.mailers.smtp.port' => 465,
+            'mail.mailers.smtp.username' => 'noreply@example.test',
+            'mail.mailers.smtp.password' => 'Zq9#SecretValue',
+            'mail.mailers.smtp.local_domain' => '127.0.0.1',
+        ]);
+        $sent = Mockery::mock(SentMessage::class);
+        $sent->shouldReceive('getDebug')->andReturn("< 220 ready\n> EHLO [127.0.0.1]\n> AUTH LOGIN\n< 334 VXNlcm5hbWU6\n> bm9yZXBseQ==\n< 334 UGFzc3dvcmQ6\n> WnE5I1NlY3JldFZhbHVl\n< 235 Authentication succeeded\n> DATA\n< 250 OK id=1abc\n");
+        $sent->shouldReceive('getMessageId')->andReturn('m1@example.test');
+
+        PortalMailDiagnostics::record('unit', 'jane@example.test', $sent, null);
+        $report = (string) file_get_contents($this->diagnostics);
+
+        $this->assertStringContainsString('host           : mail.example.test', $report);
+        $this->assertStringContainsString('EHLO domain    : 127.0.0.1', $report);
+        $this->assertStringContainsString('password       : set, 15 characters, contains #', $report);
+        $this->assertStringContainsString('result         : accepted 250 OK id=1abc', $report);
+        $this->assertStringContainsString('> AUTH LOGIN [redacted]', $report);
+        $this->assertStringNotContainsString('Zq9#SecretValue', $report);
+        $this->assertStringNotContainsString('WnE5I1NlY3JldFZhbHVl', $report);
+        $this->assertStringNotContainsString('bm9yZXBseQ==', $report);
+
+        PortalMailDiagnostics::record('unit', 'jane@example.test', null, new RuntimeException('Connection refused'));
+        $this->assertStringContainsString('FAILED RuntimeException: Connection refused', (string) file_get_contents($this->diagnostics));
+    }
+
+    public function test_the_password_shape_names_the_usual_env_mistakes(): void
+    {
+        $this->assertSame('NOT SET', PortalMailDiagnostics::passwordShape(null));
+        $this->assertSame('NOT SET', PortalMailDiagnostics::passwordShape(''));
+        $this->assertSame('set, 6 characters', PortalMailDiagnostics::passwordShape('abcdef'));
+        $this->assertStringContainsString('SPACE at an end', PortalMailDiagnostics::passwordShape('abc '));
+        $this->assertStringContainsString('QUOTE kept at an end', PortalMailDiagnostics::passwordShape("'abc'"));
+        $this->assertSame("> AUTH PLAIN [redacted]\n< 235 ok", str_replace("\r\n", "\n", PortalMailDiagnostics::redacted("> AUTH PLAIN AGZvbwBiYXI=\n< 235 ok")));
     }
 
     public function test_a_member_who_cannot_be_reached_is_recorded_by_name_and_not_by_address(): void

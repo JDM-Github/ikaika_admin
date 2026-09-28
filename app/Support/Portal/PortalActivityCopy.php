@@ -246,6 +246,16 @@ final class PortalActivityCopy
         return self::YOU.' deleted the '.self::emailBlockKind($kind).' '.$name;
     }
 
+    public static function uploadedEmailImage(bool $global = false): string
+    {
+        return self::YOU.' uploaded '.($global ? 'a global' : 'an').' email image';
+    }
+
+    public static function deletedEmailImage(bool $global = false): string
+    {
+        return self::YOU.' deleted '.($global ? 'a global' : 'an').' email image';
+    }
+
     public static function sentEmail(string $subject, int $count): string
     {
         $label = $count === 1 ? '1 member' : $count.' members';

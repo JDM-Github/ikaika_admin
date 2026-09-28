@@ -22,6 +22,9 @@ class EmailMessage extends ProductModel
         return [
             'footer_id' => 'integer',
             'audience_filter' => 'array',
+            'recipients' => 'array',
+            'cc' => 'array',
+            'bcc' => 'array',
             'recipient_count' => 'integer',
             'sent_count' => 'integer',
             'failed_count' => 'integer',

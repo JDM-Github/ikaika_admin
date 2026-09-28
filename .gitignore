@@ -39,4 +39,5 @@ migrations/export_*/
 migrations/*.sql
 /migrations/.token*
 /migrations/generate/__pycache__/
-graphify-out/
+# Local copies of other systems' code, kept for reference while working on email.
+email-test/

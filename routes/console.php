@@ -1,10 +1,16 @@
 <?php
 
+use App\Mail\PortalEmailMail;
+use App\Modules\Portal\Models\EmailMessage;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
+use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalEmailMessages;
+use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Mail;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -93,3 +99,82 @@ Artisan::command('portal:book-team-charges', function (PortalBudgetEnvelopes $bu
 
     return 0;
 })->purpose('Book the portal\'s reimbursement charges to the claimant team\'s account');
+
+/*
+ * One test email through the same mailable Send Email uses, to check the .env mail settings. It
+ * names the mailer, host, port and sender it used, never the username or password.
+ *
+ * --message resends one stored portal email exactly as it was built (body, footer, formats, sender
+ * name, Reply-To) to the test address only, so a send that never arrived can be tried again alone.
+ * The server's own acceptance line is printed so a host can trace it; the rest of the transcript is
+ * not, because it carries the login.
+ */
+Artisan::command('portal:mail-test
+    {to=jdmpega@ikaikabim.com : Who receives the test}
+    {--message= : Resend this outbox row exactly as it was built}', function (): int {
+    $to = trim((string) $this->argument('to'));
+    if (filter_var($to, FILTER_VALIDATE_EMAIL) === false) {
+        $this->error('That is not an email address: '.$to);
+
+        return 1;
+    }
+
+    $mailer = (string) config('mail.default');
+    $this->line(sprintf(
+        'Mailer %s, host %s, port %s, from %s',
+        $mailer,
+        (string) config("mail.mailers.{$mailer}.host", '-'),
+        (string) config("mail.mailers.{$mailer}.port", '-'),
+        (string) config('mail.from.address'),
+    ));
+    if ($mailer === 'log') {
+        $this->warn('MAIL_MAILER is log: the email is written to storage/logs, not sent.');
+    }
+
+    $messageId = $this->option('message');
+    if ($messageId !== null) {
+        $row = EmailMessage::query()->find((int) $messageId);
+        if (! $row instanceof EmailMessage) {
+            $this->error('There is no outbox row #'.$messageId.'.');
+
+            return 1;
+        }
+        $mail = new PortalEmailMail(
+            (string) $row->subject,
+            (string) $row->body,
+            is_string($row->footer_body) ? $row->footer_body : null,
+            PortalEmailMarkup::format($row->format) ?? PortalEmailMarkup::FORMAT_MARKUP,
+            PortalEmailMarkup::format($row->footer_format) ?? PortalEmailMarkup::FORMAT_MARKUP,
+            is_string($row->from_name) ? $row->from_name : null,
+            is_string($row->reply_to) ? $row->reply_to : null,
+        );
+        $this->line(sprintf(
+            'Resending #%d "%s" (%s, %s, %s)',
+            (int) $row->getKey(),
+            (string) $row->subject,
+            (string) ($row->format ?? 'markup'),
+            $row->from_name === null ? 'as the portal' : 'sent as a person',
+            $row->footer_body === null ? 'no footer' : 'with footer',
+        ));
+    } else {
+        $mail = PortalEmailMessages::testMail();
+    }
+
+    $origin = 'console'.($messageId === null ? '' : ' --message='.$messageId);
+    try {
+        $sent = Mail::to($to)->send($mail);
+    } catch (Throwable $error) {
+        PortalMailDiagnostics::record($origin, $to, null, $error);
+        $this->error('Not sent: '.$error->getMessage());
+        $this->line('Full report: storage/'.PortalMailDiagnostics::LOG_PATH);
+
+        return 1;
+    }
+    PortalMailDiagnostics::record($origin, $to, $sent, null);
+    $this->line('Full report: storage/'.PortalMailDiagnostics::LOG_PATH);
+
+    $this->info('Sent to '.$to.'. Check the inbox, Junk and Other.');
+    $this->line('Server reply: '.(PortalEmailMessages::acceptance($sent) ?? 'not reported').'  Message-ID: '.($sent?->getMessageId() ?? '-'));
+
+    return 0;
+})->purpose('Send one test email with the current mail settings');

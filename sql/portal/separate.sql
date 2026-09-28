@@ -99,9 +99,14 @@ CREATE TABLE calendar_event_members (
 -- and footer it went out with, so editing a block never rewrites history.
 -- audience_filter holds departments, roles and employee ids for that audience.
 -- format is 'markup' (the toolbar's light markup, escaped) or 'html' (sent as written);
--- footer_format is the snapshot footer's own format.
+-- footer_format is the snapshot footer's own format. A custom audience keeps its typed
+-- addresses in audience_filter.emails; cc and bcc are the addresses that shared one copy.
+-- from_name and reply_to are set when an administrator sent it as themselves.
+-- recipients is who the send went to, [{name, email}]; null on sends from before it was kept.
 -- Existing databases: the Laravel migrations create_portal_email_tables and
--- add_format_to_portal_email_tables.
+-- add_format_to_portal_email_tables, add_copies_to_portal_email_messages,
+-- add_sender_to_portal_email_messages, seed_portal_email_built_in_blocks and
+-- add_recipients_to_portal_email_messages.
 -- ============================================================================
 
 CREATE TABLE email_blocks (
@@ -128,8 +133,13 @@ CREATE TABLE email_messages (
     footer_id       INT          NULL,
     footer_body     TEXT         NULL,
     footer_format   VARCHAR(8)   NULL,
+    cc              JSON         NULL,
+    bcc             JSON         NULL,
+    from_name       VARCHAR(191) NULL,
+    reply_to        VARCHAR(191) NULL,
     audience        VARCHAR(32)  NOT NULL,
     audience_filter JSON         NULL,
+    recipients      JSON         NULL,
     recipient_count INT          NOT NULL DEFAULT 0,
     sent_count      INT          NOT NULL DEFAULT 0,
     failed_count    INT          NOT NULL DEFAULT 0,
@@ -143,6 +153,64 @@ CREATE TABLE email_messages (
     FOREIGN KEY (footer_id) REFERENCES email_blocks(id) ON DELETE SET NULL,
     FOREIGN KEY (sent_by)   REFERENCES employees(id)    ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Built-in blocks: the company footer and the Portal email test template. The HTML is
+-- database/seeders/email/*.html, inlined here; its logo is in Cloudinary's global folder.
+INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
+SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
+  <tr>
+    <td width="72" valign="middle" style="width:72px;padding:0 16px 0 0;">
+      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="56" style="display:block;width:56px;height:auto;border:0;">
+    </td>
+    <td valign="middle" style="padding:2px 0 2px 16px;border-left:2px solid #1f4e8c;font-size:13px;line-height:20px;color:#374151;">
+      <strong style="font-size:14px;font-weight:700;color:#1f4e8c;letter-spacing:0.3px;">IKAIKA BIM</strong><br>
+      <a href="https://ikaikabim.com" target="_blank" style="color:#374151;text-decoration:none;">ikaikabim.com</a>
+      &nbsp;&middot;&nbsp;
+      <a href="mailto:info@ikaikabim.com" style="color:#374151;text-decoration:none;">info@ikaikabim.com</a>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding:16px 0 0 0;font-size:11px;line-height:16px;color:#9ca3af;">
+      Sent through the IKAIKA Portal. This message may contain confidential information and is meant only
+      for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
+    </td>
+  </tr>
+</table>', 'html', id
+FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
+SELECT 'template', 'Portal email test', 'notice', 'Portal email test', '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
+  <tr>
+    <td style="padding:0 0 8px 0;font-size:22px;line-height:30px;font-weight:700;color:#111827;">
+      Portal email test
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:0 0 16px 0;font-size:15px;line-height:24px;color:#374151;">
+      Hi team,<br><br>
+      This is a test of the new IKAIKA Portal email.
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px 0 24px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;">
+        <tr>
+          <td bgcolor="#2563eb" style="border-radius:8px;">
+            <a href="https://ikaikabim.com" target="_blank" style="display:inline-block;padding:12px 22px;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">
+              Visit ikaikabim.com
+            </a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="font-size:15px;line-height:24px;color:#374151;">
+      Thank you,<br>
+      <strong style="font-weight:600;color:#111827;">IKAIKA BIM</strong>
+    </td>
+  </tr>
+</table>', 'html', id
+FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
 
 
 -- ============================================================================

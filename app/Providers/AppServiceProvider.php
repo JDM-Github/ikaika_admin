@@ -6,8 +6,10 @@ use App\Modules\Portal\Models\Employee;
 use App\Support\ApiPath;
 use App\Support\Core\CoreDeveloperActs;
 use App\Support\Portal\PortalCoreDeveloperActs;
+use App\Support\Portal\PortalMailRelayTransport;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -26,6 +28,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Mail::extend('wprelay', fn (array $config): PortalMailRelayTransport => new PortalMailRelayTransport(
+            (string) ($config['endpoint'] ?? ''),
+            (string) ($config['key'] ?? ''),
+        ));
+
         $directory = ApiPath::directory();
         if ($directory !== '' && blank(config('app.asset_url'))) {
             config(['app.asset_url' => '/'.$directory]);
