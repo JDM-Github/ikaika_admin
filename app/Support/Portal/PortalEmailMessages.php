@@ -3,9 +3,11 @@
 namespace App\Support\Portal;
 
 use App\Mail\PortalEmailMail;
+use App\Modules\Portal\Models\EmailBlock;
 use App\Modules\Portal\Models\EmailMessage;
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Database\Connection;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
@@ -34,8 +36,6 @@ final class PortalEmailMessages
     private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const MAX_SUBJECT = 255;
-
-    private const MAX_BODY = 20000;
 
     // A send that failed everywhere should not carry a thousand lines of transport noise.
     private const MAX_FAILURES = 25;
@@ -73,6 +73,8 @@ final class PortalEmailMessages
     public function list(Request $request): array
     {
         $category = PortalEmail::category($request->query('category'));
+        $status = $this->status($request->query('status'));
+        [$from, $to] = [$this->day($request->query('from')), $this->day($request->query('to'))];
         $perPage = $this->perPage($request);
         $page = max(1, $request->integer('page', 1));
         $search = trim((string) $request->query('q', ''));
@@ -80,17 +82,21 @@ final class PortalEmailMessages
         $dir = strtolower(trim((string) $request->query('dir', 'desc'))) === 'asc' ? 'asc' : 'desc';
 
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:administration:email:messages:'.$version.':'.($category ?? 'all').':'.$page.':'.$perPage.':'.md5($search).':'.$sort.':'.$dir;
+        $key = 'portal:administration:email:messages:'.$version.':'.($category ?? 'all').':'.($status ?? 'all').':'
+            .($from ?? '').':'.($to ?? '').':'.$page.':'.$perPage.':'.md5($search).':'.$sort.':'.$dir;
 
         return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use (
             $category,
+            $status,
+            $from,
+            $to,
             $perPage,
             $page,
             $search,
             $sort,
             $dir,
         ): array {
-            return $this->build($category, $perPage, $page, $search, $sort, $dir);
+            return $this->build($category, $status, $from, $to, $perPage, $page, $search, $sort, $dir);
         });
     }
 
@@ -133,6 +139,32 @@ final class PortalEmailMessages
     }
 
     /**
+     * The email body exactly as a send would build it, for the composer's preview. The wording may be
+     * empty or unfinished, since it is still being written; only its length is held to a send's limit.
+     *
+     * @return array{section: string, resource: string, data: array{html: string}}
+     */
+    public function preview(Request $request): array
+    {
+        $format = PortalEmailMarkup::validated($request->input('format'));
+        $body = (string) $request->input('body', '');
+        PortalEmailMarkup::holdToLimit($body, $format);
+        $footerId = $this->validatedFooterId($request);
+        $footer = $footerId === null ? null : $this->blocks->footer($footerId);
+
+        return [
+            'section' => 'administration',
+            'resource' => 'emails',
+            'data' => ['html' => PortalEmailMarkup::document(
+                trim($body),
+                $footer === null ? null : trim((string) $footer->body),
+                $format,
+                $this->blockFormat($footer),
+            )],
+        ];
+    }
+
+    /**
      * Send one email to the chosen audience, then answer with the row that records it.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
@@ -145,7 +177,8 @@ final class PortalEmailMessages
         }
 
         $subject = $this->validatedSubject($request);
-        $body = $this->validatedBody($request);
+        $format = PortalEmailMarkup::validated($request->input('format'));
+        $body = $this->validatedBody($request, $format);
         $audience = PortalEmailAudience::audience($request->input('audience'));
         if ($audience === null) {
             abort(422, 'Choose who this email is for.');
@@ -155,6 +188,7 @@ final class PortalEmailMessages
         $linkPath = $this->validatedLinkPath($request);
         $footer = $footerId === null ? null : $this->blocks->footer($footerId);
         $footerBody = $footer === null ? null : trim((string) $footer->body);
+        $footerFormat = $footer === null ? null : $this->blockFormat($footer);
 
         $recipients = $this->audience->recipients($audience, $filter);
         if ($recipients === []) {
@@ -166,8 +200,10 @@ final class PortalEmailMessages
             $category,
             $subject,
             $body,
+            $format,
             $footerId,
             $footerBody,
+            $footerFormat,
             $audience,
             $filter,
             count($recipients),
@@ -179,7 +215,7 @@ final class PortalEmailMessages
         $reached = [];
         foreach ($recipients as $recipient) {
             try {
-                Mail::to($recipient['email'])->send(new PortalEmailMail($subject, $body, $footerBody));
+                Mail::to($recipient['email'])->send(new PortalEmailMail($subject, $body, $footerBody, $format, $footerFormat ?? PortalEmailMarkup::FORMAT_MARKUP));
                 $sent++;
                 $reached[] = $recipient['id'];
             } catch (Throwable $error) {
@@ -250,8 +286,10 @@ final class PortalEmailMessages
         string $category,
         string $subject,
         string $body,
+        string $format,
         ?int $footerId,
         ?string $footerBody,
+        ?string $footerFormat,
         string $audience,
         array $filter,
         int $recipientCount,
@@ -261,8 +299,10 @@ final class PortalEmailMessages
             'category' => $category,
             'subject' => $subject,
             'body' => $body,
+            'format' => $format,
             'footer_id' => $footerId,
             'footer_body' => $footerBody,
+            'footer_format' => $footerFormat,
             'audience' => $audience,
             'audience_filter' => json_encode($filter),
             'recipient_count' => $recipientCount,
@@ -303,11 +343,20 @@ final class PortalEmailMessages
      *     meta: array{current_page: int, per_page: int, total: int, last_page: int}
      * }
      */
-    private function build(?string $category, int $perPage, int $page, string $search, string $sort, string $dir): array
-    {
-        $query = EmailMessage::query()->select(PortalEmailPresenter::messageColumns());
-        if ($category !== null) {
-            $query->where('category', $category);
+    private function build(
+        ?string $category,
+        ?string $status,
+        ?string $from,
+        ?string $to,
+        int $perPage,
+        int $page,
+        string $search,
+        string $sort,
+        string $dir,
+    ): array {
+        $query = $this->within(EmailMessage::query()->select(PortalEmailPresenter::messageColumns()), $category, $from, $to);
+        if ($status !== null) {
+            $query->where('status', $status);
         }
         if ($search !== '') {
             $needle = '%'.str_replace(['%', '_'], ['\%', '\_'], $search).'%';
@@ -342,7 +391,7 @@ final class PortalEmailMessages
             'section' => 'administration',
             'resource' => 'emails',
             'data' => $rows,
-            'counts' => $this->counts(),
+            'counts' => $this->counts($category, $from, $to),
             'meta' => [
                 'current_page' => $pageResult->currentPage(),
                 'per_page' => $pageResult->perPage(),
@@ -353,11 +402,56 @@ final class PortalEmailMessages
     }
 
     /**
+     * The category and the days a view is narrowed to. The status filter is left out on purpose: the
+     * counts break the view down by status, so they must not be narrowed to one of them.
+     *
+     * @param  Builder<EmailMessage>  $query
+     * @return Builder<EmailMessage>
+     */
+    private function within(Builder $query, ?string $category, ?string $from, ?string $to): Builder
+    {
+        if ($category !== null) {
+            $query->where('category', $category);
+        }
+        // date_created is the portal's own wall clock, so a day's bounds are plain strings.
+        if ($from !== null) {
+            $query->where('date_created', '>=', $from.' 00:00:00');
+        }
+        if ($to !== null) {
+            $query->where('date_created', '<=', $to.' 23:59:59');
+        }
+
+        return $query;
+    }
+
+    private function status(mixed $value): ?string
+    {
+        $status = strtolower(trim((string) $value));
+
+        return in_array($status, [PortalEmailPresenter::STATUS_SENT, PortalEmailPresenter::STATUS_PARTIAL, PortalEmailPresenter::STATUS_FAILED], true)
+            ? $status
+            : null;
+    }
+
+    private function day(mixed $value): ?string
+    {
+        $day = trim((string) $value);
+        if ($day === '') {
+            return null;
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) !== 1 || ! checkdate((int) substr($day, 5, 2), (int) substr($day, 8, 2), (int) substr($day, 0, 4))) {
+            abort(422, 'Dates must use YYYY-MM-DD.');
+        }
+
+        return $day;
+    }
+
+    /**
      * @return array{total: int, sent: int, partial: int, failed: int}
      */
-    private function counts(): array
+    private function counts(?string $category, ?string $from, ?string $to): array
     {
-        $grouped = EmailMessage::query()
+        $grouped = $this->within(EmailMessage::query(), $category, $from, $to)
             ->toBase()
             ->selectRaw('status, COUNT(*) AS total')
             ->groupBy('status')
@@ -436,17 +530,20 @@ final class PortalEmailMessages
         return $subject;
     }
 
-    private function validatedBody(Request $request): string
+    private function validatedBody(Request $request, string $format): string
     {
         $body = trim((string) $request->input('body', ''));
         if ($body === '') {
             abort(422, 'The email needs a body.');
         }
-        if (strlen($body) > self::MAX_BODY) {
-            abort(422, 'The body cannot exceed 20000 characters.');
-        }
+        PortalEmailMarkup::holdToLimit($body, $format);
 
         return $body;
+    }
+
+    private function blockFormat(?EmailBlock $block): string
+    {
+        return PortalEmailMarkup::format($block?->format) ?? PortalEmailMarkup::FORMAT_MARKUP;
     }
 
     private function validatedFooterId(Request $request): ?int

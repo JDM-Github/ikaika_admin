@@ -39,6 +39,8 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::get('administration/emails', [EmailMessagesController::class, 'index']);
         // Before the {id} route so the fixed path is never read as an id.
         Route::get('administration/emails/audiences', [EmailMessagesController::class, 'audiences']);
+        // Read-only despite the POST: the draft rides in the body, too long for a query string.
+        Route::post('administration/emails/preview', [EmailMessagesController::class, 'preview']);
         Route::get('administration/emails/{id}', [EmailMessagesController::class, 'show'])
             ->whereNumber('id');
         Route::get('administration/email-blocks', [EmailBlocksController::class, 'index']);

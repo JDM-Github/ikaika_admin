@@ -23,7 +23,7 @@ final class PortalEmailPresenter
      */
     public static function blockColumns(): array
     {
-        return ['id', 'kind', 'name', 'category', 'subject', 'body', 'created_by', 'date_created', 'date_updated'];
+        return ['id', 'kind', 'name', 'category', 'subject', 'body', 'format', 'created_by', 'date_created', 'date_updated'];
     }
 
     /**
@@ -52,7 +52,7 @@ final class PortalEmailPresenter
      */
     public static function messageDetailColumns(): array
     {
-        return [...self::messageColumns(), 'body', 'footer_id', 'footer_body', 'failures'];
+        return [...self::messageColumns(), 'body', 'format', 'footer_id', 'footer_body', 'footer_format', 'failures'];
     }
 
     /**
@@ -71,6 +71,7 @@ final class PortalEmailPresenter
      *     category: ?string,
      *     subject: ?string,
      *     body: string,
+     *     format: string,
      *     createdBy: ?int,
      *     createdAt: string,
      *     updatedAt: ?string
@@ -85,6 +86,7 @@ final class PortalEmailPresenter
             'category' => self::text($row->category),
             'subject' => self::text($row->subject),
             'body' => (string) $row->body,
+            'format' => self::format($row->format),
             'createdBy' => is_numeric($row->created_by) ? (int) $row->created_by : null,
             'createdAt' => self::instant($row->date_created),
             'updatedAt' => $row->date_updated === null ? null : self::instant($row->date_updated),
@@ -142,10 +144,24 @@ final class PortalEmailPresenter
         return [
             ...self::message($row, $senders),
             'body' => (string) $row->body,
+            'format' => self::format($row->format),
             'footerId' => is_numeric($row->footer_id) ? (int) $row->footer_id : null,
             'footerBody' => self::text($row->footer_body),
+            'footerFormat' => self::format($row->footer_format),
+            // The email as the inbox got it, rebuilt from the snapshot, so All Emails can draw it.
+            'html' => PortalEmailMarkup::document(
+                (string) $row->body,
+                self::text($row->footer_body),
+                self::format($row->format),
+                self::format($row->footer_format),
+            ),
             'failures' => self::failures($row->failures),
         ];
+    }
+
+    private static function format(mixed $value): string
+    {
+        return PortalEmailMarkup::format($value) ?? PortalEmailMarkup::FORMAT_MARKUP;
     }
 
     /**

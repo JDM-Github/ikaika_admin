@@ -98,7 +98,10 @@ CREATE TABLE calendar_event_members (
 -- email_messages: the outbox, one row per send, holding a snapshot of the body
 -- and footer it went out with, so editing a block never rewrites history.
 -- audience_filter holds departments, roles and employee ids for that audience.
--- Existing databases: the Laravel migration create_portal_email_tables.
+-- format is 'markup' (the toolbar's light markup, escaped) or 'html' (sent as written);
+-- footer_format is the snapshot footer's own format.
+-- Existing databases: the Laravel migrations create_portal_email_tables and
+-- add_format_to_portal_email_tables.
 -- ============================================================================
 
 CREATE TABLE email_blocks (
@@ -108,6 +111,7 @@ CREATE TABLE email_blocks (
     category     VARCHAR(32)  NULL,
     subject      VARCHAR(255) NULL,
     body         TEXT         NOT NULL,
+    format       VARCHAR(8)   NOT NULL DEFAULT 'markup',
     created_by   INT          NOT NULL,
     date_created DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     date_updated DATETIME     NULL,
@@ -120,8 +124,10 @@ CREATE TABLE email_messages (
     category        VARCHAR(32)  NOT NULL,
     subject         VARCHAR(255) NOT NULL,
     body            TEXT         NOT NULL,
+    format          VARCHAR(8)   NOT NULL DEFAULT 'markup',
     footer_id       INT          NULL,
     footer_body     TEXT         NULL,
+    footer_format   VARCHAR(8)   NULL,
     audience        VARCHAR(32)  NOT NULL,
     audience_filter JSON         NULL,
     recipient_count INT          NOT NULL DEFAULT 0,

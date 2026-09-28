@@ -46,6 +46,16 @@ class EmailMessagesController extends Controller
         return response()->json($this->messages->show($id));
     }
 
+    public function preview(Request $request): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->messages->preview($request));
+    }
+
     public function store(Request $request): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');

@@ -8,6 +8,7 @@ use App\Modules\Portal\Models\EmailMessage;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalNotificationType;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
@@ -59,6 +60,8 @@ class PortalEmailTest extends TestCase
     public function test_an_administrator_builds_a_template_and_a_footer(): void
     {
         $headers = $this->authHeaders();
+        // The local database keeps real blocks, so the counts are read against what was already there.
+        $before = $this->getJson(self::BASE.'/administration/email-blocks', $headers)->assertOk()->json('counts');
 
         $template = $this->postJson(self::BASE.'/administration/email-blocks', [
             'kind' => 'template',
@@ -73,7 +76,7 @@ class PortalEmailTest extends TestCase
             ->assertJsonPath('data.category', 'event')
             ->json('data');
 
-        $this->postJson(self::BASE.'/administration/email-blocks', [
+        $footer = $this->postJson(self::BASE.'/administration/email-blocks', [
             'kind' => 'footer',
             'name' => 'Standard signature',
             'subject' => 'Ignored, a footer has no subject',
@@ -82,16 +85,18 @@ class PortalEmailTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.kind', 'footer')
             ->assertJsonPath('data.category', null)
-            ->assertJsonPath('data.subject', null);
+            ->assertJsonPath('data.subject', null)
+            ->json('data');
 
         $listed = $this->getJson(self::BASE.'/administration/email-blocks?kind=template', $headers)
             ->assertOk()
-            ->assertJsonPath('counts.templates', 1)
-            ->assertJsonPath('counts.footers', 1)
-            ->assertJsonPath('counts.total', 2)
+            ->assertJsonPath('counts.templates', $before['templates'] + 1)
+            ->assertJsonPath('counts.footers', $before['footers'] + 1)
+            ->assertJsonPath('counts.total', $before['total'] + 2)
             ->json('data');
-        $this->assertCount(1, $listed);
-        $this->assertSame('Holiday notice', $listed[0]['name']);
+        $this->assertCount($before['templates'] + 1, $listed);
+        $this->assertSame(['template'], array_values(array_unique(array_column($listed, 'kind'))));
+        $this->assertContains('Holiday notice', array_column($listed, 'name'));
 
         $createdLog = PortalLog::query()
             ->where('resource', 'administration.email')
@@ -124,7 +129,7 @@ class PortalEmailTest extends TestCase
         $this->assertIsArray($updatedLog->payload);
         $this->assertSame('notice', $updatedLog->payload['category']);
 
-        $footerId = (int) EmailBlock::query()->where('kind', 'footer')->value('id');
+        $footerId = (int) $footer['id'];
         $this->deleteJson(self::BASE.'/administration/email-blocks/'.$footerId, [], $headers)
             ->assertNoContent();
         $this->assertNull(EmailBlock::query()->find($footerId));
@@ -341,6 +346,83 @@ class PortalEmailTest extends TestCase
             ->assertJsonPath('data.body', 'A briefing is scheduled for Friday.');
     }
 
+    // All Emails narrows by days and status; its counts follow the days and category, never the status.
+    public function test_the_outbox_narrows_by_days_status_and_category(): void
+    {
+        $headers = $this->authHeaders();
+        // Years out, so the real outbox never falls inside the days asked for.
+        $sent = $this->seedMessage('notice', 'sent', '2031-03-02 09:00:00');
+        $partial = $this->seedMessage('notice', 'partial', '2031-03-05 18:30:00');
+        $event = $this->seedMessage('event', 'failed', '2031-03-05 08:00:00');
+        $this->seedMessage('notice', 'sent', '2031-04-01 09:00:00');
+        $days = self::BASE.'/administration/emails?from=2031-03-01&to=2031-03-05';
+
+        $all = $this->getJson($days, $headers)->assertOk();
+        $this->assertSame([$partial, $event, $sent], array_map('intval', array_column($all->json('data'), 'id')));
+        $all->assertJsonPath('counts', ['total' => 3, 'sent' => 1, 'partial' => 1, 'failed' => 1]);
+
+        $failed = $this->getJson($days.'&status=failed', $headers)->assertOk();
+        $this->assertSame([$event], array_map('intval', array_column($failed->json('data'), 'id')));
+        $failed->assertJsonPath('counts.total', 3)->assertJsonPath('meta.total', 1);
+
+        $this->getJson($days.'&category=notice', $headers)->assertOk()
+            ->assertJsonPath('counts', ['total' => 2, 'sent' => 1, 'partial' => 1, 'failed' => 0]);
+        $this->assertCount(1, $this->getJson(self::BASE.'/administration/emails?from=2031-03-05&to=2031-03-05&status=partial', $headers)->json('data'));
+        // An unknown status is no filter at all; a malformed day is refused.
+        $this->assertCount(3, $this->getJson($days.'&status=lost', $headers)->json('data'));
+        $this->getJson(self::BASE.'/administration/emails?from=2031-02-30', $headers)->assertStatus(422);
+        $this->getJson(self::BASE.'/administration/emails?to=March', $headers)->assertStatus(422);
+    }
+
+    // The composer's preview is the very HTML a send puts in the inbox, footer included.
+    public function test_the_preview_is_the_email_a_send_would_build(): void
+    {
+        Mail::fake();
+        $headers = $this->authHeaders();
+        $footerId = (int) $this->postJson(self::BASE.'/administration/email-blocks', [
+            'kind' => 'footer',
+            'name' => 'Preview sign-off',
+            'body' => "Regards,\n**MIS**",
+        ], $headers)->assertCreated()->json('data.id');
+        $body = "Hello **team**,\nsee [the site](https://ikaika.com).\n\n- one\n- two";
+
+        $html = $this->postJson(self::BASE.'/administration/emails/preview', ['body' => $body, 'footerId' => $footerId], $headers)
+            ->assertOk()
+            ->json('data.html');
+
+        $this->assertIsString($html);
+        $this->assertStringContainsString('<strong>team</strong>', $html);
+        $this->assertStringContainsString('<br>', $html);
+        $this->assertStringContainsString('href="https://ikaika.com"', $html);
+        $this->assertStringContainsString('<li style=', $html);
+        $this->assertStringContainsString('<strong>MIS</strong>', $html);
+
+        $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Preview check',
+            'body' => $body,
+            'audience' => 'everyone',
+            'footerId' => $footerId,
+        ], $headers)->assertCreated();
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->render() === $html);
+
+        // Nothing written yet is still a preview; a draft past a send's limit is refused, and a read is not a preview.
+        $this->postJson(self::BASE.'/administration/emails/preview', ['body' => ''], $headers)->assertOk();
+        $this->postJson(self::BASE.'/administration/emails/preview', ['body' => str_repeat('a', 20001)], $headers)->assertStatus(422);
+        $this->getJson(self::BASE.'/administration/emails/preview', $headers)->assertStatus(405);
+    }
+
+    // Typed HTML and script links never reach an inbox as markup.
+    public function test_the_markup_escapes_html_and_drops_unsafe_links(): void
+    {
+        // A footer of nothing but blank space adds no rule under the message.
+        $html = PortalEmailMarkup::document('<b>hi</b> [x](javascript:alert(1)) ![p](https://e.test/p.png)', "  \n");
+
+        $this->assertStringContainsString('&lt;b&gt;hi&lt;/b&gt;', $html);
+        $this->assertStringNotContainsString('javascript:', $html);
+        $this->assertStringNotContainsString('<hr', $html);
+    }
+
     public function test_the_outbox_list_stays_skinny_and_one_message_carries_the_body(): void
     {
         Mail::fake();
@@ -367,7 +449,78 @@ class PortalEmailTest extends TestCase
         $this->getJson(self::BASE.'/administration/emails/'.$row['id'], $headers)
             ->assertOk()
             ->assertJsonPath('data.body', 'Visitors park at the rear.')
+            ->assertJsonPath('data.format', 'markup')
+            ->assertJsonPath('data.footerFormat', 'markup')
+            ->assertJsonPath('data.html', PortalEmailMarkup::document('Visitors park at the rear.', null))
             ->assertJsonPath('data.failures', []);
+    }
+
+    // HTML mode is the administrator's own code: sent, previewed, stored and shown as written.
+    public function test_an_html_email_goes_out_as_written_with_an_html_footer(): void
+    {
+        Mail::fake();
+        $headers = $this->authHeaders();
+        $footer = $this->postJson(self::BASE.'/administration/email-blocks', [
+            'kind' => 'footer',
+            'name' => 'HTML signature',
+            'body' => '<p style="color:#555">IKAIKA <b>MIS</b></p>',
+            'format' => 'html',
+        ], $headers)
+            ->assertCreated()
+            ->assertJsonPath('data.format', 'html')
+            ->json('data');
+        $body = '<table width="100%"><tr><td style="padding:8px">Hello <b>team</b></td></tr></table>';
+
+        $html = $this->postJson(self::BASE.'/administration/emails/preview', [
+            'body' => $body,
+            'format' => 'html',
+            'footerId' => $footer['id'],
+        ], $headers)->assertOk()->json('data.html');
+        $this->assertIsString($html);
+        $this->assertStringContainsString($body, $html);
+        $this->assertStringContainsString('<p style="color:#555">IKAIKA <b>MIS</b></p>', $html);
+
+        $sent = $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'HTML check',
+            'body' => $body,
+            'format' => 'html',
+            'audience' => 'everyone',
+            'footerId' => $footer['id'],
+        ], $headers)
+            ->assertCreated()
+            ->assertJsonPath('data.format', 'html')
+            ->assertJsonPath('data.footerFormat', 'html')
+            ->assertJsonPath('data.html', $html)
+            ->json('data');
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->render() === $html);
+        $this->assertSame('html', EmailMessage::query()->whereKey($sent['id'])->value('format'));
+
+        // Past markup's limit is fine for HTML, up to the column's own; an unknown format is refused.
+        $long = '<p>'.str_repeat('a', 30000).'</p>';
+        $this->postJson(self::BASE.'/administration/emails/preview', ['body' => $long, 'format' => 'html'], $headers)->assertOk();
+        $this->postJson(self::BASE.'/administration/emails/preview', ['body' => $long], $headers)->assertStatus(422);
+        $this->postJson(self::BASE.'/administration/emails/preview', ['body' => str_repeat('a', 60001), 'format' => 'html'], $headers)->assertStatus(422);
+        $this->postJson(self::BASE.'/administration/emails/preview', ['body' => 'x', 'format' => 'rtf'], $headers)->assertStatus(422);
+        $this->patchJson(self::BASE.'/administration/email-blocks/'.$footer['id'], [
+            'name' => 'HTML signature',
+            'body' => '**MIS**',
+            'format' => 'markup',
+        ], $headers)->assertOk()->assertJsonPath('data.format', 'markup');
+    }
+
+    // A whole HTML document is the email: nothing wraps it, and the footer sits inside its body.
+    public function test_a_whole_html_document_is_not_wrapped_and_takes_the_footer_inside(): void
+    {
+        $page = '<!doctype html><html><head><title>t</title></head><body><p>Hi</p></body></html>';
+
+        $html = PortalEmailMarkup::document($page, '**MIS**', PortalEmailMarkup::FORMAT_HTML);
+
+        $this->assertStringStartsWith('<!doctype html><html>', $html);
+        $this->assertStringEndsWith('</body></html>', $html);
+        $this->assertStringContainsString('<p>Hi</p><hr', $html);
+        $this->assertStringContainsString('<strong>MIS</strong></p>'."\n".'</div></body>', $html);
+        $this->assertSame('<html><p>x</p><hr', substr(PortalEmailMarkup::document('<html><p>x</p>', 'f', 'html'), 0, 17));
     }
 
     public function test_a_member_who_cannot_be_reached_is_recorded_by_name_and_not_by_address(): void
@@ -477,6 +630,25 @@ class PortalEmailTest extends TestCase
 
         Mail::assertNothingSent();
         $this->assertSame($messagesBefore, EmailMessage::query()->count());
+    }
+
+    private function seedMessage(string $category, string $status, string $createdAt): int
+    {
+        return (int) EmailMessage::query()->getConnection()->table('email_messages')->insertGetId([
+            'category' => $category,
+            'subject' => 'Seeded '.$status,
+            'body' => 'Seeded body',
+            'audience' => 'everyone',
+            'audience_filter' => json_encode(['departments' => [], 'roles' => [], 'memberIds' => []], JSON_THROW_ON_ERROR),
+            'recipient_count' => 3,
+            'sent_count' => $status === 'failed' ? 0 : 3,
+            'failed_count' => $status === 'sent' ? 0 : 1,
+            'status' => $status,
+            'sent_by' => (int) Employee::query()->value('id'),
+            'failures' => json_encode([], JSON_THROW_ON_ERROR),
+            'date_sent' => $createdAt,
+            'date_created' => $createdAt,
+        ]);
     }
 
     private function emailNotices(): int
