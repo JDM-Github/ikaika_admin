@@ -214,6 +214,11 @@ final class PortalBudgetEnvelopes
      * Envelopes tab, laid out the way the tracker's own Envelopes - Budget view groups them. An
      * envelope linked to no code is listed under unassigned; one linked to two would sit under both.
      *
+     * Each code carries what was received against it: every Credit linked to the code itself, the
+     * tracker's own Actual Credited. That is not what its envelopes were credited -- money moves
+     * between envelopes, and a transfer can land before its envelope is linked to the code -- so it is
+     * the figure to hold against the quotation.
+     *
      * @return array{section: string, resource: string, available: bool, currency: string, data: list<array<string, mixed>>, unassigned: list<array<string, mixed>>}
      */
     public function budgetCodes(): array
@@ -228,10 +233,10 @@ final class PortalBudgetEnvelopes
                 ->table('envelopes_budget as e')
                 ->leftJoin('transactions_envelopes as te', 'te.envelope_id', '=', 'e.id')
                 ->leftJoin('transactions as t', 't.id', '=', 'te.transaction_id')
-                ->groupBy('e.id', 'e.envelope_name', 'e.group_name', 'e.time_period', 'e.budget_amount', 'e.active')
+                ->groupBy('e.id', 'e.envelope_name', 'e.group_name', 'e.time_period', 'e.budget_amount', 'e.active', 'e.budget_notes')
                 ->orderBy('e.group_name')
                 ->orderBy('e.envelope_name')
-                ->select(['e.id', 'e.envelope_name', 'e.group_name', 'e.time_period', 'e.budget_amount', 'e.active'])
+                ->select(['e.id', 'e.envelope_name', 'e.group_name', 'e.time_period', 'e.budget_amount', 'e.active', 'e.budget_notes'])
                 ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS funded', [self::TYPE_CREDIT])
                 ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS spent', [self::TYPE_EXPENSE])
                 ->get()
@@ -245,6 +250,14 @@ final class PortalBudgetEnvelopes
                 ->table('envelopes_budget_codes')
                 ->get(['envelope_id', 'budget_code_id'])
                 ->groupBy('budget_code_id');
+            $receivedByCode = $this->connection()
+                ->table('transactions_budget_codes as tb')
+                ->join('transactions as t', 't.id', '=', 'tb.transaction_id')
+                ->where('t.type', self::TYPE_CREDIT)
+                ->groupBy('tb.budget_code_id')
+                ->select('tb.budget_code_id')
+                ->selectRaw('COALESCE(SUM(t.amount), 0) AS received')
+                ->pluck('received', 'budget_code_id');
         } catch (QueryException) {
             abort(503, 'Budget codes are unavailable right now.');
         }
@@ -269,6 +282,7 @@ final class PortalBudgetEnvelopes
                 'expectedAmount' => $code->expected_amount_quotation === null
                     ? null
                     : $this->amount($this->cents($code->expected_amount_quotation)),
+                'received' => $this->amount($this->cents($receivedByCode->get($code->id) ?? 0)),
                 'envelopes' => $members,
             ];
         }
@@ -536,6 +550,7 @@ final class PortalBudgetEnvelopes
             'spent' => $this->amount($used),
             'remaining' => $this->amount($funded - $used),
             'active' => (bool) $row->active,
+            'notes' => $this->text($row->budget_notes ?? null),
         ];
     }
 
