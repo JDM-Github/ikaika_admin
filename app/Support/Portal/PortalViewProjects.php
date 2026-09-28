@@ -5,19 +5,22 @@ namespace App\Support\Portal;
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * View Projects: the board behind the Projects screen.
+ * The project board behind View Projects and Track Projects.
  *
- * Admin and Executive get every project, each tagged with whether they are assigned.
- * Everybody else gets only their own board — the same membership cut as report pickers.
+ * View Projects (not enforced yet): Admin and Executive get every project, each tagged with
+ * whether they are assigned; everybody else gets only their own board.
+ * Track Projects follows its rule's reach: own = the projects they are on, department = those
+ * plus their department's, all = every project. Membership is never lost at any reach.
  */
 final class PortalViewProjects
 {
     public const CACHE_TTL_SECONDS = 30;
 
-    public const CACHE_VERSION_KEY = 'portal:projects:version';
+    public const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     /**
      * @return array{
@@ -28,13 +31,33 @@ final class PortalViewProjects
      */
     public function list(Employee $actor): array
     {
-        $employeeId = (int) $actor->getKey();
         $seesAll = PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null);
-        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:projects:'.$version.':'.$employeeId.':'.($seesAll ? 'all' : 'own');
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($employeeId, $seesAll): array {
-            return $this->build($employeeId, $seesAll);
+        return $this->board($actor, $seesAll ? 'all' : 'own');
+    }
+
+    /**
+     * Track Projects, cut to how far the person's Track Projects rule reaches.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>}
+     */
+    public function track(Employee $actor, Request $request): array
+    {
+        return $this->board($actor, PortalRules::active($actor, $request)['projects.track'] ?? 'own');
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>}
+     */
+    private function board(Employee $actor, string $reach): array
+    {
+        $employeeId = (int) $actor->getKey();
+        $department = $reach === 'department' ? PortalPreview::department($actor->department) : '';
+        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+        $key = 'portal:projects:'.$version.':'.$employeeId.':'.$reach.':'.md5($department);
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($employeeId, $reach, $department): array {
+            return $this->build($employeeId, $reach, $department);
         });
     }
 
@@ -51,9 +74,9 @@ final class PortalViewProjects
      *     data: list<array<string, mixed>>
      * }
      */
-    private function build(int $employeeId, bool $seesAll): array
+    private function build(int $employeeId, string $reach, string $department): array
     {
-        $rows = $this->projectRows($employeeId, $seesAll);
+        $rows = $this->projectRows($employeeId, $reach, $department);
         $projectIds = array_map(
             static fn (object $row): int => (int) $row->id,
             $rows,
@@ -104,7 +127,7 @@ final class PortalViewProjects
      *
      * @return list<object>
      */
-    private function projectRows(int $employeeId, bool $seesAll): array
+    private function projectRows(int $employeeId, string $reach, string $department): array
     {
         $query = $this->connection()
             ->table('projects')
@@ -134,7 +157,13 @@ final class PortalViewProjects
             ])
             ->distinct();
 
-        if (! $seesAll) {
+        // Their own projects at every reach; a department with no name adds nothing.
+        if ($reach === 'department' && $department !== '') {
+            $query->where(function ($visible) use ($department): void {
+                $visible->whereNotNull('membership.employee_id')
+                    ->orWhereRaw('LOWER(TRIM(projects.department)) = ?', [$department]);
+            });
+        } elseif ($reach !== 'all') {
             $query->whereNotNull('membership.employee_id');
         }
 

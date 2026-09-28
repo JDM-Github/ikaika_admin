@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Modules\Core\Models\Action;
 use App\Modules\Core\Models\Recycle;
 use App\Modules\Portal\Models\Employee;
-use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreLedger;
 use App\Support\Core\CoreRecycleKey;
@@ -349,6 +348,7 @@ class PortalRecycleBinTest extends TestCase
             ->first();
         $this->assertNotNull($added);
         $this->assertTrue($added->parameters['parameters']['restored'] ?? false);
+        $this->assertNotEmpty($added->parameters['parameters']['lineIds']);
         $this->assertSame((int) $actor->getKey(), $added->actor_id);
     }
 
@@ -388,7 +388,8 @@ class PortalRecycleBinTest extends TestCase
         $this->assertSame(1, Recycle::query()->where('id', $recycled->id)->count());
     }
 
-    public function test_an_admin_restores_another_members_row_to_that_member(): void
+    // All Recycle only looks: restoring someone else's item could backfire on them, so they restore their own.
+    public function test_an_admin_sees_another_members_row_but_cannot_restore_it(): void
     {
         $admin = $this->adminWhoIsNotExecutive();
         $member = $this->activeMember();
@@ -416,34 +417,25 @@ class PortalRecycleBinTest extends TestCase
             ->first();
         $this->assertNotNull($recycled);
 
+        $this->getJson('/api/development/portal/administration/recycle-bin/'.$recycled->id, $adminHeaders)->assertOk();
         $this->postJson(
             '/api/development/portal/administration/recycle-bin/'.$recycled->id.'/restore',
             [],
             $adminHeaders,
-        )->assertNoContent();
+        )->assertForbidden()->assertJsonPath('message', 'All Recycle is view only: people restore their own items.');
 
+        $this->assertSame(1, Recycle::query()->where('id', $recycled->id)->count());
         $memberList = $this->getJson(
             '/api/development/portal/reports/submitted?from='.$today.'&to='.$today,
             $memberHeaders,
         )->assertOk();
-        $this->assertContains($today.'-daily', collect($memberList->json('data'))->pluck('id')->all());
-
-        $inbox = PortalNotification::query()
-            ->where('employee_id', $member->getKey())
-            ->where('type', 'administration.recycle-bin.restored')
-            ->where('actor_id', $admin->getKey())
-            ->orderByDesc('id')
-            ->first();
-        $this->assertNotNull($inbox);
-        $this->assertStringContainsString('was restored by', (string) $inbox->message);
-
-        $added = Action::query()
+        $this->assertNotContains($today.'-daily', collect($memberList->json('data'))->pluck('id')->all());
+        $this->assertFalse(Action::query()
             ->where('product', CoreLedger::PRODUCT_PORTAL)
             ->where('recycle_key', $recycleKey)
             ->where('action_type', CoreActionType::ADD)
-            ->first();
-        $this->assertNotNull($added);
-        $this->assertSame((int) $admin->getKey(), $added->actor_id);
+            ->where('actor_id', $admin->getKey())
+            ->exists());
     }
 
     public function test_restore_is_refused_when_a_live_report_already_occupies_the_day(): void
@@ -641,6 +633,28 @@ class PortalRecycleBinTest extends TestCase
             ->assertUnauthorized();
     }
 
+    // Their own bin follows User / Recycle Bin, and restoring their own item follows its Restore rule.
+    public function test_the_own_bin_follows_its_rules(): void
+    {
+        $member = $this->activeMember();
+        $member->forceFill(['is_developer' => false])->save();
+        DB::connection('portal')->table('access_toggles')->where('employee_id', $member->id)->delete();
+        $this->emptyPortalBin();
+        $theirs = $this->putInBin($member);
+        $token = $this->loginToken($member);
+        $switch = fn (string $key) => $this->withToken($token)
+            ->patchJson('/api/development/portal/access/switches', ['key' => $key, 'on' => false])->assertOk();
+
+        $switch('user.recycle.restore');
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$theirs)->assertOk();
+        $this->withToken($token)->postJson('/api/development/portal/administration/recycle-bin/'.$theirs.'/restore')
+            ->assertForbidden()->assertJsonPath('message', 'You do not have access to this page.');
+
+        $switch('user.recycle');
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin')->assertForbidden();
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$theirs)->assertForbidden();
+    }
+
     private function activeMember(): Employee
     {
         $employee = Employee::query()
@@ -670,7 +684,73 @@ class PortalRecycleBinTest extends TestCase
         return $employee;
     }
 
-    private function adminWhoIsNotExecutive(): Employee
+    public function test_a_department_admin_sees_and_restores_only_their_department_in_the_all_view(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $admin = $this->adminWhoIsNotExecutive(developer: false);
+        $this->emptyPortalBin();
+        $this->putInBin($inside, ['submittedOn' => '2026-08-10']);
+        $theirs = $this->putInBin($outside, ['submittedOn' => '2026-08-11']);
+        $mine = $this->putInBin($admin, ['submittedOn' => '2026-08-12']);
+        $token = $this->loginToken($admin);
+
+        $all = $this->withToken($token)
+            ->getJson('/api/development/portal/administration/recycle-bin?scope=all')
+            ->assertOk();
+
+        $ids = collect($all->json('data'))->pluck('recordId')->all();
+        $this->assertContains('2026-08-10-daily', $ids);
+        $this->assertContains('2026-08-12-daily', $ids);
+        $this->assertNotContains('2026-08-11-daily', $ids);
+        $this->assertNotContains((string) $outside->id, collect($all->json('employees'))->pluck('id')->all());
+
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$theirs)->assertNotFound();
+        $this->withToken($token)->postJson('/api/development/portal/administration/recycle-bin/'.$theirs.'/restore')->assertNotFound();
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$mine)->assertOk();
+    }
+
+    // Default holds a developer to their department; Developer mode sees everyone.
+    public function test_a_developer_sees_every_department_only_in_developer_mode(): void
+    {
+        [, $outside] = $this->membersInBothDepartments();
+        $this->emptyPortalBin();
+        $this->putInBin($outside, ['submittedOn' => '2026-08-11']);
+        $admin = $this->adminWhoIsNotExecutive();
+        $token = $this->loginToken($admin);
+
+        $real = $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin?scope=all')->assertOk();
+        $this->assertContains('2026-08-11-daily', collect($real->json('data'))->pluck('recordId')->all());
+
+        $preview = $this->withToken($this->defaultToken($admin))
+            ->getJson('/api/development/portal/administration/recycle-bin?scope=all')->assertOk();
+        $this->assertNotContains('2026-08-11-daily', collect($preview->json('data'))->pluck('recordId')->all());
+    }
+
+    // Executives are managed from their own portal: only they see their own trash.
+    public function test_an_executive_s_rows_are_hidden_from_everyone_but_the_executive(): void
+    {
+        $executive = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->first();
+        $this->assertNotNull($executive);
+        $this->emptyPortalBin();
+        $theirs = $this->putInBin($executive, ['submittedOn' => '2026-08-13']);
+        $developer = $this->loginToken($this->adminWhoIsNotExecutive());
+
+        $all = $this->withToken($developer)->getJson('/api/development/portal/administration/recycle-bin?scope=all')->assertOk();
+        $this->assertSame([], $all->json('data'));
+        $this->withToken($developer)->getJson('/api/development/portal/administration/recycle-bin/'.$theirs)->assertNotFound();
+
+        $this->withToken($this->loginToken($executive))
+            ->getJson('/api/development/portal/administration/recycle-bin/'.$theirs)
+            ->assertOk();
+    }
+
+    // A developer sees every department, so tests about the bin itself do not depend on who is where.
+    private function adminWhoIsNotExecutive(bool $developer = true): Employee
     {
         $employee = Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
@@ -680,11 +760,36 @@ class PortalRecycleBinTest extends TestCase
             ->where('id_no', '!=', '')
             ->first();
         $this->assertNotNull($employee);
+        $employee->forceFill(['is_developer' => $developer, 'department' => 'MIS'])->save();
 
         return $employee;
     }
 
+    /**
+     * Two active members, one in MIS written loosely and one in Engineering.
+     *
+     * @return array{0: Employee, 1: Employee}
+     */
+    private function membersInBothDepartments(): array
+    {
+        $inside = $this->activeMember();
+        $outside = $this->otherActiveMember($inside);
+        $inside->forceFill(['department' => ' mis ', 'is_developer' => false])->save();
+        $outside->forceFill(['department' => 'Engineering', 'is_developer' => false])->save();
+
+        return [$inside, $outside];
+    }
+
+    // A developer fixture acts in Developer mode, so the bin itself is tested across departments.
     private function loginToken(Employee $employee): string
+    {
+        $token = $this->defaultToken($employee);
+
+        return (bool) $employee->is_developer ? $this->developerModeOn($token) : $token;
+    }
+
+    // A fresh sign-in, which always starts in Default.
+    private function defaultToken(Employee $employee): string
     {
         $this->assertNotEmpty($employee->id_no);
 

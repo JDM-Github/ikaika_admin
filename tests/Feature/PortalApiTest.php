@@ -4,11 +4,21 @@ namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
 use App\Support\ApiPath;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
 class PortalApiTest extends TestCase
 {
+    use DatabaseTransactions;
+
+    /**
+     * The sign-in below writes a log row, which must not stay in the real portal database.
+     *
+     * @var list<string>
+     */
+    protected array $connectionsToTransact = ['portal'];
+
     public function test_playground_loads(): void
     {
         $this->get('/')->assertOk();
@@ -68,6 +78,17 @@ class PortalApiTest extends TestCase
             ->assertSee('Separated', false)
             ->assertSee('Practice', false)
             ->assertSee('data-product', false);
+    }
+
+    public function test_playground_offers_a_placeholder_sync_to_airtable_control(): void
+    {
+        // The button is real markup, hidden until the actions table is open (see
+        // resources/views/playground/_script.blade.php) -- present-but-hidden is what a
+        // static render can assert; the client-side show/hide toggle has no PHP seam to test.
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('id="sync-airtable"', false)
+            ->assertSee('Sync to Airtable', false);
     }
 
     public function test_portal_module_reads_the_portal_database(): void

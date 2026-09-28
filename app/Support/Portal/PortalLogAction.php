@@ -14,4 +14,7 @@ final class PortalLogAction
     public const DELETE = 'DELETE';
 
     public const POST = 'POST';
+
+    // Reading something sensitive, such as a person's private employee information.
+    public const VIEW = 'VIEW';
 }

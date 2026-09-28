@@ -58,5 +58,8 @@ class PortalRoleTest extends TestCase
             PortalRole::roleChangeBlock(1, 2, false, true, true, 1),
         );
         $this->assertNull(PortalRole::roleChangeBlock(1, 2, false, false, false, 2));
+        // Developer mode lifts only the self-demotion refusal, never the last-admin one.
+        $this->assertNull(PortalRole::roleChangeBlock(4, 4, false, true, true, 3, true));
+        $this->assertNotNull(PortalRole::roleChangeBlock(4, 4, false, true, true, 1, true));
     }
 }

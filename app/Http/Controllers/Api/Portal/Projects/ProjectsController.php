@@ -26,6 +26,16 @@ class ProjectsController extends Controller
         return response()->json($this->projects->list($actor));
     }
 
+    public function track(Request $request): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->projects->track($actor, $request));
+    }
+
     public function destroy(Request $request, int $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');

@@ -401,6 +401,22 @@ class PortalOffsetRequestsTest extends TestCase
         $this->assertSame($work, $log->payload['workOn']);
         $this->assertSame('Cancelled', $log->payload['status']);
 
+        // The ledger edit keeps the stored hours and reason, so a sync never blanks them.
+        $action = Action::query()
+            ->where('resource', 'requests.offset')
+            ->where('action_type', CoreActionType::EDIT)
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($action);
+        $this->assertEquals([
+            'id' => (string) $id,
+            'workOn' => $work,
+            'dayOffOn' => $dayOff,
+            'hours' => 8,
+            'reason' => 'existing offset',
+            'status' => 'Cancelled',
+        ], $action->parameters['parameters']);
+
         // And both days are free again, so the same pair can be asked for a second time.
         Cache::flush();
         $this->withToken($token)->postJson('/api/development/portal/requests/offset', [

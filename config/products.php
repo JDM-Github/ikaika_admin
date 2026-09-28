@@ -81,13 +81,14 @@ return [
         ],
 
         /*
-         * Budget envelopes and their transactions. Enabling this is also what switches on budget
-         * charging for reimbursement approvals in the portal: with it off, an approval needs no
-         * envelope and behaves exactly as it did before the tracker existed.
+         * Finance tracking: budget envelopes, the transactions that fund and spend them, accounts and
+         * budget codes. Enabling this is also what switches on budget charging for reimbursement
+         * approvals in the portal: with it off, an approval needs no envelope and behaves exactly as
+         * it did before the tracker existed.
          */
         'transaction-tracker' => [
             'name' => 'Transaction Tracker',
-            'description' => 'Budget envelopes and the transactions that fund and spend them.',
+            'description' => 'Finance tracking: transactions, accounts, budget envelopes, and budget codes.',
             'connection' => 'tracker',
             'driver' => env('TRACKER_DB_DRIVER', 'mysql'),
             'host' => env('TRACKER_DB_HOST', env('DB_HOST', '127.0.0.1')),

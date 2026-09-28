@@ -35,7 +35,7 @@ class RecycleBinController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->recycleBin->show($actor, $id));
+        return response()->json($this->recycleBin->show($actor, $id, $request));
     }
 
     public function restore(Request $request, int $id): JsonResponse
@@ -45,7 +45,8 @@ class RecycleBinController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        $row = $this->recycleBin->itemForActor($actor, $id);
+        $row = $this->recycleBin->itemForActor($actor, $id, $request);
+        $this->recycleBin->requireRestorable($actor, $row, $request);
         // The bin holds more than one kind of thing now, so the row says which hand puts it back.
         if (PortalProjectDeletion::owns($row)) {
             $this->projects->restoreFromBin($actor, $row, $request);

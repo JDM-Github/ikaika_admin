@@ -6,7 +6,7 @@ use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
-    Route::middleware('throttle:portal-user-logs')->group(function (): void {
+    Route::middleware(['throttle:portal-user-logs', 'portal.rule:user.logs'])->group(function (): void {
         Route::get('user/logs', [LogsController::class, 'index']);
         Route::get('user/logs/{id}', [LogsController::class, 'show'])->whereNumber('id');
     });

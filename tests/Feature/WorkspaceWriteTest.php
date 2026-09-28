@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Core\Models\Action;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalCache;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,7 @@ class WorkspaceWriteTest extends TestCase
         $before = (string) $project->project_name;
         $after = mb_substr($before, 0, 60).' (checked)';
         $admin = $this->administrator();
+        $generation = (int) Cache::get(PortalCache::DATA_VERSION_KEY, 1);
 
         $response = $this->patchJson(
             '/api/development/portal/_grid/projects/'.$project->id,
@@ -63,6 +65,13 @@ class WorkspaceWriteTest extends TestCase
 
         $this->assertSame($before, $action->parameters['parameters']['changes']['project_name']['from']);
         $this->assertSame($after, $action->parameters['parameters']['changes']['project_name']['to']);
+
+        // The portal's own screens cache these rows, so a grid edit must invalidate them too.
+        $this->assertSame($generation + 1, (int) Cache::get(PortalCache::DATA_VERSION_KEY, 1));
+
+        // A logical target the sync can map in any environment, plus the flat new-value map.
+        $this->assertSame('portal.projects', $action->database_target);
+        $this->assertSame(['project_name' => $after], $action->parameters['parameters']['fields']);
     }
 
     public function test_a_value_that_did_not_move_writes_nothing_and_logs_nothing(): void
@@ -120,6 +129,21 @@ class WorkspaceWriteTest extends TestCase
 
         $fresh = DB::connection('portal')->table('projects')->where('id', $project->id)->first();
         $this->assertSame($project->airtable_record_id, $fresh->airtable_record_id);
+    }
+
+    // A developer outranks an admin, so an admin must not be able to grant it from the grid.
+    public function test_is_developer_is_shown_but_never_editable_from_the_grid(): void
+    {
+        $employee = DB::connection('portal')->table('employees')->where('is_developer', 0)->orderBy('id')->first();
+        $this->assertNotNull($employee);
+        $headers = $this->headersFor($this->administrator());
+
+        $fields = collect($this->getJson('/api/development/portal/_schema/employees', $headers)->assertOk()->json('fields'));
+        $this->assertFalse($fields->firstWhere('name', 'is_developer')['editable'] ?? true);
+
+        $this->patchJson('/api/development/portal/_grid/employees/'.$employee->id, ['changes' => ['is_developer' => true]], $headers)
+            ->assertStatus(422);
+        $this->assertSame(0, (int) DB::connection('portal')->table('employees')->where('id', $employee->id)->value('is_developer'));
     }
 
     public function test_a_value_the_column_cannot_hold_is_refused_before_it_reaches_mysql(): void

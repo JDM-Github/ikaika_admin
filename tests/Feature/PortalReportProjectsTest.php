@@ -178,7 +178,7 @@ class PortalReportProjectsTest extends TestCase
         ])->assertOk();
 
         $payload = array_values(array_filter(
-            $queries,
+            $this->withoutRuleCheck($queries),
             static fn (string $sql): bool => ! str_contains($sql, 'from `employees` '),
         ));
         $this->assertLessThanOrEqual(3, count($payload));

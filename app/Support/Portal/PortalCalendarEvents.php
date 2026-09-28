@@ -24,9 +24,9 @@ final class PortalCalendarEvents
 {
     public const CACHE_TTL_SECONDS = 30;
 
-    public const CACHE_VERSION_KEY = 'portal:calendar:events:version';
+    public const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
-    private const OPTIONS_CACHE_VERSION_KEY = 'portal:calendar:event-options:version';
+    private const OPTIONS_CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const CORE_RESOURCE = 'calendar.events';
 

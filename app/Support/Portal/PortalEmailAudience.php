@@ -32,7 +32,7 @@ final class PortalEmailAudience
 
     public const CACHE_TTL_SECONDS = 30;
 
-    private const CACHE_VERSION_KEY = 'portal:administration:email:audience:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     /**
      * @return array{
@@ -328,7 +328,8 @@ final class PortalEmailAudience
      */
     private function matchAny(Builder $query, string $column, array $values): void
     {
-        $query->where(function (Builder $builder) use ($column, $values): void {            foreach ($values as $value) {
+        $query->where(function (Builder $builder) use ($column, $values): void {
+            foreach ($values as $value) {
                 $builder->orWhereRaw('LOWER(TRIM('.$column.')) = ?', [strtolower($value)]);
             }
         });

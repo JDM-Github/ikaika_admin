@@ -1,21 +1,4 @@
 -- ============================================================================
--- Transaction Tracker -- schema
---
--- Assembled by migrations/migrate.ps1 on 2026-09-23 16:15 from:
---   sql/transaction_tracker/schema.sql
---
--- Run this before data.sql. It DROPS and recreates `test_tracker_database`.
---
--- sql/*/indexes.sql is deliberately left out: it only retrofits an index onto
--- databases that predate it, and the schema below already creates that index on
--- a fresh install -- importing it here would fail with Duplicate key name and
--- abort everything after it in this file.
--- ============================================================================
--- ---------------------------------------------------------------------------
--- sql/transaction_tracker/schema.sql
--- ---------------------------------------------------------------------------
-
--- ============================================================================
 -- Transaction Tracker — Airtable base converted to a MySQL schema
 -- Source base ID: appp5MogesHN2eVvG
 -- Generated data: migrations/generate/generate_sql_transaction_tracker.py
@@ -252,4 +235,3 @@ CREATE TABLE transactions_transfer_destination_accounts (
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
     FOREIGN KEY (account_id)     REFERENCES accounts(id)     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-

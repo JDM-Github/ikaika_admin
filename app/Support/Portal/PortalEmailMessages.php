@@ -31,7 +31,7 @@ final class PortalEmailMessages
      */
     public const PAGE_SIZES = [10, 25, 50, 100];
 
-    private const CACHE_VERSION_KEY = 'portal:administration:email:messages:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const MAX_SUBJECT = 255;
 
@@ -201,7 +201,7 @@ final class PortalEmailMessages
                 $reached,
                 PortalNotificationType::EMAIL_SENT,
                 'New email',
-                PortalActivityCopy::notifyEmailArrived($subject, PortalActivityCopy::displayName($actor)),
+                PortalActivityCopy::notifyEmailArrived($subject, PortalActivityCopy::actorName($actor, $request, true)),
                 $linkPath,
                 $linkPath === null ? null : 'Open',
                 ['emailId' => (string) $messageId, 'category' => $category],

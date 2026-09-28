@@ -360,6 +360,21 @@ class PortalOvertimeRequestsTest extends TestCase
         $this->assertSame($date, $log->payload['requestedFor']);
         $this->assertSame('Cancelled', $log->payload['status']);
 
+        // The ledger edit keeps the stored hours and reason, so a sync never blanks them.
+        $action = Action::query()
+            ->where('resource', 'requests.overtime')
+            ->where('action_type', CoreActionType::EDIT)
+            ->where('record_id', (string) $id)
+            ->first();
+        $this->assertNotNull($action);
+        $this->assertEquals([
+            'id' => (string) $id,
+            'requestedFor' => $date,
+            'hours' => 2,
+            'reason' => 'existing overtime',
+            'status' => 'Cancelled',
+        ], $action->parameters['parameters']);
+
         // And the day is free again, so it can be asked for a second time.
         Cache::flush();
         $this->withToken($token)->postJson('/api/development/portal/requests/overtime', [

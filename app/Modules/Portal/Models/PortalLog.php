@@ -24,6 +24,7 @@ class PortalLog extends ProductModel
             'payload' => 'array',
             'location_lat' => 'float',
             'location_lng' => 'float',
+            'as_developer' => 'boolean',
             'created_at' => 'datetime',
         ];
     }

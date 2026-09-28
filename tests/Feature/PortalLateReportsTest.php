@@ -34,6 +34,11 @@ class PortalLateReportsTest extends TestCase
     {
         parent::setUp();
         Cache::flush();
+        // Late reports follow manage.requests.late's reach; this approver is given every department.
+        DB::connection('portal')->table('access_personal')->updateOrInsert(
+            ['employee_id' => $this->adminEmployee()->getKey(), 'permission_key' => 'manage.requests.late'],
+            ['reach' => 'all'],
+        );
     }
 
     public function test_a_late_filing_waits_on_an_approver_and_tells_the_approvers(): void
@@ -167,12 +172,14 @@ class PortalLateReportsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('resource', 'late');
 
-        $rows = collect($own->json('data'));
-        $this->assertSame([$actor->getKey().':'.$day], $rows->pluck('id')->all());
-        $this->assertSame('rejected', $rows[0]['status']);
-        $this->assertSame('No outage that day.', $rows[0]['approverRemarks']);
+        // The seeded member has late reports of their own from Airtable, so only these two are checked.
+        $rows = collect($own->json('data'))->keyBy('id');
+        $this->assertFalse($rows->has($other->getKey().':'.$theirs));
+        $row = $rows[$actor->getKey().':'.$day];
+        $this->assertSame('rejected', $row['status']);
+        $this->assertSame('No outage that day.', $row['approverRemarks']);
         // The filer's own list, so no name: the same convention every own list follows.
-        $this->assertNull($rows[0]['memberName']);
+        $this->assertNull($row['memberName']);
     }
 
     public function test_editing_a_late_report_sends_it_back_for_approval(): void

@@ -315,17 +315,18 @@ class PortalCalendarEventsTest extends TestCase
         ]);
     }
 
+    // Free for everyone, and the day after too: the calendar shows every member's leave, and the
+    // spanning tests file a second request on the next day.
     private function freeDate(Employee $actor): string
     {
-        $name = $this->memberName($actor);
         for ($offset = 3; $offset < 200; $offset++) {
             $candidate = Carbon::today()->addDays($offset)->toDateString();
+            $days = [$candidate, Carbon::parse($candidate)->addDay()->toDateString()];
             $requested = DB::connection('portal')->table('requests')
-                ->whereRaw('LOWER(TRIM(name)) = ?', [strtolower($name)])
-                ->where(function ($query) use ($candidate): void {
-                    $query->where('request_date', $candidate)
-                        ->orWhere('original_work_day', $candidate)
-                        ->orWhere('offset_work_day', $candidate);
+                ->where(function ($query) use ($days): void {
+                    $query->whereIn('request_date', $days)
+                        ->orWhereIn('original_work_day', $days)
+                        ->orWhereIn('offset_work_day', $days);
                 })
                 ->exists();
             if (! $requested) {
@@ -387,13 +388,31 @@ class PortalCalendarEventsTest extends TestCase
         return $employee;
     }
 
+    // These tests are about events, not who may add them, so every account here is given Add events.
     private function loginToken(Employee $employee): string
     {
+        $this->giveAddEvents($employee);
         $token = $this->postJson('/api/development/portal/auth/login', [
             'id_no' => $employee->id_no,
         ])->json('token');
         $this->assertIsString($token);
 
         return $token;
+    }
+
+    // A developer's gift, the way a manager would give it; members do not hold Add events by default.
+    private function giveAddEvents(Employee $employee): void
+    {
+        $giver = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->where('id', '!=', $employee->getKey())
+            ->orderBy('id')
+            ->first();
+        $this->assertNotNull($giver);
+        $giver->forceFill(['is_developer' => true])->save();
+        DB::connection('portal')->table('access_grants')->updateOrInsert(
+            ['employee_id' => $employee->getKey(), 'permission_key' => 'calendar.create', 'granted_by' => $giver->getKey()],
+            ['reach' => null, 'include_executives' => false],
+        );
     }
 }

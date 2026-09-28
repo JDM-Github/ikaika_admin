@@ -38,6 +38,11 @@ class PortalBudgetEnvelopesTest extends TestCase
         Mail::fake();
         // Said outright rather than inherited from .env, so the suite means the same thing anywhere.
         config(['products.catalog.transaction-tracker.enabled' => true]);
+        // Claims follow manage.requests.reimbursement's reach, and the seeded teams sit in departments of their own.
+        DB::connection('portal')->table('access_personal')->updateOrInsert(
+            ['employee_id' => $this->approver()->getKey(), 'permission_key' => 'manage.requests.reimbursement'],
+            ['reach' => 'all'],
+        );
     }
 
     public function test_the_summary_lists_active_envelopes_with_their_balances(): void
@@ -255,7 +260,10 @@ class PortalBudgetEnvelopesTest extends TestCase
             $this->assertSame((string) $first, $holding($itemId)['chargeKey']);
             $this->assertArrayNotHasKey('charge', $holding($itemId));
         }
-        $this->assertNotSame($holding($first)['id'], $holding($second)['id']);
+        // One claim stays one row, each item with its own decision.
+        $this->assertSame($holding($first)['id'], $holding($second)['id']);
+        $statuses = array_column($holding($first)['items'], 'status', 'id');
+        $this->assertSame(['pending', 'approved'], [$statuses[(string) $first], $statuses[(string) $second]]);
         $this->assertSame((string) $loose, $holding($loose)['chargeKey']);
     }
 
@@ -913,6 +921,11 @@ class PortalBudgetEnvelopesTest extends TestCase
      */
     private function admin(): array
     {
+        return ['Authorization' => 'Bearer '.$this->loginToken($this->approver())];
+    }
+
+    private function approver(): Employee
+    {
         $employee = Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->whereRaw("LOWER(COALESCE(role, '')) = 'admin'")
@@ -922,7 +935,7 @@ class PortalBudgetEnvelopesTest extends TestCase
             ->first();
         $this->assertNotNull($employee);
 
-        return ['Authorization' => 'Bearer '.$this->loginToken($employee)];
+        return $employee;
     }
 
     private function loginToken(Employee $employee): string

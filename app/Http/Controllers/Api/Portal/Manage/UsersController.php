@@ -17,6 +17,16 @@ class UsersController extends Controller
         return response()->json($this->users->list($request));
     }
 
+    public function show(Request $request, int $id): JsonResponse
+    {
+        $viewer = $request->attributes->get('portalEmployee');
+        if (! $viewer instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->users->profile($viewer, $id, $request));
+    }
+
     public function updateRole(Request $request, int $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');

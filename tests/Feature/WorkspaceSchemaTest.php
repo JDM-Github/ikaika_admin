@@ -121,6 +121,18 @@ class WorkspaceSchemaTest extends TestCase
         $this->assertNotContains('remember_token', $names);
     }
 
+    // A grid edit is ledgered for the Airtable sync; a table Airtable does not mirror has nowhere to land it.
+    public function test_only_airtable_mirrored_tables_are_editable(): void
+    {
+        $this->getJson('/api/development/portal/_schema/projects', $this->authHeaders())
+            ->assertOk()
+            ->assertJsonPath('editable', true);
+
+        $this->getJson('/api/development/portal/_schema/logs', $this->authHeaders())
+            ->assertOk()
+            ->assertJsonPath('editable', false);
+    }
+
     public function test_the_schema_requires_a_session(): void
     {
         $this->getJson('/api/development/portal/_schema')->assertUnauthorized();

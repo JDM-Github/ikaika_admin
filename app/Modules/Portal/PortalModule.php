@@ -219,6 +219,26 @@ class PortalModule implements ProductModule
                             ],
                         ],
                     ],
+                    'access' => [
+                        'label' => 'Access Rules',
+                        'path' => 'manage/access/{id}',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'manage/access/{id}',
+                                'label' => 'Powers',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'PATCH',
+                                'path' => 'manage/access/{id}',
+                                'label' => 'Switch',
+                                'auth' => true,
+                                'body' => ['key' => 'manage.requests.leave', 'action' => 'on', 'reach' => 'department'],
+                            ],
+                        ],
+                    ],
                 ],
             ],
             'reports' => [
@@ -506,6 +526,25 @@ class PortalModule implements ProductModule
                             ],
                         ],
                     ],
+                    'all-actions' => [
+                        'label' => 'All Actions',
+                        'path' => 'administration/all-actions',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/all-actions',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'GET',
+                                'path' => 'administration/all-actions/1',
+                                'label' => 'Show',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
                     'emails' => [
                         'label' => 'Send Email',
                         'path' => 'administration/emails',
@@ -609,6 +648,32 @@ class PortalModule implements ProductModule
                                 'path' => 'user/notifications/read-all',
                                 'label' => 'Mark all read',
                                 'auth' => true,
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+            'access' => [
+                'label' => 'Access',
+                'requires_admin' => false,
+                'resources' => [
+                    'powers' => [
+                        'label' => 'My powers',
+                        'path' => 'access',
+                        'requires_admin' => false,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'access',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'PATCH',
+                                'path' => 'access/switches',
+                                'label' => 'Switch',
+                                'auth' => true,
+                                'body' => ['key' => 'manage.requests', 'on' => false],
                             ],
                         ],
                     ],

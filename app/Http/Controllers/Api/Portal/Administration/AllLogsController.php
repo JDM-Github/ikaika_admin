@@ -17,8 +17,8 @@ class AllLogsController extends Controller
         return response()->json($this->logs->listAll($request));
     }
 
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
-        return response()->json(PortalUserLogPresenter::withObjectPayload($this->logs->showAll($id)));
+        return response()->json(PortalUserLogPresenter::withObjectPayload($this->logs->showAll($id, $request)));
     }
 }
