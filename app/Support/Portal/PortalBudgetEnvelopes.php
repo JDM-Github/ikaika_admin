@@ -295,57 +295,31 @@ final class PortalBudgetEnvelopes
     }
 
     /**
-     * The charge already standing against a claim, if any.
+     * The charge an item carries, if any.
      *
      * @return array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}|null
      */
-    public function chargeFor(int $claimId): ?array
+    public function chargeFor(int $itemId): ?array
     {
-        return $this->chargeForAny([$claimId]);
-    }
-
-    /**
-     * The one charge standing against a claim whose items are these rows. A charge carries the
-     * lowest of its claim's approved items, which moves as items are approved and set back, so it is
-     * looked for under every item rather than under one.
-     *
-     * @param  list<int>  $itemIds
-     * @return array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}|null
-     */
-    public function chargeForAny(array $itemIds): ?array
-    {
-        if ($itemIds === []) {
-            return null;
-        }
-
-        $row = $this->chargeRows($itemIds)->first();
+        $row = $this->chargeRows([$itemId])->first();
 
         return $row === null ? null : $this->presentCharge($row);
     }
 
     /**
-     * The charges standing against any of these items, keyed by the item each one carries -- the
-     * queue sends every claim's own, so a further approval grows it rather than asking for an
-     * envelope again. Empty with the tracker switched off or unreadable: the queue must never fail
-     * on the tracker's account.
+     * The charges standing against any of these items, keyed by the item each one carries.
      *
      * @param  list<int>  $itemIds
      * @return array<int, array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}>
      */
     public function chargesFor(array $itemIds): array
     {
-        if ($itemIds === [] || ! $this->isAvailable()) {
-            return [];
-        }
-
-        try {
-            $rows = $this->chargeRows($itemIds)->all();
-        } catch (QueryException) {
+        if ($itemIds === []) {
             return [];
         }
 
         $charges = [];
-        foreach ($rows as $row) {
+        foreach ($this->chargeRows($itemIds)->all() as $row) {
             $charge = $this->presentCharge($row);
             $charges[$charge['claimId']] ??= $charge;
         }
@@ -354,7 +328,8 @@ final class PortalBudgetEnvelopes
     }
 
     /**
-     * Charges an approved claim's total to an envelope.
+     * Charges an approved item to the envelope the approver picked for it. The charge carries the
+     * item's id, so setting the item back finds exactly this charge and nothing of its claim's others.
      *
      * The envelope row is locked before its balance is read, so two approvers charging the same
      * envelope at once are serialised: the second reads the balance the first one left.
@@ -382,7 +357,7 @@ final class PortalBudgetEnvelopes
         $overspent = $claim['amountCents'] > $remaining;
         if ($overspent && ! $allowOverspend) {
             abort(422, sprintf(
-                '%s has %s left, but this claim is %s. Confirm the overspend to charge it anyway.',
+                '%s has %s left, but this item is %s. Confirm the overspend to charge it anyway.',
                 $name,
                 $this->peso($remaining),
                 $this->peso($claim['amountCents']),
@@ -435,47 +410,19 @@ final class PortalBudgetEnvelopes
     }
 
     /**
-     * Moves a claim's charge to the total of the items now approved in it, on the envelope it is
-     * already charged to, and hands it to the lowest of those items. Growing it is checked like a new
-     * charge -- the envelope has to be open, and more than it has left needs the approver's
-     * go-ahead -- while shrinking it never needs either.
+     * Takes one item's share out of a charge that covers its whole claim -- one made before items
+     * were charged one by one -- and hands what is left to the item that now carries it. Shrinking
+     * returns money to the envelope, so it needs neither an open envelope nor a go-ahead.
      *
      * @param  array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}  $existing
      * @param  array{id: int, memberName: string, filedOn: string, amountCents: int, items: list<string>, department?: ?string}  $claim
-     * @return array{transactionId: int, envelopeId: int, envelopeName: string, previousAmount: float, amount: float, remainingAfter: float, overspent: bool}
+     * @return array{transactionId: int, envelopeId: int, envelopeName: string, previousAmount: float, amount: float}
      */
-    public function adjust(Employee $actor, array $existing, array $claim, bool $allowOverspend): array
+    public function shrink(Employee $actor, array $existing, array $claim): array
     {
-        $envelope = $this->connection()
-            ->table('envelopes_budget')
-            ->where('id', $existing['envelopeId'])
-            ->lockForUpdate()
-            ->first(['id', 'envelope_name', 'active']);
-        $name = $envelope === null
-            ? $existing['envelopeName']
-            : ($this->text($envelope->envelope_name) ?? $existing['envelopeName']);
-
-        $previous = $this->cents($existing['amount']);
-        $growth = $claim['amountCents'] - $previous;
-        if ($growth > 0 && ($envelope === null || ! (bool) $envelope->active)) {
-            abort(422, $name.' is not an active budget envelope.');
-        }
-
-        // The balance already has the charge taken out, so only what it grows by has to fit.
-        $remaining = $this->remainingCents($existing['envelopeId']);
-        $overspent = $growth > 0 && $growth > $remaining;
-        if ($overspent && ! $allowOverspend) {
-            abort(422, sprintf(
-                '%s has %s left, but this adds %s to the claim. Confirm the overspend to charge it anyway.',
-                $name,
-                $this->peso($remaining),
-                $this->peso($growth),
-            ));
-        }
-
         $this->connection()->table('transactions')->where('id', $existing['transactionId'])->update([
             'amount' => number_format($claim['amountCents'] / 100, 2, '.', ''),
-            'description' => $this->description($claim, PortalActivityCopy::displayName($actor), $overspent),
+            'description' => $this->description($claim, PortalActivityCopy::displayName($actor), false),
             'updated_at' => now('UTC')->format('Y-m-d H:i:s'),
             'source_key' => self::SOURCE_PREFIX.$claim['id'],
         ]);
@@ -483,11 +430,9 @@ final class PortalBudgetEnvelopes
         return [
             'transactionId' => $existing['transactionId'],
             'envelopeId' => $existing['envelopeId'],
-            'envelopeName' => $name,
-            'previousAmount' => $this->amount($previous),
+            'envelopeName' => $existing['envelopeName'],
+            'previousAmount' => $existing['amount'],
             'amount' => $this->amount($claim['amountCents']),
-            'remainingAfter' => $this->amount($remaining - $growth),
-            'overspent' => $overspent,
         ];
     }
 
@@ -529,8 +474,8 @@ final class PortalBudgetEnvelopes
     }
 
     /**
-     * Removes a claim's charge once none of its items is approved any more. The junction rows go
-     * with it through their ON DELETE CASCADE.
+     * Removes a charge once what it covers is no longer approved. The junction rows go with it
+     * through their ON DELETE CASCADE.
      *
      * @param  array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}  $charge
      * @return array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}

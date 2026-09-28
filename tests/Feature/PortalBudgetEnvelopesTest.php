@@ -105,30 +105,31 @@ class PortalBudgetEnvelopesTest extends TestCase
         $this->assertSame(['Pending', 'Approved'], $this->statuses([$first, $second]));
     }
 
-    // The claim's charge is on its envelope already, so a later approval needs no envelope of its own.
-    public function test_approving_another_item_grows_the_claims_charge_on_its_envelope(): void
+    // Nothing lands on an envelope the approver did not pick: not even the one the claim's other item went to.
+    public function test_each_item_is_charged_to_the_envelope_picked_for_it(): void
     {
-        $envelope = $this->envelope('Seeded Team Supplies', 2000.00);
+        $supplies = $this->envelope('Seeded Team Supplies', 2000.00);
+        $pantry = $this->envelope('Seeded Pantry Corner', 1000.00);
         [$first, $second] = $this->claim([['Paper towel', 300.00, 1], ['Air freshener', 150.00, 2]]);
-        $this->decide([['id' => (string) $second, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+        $this->decide([['id' => (string) $second, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $supplies]])
             ->assertOk();
 
-        $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'approved']])->assertOk();
+        $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'approved']])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Choose a budget envelope to charge this reimbursement to.');
+        $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $pantry]])
+            ->assertOk();
 
-        $this->assertSame(1, $this->chargeCountOfClaim($first));
-        $charge = $this->chargeOfClaim($first);
-        $this->assertSame('600.00', $charge->amount);
-        // Handed to the lowest approved item, now the paper towel.
-        $this->assertSame('portal:reimbursement-claim:'.$first, $charge->source_key);
-        $this->assertEqualsWithDelta(1400.00, $this->remaining($envelope), 0.001);
-        $this->assertSame(['Approved', 'Approved'], $this->statuses([$first, $second]));
-        $this->assertTrue(PortalLog::query()
-            ->where('resource', 'manage.budget-envelopes')
-            ->where('message', 'like', '%charge on Seeded Team Supplies from ₱300.00 to ₱600.00%')
-            ->exists());
+        $this->assertSame(2, $this->chargeCountOfClaim($first));
+        $this->assertSame('300.00', $this->chargeOfItem($first)->amount);
+        $this->assertSame((string) $pantry, (string) $this->chargeOfItem($first)->envelope_id);
+        $this->assertSame('300.00', $this->chargeOfItem($second)->amount);
+        $this->assertSame((string) $supplies, (string) $this->chargeOfItem($second)->envelope_id);
+        $this->assertEqualsWithDelta(1700.00, $this->remaining($supplies), 0.001);
+        $this->assertEqualsWithDelta(700.00, $this->remaining($pantry), 0.001);
     }
 
-    public function test_setting_one_approved_item_back_takes_its_share_out_of_the_charge(): void
+    public function test_setting_one_approved_item_back_returns_only_its_own_charge(): void
     {
         $envelope = $this->envelope('Seeded Pantry Shelf', 1000.00);
         [$first, $second] = $this->claim([['Coffee', 400.00, 1], ['Sugar', 100.00, 1]]);
@@ -140,20 +141,13 @@ class PortalBudgetEnvelopesTest extends TestCase
 
         $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'pending']])->assertOk();
 
-        $charge = $this->chargeOfClaim($first);
-        $this->assertSame('100.00', $charge->amount);
-        // Carried by the item still approved, so withdrawing the coffee later cannot strand it.
-        $this->assertSame('portal:reimbursement-claim:'.$second, $charge->source_key);
+        $this->assertNull($this->chargeOfItem($first));
+        $this->assertSame('100.00', $this->chargeOfItem($second)->amount);
         $this->assertEqualsWithDelta(900.00, $this->remaining($envelope), 0.001);
         $this->assertSame(['Pending', 'Approved'], $this->statuses([$first, $second]));
-
-        $this->decide([['id' => (string) $second, 'kind' => 'reimbursement', 'status' => 'rejected']])->assertOk();
-
-        $this->assertNull($this->chargeOfClaim($first));
-        $this->assertEqualsWithDelta(1000.00, $this->remaining($envelope), 0.001);
     }
 
-    public function test_growing_a_charge_past_its_envelope_waits_for_the_go_ahead(): void
+    public function test_an_items_overspend_is_checked_against_what_its_envelope_has_left(): void
     {
         $envelope = $this->envelope('Seeded Road Trip', 500.00);
         [$first, $second] = $this->claim([['Taxi', 300.00, 1], ['Toll', 300.00, 1]]);
@@ -163,8 +157,8 @@ class PortalBudgetEnvelopesTest extends TestCase
         $refused = $this->decide([['id' => (string) $second, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]]);
 
         $refused->assertStatus(422);
-        $this->assertStringContainsString('has ₱200.00 left, but this adds ₱300.00 to the claim', (string) $refused->json('message'));
-        $this->assertSame('300.00', $this->chargeOfClaim($first)->amount);
+        $this->assertStringContainsString('has ₱200.00 left, but this item is ₱300.00', (string) $refused->json('message'));
+        $this->assertNull($this->chargeOfItem($second));
         $this->assertSame(['Approved', 'Pending'], $this->statuses([$first, $second]));
 
         $this->decide([[
@@ -175,12 +169,12 @@ class PortalBudgetEnvelopesTest extends TestCase
             'allowOverspend' => true,
         ]])->assertOk();
 
-        $this->assertSame('600.00', $this->chargeOfClaim($first)->amount);
+        $this->assertSame('300.00', $this->chargeOfItem($second)->amount);
         $this->assertEqualsWithDelta(-100.00, $this->remaining($envelope), 0.001);
     }
 
-    // A closed envelope takes nothing new, but an item set back still gives its share back to it.
-    public function test_a_closed_envelope_gives_back_but_takes_no_more_of_a_claim(): void
+    // A closed envelope takes no new item, but an item set back still gives its charge back to it.
+    public function test_a_closed_envelope_takes_back_an_item_but_takes_no_new_one(): void
     {
         $envelope = $this->envelope('Seeded Closing Envelope', 1000.00);
         [$first, $second] = $this->claim([['Glue', 100.00, 1], ['Tape', 50.00, 1]]);
@@ -191,19 +185,58 @@ class PortalBudgetEnvelopesTest extends TestCase
         DB::connection('tracker')->table('envelopes_budget')->where('id', $envelope)->update(['active' => false]);
 
         $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'pending']])->assertOk();
-        $this->assertSame('50.00', $this->chargeOfClaim($first)->amount);
+        $this->assertNull($this->chargeOfItem($first));
+        $this->assertSame('50.00', $this->chargeOfItem($second)->amount);
 
-        $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'approved']])
+        $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
             ->assertStatus(422)
             ->assertJsonPath('message', 'Seeded Closing Envelope is not an active budget envelope.');
-        $this->assertSame('50.00', $this->chargeOfClaim($first)->amount);
+        $this->assertNull($this->chargeOfItem($first));
     }
 
     /*
-     * The queue splits a claim by status, so its approved and pending items arrive as two claims.
-     * Both carry the claim's own key and its one charge; a claim with none says so.
+     * Before items were charged one by one, the portal charged a claim whole. Setting one of that
+     * claim's items back takes just its share out of that charge, and the rest stays where it is.
      */
-    public function test_the_queue_names_each_claims_charge_under_its_approved_and_pending_items(): void
+    public function test_a_whole_claim_charge_from_before_gives_back_only_the_item_set_back(): void
+    {
+        $envelope = $this->envelope('Seeded Legacy Envelope', 1000.00);
+        [$first, $second] = $this->claim([['Chair', 400.00, 1], ['Mat', 100.00, 1]]);
+        DB::connection('portal')->table('reimbursements')->whereIn('id', [$first, $second])->update(['status' => 'Approved']);
+        $this->unbookedCharge($first, $envelope, 500.00);
+
+        $this->decide([['id' => (string) $second, 'kind' => 'reimbursement', 'status' => 'pending']])->assertOk();
+
+        $this->assertSame('400.00', $this->chargeOfItem($first)->amount);
+        $this->assertEqualsWithDelta(600.00, $this->remaining($envelope), 0.001);
+        $this->assertTrue(PortalLog::query()
+            ->where('resource', 'manage.budget-envelopes')
+            ->where('message', 'like', '%charge on Seeded Legacy Envelope from ₱500.00 to ₱400.00%')
+            ->exists());
+
+        $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'pending']])->assertOk();
+
+        $this->assertSame(0, $this->chargeCountOfClaim($first));
+        $this->assertEqualsWithDelta(1000.00, $this->remaining($envelope), 0.001);
+    }
+
+    // Set back, the item carrying a whole-claim charge hands what is left to the claim's other item.
+    public function test_a_whole_claim_charge_moves_off_the_item_that_carried_it(): void
+    {
+        $envelope = $this->envelope('Seeded Legacy Carrier', 1000.00);
+        [$first, $second] = $this->claim([['Chair', 400.00, 1], ['Mat', 100.00, 1]]);
+        DB::connection('portal')->table('reimbursements')->whereIn('id', [$first, $second])->update(['status' => 'Approved']);
+        $this->unbookedCharge($first, $envelope, 500.00);
+
+        $this->decide([['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'pending']])->assertOk();
+
+        $this->assertNull($this->chargeOfItem($first));
+        $this->assertSame('100.00', $this->chargeOfItem($second)->amount);
+        $this->assertEqualsWithDelta(900.00, $this->remaining($envelope), 0.001);
+    }
+
+    // The queue splits a claim by status; both halves carry the claim's key, and no charge at all.
+    public function test_the_queue_gives_both_halves_of_a_split_claim_its_key(): void
     {
         $envelope = $this->envelope('Seeded Queue Envelope', 1000.00);
         [$first, $second] = $this->claim([['Soap', 120.00, 1], ['Brush', 80.00, 1]]);
@@ -219,15 +252,11 @@ class PortalBudgetEnvelopesTest extends TestCase
         );
 
         foreach ([$first, $second] as $itemId) {
-            $claim = $holding($itemId);
-            $this->assertSame((string) $first, $claim['chargeKey']);
-            $this->assertSame((string) $envelope, $claim['charge']['envelopeId']);
-            $this->assertSame('Seeded Queue Envelope', $claim['charge']['envelopeName']);
-            $this->assertEqualsWithDelta(80.00, $claim['charge']['amount'], 0.001);
+            $this->assertSame((string) $first, $holding($itemId)['chargeKey']);
+            $this->assertArrayNotHasKey('charge', $holding($itemId));
         }
         $this->assertNotSame($holding($first)['id'], $holding($second)['id']);
         $this->assertSame((string) $loose, $holding($loose)['chargeKey']);
-        $this->assertNull($holding($loose)['charge']);
     }
 
     public function test_an_approval_without_an_envelope_is_refused_and_changes_nothing(): void
@@ -249,7 +278,7 @@ class PortalBudgetEnvelopesTest extends TestCase
 
         $refused = $this->decide([['id' => (string) $item, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]]);
         $refused->assertStatus(422);
-        $this->assertStringContainsString('has ₱100.00 left, but this claim is ₱250.00', (string) $refused->json('message'));
+        $this->assertStringContainsString('has ₱100.00 left, but this item is ₱250.00', (string) $refused->json('message'));
         $this->assertNull($this->chargeOf($item));
         $this->assertSame(['Pending'], $this->statuses([$item]));
 
@@ -267,7 +296,7 @@ class PortalBudgetEnvelopesTest extends TestCase
         $this->assertEqualsWithDelta(-150.00, $this->remaining($envelope), 0.001);
     }
 
-    public function test_two_items_of_one_claim_in_one_save_charge_it_once(): void
+    public function test_two_items_approved_in_one_save_are_each_charged(): void
     {
         $envelope = $this->envelope('Seeded Pantry', 5000.00);
         [$first, $second] = $this->claim([['Coffee', 400.00, 1], ['Sugar', 100.00, 1]]);
@@ -277,7 +306,9 @@ class PortalBudgetEnvelopesTest extends TestCase
             ['id' => (string) $second, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope],
         ])->assertOk();
 
-        $this->assertSame(1, $this->chargeCount($first));
+        $this->assertSame(2, $this->chargeCountOfClaim($first));
+        $this->assertSame('400.00', $this->chargeOfItem($first)->amount);
+        $this->assertSame('100.00', $this->chargeOfItem($second)->amount);
         $this->assertEqualsWithDelta(4500.00, $this->remaining($envelope), 0.001);
     }
 
@@ -319,16 +350,17 @@ class PortalBudgetEnvelopesTest extends TestCase
     public function test_a_refused_change_rolls_back_a_charge_already_written_in_the_same_save(): void
     {
         $first = $this->envelope('Seeded Envelope A', 5000.00);
-        $second = $this->envelope('Seeded Envelope B', 5000.00);
+        $second = $this->envelope('Seeded Envelope B', 500.00);
         [$one, $two] = $this->claim([['Chair', 1200.00, 1], ['Desk', 800.00, 1]]);
 
-        $this->decide([
+        $refused = $this->decide([
             ['id' => (string) $one, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $first],
             ['id' => (string) $two, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $second],
-        ])->assertStatus(422)
-            ->assertJsonPath('message', 'This claim is already charged to Seeded Envelope A. One claim is charged to one envelope.');
+        ]);
 
-        $this->assertNull($this->chargeOf($one));
+        $refused->assertStatus(422);
+        $this->assertStringContainsString('Seeded Envelope B has ₱500.00 left, but this item is ₱800.00', (string) $refused->json('message'));
+        $this->assertNull($this->chargeOfItem($one));
         $this->assertEqualsWithDelta(5000.00, $this->remaining($first), 0.001);
         $this->assertSame(['Pending', 'Pending'], $this->statuses([$one, $two]));
     }
@@ -794,15 +826,17 @@ class PortalBudgetEnvelopesTest extends TestCase
             ->first(['t.*', 'te.envelope_id']);
     }
 
-    private function chargeCount(int $itemId): int
+    // An item's own charge: the one that carries its id.
+    private function chargeOfItem(int $itemId): ?object
     {
         return DB::connection('tracker')
-            ->table('transactions')
-            ->where('source_key', 'portal:reimbursement-claim:'.$this->claimIdOf($itemId))
-            ->count();
+            ->table('transactions as t')
+            ->leftJoin('transactions_envelopes as te', 'te.transaction_id', '=', 't.id')
+            ->where('t.source_key', 'portal:reimbursement-claim:'.$itemId)
+            ->first(['t.*', 'te.envelope_id']);
     }
 
-    // A claim's one charge, found under whichever of its items carries it.
+    // A claim's charge, found under whichever of its items carries it.
     private function chargeOfClaim(int $itemId): ?object
     {
         return DB::connection('tracker')
