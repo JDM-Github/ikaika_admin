@@ -5,6 +5,12 @@ Both merges were committed on 2026-09-28; nothing below has been changed since.
 
 ## 1. Finance (formerly Budget Tracker) and the envelope list are gated by role, not a power
 
+**Resolved 2026-09-29.** Finance has rules of its own: `finance.overview`, `finance.transactions` (+ `.export`)
+and `finance.envelopes` (+ `.export`), no reach, held by admins, executives and developers as before. The
+ledger and codes reads take any of the three page rules; `manage/budget-envelopes` follows
+`manage.requests.reimbursement.decide`, so whoever may approve a claim can load its envelopes. The notes
+below are the original finding.
+
 - Routes: `GET manage/budget-envelopes`, `manage/budget-transactions`, `manage/budget-codes`
   (`routes/portal/manage.php`), all behind `portal.admin`.
 - Portal: the Finance section (Overview, Transactions, Envelopes; it replaced Manage / Budget
@@ -37,6 +43,10 @@ Both merges were committed on 2026-09-28; nothing below has been changed since.
 - To decide: hide deleted projects from pickers and Home (past reports keep showing the name).
 
 ## 4. Missing Reports still uses the open raw employees API
+
+**Resolved 2026-09-29.** The page now reads its roster from `GET administration/missing-reports`, limited
+to the `administration.missing` reach; no portal page calls the raw API any more. The raw API itself stays
+handed off. The notes below are the original finding.
 
 - nj added the scoped `GET administration/missing-reports` for filed days, but the page still
   loads names through `UsersService.loadEmployees` (the raw `{product}/{resource}` API, which

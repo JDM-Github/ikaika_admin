@@ -363,18 +363,18 @@ class PortalManageUsersTest extends TestCase
         Mail::assertNothingSent();
     }
 
+    // Every admin-only page now follows a rule (a plain 403), so the alerting refusal probed twice is an executive's role.
     public function test_a_repeat_probe_is_logged_without_a_second_mail(): void
     {
-        $this->giveAlertMailbox($this->adminWhoIsNotExecutive());
-        $token = $this->tokenForMember();
-        $headers = ['Authorization' => "Bearer {$token}"];
+        $executive = $this->executive();
+        $executive->forceFill(['department' => 'MIS'])->save();
+        $actor = $this->adminWhoIsNotExecutive();
+        $this->giveAlertMailbox($this->otherAdmin($actor));
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $probe = fn () => $this->patchJson("/api/development/portal/manage/users/{$executive->id}/role", ['role' => PortalRole::USER], $headers);
 
-        $this->getJson('/api/development/portal/administration/emails', $headers)
-            ->assertForbidden()
-            ->assertJsonPath('notified', true);
-
-        $this->getJson('/api/development/portal/administration/emails', $headers)
-            ->assertForbidden()
+        $probe()->assertForbidden()->assertJsonPath('notified', true);
+        $probe()->assertForbidden()
             ->assertJsonPath('notified', false)
             ->assertJsonPath('warning', PortalAccessDenied::WARNING_RECORDED);
 

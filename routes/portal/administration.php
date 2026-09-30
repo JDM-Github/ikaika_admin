@@ -22,9 +22,11 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::get('administration/all-actions', [AllActionsController::class, 'index']);
         Route::get('administration/all-actions/{id}', [AllActionsController::class, 'show'])->whereNumber('id');
     });
-    // Everybody's filed days: the same read Manage Reports makes, for every member at once.
-    Route::middleware(['portal.admin', 'throttle:portal-manage-reports'])
+    // Missing Reports follows its rule and reach: only the people the reach covers are listed or reminded.
+    Route::middleware(['portal.rule:administration.missing', 'throttle:portal-manage-reports'])
         ->get('administration/missing-reports', [MissingReportsController::class, 'index']);
+    Route::middleware(['portal.rule:administration.missing.email', 'throttle:portal-administration-email-send'])
+        ->post('administration/missing-reports/reminders', [MissingReportsController::class, 'remind']);
 
     Route::middleware('throttle:portal-administration-recycle-bin')->group(function (): void {
         Route::get('administration/recycle-bin', [RecycleBinController::class, 'index']);
@@ -36,28 +38,37 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->post('administration/recycle-bin/{id}/restore', [RecycleBinController::class, 'restore'])
         ->whereNumber('id');
 
-    Route::middleware(['portal.admin', 'throttle:portal-administration-email'])->group(function (): void {
-        Route::get('administration/emails', [EmailMessagesController::class, 'index']);
+    // Email (the composer) follows its rule: whoever opens it reads the audiences, templates, footers and
+    // images, builds previews and keeps their own images. Sending and the library are powers of their own.
+    Route::middleware(['portal.rule:email', 'throttle:portal-administration-email'])->group(function (): void {
         // Before the {id} route so the fixed path is never read as an id.
         Route::get('administration/emails/audiences', [EmailMessagesController::class, 'audiences']);
         // Read-only despite the POST: the draft rides in the body, too long for a query string.
         Route::post('administration/emails/preview', [EmailMessagesController::class, 'preview']);
-        Route::get('administration/emails/{id}', [EmailMessagesController::class, 'show'])
-            ->whereNumber('id');
         Route::get('administration/email-blocks', [EmailBlocksController::class, 'index']);
         Route::get('administration/email-images', [EmailImagesController::class, 'index']);
     });
 
-    Route::middleware(['portal.admin', 'throttle:portal-administration-email-write'])->group(function (): void {
+    // Administration / All Emails: the sent list and one sent email.
+    Route::middleware(['portal.rule:administration.emails', 'throttle:portal-administration-email'])->group(function (): void {
+        Route::get('administration/emails', [EmailMessagesController::class, 'index']);
+        Route::get('administration/emails/{id}', [EmailMessagesController::class, 'show'])
+            ->whereNumber('id');
+    });
+
+    Route::middleware(['portal.rule:email.library', 'throttle:portal-administration-email-write'])->group(function (): void {
         Route::post('administration/email-blocks', [EmailBlocksController::class, 'store']);
         Route::patch('administration/email-blocks/{id}', [EmailBlocksController::class, 'update'])
             ->whereNumber('id');
         Route::delete('administration/email-blocks/{id}', [EmailBlocksController::class, 'destroy'])
             ->whereNumber('id');
+    });
+
+    Route::middleware(['portal.rule:email', 'throttle:portal-administration-email-write'])->group(function (): void {
         Route::post('administration/email-images', [EmailImagesController::class, 'store']);
         Route::delete('administration/email-images/{id}', [EmailImagesController::class, 'destroy']);
     });
 
-    Route::middleware(['portal.admin', 'throttle:portal-administration-email-send'])
+    Route::middleware(['portal.rule:email.send', 'throttle:portal-administration-email-send'])
         ->post('administration/emails', [EmailMessagesController::class, 'store']);
 });

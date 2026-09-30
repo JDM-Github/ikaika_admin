@@ -16,9 +16,10 @@ use Illuminate\Support\Str;
  *
  * A folder always comes from the scope and the signed-in employee, never from a path in the request,
  * and an image is named only by the id inside it -- so no one reaches another person's images.
- * Adding to or deleting from global is a developer's, in Developer mode, for now; the rule it is meant
- * to become is in docs/power/email-global-images.md. An email holds just the image's link, so
- * deleting one breaks it in every email already sent; the page warns before it asks for this.
+ * Adding to or deleting from global is the Global images power (email.images.global): executives hold
+ * it by preset, developers in Developer mode, and an admin only when given it (see
+ * docs/power/email-global-images.md). An email holds just the image's link, so deleting one breaks it
+ * in every email already sent; the page warns before it asks for this.
  */
 final class PortalEmailImages
 {
@@ -27,6 +28,8 @@ final class PortalEmailImages
     public const SCOPE_MINE = 'mine';
 
     public const SCOPE_GLOBAL = 'global';
+
+    private const GLOBAL_RULE = 'email.images.global';
 
     private const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -134,16 +137,16 @@ final class PortalEmailImages
         return $request->input('scope') === self::SCOPE_GLOBAL ? self::SCOPE_GLOBAL : self::SCOPE_MINE;
     }
 
-    // Everyone manages their own; global is a developer's in Developer mode until its rule exists.
+    // Everyone manages their own; global follows its power, which Developer mode holds like every rule.
     private function canManage(Employee $actor, Request $request, string $scope): bool
     {
-        return $scope === self::SCOPE_MINE || PortalDeveloperMode::isOn($actor, $request);
+        return $scope === self::SCOPE_MINE || PortalRules::holds($actor, $request, self::GLOBAL_RULE);
     }
 
     private function assertCanManage(Employee $actor, Request $request, string $scope): void
     {
         if (! $this->canManage($actor, $request, $scope)) {
-            abort(403, 'Only a developer can add or delete global images for now.');
+            abort(403, 'Adding or deleting a global image needs the Global images power.');
         }
     }
 

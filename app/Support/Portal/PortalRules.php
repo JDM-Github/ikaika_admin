@@ -172,7 +172,7 @@ final class PortalRules
         $listed = self::listed($actor, $request, $key);
 
         return Employee::query()
-            ->select(['id', 'first_name', 'last_name', 'department', 'role', 'role_level'])
+            ->select(['id', 'first_name', 'last_name', 'email', 'department', 'role', 'role_level'])
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->orderBy('last_name')
             ->orderBy('first_name')

@@ -202,6 +202,81 @@ final class PortalEmailMessages
         $footerBody = $footer === null ? null : trim((string) $footer->body);
         $footerFormat = $footer === null ? null : $this->blockFormat($footer);
 
+        return $this->deliver(
+            $actor,
+            $request,
+            $category,
+            $subject,
+            $body,
+            $format,
+            $footerId,
+            $footerBody,
+            $footerFormat,
+            $audience,
+            $filter,
+            $cc,
+            $bcc,
+            $fromName,
+            $replyTo,
+            $linkPath,
+        );
+    }
+
+    /**
+     * A fixed notice to chosen members, as the portal itself: no footer, no copies. Missing Reports'
+     * reminders go this way, so they land in the outbox and the bell exactly as a sent email does.
+     *
+     * @param  list<int>  $memberIds
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function sendToMembers(Employee $actor, Request $request, array $memberIds, string $subject, string $body, string $linkPath): array
+    {
+        return $this->deliver(
+            $actor,
+            $request,
+            'notice',
+            $subject,
+            $body,
+            PortalEmailMarkup::FORMAT_MARKUP,
+            null,
+            null,
+            null,
+            PortalEmailAudience::MEMBERS,
+            ['departments' => [], 'roles' => [], 'memberIds' => array_values($memberIds), 'emails' => []],
+            [],
+            [],
+            null,
+            null,
+            $linkPath,
+        );
+    }
+
+    /**
+     * Delivers a validated email and answers with the row that records it.
+     *
+     * @param  array{departments: list<string>, roles: list<string>, memberIds: list<int>, emails: list<string>}  $filter
+     * @param  list<string>  $cc
+     * @param  list<string>  $bcc
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    private function deliver(
+        Employee $actor,
+        Request $request,
+        string $category,
+        string $subject,
+        string $body,
+        string $format,
+        ?int $footerId,
+        ?string $footerBody,
+        ?string $footerFormat,
+        string $audience,
+        array $filter,
+        array $cc,
+        array $bcc,
+        ?string $fromName,
+        ?string $replyTo,
+        ?string $linkPath,
+    ): array {
         $recipients = $this->audience->recipients($audience, $filter);
         if ($recipients === []) {
             abort(422, 'That audience reaches nobody.');

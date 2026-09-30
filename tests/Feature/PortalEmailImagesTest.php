@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\Concerns\ActsAsPortalEmployee;
 use Tests\TestCase;
@@ -14,8 +16,9 @@ use Tests\TestCase;
 /**
  * Send Email's images live in Cloudinary under email-upload/{employee id}/, and the shared ones under
  * email-upload/global/. What is pinned here is that the folder always comes from the signed-in person
- * or the scope, so no one lists, uploads into or deletes from another person's folder; that only a
- * developer in Developer mode changes global for now; and that the secret never leaves the server.
+ * or the scope, so no one lists, uploads into or deletes from another person's folder; that changing
+ * global needs the Global images power (executives by preset, an admin only when given it, developers
+ * in Developer mode); and that the secret never leaves the server.
  */
 class PortalEmailImagesTest extends TestCase
 {
@@ -48,7 +51,23 @@ class PortalEmailImagesTest extends TestCase
         return Http::recorded(fn (HttpRequest $request): bool => str_starts_with($request->url(), self::CLOUD))->count();
     }
 
-    // A developer signed in with Developer mode on, the only one who may change global for now.
+    // An admin who is not an executive, so holds Global images only when given it.
+    private function plainAdmin(): Employee
+    {
+        $admin = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role, '')) = 'admin'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->orderBy('id')
+            ->firstOrFail();
+        $admin->forceFill(['is_developer' => false])->save();
+        DB::connection('portal')->table('access_personal')->where('employee_id', $admin->getKey())->where('permission_key', 'email.images.global')->delete();
+
+        return $admin;
+    }
+
+    // A developer signed in with Developer mode on, who holds every rule.
     private function developerHeaders(): array
     {
         $admin = $this->administrator();
@@ -185,10 +204,9 @@ class PortalEmailImagesTest extends TestCase
         $this->post(self::BASE, ['file' => UploadedFile::fake()->create('banner.png', 20, 'image/png')], $headers)->assertStatus(502);
     }
 
-    public function test_global_is_shared_and_only_a_developer_in_developer_mode_changes_it(): void
+    public function test_global_is_shared_and_an_admin_without_the_power_cannot_change_it(): void
     {
-        $admin = $this->administrator();
-        $admin->forceFill(['is_developer' => false])->save();
+        $admin = $this->plainAdmin();
         $id = '55555555-5555-4555-8555-555555555555';
         Http::fake([self::CLOUD.'/resources/image/upload*' => Http::response(['resources' => [
             $this->image('email-upload/global/'.$id, '2026-09-29T00:00:00Z'),
@@ -235,5 +253,32 @@ class PortalEmailImagesTest extends TestCase
         $log = PortalLog::query()->where('resource', 'administration.email')->where('record_id', $sent['id'])->first();
         $this->assertNotNull($log);
         $this->assertStringContainsString('a global email image', (string) $log->message);
+    }
+
+    // Executives hold Global images by preset; an admin holds it once given it, as a personal default here.
+    public function test_an_executive_and_an_admin_given_the_power_change_global(): void
+    {
+        Http::fake([
+            self::CLOUD.'/resources/image/upload*' => Http::response(['resources' => []]),
+            self::CLOUD.'/image/destroy' => Http::response(['result' => 'ok']),
+        ]);
+        $id = '77777777-7777-4777-8777-777777777777';
+
+        $executive = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->orderBy('id')
+            ->firstOrFail();
+        $executive->forceFill(['is_developer' => false])->save();
+        $this->getJson(self::BASE.'?scope=global', $this->headersFor($executive))->assertOk()->assertJsonPath('canManage', true);
+
+        $admin = $this->plainAdmin();
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'email.images.global', 'reach' => null]);
+        $headers = $this->headersFor($admin);
+        $this->getJson(self::BASE.'?scope=global', $headers)->assertOk()->assertJsonPath('canManage', true);
+        $this->deleteJson(self::BASE.'/'.$id.'?scope=global', [], $headers)->assertNoContent();
+        Http::assertSent(fn (HttpRequest $request): bool => str_starts_with($request->url(), self::CLOUD.'/image/destroy')
+            && $request['public_id'] === 'email-upload/global/'.$id);
     }
 }

@@ -67,6 +67,7 @@ class PortalAccessScenariosTest extends TestCase
     // A chain falls with its top and comes back with it: nobody below redoes anything.
     public function test_a_chain_falls_and_returns_with_its_top(): void
     {
+        $this->useBackupAsAPlainPower();
         $this->change('dev', $this->john, $this->third, ['key' => 'administration.backup', 'action' => 'on'])->assertOk();
         $this->change('default', $this->third, $this->member, ['key' => 'administration.backup.create', 'action' => 'on'])->assertOk();
         $this->assertNotNull($this->ownPower('default', $this->member, 'administration.backup.create'));
@@ -122,6 +123,7 @@ class PortalAccessScenariosTest extends TestCase
     // A borrower passes on only what came from their role or from above, and those gifts end with the loan.
     public function test_a_borrower_passes_on_only_their_own_powers(): void
     {
+        $this->useBackupAsAPlainPower();
         $this->change('dev', $this->john, $this->nathaniel, ['key' => self::PEERS, 'action' => 'on'])->assertOk();
         $this->change('dev', $this->john, $this->nathaniel, ['key' => 'manage.reports.unlisted', 'action' => 'on'])->assertOk();
         $this->change('dev', $this->john, $this->fourth, ['key' => 'administration.backup', 'action' => 'on'])->assertOk();
@@ -188,13 +190,13 @@ class PortalAccessScenariosTest extends TestCase
     public function test_an_executive_cannot_lift_a_developer_s_limit_on_a_fellow_executive(): void
     {
         $this->fourth->forceFill(['role_level' => 'Executive'])->save();
-        $this->change('dev', $this->john, $this->executive, ['key' => 'administration.email', 'action' => 'off'])->assertOk();
+        $this->change('dev', $this->john, $this->executive, ['key' => 'email', 'action' => 'off'])->assertOk();
         $this->assertTrue($this->editable('default', $this->fourth)[$this->executive->id]);
 
-        $this->change('default', $this->fourth, $this->executive, ['key' => 'administration.email', 'action' => 'on'])
+        $this->change('default', $this->fourth, $this->executive, ['key' => 'email', 'action' => 'on'])
             ->assertStatus(422)->assertJsonPath('message', 'A developer limited that power, so it cannot be switched on.');
 
-        $this->assertNull($this->ownPower('default', $this->executive, 'administration.email'));
+        $this->assertNull($this->ownPower('default', $this->executive, 'email'));
     }
 
     // The president as a developer: an executive in Default, everything in Developer mode, and each mode's acts its own.

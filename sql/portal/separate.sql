@@ -171,7 +171,7 @@ SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width
   </tr>
   <tr>
     <td colspan="2" style="padding:16px 0 0 0;font-size:11px;line-height:16px;color:#9ca3af;">
-      Sent through the IKAIKA Portal. This message may contain confidential information and is meant only
+      This message may contain confidential information and is meant only
       for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
     </td>
   </tr>
@@ -482,6 +482,15 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.users.access.give', 'manage.users.access', 'Give powers', 'Switch a power on for someone: only one held here, never wider than {UserName|Your} own reach. It ends if that power is ever lost.', 0, 1, 844),
 ('manage.users.access.limit', 'manage.users.access', 'Limit powers', 'Switch a power off for someone, with everything under it, whoever gave it to them.', 0, 1, 845),
 
+-- Finance reads the transaction tracker, which is the company's and nobody's own, so it takes no reach.
+-- Existing databases: the Laravel migration add_portal_finance_rules.
+('finance', NULL, 'Finance', 'See the company''s money: budgets, envelopes and every transaction.', 0, 1, 850),
+('finance.overview', 'finance', 'Overview', 'See the finance dashboard: cash flow, the forecast, team balances and the latest transactions.', 0, 1, 851),
+('finance.transactions', 'finance', 'Transactions', 'See every transaction in the ledger, with the envelopes and accounts it touched.', 0, 1, 852),
+('finance.transactions.export', 'finance.transactions', 'Export', 'Download the transactions list.', 0, 1, 853),
+('finance.envelopes', 'finance', 'Envelopes', 'See every envelope and budget code, with what is left in each.', 0, 1, 854),
+('finance.envelopes.export', 'finance.envelopes', 'Export', 'Download the envelope and budget code lists.', 0, 1, 855),
+
 ('administration', NULL, 'Administration', 'Keep the portal in order: logs, trash, emails and backups.', 0, 1, 900),
 ('administration.recycle', 'administration', 'All Recycle', 'See what the people in {UserName|Your} reach deleted. View only: restoring someone else''s item could backfire on them.', 1, 1, 910),
 ('administration.recycle.export', 'administration.recycle', 'Export', 'Download the recycle list.', 0, 1, 911),
@@ -495,17 +504,20 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('administration.missing.email', 'administration.missing', 'Email reminders', 'Email a reminder to one person or to everyone missing.', 0, 1, 941),
 ('administration.missing.mobile', 'administration.missing', 'Mobile reminders', 'Send a reminder to the mobile app.', 0, 1, 942),
 ('administration.missing.export', 'administration.missing', 'Export', 'Download the missing list.', 0, 1, 943),
-('administration.email', 'administration', 'Send Email', 'Open the Send Email page.', 0, 1, 950),
-('administration.email.send', 'administration.email', 'Send emails', 'Write and send an email to everyone, a department, a role or chosen members.', 0, 1, 951),
-('administration.email.library', 'administration.email', 'Templates and footers', 'Create, edit and delete email templates and footers.', 0, 1, 952),
-('administration.email.outbox', 'administration.email', 'Outbox', 'See every email that went out.', 0, 1, 953),
-('administration.email.export', 'administration.email', 'Export', 'Download the outbox.', 0, 1, 954),
+('administration.emails', 'administration', 'All Emails', 'See every email the portal sent, who it reached and whether it arrived.', 0, 1, 950),
+('administration.emails.export', 'administration.emails', 'Export', 'Download the list of sent emails.', 0, 1, 951),
 ('administration.backup', 'administration', 'Backup', 'Open the Backup page.', 0, 1, 960),
 ('administration.backup.create', 'administration.backup', 'Create backups', 'Take a backup of the portal data.', 0, 1, 961),
 ('administration.backup.download', 'administration.backup', 'Download backups', 'Download a backup file.', 0, 1, 962),
 ('administration.backup.restore', 'administration.backup', 'Restore backups', 'Put the portal back to a backup.', 0, 1, 963),
 ('administration.backup.export', 'administration.backup', 'Export', 'Download the backup list.', 0, 1, 964),
 ('administration.alerts', 'administration', 'Access alerts', 'Get an email when someone is refused access to a page.', 0, 1, 970),
+
+-- Email is its own page after Administration, as in the sidebar; what it sent is Administration / All
+-- Emails. Existing databases: the Laravel migration move_portal_email_rules.
+('email', NULL, 'Email', 'Open the Email page: write an email and see how it lands before it goes.', 0, 1, 980),
+('email.send', 'email', 'Send emails', 'Send the email to everyone, a department, a role, chosen members or typed addresses.', 0, 1, 981),
+('email.library', 'email', 'Templates and footers', 'Save, edit and delete email templates and footers.', 0, 1, 982),
 
 ('workspace', NULL, 'Data Workspace', 'Open the admin spreadsheet of portal tables.', 0, 1, 1000),
 ('workspace.private', 'workspace', 'Private columns', 'Read private columns: tax and government numbers, bank details, address and birthday.', 0, 1, 1010),
@@ -518,6 +530,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.users.access.peers', 'manage.users.access', 'Manage other admins', 'Change the role and Access Rules of fellow administrators in {UserName|Your} reach, not only members. Only administrators can hold it.', 0, 1, 'admin', 846),
 ('administration.logs.developers', 'administration.logs', 'See developers'' activity', 'See what developers did in All Logs and All Actions, sign-ins included. What they did in Developer mode reads "a developer" to anyone not in Developer mode. Only executives and MIS administrators can hold it.', 0, 1, 'admin', 922),
 ('manage.users.information', 'manage.users', 'Show employee information', 'See the private details of the people in {UserName|Your} reach: birthday, address, contact, government and tax numbers, bank details and emergency contact.', 1, 1, 'admin', 848),
+('email.images.global', 'email', 'Global images', 'Add and delete the images everyone can use in an email. Anyone who can open Email can already use them. Only administrators can hold it.', 0, 1, 'admin', 983),
 ('developer', NULL, 'Developer', 'Tools for the people who build the portal.', 0, 1, 'developer', 1100),
 ('developer.rules', 'developer', 'Rule catalog', 'Change the rule list and what each role starts with.', 0, 1, 'developer', 1110),
 ('developer.flag', 'developer', 'Developer flag', 'Mark or unmark someone as a developer.', 0, 1, 'developer', 1120),
@@ -532,6 +545,10 @@ UPDATE access_permissions SET only_department = 'MIS', min_tier = 'admin' WHERE 
     'manage.users.access.peers', 'manage.users.role', 'administration.logs.developers',
     'administration.actions', 'administration.actions.sync', 'administration.actions.export'
 );
+
+-- All Backups is parked until Airtable is retired (docs/power/backups-plan.md): developers only, in
+-- Developer mode, and no gift reaches it. Existing databases: make_portal_backup_rules_developer_only.
+UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key LIKE 'administration.backup%';
 
 -- Members: their own work only. View Projects and Track Projects show only the projects they are on.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
@@ -568,6 +585,7 @@ WHERE permission_key NOT LIKE 'developer%'
   AND permission_key <> 'manage.users.access.peers'
   AND permission_key <> 'manage.users.information'
   AND permission_key <> 'administration.logs.developers'
+  AND permission_key <> 'email.images.global'
   AND permission_key NOT LIKE '%.unlisted';
 
 -- Executives: every department and executives' logs, without the developer tools and without the

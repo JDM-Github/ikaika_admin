@@ -129,6 +129,7 @@ class PortalAccessControlTest extends TestCase
 
     public function test_a_switch_is_refused_when_too_wide_not_held_or_unknown(): void
     {
+        $this->useBackupAsAPlainPower();
         $this->change($this->admin, $this->member, ['key' => 'manage.requests.leave', 'action' => 'on', 'reach' => 'all'])
             ->assertStatus(422)->assertJsonPath('message', 'You cannot give a power wider than you hold it.');
         $this->change($this->admin, $this->member, ['key' => 'manage.requests.leave', 'action' => 'on', 'includeExecutives' => true])
@@ -169,6 +170,7 @@ class PortalAccessControlTest extends TestCase
     // What someone gave lives only as long as they hold it: lose it and it goes, regain it and it returns.
     public function test_losing_a_power_ends_what_was_given_from_it_and_regaining_restores_it(): void
     {
+        $this->useBackupAsAPlainPower();
         $this->change($this->developer, $this->admin, ['key' => 'administration.backup', 'action' => 'on'])->assertOk();
         $this->change($this->admin, $this->member, ['key' => 'administration.backup.create', 'action' => 'on'])->assertOk();
         $this->assertNotNull($this->power($this->member, 'administration.backup.create'));
@@ -270,6 +272,7 @@ class PortalAccessControlTest extends TestCase
     // Between equals only role and what came from above counts, so two admins cannot prop each other up.
     public function test_an_admin_passes_a_fellow_admin_only_what_came_from_their_role_or_above(): void
     {
+        $this->useBackupAsAPlainPower();
         foreach ([$this->admin, $this->fellow] as $admin) {
             $this->change($this->developer, $admin, ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
         }
@@ -290,20 +293,21 @@ class PortalAccessControlTest extends TestCase
         $this->assertNull($this->power($this->admin, 'manage.users.access.peers'));
     }
 
-    // Developer tools come only with Developer mode: the sheet never offers them, and nobody, a developer included, can give or limit them.
-    public function test_developer_tools_can_never_be_given_or_limited(): void
+    // Developer tools and All Backups come only with Developer mode: the sheet never offers them, and nobody, a developer included, can give or limit them.
+    public function test_developer_only_powers_can_never_be_given_or_limited(): void
     {
         $keys = array_column($this->as($this->developer)->getJson("/api/development/portal/manage/access/{$this->admin->id}")->assertOk()->json('data'), 'key');
         $this->assertContains('manage.requests', $keys);
         foreach ($keys as $key) {
             $this->assertStringStartsNotWith('developer', $key);
+            $this->assertStringStartsNotWith('administration.backup', $key);
         }
 
-        foreach (['developer', 'developer.rules'] as $key) {
+        foreach (['developer', 'developer.rules', 'administration.backup', 'administration.backup.restore'] as $key) {
             foreach (['on', 'off'] as $action) {
                 $this->change($this->developer, $this->admin, ['key' => $key, 'action' => $action])
                     ->assertStatus(422)
-                    ->assertJsonPath('message', 'Developer tools come only with Developer mode, so nobody can give or limit them.');
+                    ->assertJsonPath('message', 'That power comes only with Developer mode, so nobody can give or limit it.');
             }
         }
         $this->assertSame(0, DB::connection('portal')->table('access_grants')->count());
@@ -316,11 +320,14 @@ class PortalAccessControlTest extends TestCase
         DB::connection('portal')->table('access_grants')->insert([
             ['employee_id' => $this->admin->id, 'permission_key' => 'developer', 'granted_by' => $this->developer->id],
             ['employee_id' => $this->admin->id, 'permission_key' => 'developer.rules', 'granted_by' => $this->developer->id],
+            ['employee_id' => $this->admin->id, 'permission_key' => 'administration.backup', 'granted_by' => $this->developer->id],
         ]);
 
         $this->assertNull($this->power($this->admin, 'developer'));
         $this->assertNull($this->power($this->admin, 'developer.rules'));
+        $this->assertNull($this->power($this->admin, 'administration.backup'));
         $this->assertNotNull($this->power($this->developer, 'developer.rules'));
+        $this->assertNotNull($this->power($this->developer, 'administration.backup'));
     }
 
     // A black list hides the people on it from that person's Reports, and the Access page says who set it.

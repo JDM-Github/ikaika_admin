@@ -73,6 +73,19 @@ class PortalRulesTest extends TestCase
         $this->assertFalse(DB::connection('portal')->table('access_presets')->whereIn('role', ['member', 'admin', 'executive'])->where('permission_key', 'like', 'developer%')->exists());
     }
 
+    // All Backups is parked until Airtable is retired: every one of its rules is Developer mode's alone.
+    public function test_all_backups_is_for_developers_only_while_parked(): void
+    {
+        $tiers = DB::connection('portal')->table('access_permissions')->where('permission_key', 'like', 'administration.backup%')->pluck('min_tier', 'permission_key');
+
+        $this->assertEqualsCanonicalizing(
+            ['administration.backup', 'administration.backup.create', 'administration.backup.download', 'administration.backup.restore', 'administration.backup.export'],
+            $tiers->keys()->all(),
+        );
+        $this->assertSame(['developer'], $tiers->unique()->values()->all());
+        $this->assertFalse(DB::connection('portal')->table('access_presets')->whereIn('role', ['member', 'admin', 'executive'])->where('permission_key', 'like', 'administration.backup%')->exists());
+    }
+
     // Reports and All Recycle take white and black lists; admins start bound by them. Executives ignore
     // Reports' lists; All Recycle is not theirs by default, so only developers ignore its lists.
     public function test_reports_and_all_recycle_take_lists_that_admins_start_bound_by(): void
@@ -288,6 +301,99 @@ class PortalRulesTest extends TestCase
             $this->withToken($token)->getJson('/api/development/portal/requests/'.$kind)->assertForbidden();
         }
         $this->withToken($token)->postJson('/api/development/portal/requests/reimbursement/receipts', [])->assertForbidden();
+    }
+
+    // Finance keeps who opened it before it had rules: admins, executives and developers, never a member.
+    public function test_finance_presets_match_today(): void
+    {
+        $keys = ['finance', 'finance.overview', 'finance.transactions', 'finance.transactions.export', 'finance.envelopes', 'finance.envelopes.export'];
+        foreach (['admin', 'executive', 'developer'] as $role) {
+            $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
+            $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing a finance rule.");
+        }
+        $this->assertFalse(DB::connection('portal')->table('access_presets')->where('role', 'member')->where('permission_key', 'like', 'finance%')->exists());
+        $this->assertSame(0, DB::connection('portal')->table('access_permissions')->where('permission_key', 'like', 'finance%')->sum('supports_reach'));
+    }
+
+    // The ledger and codes answer any Finance page's rule; the envelope picker follows approving a claim.
+    public function test_each_finance_read_refuses_once_its_rules_are_off(): void
+    {
+        $token = $this->login($this->admin());
+        foreach (['budget-transactions', 'budget-codes', 'budget-envelopes'] as $read) {
+            $this->withToken($token)->getJson('/api/development/portal/manage/'.$read)->assertOk();
+        }
+
+        $this->switchOff($token, 'finance.overview');
+        $this->switchOff($token, 'finance.transactions');
+        $this->withToken($token)->getJson('/api/development/portal/manage/budget-transactions')->assertOk();
+        $this->switchOff($token, 'finance.envelopes');
+        $this->withToken($token)->getJson('/api/development/portal/manage/budget-transactions')->assertForbidden();
+        $this->withToken($token)->getJson('/api/development/portal/manage/budget-codes')->assertForbidden();
+        $this->withToken($token)->getJson('/api/development/portal/manage/budget-envelopes')->assertOk();
+
+        $this->switchOff($token, 'manage.requests.reimbursement.decide');
+        $this->withToken($token)->getJson('/api/development/portal/manage/budget-envelopes')->assertForbidden();
+
+        $member = $this->login($this->member());
+        foreach (['budget-transactions', 'budget-codes', 'budget-envelopes'] as $read) {
+            $this->withToken($member)->getJson('/api/development/portal/manage/'.$read)->assertForbidden();
+        }
+    }
+
+    // Email and All Emails keep who used them before they had rules: admins, executives and developers.
+    public function test_email_presets_match_today(): void
+    {
+        $keys = ['email', 'email.send', 'email.library', 'administration.emails', 'administration.emails.export'];
+        foreach (['admin', 'executive', 'developer'] as $role) {
+            $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
+            $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing an email rule.");
+        }
+        $this->assertFalse(DB::connection('portal')->table('access_presets')->where('role', 'member')->whereIn('permission_key', $keys)->exists());
+        $this->assertFalse(DB::connection('portal')->table('access_permissions')->where('permission_key', 'like', 'administration.email.%')->orWhere('permission_key', 'administration.email')->exists());
+        $this->assertNull(DB::connection('portal')->table('access_permissions')->where('permission_key', 'email')->value('parent_key'));
+    }
+
+    // Global images: executives and developers by preset, an admin only when given it, never a member.
+    public function test_global_images_start_with_executives_and_developers(): void
+    {
+        $holders = DB::connection('portal')->table('access_presets')->where('permission_key', 'email.images.global')->pluck('role')->all();
+
+        $this->assertEqualsCanonicalizing(['executive', 'developer'], $holders);
+        $this->assertSame('admin', DB::connection('portal')->table('access_permissions')->where('permission_key', 'email.images.global')->value('min_tier'));
+    }
+
+    // The composer, sending, the library and the sent list each answer only to their own rule.
+    public function test_each_email_route_refuses_once_its_rule_is_off(): void
+    {
+        $token = $this->login($this->admin());
+        $base = '/api/development/portal/administration/';
+        $this->withToken($token)->getJson($base.'emails')->assertOk();
+
+        $this->switchOff($token, 'email.send');
+        $this->switchOff($token, 'email.library');
+        $this->withToken($token)->postJson($base.'emails', [])->assertForbidden();
+        $this->withToken($token)->postJson($base.'email-blocks', [])->assertForbidden();
+        $this->withToken($token)->deleteJson($base.'email-blocks/1')->assertForbidden();
+        // The composer still reads, and the sent list is another page.
+        $this->withToken($token)->getJson($base.'email-blocks')->assertOk();
+        $this->withToken($token)->postJson($base.'emails/preview', ['body' => 'Hi'])->assertOk();
+        $this->withToken($token)->getJson($base.'emails')->assertOk();
+
+        $this->switchOff($token, 'administration.emails');
+        $this->withToken($token)->getJson($base.'emails')->assertForbidden();
+        $this->withToken($token)->getJson($base.'emails/1')->assertForbidden();
+        $this->withToken($token)->getJson($base.'emails/audiences')->assertOk();
+
+        $this->switchOff($token, 'email');
+        foreach (['emails/audiences', 'email-blocks', 'email-images'] as $read) {
+            $this->withToken($token)->getJson($base.$read)->assertForbidden();
+        }
+        $this->withToken($token)->postJson($base.'emails/preview', ['body' => 'Hi'])->assertForbidden();
+        $this->withToken($token)->postJson($base.'email-images', [])->assertForbidden();
+
+        $member = $this->login($this->member());
+        $this->withToken($member)->getJson($base.'emails')->assertForbidden();
+        $this->withToken($member)->getJson($base.'emails/audiences')->assertForbidden();
     }
 
     // User follows its rules from day one without anyone losing anything: every role holds them all.

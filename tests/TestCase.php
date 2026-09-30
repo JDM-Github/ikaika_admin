@@ -26,6 +26,12 @@ abstract class TestCase extends BaseTestCase
         }));
     }
 
+    // All Backups is developer-only while parked; gift-chain tests borrow its rules as powers only developers start with.
+    protected function useBackupAsAPlainPower(): void
+    {
+        DB::connection('portal')->table('access_permissions')->where('permission_key', 'like', 'administration.backup%')->update(['min_tier' => null]);
+    }
+
     // Switches Developer mode on for this signed-in token, as the Settings switch would; it lasts for that sign-in only.
     protected function developerModeOn(string $token): string
     {

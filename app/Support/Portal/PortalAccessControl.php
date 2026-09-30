@@ -54,7 +54,7 @@ final class PortalAccessControl
 
         $data = [];
         foreach ($graph->powersFor($editorId, $targetId) as $key => $mine) {
-            // Developer tools come only with Developer mode, a power their role or department can never hold is not
+            // Developer-only powers come only with Developer mode, a power their role or department can never hold is not
             // theirs to see, and one that always stays on (the Access page) is nothing to give or limit.
             if ($graph->isDeveloperOnly($key) || $this->alwaysOn($graph, $key) || (! $graph->canHold($targetId, $key) && ! isset($theirs[$key]))) {
                 continue;
@@ -149,7 +149,7 @@ final class PortalAccessControl
         $target = $this->manageable($graph, $editorId, $targetId);
         $key = $change['key'];
         if ($graph->isDeveloperOnly($key)) {
-            abort(422, 'Developer tools come only with Developer mode, so nobody can give or limit them.');
+            abort(422, 'That power comes only with Developer mode, so nobody can give or limit it.');
         }
         if ($this->alwaysOn($graph, $key)) {
             abort(422, 'That power always stays on, so nobody can give or limit it.');

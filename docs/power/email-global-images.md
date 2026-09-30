@@ -1,7 +1,7 @@
 # Send Email global images: power plan
 
-Status: **parked.** For now only a developer in Developer mode can add or delete global images.
-The rule below is what it should become. Recorded on 2026-09-29.
+Status: **enforced 2026-10-01.** Recorded on 2026-09-29 as parked (developer only); the rule below
+is now the Global images power, `email.images.global`.
 
 ## What global images are
 
@@ -22,12 +22,13 @@ it deletes.
 
 ## Today
 
-- Anyone who can open Send Email can list global images and insert one.
-- Only an employee with `is_developer` who has Developer mode on for this sign-in can upload to or
-  delete from global. `PortalDeveloperMode::isOn` decides this.
-- Everyone else gets a 403, and the panel hides Upload and Delete while Global is showing.
-- The single seam is `PortalEmailImages::canManage`. The list response reports its answer as
-  `canManage`, and the portal only reads that flag, so enforcing the rule needs no portal change.
+- Anyone who can open Email can list global images and insert one.
+- Uploading to or deleting from global needs the Global images power (`email.images.global`, under
+  Email, `min_tier` admin so no member can hold it). `PortalRules::holds` decides this in
+  `PortalEmailImages::canManage`.
+- Everyone else gets a 403, and the panel hides Upload and Delete while Global is showing. The list
+  response reports the answer as `canManage`, and the portal only reads that flag.
+- Before 2026-10-01 only a developer in Developer mode could do this.
 
 ## The rule we want
 
@@ -40,9 +41,9 @@ Adding and deleting global images should belong to:
 
 Everyone else can still see and insert global images.
 
-## How to enforce it
+## How it was enforced (2026-10-01)
 
-- Add a permission row under `administration.email`, e.g. `administration.email.images.global`
+- Add a permission row under `email`, e.g. `email.images.global`
   ("Global images": "Add and delete the images everyone can use in an email."), with `can_toggle = 1`.
   Add it in `sql/portal/separate.sql` and in a migration for existing databases.
 - Presets: developers get it through the existing "every rule" preset. Admins get nothing by default.

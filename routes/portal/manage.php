@@ -21,13 +21,13 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // Each kind on the queue and its Approve or reject follow their own rule inside PortalManageRequests.
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests'])
         ->get('manage/requests', [RequestsController::class, 'index']);
-    // Read by the reimbursement queue and the Budget Tracker, so they keep the admin gate until the
-    // tracker has rules of its own.
-    Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
+    // The envelope picker an approval charges: whoever may approve a reimbursement claim reads it.
+    Route::middleware(['portal.rule:manage.requests.reimbursement.decide', 'throttle:portal-manage-requests'])
         ->get('manage/budget-envelopes', [BudgetEnvelopesController::class, 'index']);
-    Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
+    // The ledger and the budget codes feed all three Finance pages, so any of their rules reads them.
+    Route::middleware(['portal.rule:finance.overview|finance.transactions|finance.envelopes', 'throttle:portal-manage-requests'])
         ->get('manage/budget-transactions', [BudgetEnvelopesController::class, 'transactions']);
-    Route::middleware(['portal.admin', 'throttle:portal-manage-requests'])
+    Route::middleware(['portal.rule:finance.overview|finance.transactions|finance.envelopes', 'throttle:portal-manage-requests'])
         ->get('manage/budget-codes', [BudgetEnvelopesController::class, 'codes']);
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);

@@ -363,7 +363,7 @@ without a deploy. A new page still needs its catalog rows added in separate.sql.
 
 ## Permission tree (seeded — `sql/portal/separate.sql`, table `access_permissions`)
 
-The SQL is the source of truth; this list is a copy for reading. 88 rules. `[R]` takes a reach.
+The SQL is the source of truth; this list is a copy for reading. 102 rules. `[R]` takes a reach.
 The letters say which role presets hold it: M member, A admin, E executive, D developer.
 Descriptions (what the Access page shows on each row) live in the SQL.
 
@@ -428,6 +428,12 @@ Descriptions (what the Access page shows on each row) live in the SQL.
       - `manage.users.access.limit` Limit powers — AED
       - `manage.users.access.peers` Manage other admins — ED (executives and MIS admins only)
     - `manage.users.information` Show employee information [R] — E (admin and above only)
+- `finance` Finance — AED (no reach: the tracker is the company's)
+  - `finance.overview` Overview — AED
+  - `finance.transactions` Transactions — AED
+    - `finance.transactions.export` Export — AED
+  - `finance.envelopes` Envelopes — AED
+    - `finance.envelopes.export` Export — AED
 - `administration` Administration — AED
   - `administration.recycle` All Recycle [R] — AED
     - `administration.recycle.export` Export — AED
@@ -440,17 +446,18 @@ Descriptions (what the Access page shows on each row) live in the SQL.
     - `administration.missing.email` Email reminders — AED
     - `administration.missing.mobile` Mobile reminders — AED
     - `administration.missing.export` Export — AED
-  - `administration.email` Send Email — AED
-    - `administration.email.send` Send emails — AED
-    - `administration.email.library` Templates and footers — AED
-    - `administration.email.outbox` Outbox — AED
-    - `administration.email.export` Export — AED
-  - `administration.backup` Backup — ED
-    - `administration.backup.create` Create backups — ED
-    - `administration.backup.download` Download backups — ED
-    - `administration.backup.restore` Restore backups — ED
-    - `administration.backup.export` Export — ED
+  - `administration.emails` All Emails — AED (what Email sent)
+    - `administration.emails.export` Export — AED
+  - `administration.backup` Backup — D (Developer mode only while parked, never given)
+    - `administration.backup.create` Create backups — D
+    - `administration.backup.download` Download backups — D
+    - `administration.backup.restore` Restore backups — D
+    - `administration.backup.export` Export — D
   - `administration.alerts` Access alerts — AED
+- `email` Email — AED (its own page after Administration, as in the sidebar)
+  - `email.send` Send emails — AED
+  - `email.library` Templates and footers — AED
+  - `email.images.global` Global images — ED (admin and above only; an admin only when given it)
 - `workspace` Data Workspace — AED
   - `workspace.private` Private columns — AED
   - `workspace.edit` Edit cells — AED
@@ -466,8 +473,10 @@ Descriptions (what the Access page shows on each row) live in the SQL.
 |---|---|---|---|---|
 | Baseline [B] | yes | yes | yes | yes |
 | Manage/* | — | department | all | all |
+| Finance/* | — | yes | yes | yes |
 | Administration/* (non-dev) | — | department | all | all |
-| Backup, Airtable sync | — | — | yes | yes |
+| Airtable sync | — | — | yes | yes |
+| Backup | — | — | — | Developer mode only |
 | All Logs executives flag | — | off | on | on |
 | access (the Access page) | yes | yes | yes | yes |
 | developer.* | — | — | — | yes |
