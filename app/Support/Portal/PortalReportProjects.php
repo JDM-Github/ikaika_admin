@@ -24,7 +24,7 @@ final class PortalReportProjects
      * @return array{
      *     section: string,
      *     resource: string,
-     *     data: list<array{id: string, label: string, jobType: ?string}>,
+     *     data: list<array{id: string, label: string, jobType: ?string, hasLines: bool}>,
      *     activityGroups: list<array{jobType: ?string, activities: list<string>}>
      * }
      */
@@ -48,7 +48,7 @@ final class PortalReportProjects
      * @return array{
      *     section: string,
      *     resource: string,
-     *     data: list<array{id: string, label: string, jobType: ?string}>,
+     *     data: list<array{id: string, label: string, jobType: ?string, hasLines: bool}>,
      *     activityGroups: list<array{jobType: ?string, activities: list<string>}>
      * }
      */
@@ -110,7 +110,7 @@ final class PortalReportProjects
      * One read over the (employee_id, project_id) primary key. A member sees their own board and
      * nobody else's, whatever role they hold on it.
      *
-     * @return list<array{id: string, label: string, jobType: ?string}>
+     * @return list<array{id: string, label: string, jobType: ?string, hasLines: bool}>
      */
     private function ownProjects(int $employeeId): array
     {
@@ -120,7 +120,7 @@ final class PortalReportProjects
             ->where('employees_projects.employee_id', $employeeId)
             // A deleted project waits in the Recycle Bin: nothing new may be filed against it.
             ->whereNull('projects.deleted_at')
-            ->select(['projects.id', 'projects.project_number', 'projects.project_name', 'projects.type_of_job'])
+            ->select(['projects.id', 'projects.project_number', 'projects.project_name', 'projects.type_of_job', 'projects.department'])
             ->distinct()
             ->get();
 
@@ -134,6 +134,8 @@ final class PortalReportProjects
                     $row->project_name ?? null,
                 ),
                 'jobType' => $jobType === '' ? null : $jobType,
+                // A report on this project asks for lines only when it is Engineering's.
+                'hasLines' => PortalProjectWork::isEngineering($row->department ?? null),
             ];
         }
 

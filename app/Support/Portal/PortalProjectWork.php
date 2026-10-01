@@ -37,7 +37,7 @@ final class PortalProjectWork
 
     private const RECENT_DAYS = 30;
 
-    private const LINES_DEPARTMENT = 'engineering';
+    private const ENGINEERING = 'engineering';
 
     /**
      * @param  list<object>  $projects  rows with id, department and status
@@ -73,7 +73,7 @@ final class PortalProjectWork
     private function summary(object $project, array $reports, CarbonImmutable $today): array
     {
         $isDone = PortalViewProjectPresenter::status($project->status ?? null) === 'completed';
-        $hasLines = PortalPreview::department($project->department ?? null) === self::LINES_DEPARTMENT;
+        $hasLines = self::isEngineering($project->department ?? null);
         $recentFrom = $today->subDays(self::RECENT_DAYS - 1)->toDateString();
 
         $hours = 0.0;
@@ -140,6 +140,12 @@ final class PortalProjectWork
             'rhythmDays' => $rhythm,
             'activities' => $rows,
         ];
+    }
+
+    // Engineering's projects carry lines (change in elements) and the Engineering-only form fields; no other department's do.
+    public static function isEngineering(mixed $department): bool
+    {
+        return PortalPreview::department($department) === self::ENGINEERING;
     }
 
     /**

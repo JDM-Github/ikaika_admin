@@ -97,6 +97,7 @@ final class PortalViewProjects
         $trails = $this->trailsByProject($projectIds);
         $leadsByEmail = $this->leadsByEmail($rows);
         $work = (new PortalProjectWork)->byProject($rows, CarbonImmutable::today());
+        $activityCodes = PortalActivityScopes::all();
 
         $projects = [];
         foreach ($rows as $row) {
@@ -118,6 +119,7 @@ final class PortalViewProjects
                 ),
                 ...PortalProjectPowers::flags($powers, $actor, $row),
                 'work' => $work[$id],
+                'scopeOptions' => PortalActivityScopes::forDepartment($activityCodes, $row->department ?? null),
             ];
         }
 

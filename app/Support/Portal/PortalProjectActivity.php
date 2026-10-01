@@ -18,8 +18,6 @@ final class PortalProjectActivity
 {
     public const PER_PAGE = 25;
 
-    private const LINES_DEPARTMENT = 'engineering';
-
     public function __construct(private readonly PortalProjectApproval $approval) {}
 
     /**
@@ -56,7 +54,7 @@ final class PortalProjectActivity
             ->orderByDesc('report.id')
             ->get()
             ->all();
-        $hasLines = PortalPreview::department($project->department) === self::LINES_DEPARTMENT;
+        $hasLines = PortalProjectWork::isEngineering($project->department);
         $visible = static fn (object $row): bool => $seesEveryone || (int) $row->employee_id === $actorId;
 
         $feed = array_values(array_filter($rows, static function (object $row) use ($visible, $filters): bool {

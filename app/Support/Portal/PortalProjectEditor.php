@@ -72,6 +72,9 @@ final class PortalProjectEditor
         'google-drive' => 'google_drive_folder_path',
     ];
 
+    // Only Engineering projects carry these; any other department's project has them cleared on save.
+    private const ENGINEERING_LINKS = ['forma', 'panoramic'];
+
     /** A drive path is a folder path people paste, not always a URL. */
     private const FREE_TEXT_LINKS = ['google-drive'];
 
@@ -147,6 +150,8 @@ final class PortalProjectEditor
                 'departments' => $departments,
                 'addDepartments' => $addDepartments,
                 'types' => $this->jobTypes(),
+                // A project that is not Engineering's picks its scopes from these, by its department.
+                'activityCodes' => PortalActivityScopes::all(),
             ],
         ];
     }
@@ -175,7 +180,7 @@ final class PortalProjectEditor
         if (! PortalProjectPowers::reachesDepartment(PortalRules::reach($actor, $request, PortalProjectPowers::CREATE), $actor->department, $fields['columns']['department'])) {
             abort(403, 'Your Add projects power does not reach that department.');
         }
-        $scopeCodes = $this->validatedScopeCodes($request);
+        $scopeCodes = $this->validatedScopeCodes($request, $fields['columns']['department']);
         $employeeId = (int) $actor->getKey();
         $isApproved = $this->approval->covers($actor, $request, $fields['columns']['department'])
             || PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
@@ -299,7 +304,7 @@ final class PortalProjectEditor
         $row = $this->liveProjectOrFail($projectId);
         $this->assertMay($actor, $row, $request, PortalProjectPowers::SCOPES);
 
-        $scopeCodes = $this->validatedScopeCodes($request);
+        $scopeCodes = $this->validatedScopeCodes($request, $row->department ?? null);
         $name = $this->text($row->project_name) ?? 'Project';
 
         $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request): void {
@@ -397,7 +402,8 @@ final class PortalProjectEditor
 
         $memberIds = $this->validatedPeople($data['memberIds'] ?? [], $projectId, self::MEMBER_ROLE);
         $supportMemberIds = $this->validatedPeople($data['supportMemberIds'] ?? [], $projectId, self::SUPPORT_ROLE);
-        $area = isset($data['area']) ? round((float) $data['area'], 2) : null;
+        $isEngineering = PortalProjectWork::isEngineering($department);
+        $area = $isEngineering && isset($data['area']) ? round((float) $data['area'], 2) : null;
         $status = self::STATUSES[$data['status']];
 
         $columns = [
@@ -409,14 +415,16 @@ final class PortalProjectEditor
             'project_lead_email' => $leadEmail,
             'date_modified' => now(),
         ];
-        $levels = is_array($data['levels'] ?? null) ? $data['levels'] : [];
+        $levels = $isEngineering && is_array($data['levels'] ?? null) ? $data['levels'] : [];
         foreach (self::LEVEL_COLUMNS as $discipline => $column) {
             $level = $this->text($levels[$discipline] ?? null);
             $columns[$column] = $level === null ? null : ($level === 'N/A' ? $level : 'LOD '.$level);
         }
         $links = is_array($data['links'] ?? null) ? $data['links'] : [];
         foreach (self::LINK_COLUMNS as $kind => $column) {
-            $columns[$column] = $this->validatedLink($kind, $links[$kind] ?? null);
+            $columns[$column] = $isEngineering || ! in_array($kind, self::ENGINEERING_LINKS, true)
+                ? $this->validatedLink($kind, $links[$kind] ?? null)
+                : null;
         }
 
         return [
@@ -580,9 +588,11 @@ final class PortalProjectEditor
     }
 
     /**
+     * WBS codes for an Engineering project; for any other, its department's and General's activity codes.
+     *
      * @return list<string>
      */
-    private function validatedScopeCodes(Request $request): array
+    private function validatedScopeCodes(Request $request, mixed $department): array
     {
         $data = $request->validate([
             'scopeCodes' => ['nullable', 'array', 'max:'.self::MAX_SCOPES],
@@ -596,7 +606,10 @@ final class PortalProjectEditor
                 $codes[] = $code;
             }
         }
-        if (array_diff($codes, $this->knownScopeCodes()) !== []) {
+        $known = PortalProjectWork::isEngineering($department)
+            ? $this->knownScopeCodes()
+            : array_column(PortalActivityScopes::forDepartment(PortalActivityScopes::all(), $department), 'code');
+        if (array_diff($codes, $known) !== []) {
             abort(422, 'Choose scopes from the list.');
         }
 

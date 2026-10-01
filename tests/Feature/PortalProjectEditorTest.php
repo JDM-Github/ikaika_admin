@@ -426,6 +426,55 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame('Approved', DB::connection('portal')->table('projects')->where('id', $id)->value('project_creation_status'));
     }
 
+    // Level of detail, area, Forma and panoramic are Engineering's: another department's project has them cleared.
+    public function test_a_non_engineering_project_drops_the_engineering_fields(): void
+    {
+        $admin = $this->employee('admin');
+        $payload = $this->payload([
+            'department' => 'MIS',
+            'leadId' => $admin->id,
+            'scopeCodes' => [],
+            'links' => ['forma' => 'https://autodeskforma.com/p', 'panoramic' => 'https://pano.example.com', 'ms-teams' => 'https://teams.microsoft.com/l/1'],
+        ]);
+
+        $id = (int) $this->create($this->token($admin), $payload)->assertCreated()->json('data.id');
+
+        $row = DB::connection('portal')->table('projects')->where('id', $id)->first();
+        $this->assertSame([null, null, null, null], [$row->st_lod, $row->area_sqft, $row->forma_link, $row->panoramic_link]);
+        $this->assertSame('https://teams.microsoft.com/l/1', $row->msteams_project_link);
+    }
+
+    // A project that is not Engineering's scopes from its department's and General's activity codes, never the WBS tree.
+    public function test_a_non_engineering_project_scopes_from_its_activity_codes(): void
+    {
+        $portal = DB::connection('portal');
+        $portal->table('activity_codes')->insert([
+            ['id_no' => '9901', 'name' => '9901- TEST MIS WORK', 'department' => 'MIS'],
+            ['id_no' => '9902', 'name' => 'Test drafting', 'department' => 'Engineering'],
+            ['id_no' => '9903', 'name' => 'Test meeting', 'department' => 'General'],
+        ]);
+        $id = $this->liveProjectId();
+        $token = $this->token($this->employee('admin'));
+        $portal->table('projects')->where('id', $id)->update(['department' => 'MIS']);
+
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => ['9901', '9903']])->assertOk();
+        $this->assertSame(['9901', '9903'], $portal->table('projects_wbs_scopes')->where('project_id', $id)->orderBy('wbs_code')->pluck('wbs_code')->all());
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => ['9902']])->assertStatus(422);
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => $this->scopeCodes()])->assertStatus(422);
+
+        $board = collect($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'))->firstWhere('id', (string) $id);
+        $offered = array_column($board['scopeOptions'], 'code');
+        $this->assertContains('9901', $offered);
+        $this->assertContains('9903', $offered);
+        $this->assertNotContains('9902', $offered);
+        $this->assertContains(['code' => '9901', 'name' => 'TEST MIS WORK', 'department' => 'MIS'], $this->withToken($token)->getJson(self::BASE.'/options')->json('data.activityCodes'));
+
+        $portal->table('projects')->where('id', $id)->update(['department' => 'Engineering']);
+        Cache::flush();
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => ['9901']])->assertStatus(422);
+        $this->assertSame([], collect($this->withToken($token)->getJson(self::BASE)->json('data'))->firstWhere('id', (string) $id)['scopeOptions']);
+    }
+
     public function test_writes_are_held_to_twenty_a_minute(): void
     {
         $this->withMiddleware(ThrottleRequests::class);
