@@ -20,6 +20,16 @@ This plan is about **what a project page shows**.
      project (admins, project leads, managers). Work never appears here.
 - **The project form follows the department.** Engineering fields only for Engineering projects.
 
+### Answered the same day (2026-10-01, user)
+
+- **Activity tab visibility:** other people's hours and remarks only for the project's **Project
+  Lead**, a **Project Manager** covering the project, and **Admin or higher**. Everyone else who can
+  open the project sees totals only (and their own reports in full).
+- **"Active" follows each project's own rhythm**, not a fixed 14 days (see step 2).
+- **Lines are Engineering's.** Engineering keeps "change in elements" from its reports. MIS gets its
+  own measure from **Bitbucket** (lines added / removed, files, commits; step 7), and reports for a
+  non-Engineering project stop asking for lines.
+
 ## What the data says (local copy of real data, 2026-10-01)
 
 | Fact | Number |
@@ -78,11 +88,15 @@ Portal:
 
 Each scope (activity code) on the project gets a status from its reports, never a percentage:
 - **Not started:** no report uses it yet.
-- **Active:** reported in the last 14 days.
-- **Idle:** reported before, nothing in the last 14 days.
+- **Active:** the last report is within the project's own rhythm.
+- **Idle:** reported before, but the gap since the last report is longer than its rhythm.
 - **Done:** the project is Closed or Done.
 
-Shown with its hours, its people, and its last report date. The 14 days is a constant to tune.
+**Rhythm (decided: follow the project):** the typical gap between report days on that project,
+taken as the median gap over its last 10 report days, then doubled for slack and held between
+3 and 30 days. A project reported daily goes Idle after a few quiet days; one reported weekly does
+not go Idle until about two weeks pass. A project with fewer than 3 report days uses 14 days.
+Shown with its hours, its people, and its last report date.
 
 ### 3. Activity tab (new): the work, by person
 
@@ -92,9 +106,11 @@ Shown with its hours, its people, and its last report date. The 14 days is a con
   - Members who never reported are listed as **No reports yet**.
   - People who report but are not members are marked **Not a member**, so the lead can add them.
 - Late reports (`late_submission`) are marked, as Submitted Reports does.
-- `?` **Who may see other people's hours and remarks on the Activity tab.** Options: everyone who
-  can open the project; or only the lead, Project Managers covering it and admins (others see
-  totals only). To decide before building.
+- **Who sees what (decided):** the project's lead, a Project Manager whose reach covers the
+  project, and Admin or higher see every report in full. Anyone else who can open the project sees
+  the totals and the people strip without hours or remarks, plus their own reports in full. The
+  server decides this, not the page: the activity endpoint simply leaves out what the viewer may
+  not see.
 
 ### 4. Trail tab: changes only
 
@@ -115,6 +131,41 @@ Shown with its hours, its people, and its last report date. The 14 days is a con
   its 8 codes instead of Engineering's WBS.
 - Switching the department in the form hides the fields that no longer apply. The server ignores
   and clears them for a non-Engineering project, so a hidden field cannot keep a stale value.
+
+### 7. MIS code activity from Bitbucket
+
+An MIS project tracks its work from its Git repositories instead of report lines.
+
+- **Link:** a project gets one or more Bitbucket repositories (workspace, repository, branch), set
+  on the department-aware form for MIS projects. A project can span repositories (for example the
+  portal and the admin server).
+- **Sync:** the server reads each repository's commits on the counted branch through the Bitbucket
+  Cloud REST API (`/repositories/{workspace}/{repo}/commits`, then `/diffstat/{hash}` for lines added,
+  lines removed and files per commit). A Bitbucket push webhook triggers it, with a scheduled sync as
+  a backstop. Stored per commit: hash (unique), repository, author email, matched employee, date,
+  message (internal only), lines added, lines removed, files changed.
+- **Credentials:** a read-only repository or workspace access token in `ikaika_admin/.env` only,
+  like the Airtable token. Never in the portal, a response or a log. (Bitbucket app passwords are
+  deprecated; access tokens replace them.)
+- **Author = employee by email.** The commit author comes from each developer's own Git setting
+  (`author.raw` is "Name <email>"), not from the Bitbucket login. So it matches an employee only
+  when their Git `user.email` is their ikaikabim address. Unmatched authors are listed as such, with
+  a small alias table for an old or personal address.
+- **Honest counts:**
+  - Merge commits are skipped (they repeat their parents' lines).
+  - Generated and vendored paths are skipped by pattern: lock files, `vendor/`, `node_modules/`,
+    `graphify-out/`, build output, generated native folders. Without this one regenerated file
+    outweighs a week of work.
+  - Only the counted branch (default: the main branch) counts, so rebased or abandoned branches do
+    not add twice.
+- **Shown:**
+  - Dashboard: commits, lines added and removed, files changed, active development days, last commit.
+  - Activity tab: a day-by-day list per person, beside their reports.
+  - Same visibility rule as the Activity tab: commit messages only for the lead, managers and
+    Admin or higher.
+- **Reports:** Daily and Late Report stop asking for lines when the project is not Engineering.
+- **Later, a client view:** a client-facing page (on the central platform) can show the same counts
+  with curated summaries instead of raw commit messages and no links to Bitbucket. Out of scope here.
 
 ### 6. Track Projects follows
 
@@ -137,8 +188,9 @@ Shown with its hours, its people, and its last report date. The 14 days is a con
 1. Dashboard tab and scope status from reports (steps 1 and 2): the biggest visible win, read-only.
 2. Activity tab (step 3), after the visibility question is decided.
 3. Trail cleanup (step 4): small.
-4. Department-aware form (step 5).
+4. Department-aware form (step 5), with the repository link for MIS projects.
 5. Track Projects column swap (step 6).
+6. Bitbucket code activity for MIS (step 7), once a read-only access token exists.
 
 ## Verification
 
@@ -153,8 +205,9 @@ Shown with its hours, its people, and its last report date. The 14 days is a con
 
 ## Open questions
 
-- `?` Who sees other people's hours and remarks on the Activity tab (step 3).
-- `?` Whether "Active" should be 14 days or follow the project's own report rhythm.
-- `?` Whether Lines should also show for General or MIS projects whose reports carry them (today:
-  Engineering only, as the user said MIS does not care about lines).
+- `?` Bitbucket: which branch counts per repository (default: main), and whether the workspace or
+  only chosen repositories are read.
+- `?` Bitbucket: whether every developer's Git `user.email` is already their ikaikabim address
+  (otherwise commits will not match employees until it is, or until an alias is added).
+- `?` Whether General and Admin projects keep report lines or drop them like MIS.
 - Parked: per-scope target lines for Engineering, shown as "x of target y lines", never a percentage.
