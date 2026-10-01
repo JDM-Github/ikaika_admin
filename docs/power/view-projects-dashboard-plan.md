@@ -1,6 +1,8 @@
 # View Projects dashboard: from fake percentages to real report data
 
-Status: **planned (2026-10-01).** Nothing here is built yet. The power side of View Projects
+Status: **phases 0-2 built (2026-10-01).** Reset baseline done (reset.ps1 fixed: admin 3c880fa);
+board `work` from reports (admin 2d6572b, `PortalProjectWork`); the Dashboard tab shows it with no
+percentage (portal 62f4fef). Phases 3-7 are still planned. The power side of View Projects
 (who may see, add, edit, scope, delete, lead and approve) is finished; see `view-projects-plan.md`.
 This plan is about **what a project page shows**.
 
@@ -231,15 +233,24 @@ Then, one phase at a time:
 1. **Board summary fields (server only):** hours, last 30 days, people, last report, lines, hours by
    activity, scope statuses, added next to today's fields. The portal ignores them, so nothing
    changes on screen.
-2. **Dashboard tab (portal):** the new tiles and scope statuses; the percentage UI goes. Then the
-   old `overallCompletion` / `completed` / `inProgress` fields leave the server.
+2. **Dashboard tab (portal):** the new tiles and scope statuses; the percentage UI goes. **Built.**
+   Tiles: Hours logged (caption: hours in the last 30 days), People reporting, Last report (caption:
+   first report), Lines (Engineering only); short dates and bare numbers so a tile never wraps.
+   "Hours by activity" replaced the scope donut; the scope tree shows Not Started / Active / Idle /
+   Done per row (activity codes mapped onto WBS, a branch takes the strongest status under it, a
+   finished project's unreported scopes read Done); the list shows hours; the Details timeline shows
+   Last report instead of a progress bar. The old `overallCompletion` / `completed` / `inProgress`
+   fields stay on the server until phase 6: Track Projects, Home's project progress and a Manage
+   Requests view still read them.
 3. **Activity tab:** the new read-only endpoint with the visibility rule enforced server-side, then
    the tab.
 4. **Trail cleanup:** report-date rows leave the trail.
 5. **Department-aware form and reports:** the server first accepts a non-Engineering project and a
    non-Engineering report without lines (and clears Engineering-only fields), then the portal hides
    them. The repository links for MIS projects arrive here as an empty list.
-6. **Track Projects:** Hours and Last report replace the Progress column.
+6. **Track Projects:** Hours and Last report replace the Progress column. Home's project progress
+   (`completionRatio`) and the Manage Requests view that reads `overallCompletion` switch too; only
+   then do those fields leave the server.
 7. **Bitbucket:** tables (separate.sql + migration), then the sync tested against faked HTTP
    responses, then the webhook (with its secret checked), then a real read-only token in `.env`,
    then the UI. No real call to Bitbucket happens until the fake-tested sync is green.
