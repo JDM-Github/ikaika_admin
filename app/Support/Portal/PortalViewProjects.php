@@ -23,6 +23,9 @@ final class PortalViewProjects
 
     public const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
+    // Rows Airtable wrote about reports, not changes: the Activity tab and the dashboard show those dates.
+    private const REPORT_TRAIL_PREFIXES = ['initial report was on', 'last report was on'];
+
     /**
      * @return array{
      *     section: string,
@@ -454,6 +457,11 @@ final class PortalViewProjects
                 'projects_action_history.project_action_id',
             )
             ->whereIn('projects_action_history.project_id', $projectIds)
+            ->where(function ($changes): void {
+                foreach (self::REPORT_TRAIL_PREFIXES as $prefix) {
+                    $changes->whereRaw("LOWER(TRIM(COALESCE(project_action_history.action_name, ''))) NOT LIKE ?", [$prefix.'%']);
+                }
+            })
             ->select([
                 'projects_action_history.project_id',
                 'project_action_history.id',

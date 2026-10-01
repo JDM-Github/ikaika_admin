@@ -244,6 +244,13 @@ class PortalViewProjectsTest extends TestCase
             'project_id' => $projectId,
             'project_action_id' => $historyId,
         ]);
+        // Airtable's report-date rows are work, not changes: they never reach the trail.
+        foreach (['Initial report was on 2026-08-10', 'Last Report was on 2026-08-31'] as $reportRow) {
+            $portal->table('projects_action_history')->insert([
+                'project_id' => $projectId,
+                'project_action_id' => $portal->table('project_action_history')->insertGetId(['action_name' => $reportRow, 'created_by' => 'Airtable', 'created_at' => '2026-09-02 08:00:00']),
+            ]);
+        }
 
         $response = $this->withToken($this->loginToken($actor))
             ->getJson('/api/development/portal/projects')
