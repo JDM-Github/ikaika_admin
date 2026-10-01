@@ -462,6 +462,23 @@ class PortalManageUsersTest extends TestCase
         return $employee;
     }
 
+    // Access alerts is a power: switched off, that admin is left off the mail; the other holders still get it.
+    public function test_the_access_alert_goes_only_to_holders_of_access_alerts(): void
+    {
+        $executive = $this->executive();
+        $executive->forceFill(['department' => 'MIS'])->save();
+        $actor = $this->adminWhoIsNotExecutive();
+        $quiet = $this->otherAdmin($actor);
+        $this->giveAlertMailbox($quiet, 'quiet-admin@example.test');
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $quiet->getKey(), 'permission_key' => 'administration.alerts']);
+
+        $this->patchJson("/api/development/portal/manage/users/{$executive->id}/role", ['role' => PortalRole::USER], [
+            'Authorization' => 'Bearer '.$this->loginToken($actor),
+        ])->assertForbidden()->assertJsonPath('notified', true);
+
+        Mail::assertSent(PortalAccessAlertMail::class, fn (PortalAccessAlertMail $mail): bool => ! $mail->hasTo('quiet-admin@example.test'));
+    }
+
     private function giveAlertMailbox(Employee $employee, string $email = 'alerts@example.test'): void
     {
         $employee->forceFill(['email' => $email])->save();

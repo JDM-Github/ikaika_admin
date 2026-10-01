@@ -53,11 +53,12 @@ final class PortalViewProjects
     {
         $employeeId = (int) $actor->getKey();
         $department = $reach === 'department' ? PortalPreview::department($actor->department) : '';
+        $leadEmail = strtolower(trim((string) ($actor->email ?? '')));
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:projects:'.$version.':'.$employeeId.':'.$reach.':'.md5($department);
+        $key = 'portal:projects:'.$version.':'.$employeeId.':'.$reach.':'.md5($department.'|'.$leadEmail);
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($employeeId, $reach, $department): array {
-            return $this->build($employeeId, $reach, $department);
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($employeeId, $reach, $department, $leadEmail): array {
+            return $this->build($employeeId, $reach, $department, $leadEmail);
         });
     }
 
@@ -74,9 +75,9 @@ final class PortalViewProjects
      *     data: list<array<string, mixed>>
      * }
      */
-    private function build(int $employeeId, string $reach, string $department): array
+    private function build(int $employeeId, string $reach, string $department, string $leadEmail): array
     {
-        $rows = $this->projectRows($employeeId, $reach, $department);
+        $rows = $this->projectRows($employeeId, $reach, $department, $leadEmail);
         $projectIds = array_map(
             static fn (object $row): int => (int) $row->id,
             $rows,
@@ -123,12 +124,19 @@ final class PortalViewProjects
     }
 
     /**
-     * One read with a LEFT JOIN so isAssigned costs nothing extra per row.
+     * One read with a LEFT JOIN so isAssigned costs nothing extra per row. A project's lead counts as on
+     * it, member row or not: they may edit and delete it, so it has to be on their own board.
      *
      * @return list<object>
      */
-    private function projectRows(int $employeeId, string $reach, string $department): array
+    private function projectRows(int $employeeId, string $reach, string $department, string $leadEmail): array
     {
+        $leads = $leadEmail !== '' ? 'LOWER(TRIM(COALESCE(projects.project_lead_email, \'\'))) = ?' : '1 = 0';
+        $leadBindings = $leadEmail !== '' ? [$leadEmail] : [];
+        $isOwn = static function ($own) use ($leads, $leadBindings): void {
+            $own->whereNotNull('membership.employee_id')->orWhereRaw($leads, $leadBindings);
+        };
+
         $query = $this->connection()
             ->table('projects')
             // A deleted project is in the Recycle Bin until somebody restores or purges it.
@@ -153,18 +161,18 @@ final class PortalViewProjects
                 'projects.panoramic_link',
                 'projects.ms_loop_link',
                 'projects.google_drive_folder_path',
-                $this->connection()->raw('CASE WHEN membership.employee_id IS NULL THEN 0 ELSE 1 END as is_assigned'),
             ])
+            ->selectRaw('CASE WHEN membership.employee_id IS NOT NULL OR '.$leads.' THEN 1 ELSE 0 END as is_assigned', $leadBindings)
             ->distinct();
 
         // Their own projects at every reach; a department with no name adds nothing.
         if ($reach === 'department' && $department !== '') {
-            $query->where(function ($visible) use ($department): void {
-                $visible->whereNotNull('membership.employee_id')
+            $query->where(function ($visible) use ($department, $isOwn): void {
+                $visible->where($isOwn)
                     ->orWhereRaw('LOWER(TRIM(projects.department)) = ?', [$department]);
             });
         } elseif ($reach !== 'all') {
-            $query->whereNotNull('membership.employee_id');
+            $query->where($isOwn);
         }
 
         return $query->get()->all();
@@ -263,6 +271,17 @@ final class PortalViewProjects
             return [];
         }
 
+        // Scopes saved from Manage Scopes win: a project with rows here reads only these, by WBS code.
+        $wbsRows = $this->connection()
+            ->table('projects_wbs_scopes')
+            ->whereIn('project_id', $projectIds)
+            ->orderBy('wbs_code')
+            ->get(['project_id', 'wbs_code']);
+        $projectsWithWbsScopes = [];
+        foreach ($wbsRows as $row) {
+            $projectsWithWbsScopes[(int) $row->project_id] = true;
+        }
+
         // A scope may be attached directly to a project, or indirectly through one of its
         // T3 activities. The old query only read the direct pivot, which made valid projects
         // look like they had 0 / 0 / 0 scope health.
@@ -321,7 +340,18 @@ final class PortalViewProjects
 
         // De-duplicate a scope reached by both pivots or by multiple activities.
         $scopes = [];
+        foreach ($wbsRows as $row) {
+            $code = (string) $row->wbs_code;
+            $scopes[(int) $row->project_id.':wbs:'.$code] = [
+                'projectId' => (int) $row->project_id,
+                'progress' => 0.0,
+                'code' => $code,
+            ];
+        }
         foreach ($directRows->concat($activityRows) as $row) {
+            if (isset($projectsWithWbsScopes[(int) $row->project_id])) {
+                continue;
+            }
             $key = (int) $row->project_id.':'.(int) $row->project_scope_id;
             $scopes[$key] = [
                 'projectId' => (int) $row->project_id,

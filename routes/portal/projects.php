@@ -11,8 +11,25 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['throttle:portal-projects', 'portal.rule:projects.track'])
         ->get('projects/track', [ProjectsController::class, 'track']);
     /*
-     * Not admin-gated: a project lead may delete their own, which the support class checks. The
-     * write throttle is the recycle bin's, because that is where the row lands.
+     * No rule middleware on the form's routes: PortalProjectEditor checks Add projects on create, and
+     * Edit projects on the rest, because a project's lead may edit their own without it.
+     */
+    Route::middleware('throttle:portal-projects')
+        ->get('projects/options', [ProjectsController::class, 'options']);
+    Route::middleware('throttle:portal-projects')
+        ->get('projects/{id}', [ProjectsController::class, 'show'])
+        ->whereNumber('id');
+    Route::middleware('throttle:portal-projects-write')
+        ->post('projects', [ProjectsController::class, 'store']);
+    Route::middleware('throttle:portal-projects-write')
+        ->patch('projects/{id}', [ProjectsController::class, 'update'])
+        ->whereNumber('id');
+    Route::middleware('throttle:portal-projects-write')
+        ->put('projects/{id}/scopes', [ProjectsController::class, 'scopes'])
+        ->whereNumber('id');
+    /*
+     * No rule middleware: Delete projects is checked in PortalProjectDeletion, because a project's lead
+     * may delete their own without it. The write throttle is the recycle bin's, where the row lands.
      */
     Route::middleware('throttle:portal-administration-recycle-bin-write')
         ->delete('projects/{id}', [ProjectsController::class, 'destroy'])

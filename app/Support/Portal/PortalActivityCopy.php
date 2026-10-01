@@ -84,6 +84,21 @@ final class PortalActivityCopy
         return self::YOU.' deleted a '.self::reportKind($kind).' for '.self::date($date);
     }
 
+    public static function addedProject(string $name): string
+    {
+        return self::YOU.' added the project '.$name;
+    }
+
+    public static function editedProject(string $name): string
+    {
+        return self::YOU.' edited the project '.$name;
+    }
+
+    public static function changedProjectScopes(string $name, int $count): string
+    {
+        return self::YOU.' set '.$count.' '.($count === 1 ? 'scope' : 'scopes').' on the project '.$name;
+    }
+
     public static function deletedProject(string $name): string
     {
         return self::YOU.' deleted the project '.$name;

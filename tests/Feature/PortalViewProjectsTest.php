@@ -70,6 +70,24 @@ class PortalViewProjectsTest extends TestCase
         $this->assertNotContains((string) $unassigned->id, array_column($rows, 'id'));
     }
 
+    // A lead may edit and delete their project, so it is on their own board even without a member row.
+    public function test_a_member_sees_a_project_they_lead_without_a_member_row(): void
+    {
+        $actor = $this->activeMember();
+        $led = DB::connection('portal')->table('projects')
+            ->whereNull('deleted_at')
+            ->whereNotIn('id', DB::connection('portal')->table('employees_projects')->where('employee_id', $actor->getKey())->pluck('project_id'))
+            ->value('id');
+        $this->assertNotNull($led);
+        DB::connection('portal')->table('projects')->where('id', $led)->update(['project_lead_email' => strtoupper((string) $actor->email)]);
+
+        $rows = $this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data');
+
+        $row = collect($rows)->firstWhere('id', (string) $led);
+        $this->assertNotNull($row);
+        $this->assertTrue($row['isAssigned']);
+    }
+
     public function test_an_admin_sees_all_projects_with_an_assignment_flag(): void
     {
         $actor = $this->activeAdmin();
@@ -269,9 +287,14 @@ class PortalViewProjectsTest extends TestCase
      */
     private function ownProjectIds(Employee $employee): array
     {
+        $led = DB::connection('portal')->table('projects')
+            ->whereRaw('LOWER(TRIM(project_lead_email)) = ?', [strtolower(trim((string) $employee->email))])
+            ->pluck('id');
+
         return DB::connection('portal')->table('employees_projects')
             ->where('employee_id', $employee->getKey())
             ->pluck('project_id')
+            ->concat($led)
             ->map(static fn ($id): int => (int) $id)
             ->unique()
             ->values()

@@ -172,10 +172,11 @@ class WorkspaceWriteTest extends TestCase
         );
     }
 
-    public function test_a_project_admin_may_browse_but_never_write(): void
+    public function test_a_browse_only_member_may_browse_but_never_write(): void
     {
         $member = $this->member();
-        DB::connection('portal')->table('employees')->where('id', $member->id)->update(['role' => 'ProjectAdmin']);
+        // Given only the Workspace power: browse, nothing private, no edits, no shared views.
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->id, 'permission_key' => 'workspace', 'reach' => null]);
         $headers = $this->headersFor($member->fresh());
 
         $project = DB::connection('portal')->table('projects')->orderBy('id')->first();
@@ -189,7 +190,7 @@ class WorkspaceWriteTest extends TestCase
             $headers,
         )
             ->assertForbidden()
-            ->assertJsonPath('message', 'Editing the databases directly is limited to administrators.');
+            ->assertJsonPath('message', 'Editing the databases directly needs the Edit cells power.');
 
         // The schema says so up front rather than only refusing on submit.
         $this->getJson('/api/development/portal/_schema/projects', $headers)

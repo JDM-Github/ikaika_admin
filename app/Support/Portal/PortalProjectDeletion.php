@@ -30,6 +30,8 @@ final class PortalProjectDeletion
 
     private const CORE_RESOURCE = 'projects';
 
+    private const DELETE_RULE = 'projects.view.delete';
+
     public function __construct(
         private readonly CoreLedger $ledger,
         private readonly PortalRecycleBin $recycleBin,
@@ -56,7 +58,7 @@ final class PortalProjectDeletion
             abort(404, 'That project was not found.');
         }
 
-        $this->assertMayManage($actor, $row->project_lead_email ?? null);
+        $this->assertMayDelete($actor, $row->project_lead_email ?? null, $request);
 
         $name = $this->text($row->project_name) ?? $this->text($row->project_number) ?? 'Project';
         $employeeId = (int) $actor->getKey();
@@ -164,14 +166,11 @@ final class PortalProjectDeletion
         $this->recycleBin->bumpCache();
     }
 
-    /*
-     * The same rule the Projects screen draws its button from -- an admin, or the project's own
-     * lead. Repeated here rather than trusted from there, because a hidden button is not a
-     * permission and this endpoint is reachable without one.
-     */
-    private function assertMayManage(Employee $actor, mixed $leadEmail): void
+    // Delete projects is a power (admins, executives and developers by preset, Developer mode always);
+    // a project's lead may always delete their own, as the catalog row promises.
+    private function assertMayDelete(Employee $actor, mixed $leadEmail, Request $request): void
     {
-        if (PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null)) {
+        if (PortalRules::holds($actor, $request, self::DELETE_RULE)) {
             return;
         }
 
@@ -181,7 +180,7 @@ final class PortalProjectDeletion
             return;
         }
 
-        abort(403, 'Only an admin or the project lead may delete this project.');
+        abort(403, 'Deleting a project needs the Delete projects power, unless you lead it.');
     }
 
     /** Whether this bin row is a project, so the Recycle Bin can route a restore to the right hand. */

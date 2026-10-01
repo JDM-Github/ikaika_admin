@@ -124,10 +124,11 @@ class WorkspaceViewsTest extends TestCase
         $this->assertNotContains('Just mine', $names);
     }
 
-    public function test_a_project_admin_keeps_private_views_but_cannot_share_one(): void
+    public function test_a_browse_only_member_keeps_private_views_but_cannot_share_one(): void
     {
         $member = $this->member();
-        DB::connection('portal')->table('employees')->where('id', $member->id)->update(['role' => 'ProjectAdmin']);
+        // Given only the Workspace power: browse, nothing private, no edits, no shared views.
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->id, 'permission_key' => 'workspace', 'reach' => null]);
         $headers = $this->headersFor($member->fresh());
 
         $this->postJson(

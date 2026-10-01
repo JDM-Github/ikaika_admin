@@ -26,6 +26,11 @@ below are the original finding.
 
 ## 2. Project delete ignores powers and Developer mode
 
+**Resolved 2026-10-01.** `DELETE projects/{id}` follows Delete projects (`projects.view.delete`, admins,
+executives and developers by preset, Developer mode always); a project's lead may still delete their own.
+The portal's Delete button uses the same check (`canDeleteSelectedProject`). The notes below are the
+original finding.
+
 - `DELETE projects/{id}` (`routes/portal/projects.php`) has no rule middleware.
 - `PortalProjectDeletion::assertMayManage` allows the admin role or the project's lead only. It
   does not look at powers, and a developer in Developer mode who is neither is refused.

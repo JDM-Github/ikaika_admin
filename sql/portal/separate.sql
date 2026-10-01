@@ -275,6 +275,24 @@ CREATE TABLE IF NOT EXISTS developer_modes (
 
 
 -- ============================================================================
+-- PROJECT SCOPES — the WBS codes picked in View Projects' Manage Scopes
+-- One row per project and chosen code; wbs_code is a code from project_scope_t1_processes
+-- .. t4_tasks (e.g. '500-04-03'). The Airtable-shaped pivots (projects_project_scopes,
+-- projects_activity_scope) stay as they are; View Projects reads this table first.
+-- Portal-only: never synced. Existing databases: the Laravel migration
+-- create_portal_projects_wbs_scopes.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS projects_wbs_scopes (
+    project_id INT         NOT NULL,
+    wbs_code   VARCHAR(32) NOT NULL,
+    PRIMARY KEY (project_id, wbs_code),
+    CONSTRAINT fk_projects_wbs_scopes_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
+
+
+
+-- ============================================================================
 -- FINE-GRAINED RULES — the Access page (FINE_GRAINED_RULES.md)
 -- access_permissions: the rule catalog, one row per page, tab or action. parent_key
 -- builds the tree; supports_reach marks a rule that shows other people's records
