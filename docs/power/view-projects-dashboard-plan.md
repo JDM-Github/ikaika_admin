@@ -144,9 +144,13 @@ Shown with its hours, its people, and its last report date.
 
 An MIS project tracks its work from its Git repositories instead of report lines.
 
-- **Link:** a project gets one or more Bitbucket repositories (workspace, repository, branch), set
-  on the department-aware form for MIS projects. A project can span repositories (for example the
-  portal and the admin server).
+- **Link (decided 2026-10-01: many per project):** a project gets any number of Bitbucket
+  repositories (workspace and repository), set on the department-aware form for MIS projects. A
+  project can span repositories (the portal and the admin server, other parts, testing repos).
+  - Each link has a kind: **Main** or **Testing**. Testing repositories (work tried there before it
+    goes to the real one) show on the Activity tab, labelled, but stay out of the headline totals by
+    default. Otherwise the same work, redone in the main repository, would count twice.
+  - The same repository may belong to more than one project; its commits count on each.
 - **Sync:** the server reads each repository's commits on the counted branch through the Bitbucket
   Cloud REST API (`/repositories/{workspace}/{repo}/commits`, then `/diffstat/{hash}` for lines added,
   lines removed and files per commit). A Bitbucket push webhook triggers it, with a scheduled sync as
@@ -167,10 +171,16 @@ An MIS project tracks its work from its Git repositories instead of report lines
     `graphify-out/`, build output, generated native folders. Without this one regenerated file
     outweighs a week of work.
   - Every branch counts, each commit **once by its hash**, so a commit on several branches is not
-    counted twice. Caveat: a pull request merged with **squash** creates a new commit holding the
-    same lines as the branch's commits, which would then count twice. If the team squash-merges,
-    skip squash commits (Bitbucket marks the pull request's merge strategy) or count only the
-    branch commits.
+    counted twice.
+  - **Merging never moves lines to the person who merged.** A merge commit is skipped, so each
+    developer keeps the lines of the commits they wrote. This is why the **merge commit** strategy
+    (the Bitbucket default) is the right one for counting.
+  - **Squash is the strategy that would get it wrong:** it collapses everyone's commits into one new
+    commit with a single author, and once the source branch is deleted the original commits are no
+    longer in the repository. Guard for it anyway: commits are stored as they are pushed (webhook),
+    so the branch commits are already kept; a pull request's squash commit (its `merge_commit` hash
+    from the pull request API) is then skipped, and if it was never seen as branch commits it is
+    credited to the pull request's author.
 - **Shown:**
   - Dashboard: commits, lines added and removed, files changed, active development days, last commit.
   - Activity tab: a day-by-day list per person, beside their reports.
@@ -219,6 +229,8 @@ An MIS project tracks its work from its Git repositories instead of report lines
 
 ## Open questions
 
-- `?` Bitbucket: whether the team merges pull requests with squash (decides the squash rule in step 7).
+- Recommended (2026-10-01): keep the **merge commit** strategy, not squash; the squash guard in
+  step 7 is only a fallback.
+- `?` Testing repositories out of the headline totals by default: confirm.
 - `?` Bitbucket: the whole workspace, or only the repositories linked to a project.
 - Parked: per-scope target lines for Engineering, shown as "x of target y lines", never a percentage.
