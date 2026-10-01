@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -13,7 +14,8 @@ use Illuminate\Support\Facades\Cache;
  *
  * View Projects and Track Projects each follow their rule's reach: own = the projects they are on, department = those
  * plus their department's, all = every project. Membership is never lost at any reach.
- * Each project also says whether this person may edit it, manage its scopes or delete it.
+ * Each project also says whether this person may edit it, manage its scopes or delete it, and
+ * carries its work from reports (PortalProjectWork).
  */
 final class PortalViewProjects
 {
@@ -91,6 +93,7 @@ final class PortalViewProjects
         $scopeSummaries = $this->scopeSummariesByProject($projectIds);
         $trails = $this->trailsByProject($projectIds);
         $leadsByEmail = $this->leadsByEmail($rows);
+        $work = (new PortalProjectWork)->byProject($rows, CarbonImmutable::today());
 
         $projects = [];
         foreach ($rows as $row) {
@@ -111,6 +114,7 @@ final class PortalViewProjects
                     $scopeCodes,
                 ),
                 ...PortalProjectPowers::flags($powers, $actor, $row),
+                'work' => $work[$id],
             ];
         }
 

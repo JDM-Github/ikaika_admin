@@ -99,6 +99,7 @@ class PortalViewProjectsTest extends TestCase
         $rows = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'));
         $this->assertSame(['canEdit' => true, 'canManageScopes' => true, 'canDelete' => true], collect($rows->firstWhere('id', (string) $led))->only(['canEdit', 'canManageScopes', 'canDelete'])->all());
         $this->assertTrue($rows->where('id', '!=', (string) $led)->every(static fn (array $row): bool => ! $row['canEdit'] && ! $row['canManageScopes'] && ! $row['canDelete']));
+        $this->assertSame(['hoursTotal', 'hoursLast30Days', 'reporterCount', 'firstReportOn', 'lastReportOn', 'linesTotal', 'rhythmDays', 'activities'], array_keys($rows->firstWhere('id', (string) $led)['work']));
 
         DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $actor->getKey(), 'permission_key' => 'projects.delete']);
         $row = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'))->firstWhere('id', (string) $led);
