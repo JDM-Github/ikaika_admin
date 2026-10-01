@@ -1,7 +1,11 @@
 # View Projects — power plan
 
-Status: **parked.** Enforce only once View Projects, Add Project and Manage Scopes are finished
-and tested. Until then the page keeps opening by role, as it does today.
+Status: **partly built (2026-10-01).** Add, edit, Manage Scopes, delete and restore are real, and
+the list follows `projects.view` and its reach (own / department / all; members `own`, admins and
+executives `all`, so nobody's list changed). Add uses `projects.create`, edit and scopes
+`projects.view.edit`, delete `projects.view.delete`, each with the lead exception. Still planned
+below: the Project Manager / Project Lead tree, reach on add / edit / scopes / delete, the lead
+picker filter, and approvals. The "Why this is parked" table is history from 2026-09-25.
 
 Lines marked `?` are still open. Everything else was decided on 2026-09-25; the reasoning sits
 next to each decision.

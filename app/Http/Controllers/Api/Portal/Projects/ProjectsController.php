@@ -25,7 +25,7 @@ class ProjectsController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->projects->list($actor));
+        return response()->json($this->projects->list($actor, $request));
     }
 
     public function track(Request $request): JsonResponse

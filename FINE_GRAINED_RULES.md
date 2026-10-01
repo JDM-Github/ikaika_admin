@@ -80,13 +80,18 @@ Done so far (display only, nothing enforced):
     enforcement and the session both see the narrowed reach. `PATCH /portal/access/reach`.
   - Your own switches and self reach are not logged (2026-09-27): your own choice about powers you
     already hold, which can never gain you a new one.
-  - **Enforced so far: Home, Track Projects, Reports, Requests, User, Event Calendar, Manage / Requests, Manage / Reports, Manage / Users, Administration / All Recycle, Administration / All Logs, Administration / All Actions.** The Access page and Access Rule sheet banners
+  - **Enforced so far: Home, View Projects, Track Projects, Reports, Requests, User, Event Calendar, Manage / Requests, Manage / Reports, Manage / Users, Administration / All Recycle, Administration / All Logs, Administration / All Actions.** The Access page and Access Rule sheet banners
     name the enforced pages; the banner goes when every page is done.
   - Track Projects: `projects.track` now has a reach (member preset `own`, everyone else
     `all`, exactly today's lists). Its own read, `GET /portal/projects/track`
     (`portal.rule:projects.track`): own = projects they are on, department = those plus their
-    department's, all = every project. Export keeps its rule. View Projects is parked in
-    `docs/power/view-projects-plan.md`.
+    department's, all = every project. Export keeps its rule. Own counts the project lead too
+    (2026-10-01).
+  - View Projects (2026-10-01): `GET /portal/projects` follows `portal.rule:projects.view` and its
+    reach, the same own / department / all as Track Projects (member preset `own`, admins and
+    executives `all`). Add needs `projects.create`; edit and scopes `projects.view.edit`; delete
+    `projects.view.delete`; a project's lead may always edit, scope and delete their own. The
+    Project Manager tree and approvals stay planned in `docs/power/view-projects-plan.md`.
   - Reports: Daily and Late filing check their rule by the kind sent; Submitted Reports, Edit
     (PATCH) and Delete (DELETE) follow theirs. The filing forms' shared reads (report projects,
     submitted list, filed days) accept any one of the rules that need them

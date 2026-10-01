@@ -29,11 +29,10 @@ final class PortalViewProjects
      *     data: list<array<string, mixed>>
      * }
      */
-    public function list(Employee $actor): array
+    // View Projects follows its rule's reach (2026-10-01): members own, admins and executives all by preset.
+    public function list(Employee $actor, Request $request): array
     {
-        $seesAll = PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null);
-
-        return $this->board($actor, $seesAll ? 'all' : 'own');
+        return $this->board($actor, PortalRules::active($actor, $request)['projects.view'] ?? 'own');
     }
 
     /**

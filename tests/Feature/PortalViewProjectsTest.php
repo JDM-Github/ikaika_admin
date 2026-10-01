@@ -88,6 +88,63 @@ class PortalViewProjectsTest extends TestCase
         $this->assertTrue($row['isAssigned']);
     }
 
+    // The list follows View Projects (projects.view): switched off, the page is refused like any other ruled page.
+    public function test_view_projects_switched_off_is_refused(): void
+    {
+        $actor = $this->activeMember();
+        $this->clearProjectRules($actor);
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $actor->getKey(), 'permission_key' => 'projects.view']);
+
+        $this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertForbidden();
+    }
+
+    // Given department reach, a member also sees their department's projects, and keeps their own.
+    public function test_a_member_given_department_reach_sees_their_department_too(): void
+    {
+        $actor = $this->activeMember();
+        $this->clearProjectRules($actor);
+        $department = strtolower(trim((string) DB::connection('portal')->table('projects')
+            ->whereNull('deleted_at')
+            ->whereNotIn('id', $this->ownProjectIds($actor))
+            ->whereNotNull('department')->where('department', '!=', '')
+            ->value('department')));
+        $actor->forceFill(['department' => $department])->save();
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $actor->getKey(), 'permission_key' => 'projects.view', 'reach' => 'department']);
+
+        $ids = array_map('intval', array_column($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'), 'id'));
+
+        $departmentIds = DB::connection('portal')->table('projects')->whereNull('deleted_at')
+            ->whereRaw('LOWER(TRIM(department)) = ?', [$department])->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        $this->assertEqualsCanonicalizing(array_values(array_unique([...$departmentIds, ...array_intersect($this->ownProjectIds($actor), $this->liveProjectIds())])), $ids);
+    }
+
+    // An admin who narrows their own reach to Own sees only the projects they are on or lead.
+    public function test_an_admin_narrowed_to_own_sees_only_their_projects(): void
+    {
+        $actor = $this->activeAdmin();
+        $this->clearProjectRules($actor);
+        DB::connection('portal')->table('access_self_reach')->insert(['employee_id' => $actor->getKey(), 'permission_key' => 'projects.view', 'reach' => 'own']);
+
+        $ids = array_map('intval', array_column($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'), 'id'));
+
+        $this->assertEqualsCanonicalizing(array_values(array_intersect($this->ownProjectIds($actor), $this->liveProjectIds())), $ids);
+    }
+
+    private function clearProjectRules(Employee $employee): void
+    {
+        foreach (['access_toggles', 'access_personal', 'access_self_reach', 'access_grants', 'access_limits'] as $table) {
+            DB::connection('portal')->table($table)->where('employee_id', $employee->getKey())->where('permission_key', 'like', 'projects%')->delete();
+        }
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function liveProjectIds(): array
+    {
+        return DB::connection('portal')->table('projects')->whereNull('deleted_at')->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+    }
+
     public function test_an_admin_sees_all_projects_with_an_assignment_flag(): void
     {
         $actor = $this->activeAdmin();
