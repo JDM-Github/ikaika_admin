@@ -11,10 +11,9 @@ use Illuminate\Support\Facades\Cache;
 /**
  * The project board behind View Projects and Track Projects.
  *
- * View Projects (not enforced yet): Admin and Executive get every project, each tagged with
- * whether they are assigned; everybody else gets only their own board.
- * Track Projects follows its rule's reach: own = the projects they are on, department = those
+ * View Projects and Track Projects each follow their rule's reach: own = the projects they are on, department = those
  * plus their department's, all = every project. Membership is never lost at any reach.
+ * Each project also says whether this person may edit it, manage its scopes or delete it.
  */
 final class PortalViewProjects
 {
@@ -32,7 +31,7 @@ final class PortalViewProjects
     // View Projects follows its rule's reach (2026-10-01): members own, admins and executives all by preset.
     public function list(Employee $actor, Request $request): array
     {
-        return $this->board($actor, PortalRules::active($actor, $request)['projects.view'] ?? 'own');
+        return $this->board($actor, PortalRules::active($actor, $request)['projects.view'] ?? 'own', PortalProjectPowers::reaches($actor, $request));
     }
 
     /**
@@ -42,22 +41,27 @@ final class PortalViewProjects
      */
     public function track(Employee $actor, Request $request): array
     {
-        return $this->board($actor, PortalRules::active($actor, $request)['projects.track'] ?? 'own');
+        return $this->board($actor, PortalRules::active($actor, $request)['projects.track'] ?? 'own', PortalProjectPowers::reaches($actor, $request));
     }
 
     /**
+     * Cached per person and per reach, Edit, Manage scopes and Delete included, so each project says
+     * what this person may do with it.
+     *
+     * @param  array<string, ?string>  $powers
      * @return array{section: string, resource: string, data: list<array<string, mixed>>}
      */
-    private function board(Employee $actor, string $reach): array
+    private function board(Employee $actor, string $reach, array $powers): array
     {
         $employeeId = (int) $actor->getKey();
         $department = $reach === 'department' ? PortalPreview::department($actor->department) : '';
         $leadEmail = strtolower(trim((string) ($actor->email ?? '')));
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:projects:'.$version.':'.$employeeId.':'.$reach.':'.md5($department.'|'.$leadEmail);
+        $actorDepartment = PortalPreview::department($actor->department);
+        $key = 'portal:projects:'.$version.':'.$employeeId.':'.$reach.':'.md5($department.'|'.$leadEmail.'|'.$actorDepartment.'|'.json_encode($powers));
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($employeeId, $reach, $department, $leadEmail): array {
-            return $this->build($employeeId, $reach, $department, $leadEmail);
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor, $employeeId, $reach, $department, $leadEmail, $powers): array {
+            return $this->build($actor, $employeeId, $reach, $department, $leadEmail, $powers);
         });
     }
 
@@ -68,13 +72,14 @@ final class PortalViewProjects
     }
 
     /**
+     * @param  array<string, ?string>  $powers
      * @return array{
      *     section: string,
      *     resource: string,
      *     data: list<array<string, mixed>>
      * }
      */
-    private function build(int $employeeId, string $reach, string $department, string $leadEmail): array
+    private function build(Employee $actor, int $employeeId, string $reach, string $department, string $leadEmail, array $powers): array
     {
         $rows = $this->projectRows($employeeId, $reach, $department, $leadEmail);
         $projectIds = array_map(
@@ -95,15 +100,18 @@ final class PortalViewProjects
             if ($scopeSummary !== null) {
                 unset($scopeSummary['scopeCodes']);
             }
-            $projects[] = PortalViewProjectPresenter::item(
-                $row,
-                $memberNames[$id] ?? [],
-                $leadsByEmail,
-                $clientNames[$id] ?? [],
-                $scopeSummary,
-                $trails[$id] ?? [],
-                $scopeCodes,
-            );
+            $projects[] = [
+                ...PortalViewProjectPresenter::item(
+                    $row,
+                    $memberNames[$id] ?? [],
+                    $leadsByEmail,
+                    $clientNames[$id] ?? [],
+                    $scopeSummary,
+                    $trails[$id] ?? [],
+                    $scopeCodes,
+                ),
+                ...PortalProjectPowers::flags($powers, $actor, $row),
+            ];
         }
 
         usort($projects, static function (array $first, array $second): int {
@@ -155,6 +163,7 @@ final class PortalViewProjects
                 'projects.area_sqft',
                 'projects.project_lead_email',
                 'projects.project_creation_status',
+                'projects.requested_by',
                 'projects.forma_link',
                 'projects.msteams_project_link',
                 'projects.ms_planner_link',

@@ -13,7 +13,7 @@ use Tests\TestCase;
 
 /**
  * Adding a project follows Add projects (projects.create); editing it and saving its scopes follow Edit
- * projects (projects.view.edit), which a project's lead never needs for their own. Every write lands in
+ * projects and Manage scopes at a reach covering it, members holding both for the projects they lead. Every write lands in
  * SQL with a ledger action and a log row, and View Projects reads the saved scopes first.
  */
 class PortalProjectEditorTest extends TestCase
@@ -289,22 +289,60 @@ class PortalProjectEditorTest extends TestCase
         $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertForbidden();
         $this->withToken($token)->patchJson(self::BASE.'/'.$id, $payload)
             ->assertForbidden()
-            ->assertJsonPath('message', 'Editing a project needs the Edit projects power, unless you lead it.');
+            ->assertJsonPath('message', 'Your Edit projects power does not reach this project.');
 
         DB::connection('portal')->table('projects')->where('id', $id)->update(['project_lead_email' => strtoupper((string) $member->email)]);
         $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk()->assertJsonPath('data.id', (string) $id);
         $this->withToken($token)->patchJson(self::BASE.'/'.$id, $payload)->assertOk();
     }
 
-    // Switched off, Edit projects is gone even for an admin who leads nothing.
-    public function test_an_admin_without_edit_projects_is_refused(): void
+    // Switched off, Manage scopes is gone even for an admin who leads nothing, and Edit projects stays.
+    public function test_an_admin_without_manage_scopes_is_refused(): void
     {
         $id = $this->liveProjectId();
         $admin = $this->employee('admin');
-        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'projects.view.edit']);
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'projects.scopes']);
+        $token = $this->token($admin);
 
-        $this->withToken($this->token($admin))->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => $this->scopeCodes()])->assertForbidden();
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => $this->scopeCodes()])
+            ->assertForbidden()
+            ->assertJsonPath('message', 'Your Manage scopes power does not reach this project.');
         $this->assertFalse(DB::connection('portal')->table('projects_wbs_scopes')->where('project_id', $id)->exists());
+        $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk();
+    }
+
+    // Department reach covers that department's projects and the ones they lead, nothing else.
+    public function test_department_reach_edits_only_that_department(): void
+    {
+        $id = $this->liveProjectId();
+        $member = $this->employee('user', 3);
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.edit', 'reach' => 'department']);
+        DB::connection('portal')->table('projects')->where('id', $id)->update(['department' => 'Engineering', 'project_lead_email' => null]);
+
+        $member->forceFill(['department' => 'MIS'])->save();
+        $this->withToken($this->token($member))->getJson(self::BASE.'/'.$id)->assertForbidden();
+
+        $member->forceFill(['department' => 'engineering'])->save();
+        $this->withToken($this->token($member))->getJson(self::BASE.'/'.$id)->assertOk();
+    }
+
+    // Leading a project is a power like any other: a manager's limit or the lead's own switch takes it away.
+    public function test_a_lead_loses_their_project_to_a_limit_or_their_own_switch(): void
+    {
+        $id = $this->liveProjectId();
+        $member = $this->employee('user', 3);
+        DB::connection('portal')->table('projects')->where('id', $id)->update(['project_lead_email' => $member->email]);
+        $this->withToken($this->token($member))->getJson(self::BASE.'/'.$id)->assertOk();
+
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.edit']);
+        $this->withToken($this->token($member))->getJson(self::BASE.'/'.$id)->assertForbidden();
+        DB::connection('portal')->table('access_toggles')->delete();
+
+        $admin = $this->employee('admin');
+        $member->forceFill(['department' => $admin->department])->save();
+        $this->withToken($this->token($admin))->patchJson('/api/development/portal/manage/access/'.$member->getKey(), ['key' => 'projects.edit', 'action' => 'off'])->assertOk();
+        $this->assertTrue(DB::connection('portal')->table('access_limits')->where('employee_id', $member->getKey())->where('permission_key', 'projects.edit')->exists());
+        $this->withToken($this->token($member))->getJson(self::BASE.'/'.$id)->assertForbidden();
     }
 
     public function test_saving_scopes_replaces_the_set_and_view_projects_reads_it(): void

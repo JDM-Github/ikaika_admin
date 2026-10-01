@@ -89,9 +89,13 @@ Done so far (display only, nothing enforced):
     (2026-10-01).
   - View Projects (2026-10-01): `GET /portal/projects` follows `portal.rule:projects.view` and its
     reach, the same own / department / all as Track Projects (member preset `own`, admins and
-    executives `all`). Add needs `projects.create` (members hold it by preset since 2026-10-01); edit
-    and scopes `projects.view.edit`; delete `projects.view.delete`; a project's lead may always edit,
-    scope and delete their own, and whoever asked for a project may edit it until it is approved.
+    executives `all`). Add needs `projects.create` (members hold it by preset since 2026-10-01). Edit,
+    scopes and delete follow `projects.edit`, `projects.scopes` and `projects.delete` (2026-10-01),
+    reach own | department | all checked against the project (`PortalProjectPowers`): own is the
+    projects the person leads, by email; department adds their department's. Members hold all three at
+    own, admins, executives and developers at all, so the old lead exception is an ordinary power a
+    manager can limit and the lead can switch off. Whoever asked for a project may edit it and its
+    scopes until it is approved. The board says per project `canEdit`, `canManageScopes`, `canDelete`.
   - Manage / Projects (2026-10-01): `projects.manager`, reach department | all (admins, executives,
     developers `all`), covers projects by the project's department. An add it covers is Approved at
     once; any other waits as Pending for a covering manager. The rest of the tree stays planned in
@@ -379,9 +383,11 @@ Descriptions (what the Access page shows on each row) live in the SQL.
 - `home` Home — MAED
 - `projects` Projects — MAED
   - `projects.view` View Projects [R] — MAED
-    - `projects.view.edit` Edit projects — AED
-    - `projects.view.delete` Delete projects — AED
-  - `projects.create` Add projects — AED
+    - `projects.edit` Edit projects [R] — MAED (members own)
+    - `projects.scopes` Manage scopes [R] — MAED (members own)
+    - `projects.delete` Delete projects [R] — MAED (members own)
+  - `projects.create` Add projects — MAED
+  - `projects.manager` Project Manager [R] — AED
   - `projects.track` Track Projects — MAED
     - `projects.track.export` Export — MAED
 - `reports` Reports — MAED

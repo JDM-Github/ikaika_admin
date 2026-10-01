@@ -159,8 +159,8 @@ class PortalOverrideTest extends TestCase
         $this->assertSame([['name' => $named, 'mode' => 'block']], $this->sheetRule('dev', $this->nathaniel, $this->third, 'manage.reports')['list']['others']);
 
         // A developer's Default act is theirs by name, to everyone.
-        $this->change('default', $this->nathaniel, $this->member, ['key' => 'projects.view.edit', 'action' => 'on'])->assertOk();
-        $this->assertSame([$this->displayName($this->nathaniel)], $this->ownPower('default', $this->member, 'projects.view.edit')['givenBy'] ?? null);
+        $this->change('default', $this->nathaniel, $this->member, ['key' => 'projects.manager', 'action' => 'on'])->assertOk();
+        $this->assertSame([$this->displayName($this->nathaniel)], $this->ownPower('default', $this->member, 'projects.manager')['givenBy'] ?? null);
     }
 
     // Without See developers' activity a developer's rows are not there at all; with it, a Developer mode

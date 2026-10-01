@@ -13,7 +13,17 @@ executives and developers `all`). Members hold Add projects by preset; a project
 Project Manager does not cover for its department waits (Pending, `requested_by` / `requested_at`),
 stays usable and marked on the board, and covering managers get a bell notice. Reject needs a reason;
 the requester edits the rejected project and saving sends it again. Members' list stays `own`.
-Still planned: Project Lead, reach on edit / scopes / delete, `create.direct`.
+Still planned: Project Lead, the Add Project department filter, `create.direct`.
+
+**Edit, Manage scopes and Delete built (2026-10-01).** `projects.edit`, `projects.scopes` and
+`projects.delete` replace `projects.view.edit` / `projects.view.delete`, with reach own | department |
+all checked against the project (`PortalProjectPowers`; own = the projects they lead, by email).
+User decision that day: they sit **under View Projects, not Project Manager**, because the access
+graph drops a rule whose parent is not held. So members hold all three at own by preset and the lead
+exception is an ordinary power: a manager limits it on the Access Rule sheet, the lead switches it
+off on Access, and no special "Yours as project lead" code exists. Admins, executives and developers
+hold them at all. The board says per project `canEdit` / `canManageScopes` / `canDelete`, and the
+portal's buttons follow that instead of matching the lead by name.
 
 Lines marked `?` are still open. Everything else was decided on 2026-09-25; the reasoning sits
 next to each decision.

@@ -30,7 +30,6 @@ final class PortalProjectDeletion
 
     private const CORE_RESOURCE = 'projects';
 
-    private const DELETE_RULE = 'projects.view.delete';
 
     public function __construct(
         private readonly CoreLedger $ledger,
@@ -59,7 +58,9 @@ final class PortalProjectDeletion
             abort(404, 'That project was not found.');
         }
 
-        $this->assertMayDelete($actor, $row->project_lead_email ?? null, $request);
+        if (! PortalProjectPowers::allows($actor, $request, PortalProjectPowers::DELETE, $row)) {
+            abort(403, 'Your Delete projects power does not reach this project.');
+        }
 
         $name = $this->text($row->project_name) ?? $this->text($row->project_number) ?? 'Project';
         $employeeId = (int) $actor->getKey();
@@ -167,23 +168,6 @@ final class PortalProjectDeletion
 
         $this->projects->bumpCache();
         $this->recycleBin->bumpCache();
-    }
-
-    // Delete projects is a power (admins, executives and developers by preset, Developer mode always);
-    // a project's lead may always delete their own, as the catalog row promises.
-    private function assertMayDelete(Employee $actor, mixed $leadEmail, Request $request): void
-    {
-        if (PortalRules::holds($actor, $request, self::DELETE_RULE)) {
-            return;
-        }
-
-        $lead = $this->text($leadEmail);
-        $own = $this->text($actor->email ?? null);
-        if ($lead !== null && $own !== null && strcasecmp($lead, $own) === 0) {
-            return;
-        }
-
-        abort(403, 'Deleting a project needs the Delete projects power, unless you lead it.');
     }
 
     /** Whether this bin row is a project, so the Recycle Bin can route a restore to the right hand. */

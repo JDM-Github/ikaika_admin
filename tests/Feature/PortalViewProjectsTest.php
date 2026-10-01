@@ -88,6 +88,27 @@ class PortalViewProjectsTest extends TestCase
         $this->assertTrue($row['isAssigned']);
     }
 
+    // Each project says what this person may do with it: a member only the ones they lead, an admin every one.
+    public function test_each_project_says_whether_it_can_be_edited_scoped_or_deleted(): void
+    {
+        $actor = $this->activeMember();
+        $led = (int) DB::connection('portal')->table('projects')->whereNull('deleted_at')->value('id');
+        DB::connection('portal')->table('projects')->where('id', $led)->update(['project_lead_email' => $actor->email]);
+        DB::connection('portal')->table('projects')->where('id', '!=', $led)->whereRaw('LOWER(COALESCE(project_lead_email, \'\')) = ?', [strtolower((string) $actor->email)])->update(['project_lead_email' => null]);
+
+        $rows = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'));
+        $this->assertSame(['canEdit' => true, 'canManageScopes' => true, 'canDelete' => true], collect($rows->firstWhere('id', (string) $led))->only(['canEdit', 'canManageScopes', 'canDelete'])->all());
+        $this->assertTrue($rows->where('id', '!=', (string) $led)->every(static fn (array $row): bool => ! $row['canEdit'] && ! $row['canManageScopes'] && ! $row['canDelete']));
+
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $actor->getKey(), 'permission_key' => 'projects.delete']);
+        $row = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'))->firstWhere('id', (string) $led);
+        $this->assertTrue($row['canEdit']);
+        $this->assertFalse($row['canDelete']);
+
+        $adminRows = collect($this->withToken($this->loginToken($this->activeAdmin()))->getJson('/api/development/portal/projects')->assertOk()->json('data'));
+        $this->assertTrue($adminRows->every(static fn (array $row): bool => $row['canEdit'] && $row['canManageScopes'] && $row['canDelete']));
+    }
+
     // The list follows View Projects (projects.view): switched off, the page is refused like any other ruled page.
     public function test_view_projects_switched_off_is_refused(): void
     {

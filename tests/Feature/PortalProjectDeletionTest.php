@@ -11,9 +11,9 @@ use Tests\Concerns\FilesPortalReports;
 use Tests\TestCase;
 
 /**
- * Deleting a project follows Delete projects (projects.view.delete): admins, executives and developers
- * hold it by preset and Developer mode always, while a project's lead may delete their own without
- * it. Nobody else may, whatever their role.
+ * Deleting a project follows Delete projects (projects.delete) at a reach covering it: admins,
+ * executives and developers hold it at every department by preset and Developer mode always; members
+ * at own, the projects they lead. Nobody else may, whatever their role.
  */
 class PortalProjectDeletionTest extends TestCase
 {
@@ -130,11 +130,11 @@ class PortalProjectDeletionTest extends TestCase
     public function test_an_admin_without_the_power_is_refused(): void
     {
         $admin = $this->employee('admin');
-        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'projects.view.delete']);
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'projects.delete']);
 
         $this->deleteAs($this->token($admin))
             ->assertForbidden()
-            ->assertJsonPath('message', 'Deleting a project needs the Delete projects power, unless you lead it.');
+            ->assertJsonPath('message', 'Your Delete projects power does not reach this project.');
         $this->assertFalse($this->isDeleted());
     }
 

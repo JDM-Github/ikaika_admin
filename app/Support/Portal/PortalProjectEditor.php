@@ -18,8 +18,8 @@ use Illuminate\Validation\Rule;
  * Manager covers for its department is Approved at once, with them as approver; any other waits as
  * Pending on Manage / Projects (PortalProjectApproval), and saving a Rejected one sends it again.
  *
- * Adding needs the Add projects power. Editing and scopes need Edit projects, or leading the project,
- * as the catalog row promises. The pm rows on employees_projects come from Airtable and are left as
+ * Adding needs the Add projects power. Editing and scopes follow Edit projects and Manage scopes at
+ * a reach covering the project (PortalProjectPowers); own reach is the projects the person leads. The pm rows on employees_projects come from Airtable and are left as
  * they are; only the member and support rows follow the form.
  *
  * Every save also writes the project's Trail history (PortalProjectTrail); an edit's row says what
@@ -33,7 +33,6 @@ final class PortalProjectEditor
 
     private const CREATE_RULE = 'projects.create';
 
-    private const EDIT_RULE = 'projects.view.edit';
 
     private const MEMBER_ROLE = 'member';
 
@@ -105,9 +104,11 @@ final class PortalProjectEditor
      */
     public function options(Employee $actor, Request $request): array
     {
+        // Edit projects at own opens the form only for someone who leads a project.
+        $editReach = PortalRules::reach($actor, $request, PortalProjectPowers::EDIT);
         if (! PortalRules::holds($actor, $request, self::CREATE_RULE)
-            && ! PortalRules::holds($actor, $request, self::EDIT_RULE)
-            && ! $this->leadsAnyProject($actor)) {
+            && ! in_array($editReach, ['department', 'all'], true)
+            && ($editReach === null || ! $this->leadsAnyProject($actor))) {
             abort(403, 'The project form needs the Add projects or Edit projects power.');
         }
 
@@ -146,7 +147,7 @@ final class PortalProjectEditor
     public function show(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMayEdit($actor, $row, $request);
+        $this->assertMay($actor, $row, $request, PortalProjectPowers::EDIT);
 
         return $this->response($projectId);
     }
@@ -219,7 +220,7 @@ final class PortalProjectEditor
     public function update(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMayEdit($actor, $row, $request);
+        $this->assertMay($actor, $row, $request, PortalProjectPowers::EDIT);
 
         $fields = $this->validatedFields($request, $projectId);
         $changes = $this->changes($projectId, $fields);
@@ -282,7 +283,7 @@ final class PortalProjectEditor
     public function replaceScopes(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMayEdit($actor, $row, $request);
+        $this->assertMay($actor, $row, $request, PortalProjectPowers::SCOPES);
 
         $scopeCodes = $this->validatedScopeCodes($request);
         $name = $this->text($row->project_name) ?? 'Project';
@@ -731,24 +732,14 @@ final class PortalProjectEditor
         return in_array($level, self::LEVELS, true) ? $level : null;
     }
 
-    // Edit projects is a power; a project's lead may always edit their own, as the catalog row promises,
-    // and whoever asked for a project may edit it while it waits or after it is rejected.
-    private function assertMayEdit(Employee $actor, object $row, Request $request): void
+    // Edit projects and Manage scopes reach this project, or the actor asked for it and it is not approved yet.
+    private function assertMay(Employee $actor, object $row, Request $request, string $key): void
     {
-        if (PortalRules::holds($actor, $request, self::EDIT_RULE)) {
-            return;
+        if (! PortalProjectPowers::allows($actor, $request, $key, $row)) {
+            abort(403, $key === PortalProjectPowers::SCOPES
+                ? 'Your Manage scopes power does not reach this project.'
+                : 'Your Edit projects power does not reach this project.');
         }
-
-        $lead = $this->text($row->project_lead_email ?? null);
-        $own = $this->text($actor->email ?? null);
-        if ($lead !== null && $own !== null && strcasecmp($lead, $own) === 0) {
-            return;
-        }
-        if ((int) ($row->requested_by ?? 0) === (int) $actor->getKey() && $row->project_creation_status !== PortalProjectApproval::APPROVED) {
-            return;
-        }
-
-        abort(403, 'Editing a project needs the Edit projects power, unless you lead it.');
     }
 
     private function leadsAnyProject(Employee $actor): bool
@@ -768,7 +759,7 @@ final class PortalProjectEditor
             ->table('projects')
             ->where('id', $projectId)
             ->whereNull('deleted_at')
-            ->first(['id', 'project_name', 'project_lead_email', 'project_creation_status', 'requested_by']);
+            ->first(['id', 'project_name', 'department', 'project_lead_email', 'project_creation_status', 'requested_by']);
         if ($row === null) {
             abort(404, 'That project was not found.');
         }
