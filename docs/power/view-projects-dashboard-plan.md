@@ -2,7 +2,20 @@
 
 Status: **phases 0-2 built (2026-10-01).** Reset baseline done (reset.ps1 fixed: admin 3c880fa);
 board `work` from reports (admin 2d6572b, `PortalProjectWork`); the Dashboard tab shows it with no
-percentage (portal 62f4fef). Phases 3-7 are still planned. The power side of View Projects
+percentage (portal 62f4fef). **Phases 3-5 built (2026-10-02):**
+- Phase 3, Activity tab: `GET projects/{id}/activity`, `PortalProjectActivity` (admin 67c397e;
+  portal b2a9e4b). A fourth tab, Activity, sits between Details and Trail.
+- Phase 4, Trail: Airtable's "Initial/Last report was on" rows leave it (admin 2b6ff8d). Details
+  "Start date" is the earlier of the first change and the first report (portal 9ef8d63).
+- Phase 5, department-aware (admin 521d82e, portal 09b89c5):
+  - the server clears level of detail, area, Forma and panoramic for a non-Engineering project,
+    and the form hides them once a non-Engineering department is chosen;
+  - non-Engineering projects scope from their department's and General's activity codes
+    (`PortalActivityScopes`; board `scopeOptions`, form options `activityCodes`), shown as flat rows;
+  - report projects say `hasLines`, so the report forms hide items and save 0 lines off Engineering;
+  - one portal rule lives in `ProjectDepartmentUtility`, one server rule in `PortalProjectWork::isEngineering`.
+
+Phases 6-7 are still planned. Repository links for MIS projects arrive with phase 7, not 5. The power side of View Projects
 (who may see, add, edit, scope, delete, lead and approve) is finished; see `view-projects-plan.md`.
 This plan is about **what a project page shows**.
 
