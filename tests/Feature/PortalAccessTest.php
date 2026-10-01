@@ -111,6 +111,33 @@ class PortalAccessTest extends TestCase
         $this->assertNull($this->rule($response, 'developer.flag')['reach']);
     }
 
+    // View Projects parity (2026-10-01): each role's project powers and reaches, so a preset change is a decision, not an accident.
+    public function test_project_presets_keep_what_each_role_could_do(): void
+    {
+        $presets = [];
+        foreach (DB::connection('portal')->table('access_presets')->where('permission_key', 'like', 'projects%')->get() as $row) {
+            $presets[$row->role][$row->permission_key] = $row->reach;
+        }
+        $everything = [
+            'projects' => null, 'projects.view' => 'all', 'projects.edit' => 'all', 'projects.scopes' => 'all',
+            'projects.delete' => 'all', 'projects.lead' => 'all', 'projects.create' => 'all', 'projects.create.direct' => null,
+            'projects.manager' => 'all', 'projects.track' => 'all', 'projects.track.export' => null,
+        ];
+        ksort($everything);
+        foreach ($presets as &$rules) {
+            ksort($rules);
+        }
+
+        $this->assertSame($everything, $presets['admin']);
+        $this->assertSame($everything, $presets['executive']);
+        $this->assertSame($everything, $presets['developer']);
+        $this->assertSame([
+            'projects' => null, 'projects.create' => 'all', 'projects.delete' => 'own', 'projects.edit' => 'own',
+            'projects.lead' => 'department', 'projects.scopes' => 'own', 'projects.track' => 'own',
+            'projects.track.export' => null, 'projects.view' => 'own',
+        ], $presets['member']);
+    }
+
     // A preset that held a child without its parent would leave that child with nowhere to hang.
     public function test_every_preset_holds_the_parent_of_each_rule_it_holds(): void
     {

@@ -31,8 +31,6 @@ final class PortalProjectEditor
 
     private const CORE_RESOURCE = 'projects';
 
-    private const CREATE_RULE = 'projects.create';
-
 
     private const MEMBER_ROLE = 'member';
 
@@ -106,20 +104,31 @@ final class PortalProjectEditor
     {
         // Edit projects at own opens the form only for someone who leads a project.
         $editReach = PortalRules::reach($actor, $request, PortalProjectPowers::EDIT);
-        if (! PortalRules::holds($actor, $request, self::CREATE_RULE)
+        if (! PortalRules::holds($actor, $request, PortalProjectPowers::CREATE)
             && ! in_array($editReach, ['department', 'all'], true)
             && ($editReach === null || ! $this->leadsAnyProject($actor))) {
             abort(403, 'The project form needs the Add projects or Edit projects power.');
         }
 
+        // Who may lead, and where: Project Lead at all leads anywhere, at department (or own) their own department's.
+        $leadReaches = PortalProjectPowers::leadReaches();
         $employees = [];
         foreach ($this->activeEmployees() as $row) {
+            $reach = $this->text($row->email) === null ? null : ($leadReaches[(int) $row->id] ?? null);
             $employees[] = [
                 'id' => (string) (int) $row->id,
                 'name' => $this->personName($row),
-                'canLead' => $this->text($row->email) !== null,
+                'canLead' => $reach !== null,
+                'leadsAnywhere' => $reach === 'all',
+                'leadDepartment' => $reach === null || $reach === 'all' ? null : $this->text($row->department),
             ];
         }
+        $departments = $this->departments();
+        $addReach = PortalRules::reach($actor, $request, PortalProjectPowers::CREATE);
+        $addDepartments = array_values(array_filter(
+            $departments,
+            static fn (string $department): bool => PortalProjectPowers::reachesDepartment($addReach, $actor->department, $department),
+        ));
 
         $clients = [];
         foreach ($this->connection()->table('clients')->orderBy('name')->get(['id', 'name']) as $row) {
@@ -135,7 +144,8 @@ final class PortalProjectEditor
             'data' => [
                 'employees' => $employees,
                 'clients' => $clients,
-                'departments' => $this->departments(),
+                'departments' => $departments,
+                'addDepartments' => $addDepartments,
                 'types' => $this->jobTypes(),
             ],
         ];
@@ -157,14 +167,18 @@ final class PortalProjectEditor
      */
     public function create(Employee $actor, Request $request): array
     {
-        if (! PortalRules::holds($actor, $request, self::CREATE_RULE)) {
+        if (! PortalRules::holds($actor, $request, PortalProjectPowers::CREATE)) {
             abort(403, 'Adding a project needs the Add projects power.');
         }
 
         $fields = $this->validatedFields($request, null);
+        if (! PortalProjectPowers::reachesDepartment(PortalRules::reach($actor, $request, PortalProjectPowers::CREATE), $actor->department, $fields['columns']['department'])) {
+            abort(403, 'Your Add projects power does not reach that department.');
+        }
         $scopeCodes = $this->validatedScopeCodes($request);
         $employeeId = (int) $actor->getKey();
-        $isApproved = $this->approval->covers($actor, $request, $fields['columns']['department']);
+        $isApproved = $this->approval->covers($actor, $request, $fields['columns']['department'])
+            || PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
 
         $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId, $request, $isApproved): int {
             $projectId = (int) $this->connection()->table('projects')->insertGetId([
@@ -367,15 +381,14 @@ final class PortalProjectEditor
             abort(422, 'A project name is required.');
         }
 
-        $leadEmail = $this->validatedLeadEmail((int) $data['leadId'], $projectId);
-        $clientId = (int) $data['clientId'];
-        if (! $this->connection()->table('clients')->where('id', $clientId)->exists()) {
-            abort(422, 'Choose a client from the list.');
-        }
-
         $department = $this->text($data['department']);
         if ($department === null || ! in_array($department, $this->departments(), true)) {
             abort(422, 'Choose a department from the list.');
+        }
+        $leadEmail = $this->validatedLeadEmail((int) $data['leadId'], $projectId, $department);
+        $clientId = (int) $data['clientId'];
+        if (! $this->connection()->table('clients')->where('id', $clientId)->exists()) {
+            abort(422, 'Choose a client from the list.');
         }
         $type = $this->text($data['type'] ?? null);
         if ($type !== null && ! in_array($type, $this->jobTypes(), true)) {
@@ -486,16 +499,13 @@ final class PortalProjectEditor
         return $parts === [] ? null : implode('; ', $parts);
     }
 
-    // An active employee with an email, or on an edit the lead the project already has.
-    private function validatedLeadEmail(int $leadId, ?int $projectId): string
+    // An active employee with an email whose Project Lead reaches the department, or on an edit the lead the project already has.
+    private function validatedLeadEmail(int $leadId, ?int $projectId, string $department): string
     {
-        $lead = $this->connection()->table('employees')->where('id', $leadId)->first(['email', 'status']);
+        $lead = $this->connection()->table('employees')->where('id', $leadId)->first(['email', 'status', 'department']);
         $email = $lead === null ? null : $this->text($lead->email);
         if ($email === null) {
             abort(422, 'Choose a project lead from the list.');
-        }
-        if (strtolower(trim((string) $lead->status)) === 'active') {
-            return $email;
         }
 
         $current = $projectId === null ? null : $this->text(
@@ -504,8 +514,14 @@ final class PortalProjectEditor
         if ($current !== null && strcasecmp($current, $email) === 0) {
             return $current;
         }
+        if (strtolower(trim((string) $lead->status)) !== 'active') {
+            abort(422, 'Choose a project lead from the list.');
+        }
+        if (! PortalProjectPowers::reachesDepartment(PortalProjectPowers::leadReaches()[$leadId] ?? null, $lead->department, $department)) {
+            abort(422, 'That person cannot lead a project of this department. Choose a lead from the list.');
+        }
 
-        abort(422, 'Choose a project lead from the list.');
+        return $email;
     }
 
     /**
@@ -777,7 +793,7 @@ final class PortalProjectEditor
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->orderBy('first_name')
             ->orderBy('last_name')
-            ->get(['id', 'first_name', 'last_name', 'email']);
+            ->get(['id', 'first_name', 'last_name', 'email', 'department']);
     }
 
     /**

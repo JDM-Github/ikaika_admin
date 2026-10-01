@@ -13,7 +13,11 @@ executives and developers `all`). Members hold Add projects by preset; a project
 Project Manager does not cover for its department waits (Pending, `requested_by` / `requested_at`),
 stays usable and marked on the board, and covering managers get a bell notice. Reject needs a reason;
 the requester edits the rejected project and saving sends it again. Members' list stays `own`.
-Still planned: Project Lead, the Add Project department filter, `create.direct`.
+**Step C built (2026-10-01):** Add projects has a reach (every role `all` by preset, so nothing
+changed; department or own = their own department), Project Lead (`projects.lead`, under View
+Projects; members `department`, others `all`) filters the lead picker and is checked on save, and
+Add without approval (`projects.create.direct`, admins / executives / developers) approves an add at
+once. A parity test pins every role's project presets (`PortalAccessTest`).
 
 **Edit, Manage scopes and Delete built (2026-10-01).** `projects.edit`, `projects.scopes` and
 `projects.delete` replace `projects.view.edit` / `projects.view.delete`, with reach own | department |

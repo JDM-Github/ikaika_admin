@@ -21,6 +21,12 @@ final class PortalProjectPowers
 
     public const KEYS = [self::EDIT, self::SCOPES, self::DELETE];
 
+    public const CREATE = 'projects.create';
+
+    public const DIRECT = 'projects.create.direct';
+
+    public const LEAD = 'projects.lead';
+
     // Whether the rule, at the reach the actor holds it now, covers this project row.
     public static function allows(Employee $actor, Request $request, string $key, object $project): bool
     {
@@ -53,6 +59,38 @@ final class PortalProjectPowers
         $reaches = [];
         foreach (self::KEYS as $key) {
             $reaches[$key] = PortalRules::reach($actor, $request, $key);
+        }
+
+        return $reaches;
+    }
+
+    // Add projects and Project Lead reach departments: all is any, department (or own) only the person's own.
+    public static function reachesDepartment(?string $reach, mixed $ownDepartment, mixed $department): bool
+    {
+        if ($reach === null) {
+            return false;
+        }
+        if ($reach === 'all') {
+            return true;
+        }
+        $own = PortalPreview::department($ownDepartment);
+
+        return $own !== '' && $own === PortalPreview::department($department);
+    }
+
+    /**
+     * Every active person's Project Lead reach right now, by employee id; whoever does not hold it is absent.
+     *
+     * @return array<int, string>
+     */
+    public static function leadReaches(): array
+    {
+        $reaches = [];
+        foreach (PortalRules::holders([self::LEAD]) as $holder) {
+            $reach = $holder['reaches'][self::LEAD] ?? null;
+            if ($reach !== null) {
+                $reaches[(int) $holder['employee']->getKey()] = $reach;
+            }
         }
 
         return $reaches;

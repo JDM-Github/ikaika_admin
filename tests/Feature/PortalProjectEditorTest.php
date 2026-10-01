@@ -380,6 +380,52 @@ class PortalProjectEditorTest extends TestCase
         $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
     }
 
+    // Add projects reaches departments: narrowed to their own, a member may only start their department's projects.
+    public function test_add_projects_reach_limits_the_departments(): void
+    {
+        $member = $this->employee('user', 3);
+        $member->forceFill(['department' => 'MIS'])->save();
+        $token = $this->token($member);
+        $this->assertContains('Engineering', $this->withToken($token)->getJson(self::BASE.'/options')->assertOk()->json('data.addDepartments'));
+
+        DB::connection('portal')->table('access_self_reach')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create', 'reach' => 'department']);
+        $options = $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
+        $this->assertSame(['MIS'], $options->json('data.addDepartments'));
+        $this->assertContains('Engineering', $options->json('data.departments'));
+        $this->create($token, $this->payload())->assertForbidden()->assertJsonPath('message', 'Your Add projects power does not reach that department.');
+    }
+
+    // Project Lead says who may lead where: a member leads only their department's projects, an admin any.
+    public function test_the_lead_must_hold_project_lead_for_the_department(): void
+    {
+        $token = $this->token($this->employee('admin'));
+        $lead = $this->employee('user');
+        $admin = $this->employee('admin', 1);
+
+        $lead->forceFill(['department' => 'MIS'])->save();
+        $people = collect($this->withToken($token)->getJson(self::BASE.'/options')->assertOk()->json('data.employees'))->keyBy('id');
+        $this->assertSame(['canLead' => true, 'leadsAnywhere' => false, 'leadDepartment' => 'MIS'], collect($people[(string) $lead->id])->only(['canLead', 'leadsAnywhere', 'leadDepartment'])->all());
+        $this->assertTrue($people[(string) $admin->id]['leadsAnywhere']);
+        $this->create($token, $this->payload())->assertStatus(422)->assertJsonPath('message', 'That person cannot lead a project of this department. Choose a lead from the list.');
+        $this->create($token, $this->payload(['leadId' => $admin->id]))->assertCreated();
+
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $lead->getKey(), 'permission_key' => 'projects.lead']);
+        $people = collect($this->withToken($token)->getJson(self::BASE.'/options')->assertOk()->json('data.employees'))->keyBy('id');
+        $this->assertFalse($people[(string) $lead->id]['canLead']);
+    }
+
+    // Add without approval: a project its holder adds is approved at once, even where no Project Manager covers them.
+    public function test_add_without_approval_skips_the_wait(): void
+    {
+        $member = $this->employee('user', 3);
+        $member->forceFill(['department' => 'MIS'])->save();
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create.direct', 'reach' => null]);
+
+        $id = (int) $this->create($this->token($member), $this->payload())->assertCreated()->json('data.id');
+
+        $this->assertSame('Approved', DB::connection('portal')->table('projects')->where('id', $id)->value('project_creation_status'));
+    }
+
     public function test_writes_are_held_to_twenty_a_minute(): void
     {
         $this->withMiddleware(ThrottleRequests::class);

@@ -96,6 +96,11 @@ Done so far (display only, nothing enforced):
     own, admins, executives and developers at all, so the old lead exception is an ordinary power a
     manager can limit and the lead can switch off. Whoever asked for a project may edit it and its
     scopes until it is approved. The board says per project `canEdit`, `canManageScopes`, `canDelete`.
+    Step C (2026-10-01): `projects.create` has a reach (all for every role by preset; department or own
+    = only their own department), checked on POST and offered as `addDepartments`. `projects.lead`
+    (members department, others all) says who may be chosen as lead and where; options send
+    `canLead` / `leadsAnywhere` / `leadDepartment` and saving refuses a lead it does not reach (a
+    project's current lead stays). `projects.create.direct` approves an add at once.
   - Manage / Projects (2026-10-01): `projects.manager`, reach department | all (admins, executives,
     developers `all`), covers projects by the project's department. An add it covers is Approved at
     once; any other waits as Pending for a covering manager. The rest of the tree stays planned in
@@ -386,7 +391,9 @@ Descriptions (what the Access page shows on each row) live in the SQL.
     - `projects.edit` Edit projects [R] — MAED (members own)
     - `projects.scopes` Manage scopes [R] — MAED (members own)
     - `projects.delete` Delete projects [R] — MAED (members own)
-  - `projects.create` Add projects — MAED
+    - `projects.lead` Project Lead [R] — MAED (members department)
+  - `projects.create` Add projects [R] — MAED
+    - `projects.create.direct` Add without approval — AED
   - `projects.manager` Project Manager [R] — AED
   - `projects.track` Track Projects — MAED
     - `projects.track.export` Export — MAED

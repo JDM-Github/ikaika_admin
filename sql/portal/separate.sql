@@ -443,11 +443,13 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 
 ('projects', NULL, 'Projects', 'Open the Projects section of the sidebar.', 0, 1, 200),
 ('projects.view', 'projects', 'View Projects', 'Browse projects and open each one''s dashboard, details and trail history.', 1, 1, 210),
-('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project.', 0, 1, 220),
-('projects.manager', 'projects', 'Project Manager', 'Approve or reject the projects waiting on Manage / Projects for {UserName|Your} department or every department, and add projects there without waiting.', 1, 1, 225),
 ('projects.edit', 'projects.view', 'Edit projects', 'Edit the details of {UserName|Your} department''s projects or every project. On Only your own, the projects {UserName|You} lead.', 1, 1, 211),
 ('projects.scopes', 'projects.view', 'Manage scopes', 'Choose the WBS scopes of {UserName|Your} department''s projects or every project. On Only your own, the projects {UserName|You} lead.', 1, 1, 212),
 ('projects.delete', 'projects.view', 'Delete projects', 'Move {UserName|Your} department''s projects or any project to the recycle bin. On Only your own, the projects {UserName|You} lead.', 1, 1, 213),
+('projects.lead', 'projects.view', 'Project Lead', 'Be chosen as the lead of {UserName|Your} department''s projects or of any project.', 1, 1, 214),
+('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project, for {UserName|Your} department or every department.', 1, 1, 220),
+('projects.create.direct', 'projects.create', 'Add without approval', 'A project {UserName|You} add is approved at once, without waiting for a Project Manager.', 0, 1, 221),
+('projects.manager', 'projects', 'Project Manager', 'Approve or reject the projects waiting on Manage / Projects for {UserName|Your} department or every department, and add projects there without waiting.', 1, 1, 225),
 ('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
 
@@ -581,14 +583,21 @@ UPDATE access_permissions SET only_department = 'MIS', min_tier = 'admin' WHERE 
 UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key LIKE 'administration.backup%';
 
 -- Members: their own work only. View Projects and Track Projects show only the projects they are on;
--- Edit, Manage scopes and Delete only the projects they lead.
+-- Edit, Manage scopes and Delete only the projects they lead; they lead their department's projects
+-- and may start one for any department, which waits for a Project Manager.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
-SELECT 'member', permission_key, CASE WHEN permission_key IN ('projects.view', 'projects.track', 'projects.edit', 'projects.scopes', 'projects.delete') THEN 'own' END, 0
+SELECT 'member', permission_key,
+       CASE
+           WHEN permission_key IN ('projects.view', 'projects.track', 'projects.edit', 'projects.scopes', 'projects.delete') THEN 'own'
+           WHEN permission_key = 'projects.lead' THEN 'department'
+           WHEN permission_key = 'projects.create' THEN 'all'
+       END,
+       0
 FROM access_permissions
 WHERE permission_key IN (
     'home',
     'projects', 'projects.view', 'projects.create', 'projects.track', 'projects.track.export',
-    'projects.edit', 'projects.scopes', 'projects.delete',
+    'projects.edit', 'projects.scopes', 'projects.delete', 'projects.lead',
     'reports', 'reports.daily', 'reports.late', 'reports.submitted',
     'reports.submitted.edit', 'reports.submitted.delete', 'reports.submitted.export',
     'requests', 'requests.own', 'requests.own.edit', 'requests.own.cancel', 'requests.own.export',
@@ -606,7 +615,7 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'admin', permission_key,
        CASE
            WHEN supports_reach = 0 THEN NULL
-           WHEN permission_key IN ('projects.view', 'projects.track', 'projects.manager', 'projects.edit', 'projects.scopes', 'projects.delete', 'administration.actions') THEN 'all'
+           WHEN permission_key IN ('projects.view', 'projects.track', 'projects.manager', 'projects.edit', 'projects.scopes', 'projects.delete', 'projects.lead', 'projects.create', 'administration.actions') THEN 'all'
            ELSE 'department'
        END,
        0
