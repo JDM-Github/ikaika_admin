@@ -134,6 +134,8 @@ function Invoke-SqlFile {
         [string]$Sql
     )
 
+    # With ignorable errors the file runs to the end (--force), so a statement after an expected error still runs.
+
     if (-not $Sql -and -not (Test-Path $Path)) {
         Write-Error "$Label -- file not found: $Path"
         exit 1
@@ -148,6 +150,9 @@ function Invoke-SqlFile {
         # passing it here too is harmless.
         $mysqlArgs += @('-D', $databaseName)
     }
+    if ($IgnorableErrors.Count -gt 0) {
+        $mysqlArgs += '--force'
+    }
 
     $env:MYSQL_PWD = $DbPassword
     try {
@@ -159,16 +164,18 @@ function Invoke-SqlFile {
     $exitCode = $LASTEXITCODE
     $outputText = ($output | Out-String).Trim()
 
-    if ($exitCode -ne 0) {
-        $ignorable = $IgnorableErrors | Where-Object { $outputText -match [regex]::Escape($_) }
-        if ($ignorable) {
+    # --force can exit 0 after a failed statement, so the ERROR lines decide, not only the exit code.
+    $errorLines = @($outputText -split "`r?`n" | Where-Object { $_ -match '^ERROR' })
+    if ($exitCode -ne 0 -or $errorLines.Count -gt 0) {
+        $unexpected = @($errorLines | Where-Object { $line = $_; -not ($IgnorableErrors | Where-Object { $line -match [regex]::Escape($_) }) })
+        if ($errorLines.Count -gt 0 -and $unexpected.Count -eq 0) {
             Write-Host "    expected on a fresh install (schema.sql already created this) -- continuing" -ForegroundColor DarkYellow
             if ($outputText) { Write-Host "    $outputText" -ForegroundColor DarkGray }
             return
         }
         if ($outputText) { Write-Host $outputText -ForegroundColor Red }
         Write-Error "$Label failed (exit $exitCode). Stopping -- nothing after this step ran."
-        exit $exitCode
+        exit ([Math]::Max($exitCode, 1))
     }
 
     Write-Host '    done' -ForegroundColor Green
@@ -176,7 +183,7 @@ function Invoke-SqlFile {
 
 Invoke-SqlFile -Path (Join-Path $scriptDir 'schema.sql')   -Label '1/5 schema.sql'
 Invoke-SqlFile -Path (Join-Path $scriptDir 'indexes.sql')  -Label '2/5 indexes.sql' -SelectDatabase `
-    -IgnorableErrors @("Duplicate key name 'idx_user_reports_date'")
+    -IgnorableErrors @("Duplicate key name 'idx_user_reports_date'", "Duplicate column name 'deleted_at'")
 Invoke-SqlFile -Path (Join-Path $scriptDir 'data.sql')     -Label '3/5 data.sql' -SelectDatabase
 Invoke-SqlFile -Path (Join-Path $scriptDir 'separate.sql') -Label '4/5 separate.sql' -SelectDatabase
 Invoke-SqlFile -Label "5/5 clear portal rows from $coreDatabase.actions and .recycle" -Sql @"
