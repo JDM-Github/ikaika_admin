@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\RequirePortalLocation;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -17,7 +18,8 @@ use Illuminate\Support\Facades\Route;
  *   routes/portal/administration.php  Administration / Recycle Bin
  */
 
-Route::prefix('portal')->group(function (): void {
+// Every write is located (company policy, 2026-10-01); RequirePortalLocation lists the exemptions.
+Route::prefix('portal')->middleware(RequirePortalLocation::class)->group(function (): void {
     require __DIR__.'/auth.php';
     require __DIR__.'/user.php';
     require __DIR__.'/home.php';

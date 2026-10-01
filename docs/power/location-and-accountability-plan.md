@@ -1,6 +1,7 @@
 # Location and accountability — plan
 
-Status: **step 2 built (2026-10-01); steps 1, 3 and 4 planned.** Company policy: every action in the portal
+Status: **steps 1, 2 and 3 built (2026-10-01); step 4 decided for Sync to Airtable only, not built.**
+Decided 2026-10-01: a blocked location stops all saving. Company policy: every action in the portal
 must be traceable to the person who did it. A significant ("ground-breaking") action must not
 happen without that person confirming it is them.
 
@@ -38,7 +39,11 @@ Two things can go wrong:
 
 ## The plan
 
-### 1. Location modal on every write
+### 1. Location modal on every write (built 2026-10-01)
+
+Built as `LocationGateState` (portal), asked by `ApiManager` before every write, drawn by the shell as
+`LocationGateSharedModal`. Checked with Playwright: blocked, the modal shows the steps and closes
+by itself 0.4 s after the setting flips; Cancel sends nothing.
 
 When a write starts and location is not granted, a modal stops it:
 
@@ -63,7 +68,10 @@ When a write starts and location is not granted, a modal stops it:
   lookup the portal already has) and carries `X-Portal-Location-Source: ip`.
 - A save can then never hang on location again.
 
-### 3. The server refuses writes without a location
+### 3. The server refuses writes without a location (built 2026-10-01)
+
+Built as `RequirePortalLocation` on the portal route group. Tests send a default location from
+`Tests\TestCase::setUp`; `PortalLocationRequiredTest` flushes it.
 
 - A write (POST, PATCH, PUT, DELETE) without `X-Portal-Location` is refused with 428 and a
   message the modal understands.

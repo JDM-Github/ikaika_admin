@@ -8,6 +8,13 @@ use Illuminate\Support\Facades\DB;
 
 abstract class TestCase extends BaseTestCase
 {
+    // Every portal write must carry a location (RequirePortalLocation); a test of that refusal flushes it.
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withHeader('X-Portal-Location', 'Calamba City, Laguna, Philippines');
+    }
+
     /**
      * Drops the rule check's own reads (catalog, presets, gifts, limits, switches, reaches,
      * Developer mode and the roster it judges), so a query budget measures only the endpoint.
