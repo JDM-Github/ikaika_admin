@@ -283,6 +283,13 @@ CREATE TABLE IF NOT EXISTS developer_modes (
 -- create_portal_projects_wbs_scopes.
 -- ============================================================================
 
+-- Manage / Projects: who asked for a project added in the portal, and when. Null on Airtable's own rows.
+-- A project added without Project Manager covering its department waits (project_creation_status
+-- 'Pending') until one approves or rejects it. Existing databases: add_portal_project_manager_rule.
+ALTER TABLE projects
+    ADD COLUMN requested_by INT       NULL,
+    ADD COLUMN requested_at TIMESTAMP NULL;
+
 CREATE TABLE IF NOT EXISTS projects_wbs_scopes (
     project_id INT         NOT NULL,
     wbs_code   VARCHAR(32) NOT NULL,
@@ -439,6 +446,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.view.edit', 'projects.view', 'Edit projects', 'Edit project details and manage scopes. A project''s lead can always edit their own project.', 0, 1, 211),
 ('projects.view.delete', 'projects.view', 'Delete projects', 'Move a project to the recycle bin. A project''s lead can always delete their own project.', 0, 1, 212),
 ('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project.', 0, 1, 220),
+('projects.manager', 'projects', 'Project Manager', 'Approve or reject the projects waiting on Manage / Projects for {UserName|Your} department or every department, and add projects there without waiting.', 1, 1, 225),
 ('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
 
@@ -577,7 +585,7 @@ SELECT 'member', permission_key, CASE WHEN permission_key IN ('projects.view', '
 FROM access_permissions
 WHERE permission_key IN (
     'home',
-    'projects', 'projects.view', 'projects.track', 'projects.track.export',
+    'projects', 'projects.view', 'projects.create', 'projects.track', 'projects.track.export',
     'reports', 'reports.daily', 'reports.late', 'reports.submitted',
     'reports.submitted.edit', 'reports.submitted.delete', 'reports.submitted.export',
     'requests', 'requests.own', 'requests.own.edit', 'requests.own.cancel', 'requests.own.export',
@@ -595,7 +603,7 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'admin', permission_key,
        CASE
            WHEN supports_reach = 0 THEN NULL
-           WHEN permission_key IN ('projects.view', 'projects.track', 'administration.actions') THEN 'all'
+           WHEN permission_key IN ('projects.view', 'projects.track', 'projects.manager', 'administration.actions') THEN 'all'
            ELSE 'department'
        END,
        0

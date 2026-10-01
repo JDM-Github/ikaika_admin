@@ -27,6 +27,12 @@ final class PortalProjectTrail
 
     public const RESTORED = 'Project Restored';
 
+    public const APPROVED = 'Project Creation Approved';
+
+    public const REJECTED = 'Project Creation Rejected';
+
+    public const RESUBMITTED = 'Project Creation Resubmission';
+
     public function record(int $projectId, string $actionName, Employee $actor, ?Request $request, ?string $remarks = null): void
     {
         $actionId = (int) $this->connection()->table('project_action_history')->insertGetId([

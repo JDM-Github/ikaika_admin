@@ -13,6 +13,10 @@ final class PortalShellPath
 
     public const USER_MANAGEMENT = '/manage/user-management';
 
+    public const MANAGE_PROJECTS = '/manage/manage-projects';
+
+    public const VIEW_PROJECTS = '/projects/projects';
+
     public const SUBMITTED_REPORTS = '/reports/submitted-reports';
 
     public const DAILY_REPORT = '/reports/daily-report';

@@ -7,6 +7,14 @@ executives `all`, so nobody's list changed). Add uses `projects.create`, edit an
 below: the Project Manager / Project Lead tree, reach on add / edit / scopes / delete, the lead
 picker filter, and approvals. The "Why this is parked" table is history from 2026-09-25.
 
+**Approvals built (2026-10-01), as decided that day:** Manage / Projects (`GET/PATCH manage/projects`,
+`PortalManageProjects`) behind the new `projects.manager` power (reach department | all; admins,
+executives and developers `all`). Members hold Add projects by preset; a project added by someone
+Project Manager does not cover for its department waits (Pending, `requested_by` / `requested_at`),
+stays usable and marked on the board, and covering managers get a bell notice. Reject needs a reason;
+the requester edits the rejected project and saving sends it again. Members' list stays `own`.
+Still planned: Project Lead, reach on edit / scopes / delete, `create.direct`.
+
 Lines marked `?` are still open. Everything else was decided on 2026-09-25; the reasoning sits
 next to each decision.
 

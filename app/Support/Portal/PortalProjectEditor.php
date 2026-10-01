@@ -14,8 +14,9 @@ use Illuminate\Validation\Rule;
  * Adding a project, editing it, and saving the scopes chosen in Manage Scopes.
  *
  * Portal-only (2026-10-01): the rows land in SQL and the ledger, never in the Airtable sync map, so
- * the sync lists their actions as not mapped and sends nothing. A project added here is Approved at
- * once, with the actor as its approver; there is no approval step in the portal yet.
+ * the sync lists their actions as not mapped and sends nothing. A project added by someone Project
+ * Manager covers for its department is Approved at once, with them as approver; any other waits as
+ * Pending on Manage / Projects (PortalProjectApproval), and saving a Rejected one sends it again.
  *
  * Adding needs the Add projects power. Editing and scopes need Edit projects, or leading the project,
  * as the catalog row promises. The pm rows on employees_projects come from Airtable and are left as
@@ -37,8 +38,6 @@ final class PortalProjectEditor
     private const MEMBER_ROLE = 'member';
 
     private const SUPPORT_ROLE = 'support';
-
-    private const APPROVED = 'Approved';
 
     /** The portal's status => the word projects.status holds, which is Airtable's. */
     private const STATUSES = [
@@ -95,6 +94,7 @@ final class PortalProjectEditor
         private readonly PortalViewProjects $projects,
         private readonly PortalAudit $audit,
         private readonly PortalProjectTrail $trail,
+        private readonly PortalProjectApproval $approval,
     ) {}
 
     /**
@@ -146,7 +146,7 @@ final class PortalProjectEditor
     public function show(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMayEdit($actor, $row->project_lead_email ?? null, $request);
+        $this->assertMayEdit($actor, $row, $request);
 
         return $this->response($projectId);
     }
@@ -163,13 +163,16 @@ final class PortalProjectEditor
         $fields = $this->validatedFields($request, null);
         $scopeCodes = $this->validatedScopeCodes($request);
         $employeeId = (int) $actor->getKey();
+        $isApproved = $this->approval->covers($actor, $request, $fields['columns']['department']);
 
-        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId, $request): int {
+        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId, $request, $isApproved): int {
             $projectId = (int) $this->connection()->table('projects')->insertGetId([
                 ...$fields['columns'],
-                'project_creation_status' => self::APPROVED,
-                'project_creation_approver' => $this->personName($actor),
-                'project_approver_email' => $this->text($actor->email ?? null),
+                'project_creation_status' => $isApproved ? PortalProjectApproval::APPROVED : PortalProjectApproval::PENDING,
+                'project_creation_approver' => $isApproved ? $this->personName($actor) : null,
+                'project_approver_email' => $isApproved ? $this->text($actor->email ?? null) : null,
+                'requested_by' => $employeeId,
+                'requested_at' => now(),
             ]);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
@@ -200,24 +203,38 @@ final class PortalProjectEditor
             $request,
             ['projectName' => $fields['name'], 'department' => $fields['columns']['department']],
         );
+        if (! $isApproved) {
+            $this->approval->notifyManagers($actor, $request, $projectId, $fields['name'], $fields['columns']['department'], false);
+        }
         $this->projects->bumpCache();
 
         return $this->response($projectId);
     }
 
     /**
+     * Saving a Rejected project sends it again for approval, unless Project Manager covers its adder.
+     *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function update(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMayEdit($actor, $row->project_lead_email ?? null, $request);
+        $this->assertMayEdit($actor, $row, $request);
 
         $fields = $this->validatedFields($request, $projectId);
         $changes = $this->changes($projectId, $fields);
+        $isResubmitted = $row->project_creation_status === PortalProjectApproval::REJECTED
+            && ! $this->approval->covers($actor, $request, $fields['columns']['department']);
+        $columns = $isResubmitted ? [
+            ...$fields['columns'],
+            'project_creation_status' => PortalProjectApproval::PENDING,
+            'project_creation_approver' => null,
+            'project_approver_email' => null,
+            'project_creation_approver_remarks' => null,
+        ] : $fields['columns'];
 
-        $this->ledger->within($this->connection(), function () use ($fields, $projectId, $actor, $changes, $request): void {
-            $this->connection()->table('projects')->where('id', $projectId)->update($fields['columns']);
+        $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted): void {
+            $this->connection()->table('projects')->where('id', $projectId)->update($columns);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
             $this->replaceClient($projectId, $fields['clientId']);
@@ -235,7 +252,13 @@ final class PortalProjectEditor
             if ($changes !== null) {
                 $this->trail->record($projectId, PortalProjectTrail::EDITED, $actor, $request, $changes);
             }
+            if ($isResubmitted) {
+                $this->trail->record($projectId, PortalProjectTrail::RESUBMITTED, $actor, $request);
+            }
         });
+        if ($isResubmitted) {
+            $this->approval->notifyManagers($actor, $request, $projectId, $fields['name'], $fields['columns']['department'], true);
+        }
 
         $this->audit->record(
             $actor,
@@ -259,7 +282,7 @@ final class PortalProjectEditor
     public function replaceScopes(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMayEdit($actor, $row->project_lead_email ?? null, $request);
+        $this->assertMayEdit($actor, $row, $request);
 
         $scopeCodes = $this->validatedScopeCodes($request);
         $name = $this->text($row->project_name) ?? 'Project';
@@ -679,6 +702,8 @@ final class PortalProjectEditor
                 'type' => $this->text($row->type_of_job ?? null),
                 'area' => $area === null || $area === '' ? null : (float) $area,
                 'status' => PortalViewProjectPresenter::status($row->status ?? null),
+                'creationStatus' => PortalViewProjectPresenter::creationStatus($row->project_creation_status ?? null),
+                'creationRemarks' => $this->text($row->project_creation_approver_remarks ?? null),
                 'members' => $people[self::MEMBER_ROLE],
                 'supportMembers' => $people[self::SUPPORT_ROLE],
                 'levels' => $levels,
@@ -706,16 +731,20 @@ final class PortalProjectEditor
         return in_array($level, self::LEVELS, true) ? $level : null;
     }
 
-    // Edit projects is a power; a project's lead may always edit their own, as the catalog row promises.
-    private function assertMayEdit(Employee $actor, mixed $leadEmail, Request $request): void
+    // Edit projects is a power; a project's lead may always edit their own, as the catalog row promises,
+    // and whoever asked for a project may edit it while it waits or after it is rejected.
+    private function assertMayEdit(Employee $actor, object $row, Request $request): void
     {
         if (PortalRules::holds($actor, $request, self::EDIT_RULE)) {
             return;
         }
 
-        $lead = $this->text($leadEmail);
+        $lead = $this->text($row->project_lead_email ?? null);
         $own = $this->text($actor->email ?? null);
         if ($lead !== null && $own !== null && strcasecmp($lead, $own) === 0) {
+            return;
+        }
+        if ((int) ($row->requested_by ?? 0) === (int) $actor->getKey() && $row->project_creation_status !== PortalProjectApproval::APPROVED) {
             return;
         }
 
@@ -739,7 +768,7 @@ final class PortalProjectEditor
             ->table('projects')
             ->where('id', $projectId)
             ->whereNull('deleted_at')
-            ->first(['id', 'project_name', 'project_lead_email']);
+            ->first(['id', 'project_name', 'project_lead_email', 'project_creation_status', 'requested_by']);
         if ($row === null) {
             abort(404, 'That project was not found.');
         }

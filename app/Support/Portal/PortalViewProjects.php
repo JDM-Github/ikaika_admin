@@ -154,6 +154,7 @@ final class PortalViewProjects
                 'projects.type_of_job',
                 'projects.area_sqft',
                 'projects.project_lead_email',
+                'projects.project_creation_status',
                 'projects.forma_link',
                 'projects.msteams_project_link',
                 'projects.ms_planner_link',

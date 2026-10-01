@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Portal\Manage\AccessController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
+use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
@@ -9,6 +10,12 @@ use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
+    // Manage / Projects follows Project Manager; which departments it covers is decided in PortalManageProjects.
+    Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects'])
+        ->get('manage/projects', [ProjectsController::class, 'index']);
+    Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects-write'])
+        ->patch('manage/projects/{id}', [ProjectsController::class, 'update'])
+        ->whereNumber('id');
     // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.
     Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
         ->get('manage/users', [UsersController::class, 'index']);

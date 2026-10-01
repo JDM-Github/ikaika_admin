@@ -89,6 +89,25 @@ final class PortalActivityCopy
         return self::YOU.' previewed the Airtable sync: '.$count.' '.($count === 1 ? 'change' : 'changes').' waiting';
     }
 
+    public static function notifyProjectRequested(string $who, string $name, bool $isResubmitted): string
+    {
+        return $isResubmitted
+            ? $who.' sent the project '.$name.' again for approval.'
+            : $who.' added the project '.$name.' and it waits for approval.';
+    }
+
+    public static function notifyProjectDecided(string $who, string $name, bool $isApproved, ?string $remarks): string
+    {
+        return $isApproved
+            ? $who.' approved the project '.$name.'.'
+            : $who.' rejected the project '.$name.($remarks === null ? '.' : ': '.$remarks);
+    }
+
+    public static function decidedProject(string $name, bool $isApproved): string
+    {
+        return self::YOU.($isApproved ? ' approved' : ' rejected').' the project '.$name;
+    }
+
     public static function addedProject(string $name): string
     {
         return self::YOU.' added the project '.$name;

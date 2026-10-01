@@ -89,9 +89,13 @@ Done so far (display only, nothing enforced):
     (2026-10-01).
   - View Projects (2026-10-01): `GET /portal/projects` follows `portal.rule:projects.view` and its
     reach, the same own / department / all as Track Projects (member preset `own`, admins and
-    executives `all`). Add needs `projects.create`; edit and scopes `projects.view.edit`; delete
-    `projects.view.delete`; a project's lead may always edit, scope and delete their own. The
-    Project Manager tree and approvals stay planned in `docs/power/view-projects-plan.md`.
+    executives `all`). Add needs `projects.create` (members hold it by preset since 2026-10-01); edit
+    and scopes `projects.view.edit`; delete `projects.view.delete`; a project's lead may always edit,
+    scope and delete their own, and whoever asked for a project may edit it until it is approved.
+  - Manage / Projects (2026-10-01): `projects.manager`, reach department | all (admins, executives,
+    developers `all`), covers projects by the project's department. An add it covers is Approved at
+    once; any other waits as Pending for a covering manager. The rest of the tree stays planned in
+    `docs/power/view-projects-plan.md`.
   - Reports: Daily and Late filing check their rule by the kind sent; Submitted Reports, Edit
     (PATCH) and Delete (DELETE) follow theirs. The filing forms' shared reads (report projects,
     submitted list, filed days) accept any one of the rules that need them

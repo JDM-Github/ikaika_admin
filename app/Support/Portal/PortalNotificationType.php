@@ -27,6 +27,12 @@ final class PortalNotificationType
 
     public const ROLE_CHANGED = 'manage.users.role';
 
+    public const PROJECT_REQUESTED = 'projects.requested';
+
+    public const PROJECT_APPROVED = 'projects.approved';
+
+    public const PROJECT_REJECTED = 'projects.rejected';
+
     public const BIN_RESTORED = 'administration.recycle-bin.restored';
 
     public const EMAIL_SENT = 'administration.email.sent';

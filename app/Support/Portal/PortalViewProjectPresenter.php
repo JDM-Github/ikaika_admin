@@ -88,6 +88,7 @@ final class PortalViewProjectPresenter
             'departmentName' => $department !== '' ? $department : 'Unassigned',
             'typeLabel' => $type,
             'status' => self::status($row->status ?? null),
+            'creationStatus' => self::creationStatus($row->project_creation_status ?? null),
             'areaSquareFeet' => self::area($row->area_sqft ?? null),
             'memberNames' => $memberNames,
             'isAssigned' => (bool) ($row->is_assigned ?? false),
@@ -121,6 +122,16 @@ final class PortalViewProjectPresenter
         }
 
         return 'ongoing';
+    }
+
+    // Airtable's own rows all say Approved, Pending or Rejected; anything else reads as approved.
+    public static function creationStatus(mixed $status): string
+    {
+        return match (strtolower(trim((string) $status))) {
+            'pending' => 'pending',
+            'rejected' => 'rejected',
+            default => 'approved',
+        };
     }
 
     public static function completionRatio(mixed $progressPct): float

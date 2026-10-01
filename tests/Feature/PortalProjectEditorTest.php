@@ -175,14 +175,68 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame('Scopes Changed: 1 scope', $board['trail'][0]['summary']);
     }
 
-    public function test_a_member_cannot_add_a_project(): void
+    // Members add projects by preset (2026-10-01); without Project Manager for its department the project waits.
+    public function test_a_members_project_waits_for_a_project_manager(): void
     {
+        $member = $this->employee('user', 3);
+        $admin = $this->employee('admin');
+        $this->token($admin);
+
+        $response = $this->create($this->token($member), $this->payload())
+            ->assertCreated()
+            ->assertJsonPath('data.creationStatus', 'pending');
+        $id = (int) $response->json('data.id');
+
+        $row = DB::connection('portal')->table('projects')->where('id', $id)->first();
+        $this->assertSame('Pending', $row->project_creation_status);
+        $this->assertNull($row->project_creation_approver);
+        $this->assertSame((int) $member->getKey(), (int) $row->requested_by);
+        $this->assertNotNull($row->requested_at);
+        // Admins hold Project Manager for every department, so they are told.
+        $this->assertTrue(DB::connection('portal')->table('notifications')
+            ->where('employee_id', $admin->getKey())->where('type', 'projects.requested')->where('link_path', '/manage/manage-projects')->exists());
+        $this->assertFalse(DB::connection('portal')->table('notifications')->where('employee_id', $member->getKey())->where('type', 'projects.requested')->exists());
+    }
+
+    public function test_without_add_projects_nothing_is_added(): void
+    {
+        $member = $this->employee('user', 3);
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create']);
         $before = DB::connection('portal')->table('projects')->count();
 
-        $this->create($this->token($this->employee('user', 3)), $this->payload())
+        $this->create($this->token($member), $this->payload())
             ->assertForbidden()
             ->assertJsonPath('message', 'Adding a project needs the Add projects power.');
         $this->assertSame($before, DB::connection('portal')->table('projects')->count());
+    }
+
+    // Whoever asked may edit their waiting project, and saving a rejected one sends it again.
+    public function test_the_requester_edits_and_resends_a_rejected_project(): void
+    {
+        $member = $this->employee('user', 3);
+        $token = $this->token($member);
+        $payload = $this->payload();
+        $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
+        unset($payload['scopeCodes']);
+
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'name' => 'Waiting Edit 2020'])
+            ->assertOk()
+            ->assertJsonPath('data.creationStatus', 'pending');
+
+        DB::connection('portal')->table('projects')->where('id', $id)->update(['project_creation_status' => 'Rejected', 'project_creation_approver_remarks' => 'Wrong client']);
+        $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk()->assertJsonPath('data.creationRemarks', 'Wrong client');
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'name' => 'Resent 2020'])
+            ->assertOk()
+            ->assertJsonPath('data.creationStatus', 'pending')
+            ->assertJsonPath('data.creationRemarks', null);
+
+        $this->assertSame('Project Creation Resubmission', DB::connection('portal')->table('projects_action_history')
+            ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
+            ->where('projects_action_history.project_id', $id)->orderByDesc('project_action_history.id')->value('project_action_history.action_name'));
+
+        // Approved, it is no longer theirs to edit.
+        DB::connection('portal')->table('projects')->where('id', $id)->update(['project_creation_status' => 'Approved']);
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, $payload)->assertForbidden();
     }
 
     public function test_adding_refuses_what_is_not_on_the_lists(): void
@@ -279,6 +333,9 @@ class PortalProjectEditorTest extends TestCase
 
         $member = $this->employee('user', 3);
         $token = $this->token($member);
+        $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create']);
+        Cache::flush();
         $this->withToken($token)->getJson(self::BASE.'/options')->assertForbidden();
 
         DB::connection('portal')->table('projects')->where('id', $this->liveProjectId())->update(['project_lead_email' => $member->email]);
