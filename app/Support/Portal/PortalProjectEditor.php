@@ -20,6 +20,9 @@ use Illuminate\Validation\Rule;
  * Adding needs the Add projects power. Editing and scopes need Edit projects, or leading the project,
  * as the catalog row promises. The pm rows on employees_projects come from Airtable and are left as
  * they are; only the member and support rows follow the form.
+ *
+ * Every save also writes the project's Trail history (PortalProjectTrail); an edit's row says what
+ * changed, and an edit that changed nothing writes none.
  */
 final class PortalProjectEditor
 {
@@ -47,6 +50,13 @@ final class PortalProjectEditor
 
     /** Stored as 'LOD 300'; 'N/A' is stored as it is. */
     private const LEVELS = ['100', '200', '250', '300', '350', '400', '500', 'N/A'];
+
+    private const STATUS_LABELS = [
+        'ongoing' => 'Ongoing',
+        'completed' => 'Completed',
+        'on-hold' => 'On Hold',
+        'cancelled' => 'Cancelled',
+    ];
 
     private const LEVEL_COLUMNS = [
         'structural' => 'st_lod',
@@ -84,6 +94,7 @@ final class PortalProjectEditor
         private readonly CoreLedger $ledger,
         private readonly PortalViewProjects $projects,
         private readonly PortalAudit $audit,
+        private readonly PortalProjectTrail $trail,
     ) {}
 
     /**
@@ -153,7 +164,7 @@ final class PortalProjectEditor
         $scopeCodes = $this->validatedScopeCodes($request);
         $employeeId = (int) $actor->getKey();
 
-        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId): int {
+        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId, $request): int {
             $projectId = (int) $this->connection()->table('projects')->insertGetId([
                 ...$fields['columns'],
                 'project_creation_status' => self::APPROVED,
@@ -175,6 +186,7 @@ final class PortalProjectEditor
                 $employeeId,
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
+            $this->trail->record($projectId, PortalProjectTrail::CREATED, $actor, $request);
 
             return $projectId;
         });
@@ -202,8 +214,9 @@ final class PortalProjectEditor
         $this->assertMayEdit($actor, $row->project_lead_email ?? null, $request);
 
         $fields = $this->validatedFields($request, $projectId);
+        $changes = $this->changes($projectId, $fields);
 
-        $this->ledger->within($this->connection(), function () use ($fields, $projectId, $actor): void {
+        $this->ledger->within($this->connection(), function () use ($fields, $projectId, $actor, $changes, $request): void {
             $this->connection()->table('projects')->where('id', $projectId)->update($fields['columns']);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
@@ -219,6 +232,9 @@ final class PortalProjectEditor
                 (int) $actor->getKey(),
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
+            if ($changes !== null) {
+                $this->trail->record($projectId, PortalProjectTrail::EDITED, $actor, $request, $changes);
+            }
         });
 
         $this->audit->record(
@@ -248,7 +264,7 @@ final class PortalProjectEditor
         $scopeCodes = $this->validatedScopeCodes($request);
         $name = $this->text($row->project_name) ?? 'Project';
 
-        $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor): void {
+        $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request): void {
             $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->delete();
             $this->writeScopes($projectId, $scopeCodes);
 
@@ -262,6 +278,10 @@ final class PortalProjectEditor
                 (int) $actor->getKey(),
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
+            $count = count($scopeCodes);
+            $this->trail->record($projectId, PortalProjectTrail::SCOPES, $actor, $request, $count === 0
+                ? 'Scopes cleared'
+                : $count.' '.($count === 1 ? 'scope' : 'scopes'));
         });
 
         $this->audit->record(
@@ -380,6 +400,66 @@ final class PortalProjectEditor
                 'supportMemberIds' => array_map('strval', $supportMemberIds),
             ],
         ];
+    }
+
+    /**
+     * What an edit changes, read before the write, as the Trail history row's remarks; null when
+     * nothing changed. Plain values show old to new; people, levels and links only say they changed.
+     *
+     * @param  array{clientId: int, memberIds: list<int>, supportMemberIds: list<int>, columns: array<string, mixed>}  $fields
+     */
+    private function changes(int $projectId, array $fields): ?string
+    {
+        $before = $this->connection()->table('projects')->where('id', $projectId)->first();
+        if ($before === null) {
+            return null;
+        }
+        $after = $fields['columns'];
+        $parts = [];
+
+        foreach (['project_name' => 'Name', 'department' => 'Department', 'type_of_job' => 'Type'] as $column => $label) {
+            $old = $this->text($before->{$column} ?? null);
+            $new = $this->text($after[$column] ?? null);
+            if ($old !== $new) {
+                $parts[] = $label.': '.($old ?? 'none').' to '.($new ?? 'none');
+            }
+        }
+        $oldStatus = self::STATUS_LABELS[PortalViewProjectPresenter::status($before->status ?? null)];
+        $newStatus = self::STATUS_LABELS[PortalViewProjectPresenter::status($after['status'] ?? null)];
+        if ($oldStatus !== $newStatus) {
+            $parts[] = 'Status: '.$oldStatus.' to '.$newStatus;
+        }
+        $oldArea = $before->area_sqft === null ? null : round((float) $before->area_sqft, 2);
+        $newArea = $after['area_sqft'] ?? null;
+        if ($oldArea !== $newArea) {
+            $parts[] = 'Area: '.($oldArea === null ? 'none' : number_format($oldArea)).' to '.($newArea === null ? 'none' : number_format((float) $newArea)).' sq ft';
+        }
+        if (strcasecmp((string) $this->text($before->project_lead_email ?? null), (string) $after['project_lead_email']) !== 0) {
+            $parts[] = 'Lead changed';
+        }
+
+        $clientIds = $this->connection()->table('projects_clients')->where('project_id', $projectId)->pluck('client_id')->map(static fn (mixed $id): int => (int) $id)->all();
+        if ($clientIds !== [$fields['clientId']]) {
+            $parts[] = 'Client changed';
+        }
+        foreach ([self::MEMBER_ROLE => ['memberIds', 'Members changed'], self::SUPPORT_ROLE => ['supportMemberIds', 'Support members changed']] as $role => [$key, $message]) {
+            $old = $this->connection()->table('employees_projects')->where('project_id', $projectId)->where('role_on_project', $role)->pluck('employee_id')->map(static fn (mixed $id): int => (int) $id)->sort()->values()->all();
+            $new = $fields[$key];
+            sort($new);
+            if ($old !== $new) {
+                $parts[] = $message;
+            }
+        }
+        foreach (['Levels of detail changed' => self::LEVEL_COLUMNS, 'Links changed' => self::LINK_COLUMNS] as $message => $columns) {
+            foreach ($columns as $column) {
+                if ($this->text($before->{$column} ?? null) !== $this->text($after[$column] ?? null)) {
+                    $parts[] = $message;
+                    break;
+                }
+            }
+        }
+
+        return $parts === [] ? null : implode('; ', $parts);
     }
 
     // An active employee with an email, or on an edit the lead the project already has.

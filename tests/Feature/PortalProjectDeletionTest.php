@@ -7,6 +7,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
+use Tests\Concerns\FilesPortalReports;
 use Tests\TestCase;
 
 /**
@@ -17,6 +18,7 @@ use Tests\TestCase;
 class PortalProjectDeletionTest extends TestCase
 {
     use DatabaseTransactions;
+    use FilesPortalReports;
 
     /**
      * @var list<string>
@@ -66,9 +68,62 @@ class PortalProjectDeletionTest extends TestCase
 
     public function test_an_admin_with_the_power_deletes_a_project(): void
     {
-        $this->deleteAs($this->token($this->employee('admin')))->assertSuccessful();
+        $admin = $this->employee('admin');
+        $this->deleteAs($this->token($admin))->assertSuccessful();
 
         $this->assertTrue($this->isDeleted());
+        $trail = DB::connection('portal')->table('projects_action_history')
+            ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
+            ->where('projects_action_history.project_id', $this->projectId)
+            ->orderByDesc('project_action_history.id')
+            ->first(['project_action_history.action_name', 'project_action_history.created_by']);
+        $this->assertSame('Project Deleted', $trail?->action_name);
+        $this->assertSame(trim($admin->first_name.' '.$admin->last_name), $trail?->created_by);
+    }
+
+    // A deleted project leaves the report picker and Home, and nothing new may be filed against it.
+    public function test_a_deleted_project_leaves_the_pickers_and_home_and_takes_no_reports(): void
+    {
+        $member = $this->employee('user');
+        $projectId = (int) DB::connection('portal')->table('employees_projects')
+            ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
+            ->where('employees_projects.employee_id', $member->getKey())
+            ->whereNull('projects.deleted_at')
+            ->whereNotNull('projects.project_name')
+            ->where('projects.status', 'Started')
+            ->orderBy('projects.id')
+            ->value('projects.id');
+        $this->assertGreaterThan(0, $projectId);
+        // The filing helper uses the member's first project, so make this one it.
+        DB::connection('portal')->table('employees_projects')->where('employee_id', $member->getKey())->where('project_id', '!=', $projectId)->delete();
+        $token = $this->token($member);
+        $body = $this->dailyReportBody($member, $this->freeReportDate($member));
+        $activeBefore = (int) $this->withToken($token)->getJson('/api/development/portal/home')->assertOk()->json('data.activeProjectCount');
+
+        DB::connection('portal')->table('projects')->where('id', $projectId)->update(['deleted_at' => now()]);
+        Cache::flush();
+
+        $picker = $this->withToken($token)->getJson('/api/development/portal/reports/projects')->assertOk()->json('data');
+        $this->assertNotContains((string) $projectId, array_column($picker, 'id'));
+        $this->assertSame($activeBefore - 1, (int) $this->withToken($token)->getJson('/api/development/portal/home')->assertOk()->json('data.activeProjectCount'));
+        $this->withToken($token)->postJson('/api/development/portal/reports/submitted', $body)->assertStatus(422);
+    }
+
+    // Restoring from the Recycle Bin clears the stamp and adds its own Trail history row.
+    public function test_restoring_a_project_brings_it_back_with_a_trail_row(): void
+    {
+        $token = $this->token($this->employee('admin'));
+        $this->deleteAs($token)->assertSuccessful();
+        $recycleId = (int) DB::connection('core')->table('recycle')->where('recycle_key', 'project-'.$this->projectId)->value('id');
+
+        $this->withToken($token)->postJson('/api/development/portal/administration/recycle-bin/'.$recycleId.'/restore')->assertSuccessful();
+
+        $this->assertFalse($this->isDeleted());
+        $this->assertSame('Project Restored', DB::connection('portal')->table('projects_action_history')
+            ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
+            ->where('projects_action_history.project_id', $this->projectId)
+            ->orderByDesc('project_action_history.id')
+            ->value('project_action_history.action_name'));
     }
 
     // Switched off, the power is gone even for an admin: the role alone no longer deletes.

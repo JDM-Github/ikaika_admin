@@ -137,6 +137,44 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame('{UserName|You} added the project Editor Test Project 2020', DB::connection('portal')->table('logs')->where('resource', 'projects')->where('record_id', (string) $id)->value('message'));
     }
 
+    /**
+     * @return list<array{action_name: string, created_by: string, remarks: ?string}>
+     */
+    private function trail(int $projectId): array
+    {
+        return DB::connection('portal')->table('projects_action_history')
+            ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
+            ->where('projects_action_history.project_id', $projectId)
+            ->orderBy('project_action_history.id')
+            ->get(['project_action_history.action_name', 'project_action_history.created_by', 'project_action_history.remarks'])
+            ->map(static fn (object $row): array => (array) $row)
+            ->all();
+    }
+
+    // Each save adds a Trail history row in Airtable's own words; an edit says what changed, a no-op edit says nothing.
+    public function test_every_save_writes_the_trail_history(): void
+    {
+        $admin = $this->employee('admin');
+        $token = $this->token($admin);
+        $payload = $this->payload(['status' => 'ongoing']);
+        $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
+        unset($payload['scopeCodes']);
+
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'name' => 'Trail Renamed 2020', 'status' => 'on-hold', 'area' => 1300])->assertOk();
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'name' => 'Trail Renamed 2020', 'status' => 'on-hold', 'area' => 1300])->assertOk();
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$this->scopeCodes()[1]]])->assertOk();
+
+        $name = trim($admin->first_name.' '.$admin->last_name);
+        $this->assertSame([
+            ['action_name' => 'Project Creation', 'created_by' => $name, 'remarks' => null],
+            ['action_name' => 'Project Edited', 'created_by' => $name, 'remarks' => 'Name: Editor Test Project 2020 to Trail Renamed 2020; Status: Ongoing to On Hold; Area: 1,250 to 1,300 sq ft'],
+            ['action_name' => 'Scopes Changed', 'created_by' => $name, 'remarks' => '1 scope'],
+        ], $this->trail($id));
+
+        $board = collect($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'))->firstWhere('id', (string) $id);
+        $this->assertSame('Scopes Changed: 1 scope', $board['trail'][0]['summary']);
+    }
+
     public function test_a_member_cannot_add_a_project(): void
     {
         $before = DB::connection('portal')->table('projects')->count();

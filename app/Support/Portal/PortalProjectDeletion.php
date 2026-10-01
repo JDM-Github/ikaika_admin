@@ -37,6 +37,7 @@ final class PortalProjectDeletion
         private readonly PortalRecycleBin $recycleBin,
         private readonly PortalViewProjects $projects,
         private readonly PortalAudit $audit,
+        private readonly PortalProjectTrail $trail,
     ) {}
 
     public function destroy(Employee $actor, int $projectId, Request $request): void
@@ -92,6 +93,7 @@ final class PortalProjectDeletion
             $this->ledger->revert($written['recycle_id'], $written['action_id']);
             throw $error;
         }
+        $this->trail->record($projectId, PortalProjectTrail::DELETED, $actor, $request);
 
         $this->audit->record(
             $actor,
@@ -138,6 +140,7 @@ final class PortalProjectDeletion
             ->table('projects')
             ->where('id', $projectId)
             ->update(['deleted_at' => null]);
+        $this->trail->record($projectId, PortalProjectTrail::RESTORED, $actor, $request);
 
         // recordAdd, not revert: it drops the bin row and logs the restore as its own action, so the
         // original delete stays in the ledger. revert is for rolling back a delete that failed.

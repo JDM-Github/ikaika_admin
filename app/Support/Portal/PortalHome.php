@@ -162,6 +162,8 @@ final class PortalHome
             ->table('employees_projects')
             ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
             ->where('employees_projects.employee_id', $employeeId)
+            // A deleted project waits in the Recycle Bin, so it is no longer an active project.
+            ->whereNull('projects.deleted_at')
             ->select([
                 'projects.id',
                 'projects.project_number',
