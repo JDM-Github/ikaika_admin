@@ -3,8 +3,8 @@
 namespace App\Support\Portal;
 
 use Carbon\CarbonImmutable;
-use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder;
 
 /**
  * The work behind each project, read from its reports (docs/power/view-projects-dashboard-plan.md):
@@ -163,7 +163,7 @@ final class PortalProjectWork
     }
 
     // Airtable names repeat the code ("8303- ELECTRICAL REVIT MODELING"); the code is sent on its own.
-    private static function activityName(mixed $name, string $code): string
+    public static function activityName(mixed $name, string $code): string
     {
         $text = trim((string) $name);
         $stripped = trim((string) preg_replace('/^'.preg_quote($code, '/').'\s*-\s*/', '', $text));
@@ -177,7 +177,18 @@ final class PortalProjectWork
      */
     private function reportRows(array $projectIds): iterable
     {
-        return $this->connection()
+        return self::reports($projectIds)->get();
+    }
+
+    /**
+     * The reports that count on these projects, with their person, activity code and work day; the
+     * Activity tab (PortalProjectActivity) reads the same rows.
+     *
+     * @param  list<int>  $projectIds
+     */
+    public static function reports(array $projectIds): Builder
+    {
+        return Model::getConnectionResolver()->connection('portal')
             ->table('projects_user_reports as link')
             ->join('user_reports as report', 'report.id', '=', 'link.user_report_id')
             ->leftJoin('employees_user_reports as author', 'author.user_report_id', '=', 'report.id')
@@ -195,12 +206,7 @@ final class PortalProjectWork
                 'code.id_no as code',
                 'code.name',
             ])
-            ->selectRaw('DATE(COALESCE(report.actual_work_date, report.report_date)) as work_day')
-            ->get();
+            ->selectRaw('DATE(COALESCE(report.actual_work_date, report.report_date)) as work_day');
     }
 
-    private function connection(): Connection
-    {
-        return Model::getConnectionResolver()->connection('portal');
-    }
 }

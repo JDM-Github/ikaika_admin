@@ -20,6 +20,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware('throttle:portal-projects')
         ->get('projects/{id}', [ProjectsController::class, 'show'])
         ->whereNumber('id');
+    // The Activity tab follows View Projects; PortalProjectActivity cuts it to who may see whose work.
+    Route::middleware(['throttle:portal-projects', 'portal.rule:projects.view'])
+        ->get('projects/{id}/activity', [ProjectsController::class, 'activity'])
+        ->whereNumber('id');
     Route::middleware('throttle:portal-projects-write')
         ->post('projects', [ProjectsController::class, 'store']);
     Route::middleware('throttle:portal-projects-write')
