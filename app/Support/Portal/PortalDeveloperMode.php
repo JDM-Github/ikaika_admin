@@ -72,6 +72,25 @@ final class PortalDeveloperMode
         $this->log($developer, $request, 'developer.mode', '{UserName|You} switched on Developer mode', ['on' => true, 'passwordSet' => $isDefault]);
     }
 
+    /*
+     * Confirms it is them before a significant action (Sync to Airtable): their own Developer mode
+     * password, never the one-time default, which only ever switches the mode on. Not logged here;
+     * the action it guards logs itself.
+     */
+    public function confirm(Employee $actor, string $password): void
+    {
+        if (! (bool) $actor->is_developer) {
+            abort(403, 'Confirming needs a Developer mode password, which only developers have.');
+        }
+        $hash = self::row($actor)?->password_hash;
+        if (! is_string($hash) || $hash === '') {
+            abort(428, 'Set your Developer mode password in Settings before confirming.');
+        }
+        if (! Hash::check($password, $hash)) {
+            abort(422, 'That password is not right.');
+        }
+    }
+
     public function deactivate(Employee $developer, Request $request): void
     {
         if (! self::isOn($developer, $request)) {

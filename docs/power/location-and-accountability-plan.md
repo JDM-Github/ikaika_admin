@@ -1,6 +1,6 @@
 # Location and accountability — plan
 
-Status: **steps 1, 2 and 3 built (2026-10-01); step 4 decided for Sync to Airtable only, not built.**
+Status: **steps 1-4 built (2026-10-01).** Step 4 covers Sync to Airtable only, as a dry run.
 Decided 2026-10-01: a blocked location stops all saving. Company policy: every action in the portal
 must be traceable to the person who did it. A significant ("ground-breaking") action must not
 happen without that person confirming it is them.
@@ -81,6 +81,12 @@ Built as `RequirePortalLocation` on the portal route group. Tests send a default
   IP when the device fix times out, but still require the permission itself.
 
 ### 4. Confirm it is you before a significant action
+
+Built 2026-10-01 for **Sync to Airtable only**, which is a **dry run** from the portal for now
+(`POST administration/actions/sync-preview`, `PortalAirtableSyncPreview`): the person types their own
+Developer mode password (`PortalDeveloperMode::confirm`; never the one-time default, only developers
+have one), then sees what the next send would do. Sending stays `portal:airtable-sync --send`.
+The rest of this section is the wider plan, for when more actions are added.
 
 Before a significant action, the portal asks the person to confirm their identity again:
 - their password, as Developer mode does;

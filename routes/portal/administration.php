@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Portal\Administration\AirtableSyncController;
 use App\Http\Controllers\Api\Portal\Administration\AllActionsController;
 use App\Http\Controllers\Api\Portal\Administration\AllLogsController;
 use App\Http\Controllers\Api\Portal\Administration\EmailBlocksController;
@@ -22,6 +23,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::get('administration/all-actions', [AllActionsController::class, 'index']);
         Route::get('administration/all-actions/{id}', [AllActionsController::class, 'show'])->whereNumber('id');
     });
+    // Sync to Airtable is a dry run from the portal, behind the Developer mode password; the password
+    // throttle is Developer mode's own (five a minute).
+    Route::middleware(['portal.rule:administration.actions.sync', 'throttle:portal-developer'])
+        ->post('administration/actions/sync-preview', [AirtableSyncController::class, 'preview']);
     // Missing Reports follows its rule and reach: only the people the reach covers are listed or reminded.
     Route::middleware(['portal.rule:administration.missing', 'throttle:portal-manage-reports'])
         ->get('administration/missing-reports', [MissingReportsController::class, 'index']);
