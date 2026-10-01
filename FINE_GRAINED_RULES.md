@@ -363,7 +363,7 @@ without a deploy. A new page still needs its catalog rows added in separate.sql.
 
 ## Permission tree (seeded — `sql/portal/separate.sql`, table `access_permissions`)
 
-The SQL is the source of truth; this list is a copy for reading. 102 rules. `[R]` takes a reach.
+The SQL is the source of truth; this list is a copy for reading. 104 rules. `[R]` takes a reach.
 The letters say which role presets hold it: M member, A admin, E executive, D developer.
 Descriptions (what the Access page shows on each row) live in the SQL.
 
@@ -434,6 +434,8 @@ Descriptions (what the Access page shows on each row) live in the SQL.
     - `finance.transactions.export` Export — AED
   - `finance.envelopes` Envelopes — AED
     - `finance.envelopes.export` Export — AED
+    - `finance.envelopes.edit` Add and edit (budget codes and envelopes) — AED
+    - `finance.envelopes.funds` Record funds — AED
 - `administration` Administration — AED
   - `administration.recycle` All Recycle [R] — AED
     - `administration.recycle.export` Export — AED

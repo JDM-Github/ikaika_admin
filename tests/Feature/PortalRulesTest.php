@@ -306,7 +306,7 @@ class PortalRulesTest extends TestCase
     // Finance keeps who opened it before it had rules: admins, executives and developers, never a member.
     public function test_finance_presets_match_today(): void
     {
-        $keys = ['finance', 'finance.overview', 'finance.transactions', 'finance.transactions.export', 'finance.envelopes', 'finance.envelopes.export'];
+        $keys = ['finance', 'finance.overview', 'finance.transactions', 'finance.transactions.export', 'finance.envelopes', 'finance.envelopes.export', 'finance.envelopes.edit', 'finance.envelopes.funds'];
         foreach (['admin', 'executive', 'developer'] as $role) {
             $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
             $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing a finance rule.");
@@ -338,6 +338,28 @@ class PortalRulesTest extends TestCase
         foreach (['budget-transactions', 'budget-codes', 'budget-envelopes'] as $read) {
             $this->withToken($member)->getJson('/api/development/portal/manage/'.$read)->assertForbidden();
         }
+    }
+
+    // Adding and editing codes and envelopes, and recording funds, each answer only to their own power.
+    public function test_each_envelope_write_refuses_once_its_rule_is_off(): void
+    {
+        $token = $this->login($this->admin());
+        $base = '/api/development/portal/manage/';
+        // Held: the request reaches validation (or the tracker being off), never a 403.
+        $this->assertNotSame(403, $this->withToken($token)->postJson($base.'budget-codes', [])->status());
+        $this->assertNotSame(403, $this->withToken($token)->postJson($base.'budget-envelopes/1/funds', [])->status());
+
+        $this->switchOff($token, 'finance.envelopes.funds');
+        $this->withToken($token)->postJson($base.'budget-envelopes/1/funds', [])->assertForbidden();
+        $this->assertNotSame(403, $this->withToken($token)->postJson($base.'budget-codes', [])->status());
+
+        $this->switchOff($token, 'finance.envelopes.edit');
+        $this->withToken($token)->postJson($base.'budget-codes', [])->assertForbidden();
+        $this->withToken($token)->postJson($base.'budget-envelopes', [])->assertForbidden();
+        $this->withToken($token)->patchJson($base.'budget-codes/1', [])->assertForbidden();
+        $this->withToken($token)->patchJson($base.'budget-envelopes/1', [])->assertForbidden();
+        // The page and its reads stay open.
+        $this->withToken($token)->getJson($base.'budget-codes')->assertOk();
     }
 
     // Email and All Emails keep who used them before they had rules: admins, executives and developers.

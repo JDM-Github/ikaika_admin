@@ -29,6 +29,19 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->get('manage/budget-transactions', [BudgetEnvelopesController::class, 'transactions']);
     Route::middleware(['portal.rule:finance.overview|finance.transactions|finance.envelopes', 'throttle:portal-manage-requests'])
         ->get('manage/budget-codes', [BudgetEnvelopesController::class, 'codes']);
+    // Finance / Envelopes adds to the tracker: adding and editing codes and envelopes is one power,
+    // recording money received another, since it moves balances.
+    Route::middleware(['portal.rule:finance.envelopes.edit', 'throttle:portal-manage-budget-write'])->group(function (): void {
+        Route::post('manage/budget-codes', [BudgetEnvelopesController::class, 'storeCode']);
+        Route::post('manage/budget-envelopes', [BudgetEnvelopesController::class, 'storeEnvelope']);
+        Route::patch('manage/budget-codes/{id}', [BudgetEnvelopesController::class, 'updateCode'])
+            ->whereNumber('id');
+        Route::patch('manage/budget-envelopes/{id}', [BudgetEnvelopesController::class, 'updateEnvelope'])
+            ->whereNumber('id');
+    });
+    Route::middleware(['portal.rule:finance.envelopes.funds', 'throttle:portal-manage-budget-write'])
+        ->post('manage/budget-envelopes/{id}/funds', [BudgetEnvelopesController::class, 'storeFunds'])
+        ->whereNumber('id');
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
     Route::middleware(['portal.rule:manage.requests.reimbursement.payout', 'throttle:portal-manage-requests-write'])

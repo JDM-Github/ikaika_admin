@@ -490,6 +490,9 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('finance.transactions.export', 'finance.transactions', 'Export', 'Download the transactions list.', 0, 1, 853),
 ('finance.envelopes', 'finance', 'Envelopes', 'See every envelope and budget code, with what is left in each.', 0, 1, 854),
 ('finance.envelopes.export', 'finance.envelopes', 'Export', 'Download the envelope and budget code lists.', 0, 1, 855),
+-- Existing databases: the Laravel migration add_portal_finance_envelope_write_rules.
+('finance.envelopes.edit', 'finance.envelopes', 'Add and edit', 'Add and change budget codes and envelopes, and close or reopen an envelope.', 0, 1, 856),
+('finance.envelopes.funds', 'finance.envelopes', 'Record funds', 'Record money an envelope received, credited to it, its budget code and its account.', 0, 1, 857),
 
 ('administration', NULL, 'Administration', 'Keep the portal in order: logs, trash, emails and backups.', 0, 1, 900),
 ('administration.recycle', 'administration', 'All Recycle', 'See what the people in {UserName|Your} reach deleted. View only: restoring someone else''s item could backfire on them.', 1, 1, 910),

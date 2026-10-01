@@ -109,6 +109,43 @@ final class PortalActivityCopy
         return self::YOU.' returned '.$amount.' to '.$envelopeName.' when a reimbursement stopped being approved';
     }
 
+    public static function addedBudgetCode(string $name): string
+    {
+        return self::YOU.' added the budget code '.$name;
+    }
+
+    public static function addedBudgetEnvelope(string $name, ?string $codeName): string
+    {
+        return $codeName === null
+            ? self::YOU.' added the envelope '.$name.' with no budget code'
+            : self::YOU.' added the envelope '.$name.' under '.$codeName;
+    }
+
+    public static function updatedBudgetCode(string $name): string
+    {
+        return self::YOU.' updated the budget code '.$name;
+    }
+
+    public static function updatedBudgetEnvelope(string $name): string
+    {
+        return self::YOU.' updated the envelope '.$name;
+    }
+
+    public static function closedBudgetEnvelope(string $name): string
+    {
+        return self::YOU.' closed the envelope '.$name;
+    }
+
+    public static function reopenedBudgetEnvelope(string $name): string
+    {
+        return self::YOU.' reopened the envelope '.$name;
+    }
+
+    public static function recordedEnvelopeFunds(string $envelopeName, string $amount): string
+    {
+        return self::YOU.' recorded '.$amount.' received into '.$envelopeName;
+    }
+
     public static function restoredReport(string $kind, string $date): string
     {
         return self::YOU.' restored a '.self::reportKind($kind).' for '.self::date($date);

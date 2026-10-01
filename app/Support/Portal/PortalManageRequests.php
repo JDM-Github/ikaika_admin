@@ -475,8 +475,8 @@ final class PortalManageRequests
             return $query;
         };
 
-        // Every item of the claim as it stood before this decision: the charge is the claim's
-        // approved items, so the ones this decision leaves alone count too.
+        // Every item of the claim as it stood before this decision: the item decided, and the rest
+        // for the one case that needs them -- a charge made when a claim was charged whole.
         $rows = $claim()->get(['id', 'item', 'cost', 'qty', 'status']);
         if ($rows->isEmpty()) {
             abort(404, 'That reimbursement is not on the queue.');
@@ -495,9 +495,7 @@ final class PortalManageRequests
                 'status' => $status,
                 'approver_remarks' => $remarks,
             ]);
-        $approved = $rows->filter(fn (object $row): bool => (int) $row->id === $id
-            ? $status === 'Approved'
-            : strcasecmp(trim((string) ($row->status ?? '')), 'Approved') === 0)->values()->all();
+        $decided = $rows->first(fn (object $row): bool => (int) $row->id === $id) ?? $seed;
 
         $filedOn = $this->calendarDate($seed->reimb_date ?? null) ?? '';
         $this->recordDecision($actor, 'reimbursement', $id, [
@@ -517,10 +515,11 @@ final class PortalManageRequests
             'date' => $filedOn,
             'recordId' => (string) $id,
             'status' => $apiStatus,
-            'ledger' => $this->settleClaimCharge(
+            'ledger' => $this->settleItemCharge(
                 $actor,
                 $rows->all(),
-                $approved,
+                $decided,
+                $status,
                 $envelopeId,
                 $allowOverspend,
                 $memberName,
@@ -542,39 +541,84 @@ final class PortalManageRequests
     }
 
     /**
-     * Keeps a claim's envelope charge in step with its approved items: one charge per claim, for the
-     * total of the items approved in it. The first approval opens it on the chosen envelope, each
-     * later one grows it there, and an item that stops being approved takes its share back out --
-     * the whole charge goes once no item is left approved.
+     * Keeps one item's envelope charge in step with its decision. An item is charged to the envelope
+     * the approver picks for it when it is approved, and that charge goes back the moment it stops
+     * being approved. Each item carries a charge of its own, so nothing is ever put on an envelope
+     * the approver did not pick for it -- not even the one its claim's other items went to.
      *
-     * The charge carries the lowest of the approved items, so it stays with an item that is there to
-     * carry it: a member can withdraw a pending item, never an approved one.
+     * A charge made before items were charged one by one covers its whole claim. Setting one of that
+     * claim's items back takes the item's share out of it, rather than returning all of it.
      *
-     * @param  list<object>  $rows  every item of the claim
-     * @param  list<object>  $approved  the items approved once this decision is written
+     * @param  list<object>  $rows  every item of the claim, as they stood before this decision
      * @return array{action: string, message: string, recordId: string, payload: array<string, mixed>}|null
      */
-    private function settleClaimCharge(
+    private function settleItemCharge(
         Employee $actor,
         array $rows,
-        array $approved,
+        object $item,
+        string $status,
         ?int $envelopeId,
         bool $allowOverspend,
         string $memberName,
         string $filedOn,
         ?string $department,
     ): ?array {
-        if (! $this->budget->isAvailable() || $rows === []) {
+        $isApproved = $status === 'Approved';
+        if (! $this->budget->isAvailable() || $this->isApproved($item->status ?? null) === $isApproved) {
             return null;
         }
 
-        $existing = $this->budget->chargeForAny(array_map(static fn (object $row): int => (int) $row->id, $rows));
-
-        if ($approved === []) {
-            if ($existing === null) {
+        $itemId = (int) $item->id;
+        $label = $this->text($item->item ?? null) ?? 'Item';
+        if ($isApproved) {
+            // Already carried, from before the item was last set back: nothing more to charge.
+            if ($this->budget->chargeFor($itemId) !== null) {
                 return null;
             }
-            $released = $this->budget->release($existing);
+            if ($envelopeId === null) {
+                abort(422, 'Choose a budget envelope to charge this reimbursement to.');
+            }
+
+            $charge = $this->budget->charge($actor, [
+                'id' => $itemId,
+                'memberName' => $memberName,
+                'filedOn' => $filedOn,
+                'amountCents' => $this->itemCents($item),
+                'items' => [$label],
+                'department' => $department,
+            ], $envelopeId, $allowOverspend);
+
+            return [
+                'action' => PortalLogAction::POST,
+                'message' => PortalActivityCopy::chargedReimbursement(
+                    $memberName,
+                    $charge['envelopeName'],
+                    $this->peso($charge['amount']),
+                ),
+                'recordId' => (string) $charge['transactionId'],
+                'payload' => [
+                    'claimId' => (string) $itemId,
+                    'envelopeId' => (string) $charge['envelopeId'],
+                    'envelope' => $charge['envelopeName'],
+                    'amount' => $charge['amount'],
+                    'remainingAfter' => $charge['remainingAfter'],
+                    'overspent' => $charge['overspent'],
+                    'accountId' => $charge['accountId'],
+                    'account' => $charge['accountName'],
+                    'team' => $charge['team'],
+                ],
+            ];
+        }
+
+        $charge = $this->budget->chargeFor($itemId) ?? $this->wholeClaimCharge($rows, $itemId);
+        if ($charge === null) {
+            return null;
+        }
+        $left = (int) round($charge['amount'] * 100) - $this->itemCents($item);
+        $carrier = $charge['claimId'] === $itemId ? $this->nextCarrier($rows, $itemId) : $charge['claimId'];
+
+        if ($left <= 0 || $carrier === null) {
+            $released = $this->budget->release($charge);
 
             return [
                 'action' => PortalLogAction::DELETE,
@@ -592,78 +636,92 @@ final class PortalManageRequests
             ];
         }
 
-        $amountCents = 0;
-        $items = [];
-        foreach ($approved as $row) {
-            $amountCents += (int) round(((float) ($row->cost ?? 0)) * 100) * $this->quantity($row->qty ?? null);
-            $items[] = $this->text($row->item ?? null) ?? 'Item';
-        }
-        $claim = [
-            'id' => (int) min(array_map(static fn (object $row): int => (int) $row->id, $approved)),
+        $remaining = array_values(array_filter(
+            $rows,
+            fn (object $row): bool => (int) $row->id !== $itemId && $this->isApproved($row->status ?? null),
+        ));
+        $shrunk = $this->budget->shrink($actor, $charge, [
+            'id' => $carrier,
             'memberName' => $memberName,
             'filedOn' => $filedOn,
-            'amountCents' => $amountCents,
-            'items' => $items,
+            'amountCents' => $left,
+            'items' => array_map(fn (object $row): string => $this->text($row->item ?? null) ?? 'Item', $remaining),
             'department' => $department,
-        ];
-
-        if ($existing !== null) {
-            if ($envelopeId !== null && $envelopeId !== $existing['envelopeId']) {
-                abort(422, 'This claim is already charged to '.$existing['envelopeName'].'. One claim is charged to one envelope.');
-            }
-            if ((int) round($existing['amount'] * 100) === $amountCents && $existing['claimId'] === $claim['id']) {
-                return null;
-            }
-
-            $adjusted = $this->budget->adjust($actor, $existing, $claim, $allowOverspend);
-
-            return [
-                'action' => PortalLogAction::PATCH,
-                'message' => PortalActivityCopy::adjustedReimbursementCharge(
-                    $memberName,
-                    $adjusted['envelopeName'],
-                    $this->peso($adjusted['previousAmount']),
-                    $this->peso($adjusted['amount']),
-                ),
-                'recordId' => (string) $adjusted['transactionId'],
-                'payload' => [
-                    'claimId' => (string) $claim['id'],
-                    'envelopeId' => (string) $adjusted['envelopeId'],
-                    'envelope' => $adjusted['envelopeName'],
-                    'previousAmount' => $adjusted['previousAmount'],
-                    'amount' => $adjusted['amount'],
-                    'remainingAfter' => $adjusted['remainingAfter'],
-                    'overspent' => $adjusted['overspent'],
-                ],
-            ];
-        }
-
-        if ($envelopeId === null) {
-            abort(422, 'Choose a budget envelope to charge this reimbursement to.');
-        }
-
-        $charge = $this->budget->charge($actor, $claim, $envelopeId, $allowOverspend);
+        ]);
 
         return [
-            'action' => PortalLogAction::POST,
-            'message' => PortalActivityCopy::chargedReimbursement(
+            'action' => PortalLogAction::PATCH,
+            'message' => PortalActivityCopy::adjustedReimbursementCharge(
                 $memberName,
-                $charge['envelopeName'],
-                $this->peso($charge['amount']),
+                $shrunk['envelopeName'],
+                $this->peso($shrunk['previousAmount']),
+                $this->peso($shrunk['amount']),
             ),
-            'recordId' => (string) $charge['transactionId'],
+            'recordId' => (string) $shrunk['transactionId'],
             'payload' => [
-                'claimId' => (string) $claim['id'],
-                'envelopeId' => (string) $charge['envelopeId'],
-                'envelope' => $charge['envelopeName'],
-                'amount' => $charge['amount'],
-                'remainingAfter' => $charge['remainingAfter'],
-                'overspent' => $charge['overspent'],
-                'accountId' => $charge['accountId'],
-                'account' => $charge['accountName'],
-                'team' => $charge['team'],
+                'claimId' => (string) $carrier,
+                'envelopeId' => (string) $shrunk['envelopeId'],
+                'envelope' => $shrunk['envelopeName'],
+                'previousAmount' => $shrunk['previousAmount'],
+                'amount' => $shrunk['amount'],
             ],
         ];
+    }
+
+    /**
+     * The charge that covers an item's whole claim, from before items were charged one by one: one
+     * carried by another of the claim's items, and worth more than that item alone. An item's own
+     * charge is exactly its total, so it is never mistaken for one.
+     *
+     * @param  list<object>  $rows
+     * @return array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}|null
+     */
+    private function wholeClaimCharge(array $rows, int $itemId): ?array
+    {
+        $totals = [];
+        foreach ($rows as $row) {
+            if ((int) $row->id !== $itemId) {
+                $totals[(int) $row->id] = $this->itemCents($row);
+            }
+        }
+        foreach ($this->budget->chargesFor(array_keys($totals)) as $carrierId => $charge) {
+            if ((int) round($charge['amount'] * 100) > ($totals[$carrierId] ?? 0)) {
+                return $charge;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The item a whole-claim charge moves to when the one carrying it is set back: the lowest of the
+     * claim's other approved items that carries no charge of its own. Null when there is none.
+     *
+     * @param  list<object>  $rows
+     */
+    private function nextCarrier(array $rows, int $itemId): ?int
+    {
+        $approved = [];
+        foreach ($rows as $row) {
+            if ((int) $row->id !== $itemId && $this->isApproved($row->status ?? null)) {
+                $approved[] = (int) $row->id;
+            }
+        }
+        $carrying = $this->budget->chargesFor($approved);
+        $free = array_values(array_filter($approved, fn (int $id): bool => ! isset($carrying[$id])));
+
+        return $free === [] ? null : min($free);
+    }
+
+    private function isApproved(mixed $status): bool
+    {
+        return strcasecmp(trim((string) ($status ?? '')), 'Approved') === 0;
+    }
+
+    // An item's total in whole centavos: its cost times its quantity.
+    private function itemCents(object $row): int
+    {
+        return (int) round(((float) ($row->cost ?? 0)) * 100) * $this->quantity($row->qty ?? null);
     }
 
     private function peso(float $amount): string
@@ -1052,23 +1110,19 @@ final class PortalManageRequests
         $receiptFields = $this->reimbursements->receiptFieldsByItemId($ids);
         $payoutFields = $this->reimbursements->payoutReceiptFieldsByItemId($ids);
 
-        // A claim's charge is found through every item filed with it, the rows decide() settles together.
+        // The queue splits a claim by status, so its approved and pending items arrive as two rows
+        // of claims. Both carry the claim's own key, so the portal can tell they are one claim.
         $groups = [];
         $claimItems = [];
         foreach ($rows as $row) {
             $groups[$this->claimKey($row)][] = $row;
             $claimItems[$this->submissionKey($row)][] = (int) $row->id;
         }
-        $charges = $this->budget->chargesFor(array_merge(...array_values($claimItems)));
 
         $data = [];
         foreach ($groups as $group) {
             $itemIds = $claimItems[$this->submissionKey($group[0])] ?? [];
-            $charge = null;
-            foreach ($itemIds as $itemId) {
-                $charge ??= $charges[$itemId] ?? null;
-            }
-            $claim = $this->presentClaim($group, $receiptFields, $payoutFields, $itemIds === [] ? null : min($itemIds), $charge);
+            $claim = $this->presentClaim($group, $receiptFields, $payoutFields, $itemIds === [] ? null : min($itemIds));
             if ($claim !== null) {
                 $data[] = $claim;
             }
@@ -1087,10 +1141,9 @@ final class PortalManageRequests
      * @param  list<object>  $rows
      * @param  array<int, array{receiptName: ?string, receiptUrl: ?string, receiptMime: ?string, receiptThumbUrl: ?string}>  $receiptFields
      * @param  array<int, array{payoutReceiptName: ?string, payoutReceiptUrl: ?string, payoutReceiptMime: ?string, payoutReceiptThumbUrl: ?string}>  $payoutFields
-     * @param  array{transactionId: int, claimId: int, envelopeId: int, envelopeName: string, amount: float}|null  $charge
      * @return array<string, mixed>|null
      */
-    private function presentClaim(array $rows, array $receiptFields, array $payoutFields, ?int $chargeKey, ?array $charge): ?array
+    private function presentClaim(array $rows, array $receiptFields, array $payoutFields, ?int $chargeKey): ?array
     {
         if ($rows === []) {
             return null;
@@ -1153,11 +1206,6 @@ final class PortalManageRequests
             'approverRemarks' => $approverRemarks,
             'items' => $items,
             'chargeKey' => (string) ($chargeKey ?? min($ids)),
-            'charge' => $charge === null ? null : [
-                'envelopeId' => (string) $charge['envelopeId'],
-                'envelopeName' => $charge['envelopeName'],
-                'amount' => $charge['amount'],
-            ],
         ];
     }
 
