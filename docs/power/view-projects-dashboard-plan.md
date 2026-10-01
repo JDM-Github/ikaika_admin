@@ -27,8 +27,16 @@ This plan is about **what a project page shows**.
   open the project sees totals only (and their own reports in full).
 - **"Active" follows each project's own rhythm**, not a fixed 14 days (see step 2).
 - **Lines are Engineering's.** Engineering keeps "change in elements" from its reports. MIS gets its
-  own measure from **Bitbucket** (lines added / removed, files, commits; step 7), and reports for a
-  non-Engineering project stop asking for lines.
+  own measure from **Bitbucket** (lines added / removed, files, commits; step 7).
+- **Lines follow the project's department, not the person's role** (answered 2026-10-01): an
+  Engineering project asks for lines from whoever reports on it, admins and project leads included
+  (admins still do the work; only executives do not). A General, Admin or MIS project does not ask.
+- **Every branch counts** (answered 2026-10-01): all of a person's commits count, on any branch,
+  each commit once by its hash (see step 7).
+- **Commit author = employee by their ikaikabim email** (answered 2026-10-01): everyone commits with
+  it, since Bitbucket is only reachable with an ikaikabim account.
+- **Everything new goes in `sql/portal/separate.sql`** (with a migration for existing databases);
+  `sql/portal/schema.sql` is the original Airtable data and is never edited.
 
 ## What the data says (local copy of real data, 2026-10-01)
 
@@ -144,26 +152,32 @@ An MIS project tracks its work from its Git repositories instead of report lines
   lines removed and files per commit). A Bitbucket push webhook triggers it, with a scheduled sync as
   a backstop. Stored per commit: hash (unique), repository, author email, matched employee, date,
   message (internal only), lines added, lines removed, files changed.
+- **Storage:** the repository links and synced commits are new portal tables in
+  `sql/portal/separate.sql` plus a migration; `schema.sql` is never touched.
 - **Credentials:** a read-only repository or workspace access token in `ikaika_admin/.env` only,
   like the Airtable token. Never in the portal, a response or a log. (Bitbucket app passwords are
   deprecated; access tokens replace them.)
-- **Author = employee by email.** The commit author comes from each developer's own Git setting
-  (`author.raw` is "Name <email>"), not from the Bitbucket login. So it matches an employee only
-  when their Git `user.email` is their ikaikabim address. Unmatched authors are listed as such, with
-  a small alias table for an old or personal address.
+- **Author = employee by email.** The commit author comes from each developer's Git setting
+  (`author.raw` is "Name <email>"); everyone uses their ikaikabim address (decided), so it matches
+  `employees.email`. A commit whose email matches nobody is kept and shown as "Unknown author", never
+  dropped. (John Dave Pega's work email was missing from `sql/portal/data.sql`; added 2026-10-01.)
 - **Honest counts:**
   - Merge commits are skipped (they repeat their parents' lines).
   - Generated and vendored paths are skipped by pattern: lock files, `vendor/`, `node_modules/`,
     `graphify-out/`, build output, generated native folders. Without this one regenerated file
     outweighs a week of work.
-  - Only the counted branch (default: the main branch) counts, so rebased or abandoned branches do
-    not add twice.
+  - Every branch counts, each commit **once by its hash**, so a commit on several branches is not
+    counted twice. Caveat: a pull request merged with **squash** creates a new commit holding the
+    same lines as the branch's commits, which would then count twice. If the team squash-merges,
+    skip squash commits (Bitbucket marks the pull request's merge strategy) or count only the
+    branch commits.
 - **Shown:**
   - Dashboard: commits, lines added and removed, files changed, active development days, last commit.
   - Activity tab: a day-by-day list per person, beside their reports.
   - Same visibility rule as the Activity tab: commit messages only for the lead, managers and
     Admin or higher.
-- **Reports:** Daily and Late Report stop asking for lines when the project is not Engineering.
+- **Reports:** Daily and Late Report ask for lines only when the project is Engineering, whoever
+  reports (admins and leads included).
 - **Later, a client view:** a client-facing page (on the central platform) can show the same counts
   with curated summaries instead of raw commit messages and no links to Bitbucket. Out of scope here.
 
@@ -205,9 +219,6 @@ An MIS project tracks its work from its Git repositories instead of report lines
 
 ## Open questions
 
-- `?` Bitbucket: which branch counts per repository (default: main), and whether the workspace or
-  only chosen repositories are read.
-- `?` Bitbucket: whether every developer's Git `user.email` is already their ikaikabim address
-  (otherwise commits will not match employees until it is, or until an alias is added).
-- `?` Whether General and Admin projects keep report lines or drop them like MIS.
+- `?` Bitbucket: whether the team merges pull requests with squash (decides the squash rule in step 7).
+- `?` Bitbucket: the whole workspace, or only the repositories linked to a project.
 - Parked: per-scope target lines for Engineering, shown as "x of target y lines", never a percentage.
