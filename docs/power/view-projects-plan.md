@@ -173,7 +173,8 @@ Whoever manages the person already changes their reach from the Access Rule shee
 ## Order of work (after the page is finished)
 
 1. Decide where approvals live (most likely a new Manage / Projects page, with its own plan).
-2. Self-reach on the Access page (shared, every page).
+2. Self-reach on the Access page (shared, every page). **Done** (`access_self_reach`, `PATCH access/reach`,
+   narrow only); View Projects, Track Projects and Project Manager follow it, with tests.
 3. Catalog + presets in separate.sql. Parity test: every role still sees exactly what it sees
    today.
 4. Server: rule middleware and reach filters on each project endpoint.

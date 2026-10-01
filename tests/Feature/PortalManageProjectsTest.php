@@ -112,6 +112,21 @@ class PortalManageProjectsTest extends TestCase
         $this->assertContains((string) $this->projectId, $ids);
     }
 
+    // An admin who narrows Project Manager to their department on Access loses other departments until they widen it back.
+    public function test_an_admin_narrowed_to_department_covers_only_it(): void
+    {
+        $this->admin->forceFill(['department' => 'MIS'])->save();
+        $token = $this->token($this->admin);
+
+        $this->withToken($token)->patchJson('/api/development/portal/access/reach', ['key' => 'projects.manager', 'reach' => 'department'])->assertOk();
+        $this->assertNotContains((string) $this->projectId, array_column($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'), 'id'));
+        $this->withToken($token)->patchJson(self::BASE.'/'.$this->projectId, ['decision' => 'approve'])->assertForbidden();
+
+        $this->withToken($token)->patchJson('/api/development/portal/access/reach', ['key' => 'projects.manager', 'reach' => 'all'])->assertOk();
+        $this->assertSame(0, DB::connection('portal')->table('access_self_reach')->where('employee_id', $this->admin->getKey())->count());
+        $this->assertContains((string) $this->projectId, array_column($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'), 'id'));
+    }
+
     public function test_approving_writes_the_project_trail_ledger_and_tells_the_requester(): void
     {
         $this->decide($this->admin, ['decision' => 'approve'])
