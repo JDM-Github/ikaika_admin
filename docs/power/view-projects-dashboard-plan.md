@@ -147,9 +147,8 @@ An MIS project tracks its work from its Git repositories instead of report lines
 - **Link (decided 2026-10-01: many per project):** a project gets any number of Bitbucket
   repositories (workspace and repository), set on the department-aware form for MIS projects. A
   project can span repositories (the portal and the admin server, other parts, testing repos).
-  - Each link has a kind: **Main** or **Testing**. Testing repositories (work tried there before it
-    goes to the real one) show on the Activity tab, labelled, but stay out of the headline totals by
-    default. Otherwise the same work, redone in the main repository, would count twice.
+  - Every linked repository counts the same, testing repositories included (decided 2026-10-01:
+    "it's still a line").
   - The same repository may belong to more than one project; its commits count on each.
 - **Sync:** the server reads each repository's commits on the counted branch through the Bitbucket
   Cloud REST API (`/repositories/{workspace}/{repo}/commits`, then `/diffstat/{hash}` for lines added,
@@ -207,14 +206,43 @@ An MIS project tracks its work from its Git repositories instead of report lines
 - Drop `overallCompletion`, `completed`, `inProgress` from `scopeSummary` once the portal no longer
   reads them (same commit as the portal change, so nothing breaks in between).
 
-## Order of work
+## Safe order of work (so nothing breaks on the way)
 
-1. Dashboard tab and scope status from reports (steps 1 and 2): the biggest visible win, read-only.
-2. Activity tab (step 3), after the visibility question is decided.
-3. Trail cleanup (step 4): small.
-4. Department-aware form (step 5), with the repository link for MIS projects.
-5. Track Projects column swap (step 6).
-6. Bitbucket code activity for MIS (step 7), once a read-only access token exists.
+The rules every phase follows:
+- **Server adds first, portal follows, removal last.** A new field or endpoint ships before the
+  portal reads it; an old field goes only once nothing reads it. So the portal never asks for
+  something the server does not send.
+- **One phase, one pair of commits** (admin, then portal), each green on its own: server tests,
+  portal typecheck, lint and tests, then a read-only Playwright check as Steven (admin) and Jamie
+  (member). Any rows a check writes are cleaned up by id.
+- **New tables and columns go in `sql/portal/separate.sql` and a migration, together**, never
+  `schema.sql`. A reset then rebuilds the same database the migrations built.
+
+Phase 0, baseline (before any code):
+1. Push ikaika_admin (it was 14 commits ahead of Bitbucket on 2026-10-01) and the portal.
+2. Reset the local database: `sql/portal/reset.ps1` (schema, indexes, data, separate, then clears
+   the core ledger's portal rows). It wipes everything made only in the portal locally (projects
+   added there, Access gifts and limits, notifications, logs).
+3. Run both suites. The parity test (`PortalAccessTest`) then proves `separate.sql` rebuilds the
+   same presets the migrations made; fix any drift before building.
+4. Smoke check View Projects, Manage / Projects and Access in the browser.
+
+Then, one phase at a time:
+1. **Board summary fields (server only):** hours, last 30 days, people, last report, lines, hours by
+   activity, scope statuses, added next to today's fields. The portal ignores them, so nothing
+   changes on screen.
+2. **Dashboard tab (portal):** the new tiles and scope statuses; the percentage UI goes. Then the
+   old `overallCompletion` / `completed` / `inProgress` fields leave the server.
+3. **Activity tab:** the new read-only endpoint with the visibility rule enforced server-side, then
+   the tab.
+4. **Trail cleanup:** report-date rows leave the trail.
+5. **Department-aware form and reports:** the server first accepts a non-Engineering project and a
+   non-Engineering report without lines (and clears Engineering-only fields), then the portal hides
+   them. The repository links for MIS projects arrive here as an empty list.
+6. **Track Projects:** Hours and Last report replace the Progress column.
+7. **Bitbucket:** tables (separate.sql + migration), then the sync tested against faked HTTP
+   responses, then the webhook (with its secret checked), then a real read-only token in `.env`,
+   then the UI. No real call to Bitbucket happens until the fake-tested sync is green.
 
 ## Verification
 
@@ -231,6 +259,5 @@ An MIS project tracks its work from its Git repositories instead of report lines
 
 - Recommended (2026-10-01): keep the **merge commit** strategy, not squash; the squash guard in
   step 7 is only a fallback.
-- `?` Testing repositories out of the headline totals by default: confirm.
 - `?` Bitbucket: the whole workspace, or only the repositories linked to a project.
 - Parked: per-scope target lines for Engineering, shown as "x of target y lines", never a percentage.
