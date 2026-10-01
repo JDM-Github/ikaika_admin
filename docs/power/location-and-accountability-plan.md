@@ -1,6 +1,6 @@
 # Location and accountability — plan
 
-Status: **planned, not built** (written 2026-10-01). Company policy: every action in the portal
+Status: **step 2 built (2026-10-01); steps 1, 3 and 4 planned.** Company policy: every action in the portal
 must be traceable to the person who did it. A significant ("ground-breaking") action must not
 happen without that person confirming it is them.
 
@@ -54,8 +54,11 @@ When a write starts and location is not granted, a modal stops it:
 - The modal names the policy in one line, so the notice the Data Privacy Act asks for is shown
   where the data is collected.
 
-### 2. Location timeout with a fallback
+### 2. Location timeout with a fallback (built 2026-10-01)
 
+- Built in `LocationManager` (portal): the device read gets 8 seconds; a prompt still open is
+  shared by the next action instead of asked again. Checked with Playwright: a save with the prompt
+  never answered went through, logged with source `ip`.
 - A device fix gets about 8 seconds. After that the write uses the network location (the IP
   lookup the portal already has) and carries `X-Portal-Location-Source: ip`.
 - A save can then never hang on location again.
