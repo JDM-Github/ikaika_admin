@@ -167,7 +167,6 @@ final class PortalViewProjects
                 'projects.project_name',
                 'projects.department',
                 'projects.status',
-                'projects.progress_pct',
                 'projects.type_of_job',
                 'projects.area_sqft',
                 'projects.project_lead_email',
@@ -273,13 +272,14 @@ final class PortalViewProjects
     }
 
     /**
+     * The scopes attached to each project, by WBS code where Manage Scopes saved them, else by the
+     * activity codes its reports name. Counts and codes only: a project's real work comes from its
+     * reports (PortalProjectWork), so no completion figure is invented here.
+     *
      * @param  list<int>  $projectIds
      * @return array<int, array{
      *     tierLabel: string,
      *     total: int,
-     *     completed: int,
-     *     inProgress: int,
-     *     overallCompletion: float
      *     scopeCodes: list<string>
      * }>
      */
@@ -310,7 +310,6 @@ final class PortalViewProjects
             ->select([
                 'projects_project_scopes.project_id',
                 'projects_project_scopes.project_scope_id',
-                'project_scopes.progress_pct',
                 'project_scopes.id_no',
             ])
             ->get();
@@ -328,7 +327,6 @@ final class PortalViewProjects
             ->select([
                 'project_activity.project_id',
                 'scope_activity.project_scope_id',
-                'scope.progress_pct',
                 'scope.id_no',
             ])
             ->distinct()
@@ -362,7 +360,6 @@ final class PortalViewProjects
             $code = (string) $row->wbs_code;
             $scopes[(int) $row->project_id.':wbs:'.$code] = [
                 'projectId' => (int) $row->project_id,
-                'progress' => 0.0,
                 'code' => $code,
             ];
         }
@@ -373,7 +370,6 @@ final class PortalViewProjects
             $key = (int) $row->project_id.':'.(int) $row->project_scope_id;
             $scopes[$key] = [
                 'projectId' => (int) $row->project_id,
-                'progress' => $row->progress_pct,
                 'code' => $row->id_no,
             ];
         }
@@ -390,7 +386,6 @@ final class PortalViewProjects
             $key = $projectId.':activity:'.(int) $row->activity_code_id;
             $scopes[$key] = [
                 'projectId' => $projectId,
-                'progress' => 0.0,
                 'code' => $row->id_no,
             ];
         }
@@ -398,38 +393,16 @@ final class PortalViewProjects
         $summaries = [];
         foreach ($scopes as $scope) {
             $projectId = $scope['projectId'];
-            $progress = $scope['progress'];
-            $ratio = $progress === null || $progress === '' ? 0.0 : (float) $progress;
-            if ($ratio > 1) {
-                $ratio /= 100;
-            }
-            $ratio = max(0.0, min(1.0, $ratio));
             $summaries[$projectId] ??= [
                 'tierLabel' => '',
                 'total' => 0,
-                'completed' => 0,
-                'inProgress' => 0,
-                'overallCompletion' => 0.0,
                 'scopeCodes' => [],
             ];
             $summaries[$projectId]['total']++;
-            if ($ratio >= 1) {
-                $summaries[$projectId]['completed']++;
-            } elseif ($ratio > 0) {
-                $summaries[$projectId]['inProgress']++;
-            }
-            $summaries[$projectId]['overallCompletion'] += $ratio;
             $code = trim((string) ($scope['code'] ?? ''));
             if ($code !== '' && ! in_array($code, $summaries[$projectId]['scopeCodes'], true)) {
                 $summaries[$projectId]['scopeCodes'][] = $code;
             }
-        }
-
-        foreach ($summaries as $projectId => $summary) {
-            $summaries[$projectId]['overallCompletion'] = round(
-                $summary['overallCompletion'] / max($summary['total'], 1),
-                4,
-            );
         }
 
         return $summaries;

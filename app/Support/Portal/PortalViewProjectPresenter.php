@@ -19,7 +19,6 @@ final class PortalViewProjectPresenter
      *     project_name: mixed,
      *     department: mixed,
      *     status: mixed,
-     *     progress_pct: mixed,
      *     type_of_job: mixed,
      *     area_sqft: mixed,
      *     project_lead_email: mixed,
@@ -36,10 +35,7 @@ final class PortalViewProjectPresenter
      * @param  list<string>  $clientNames
      * @param  array{
      *     tierLabel: string,
-     *     total: int,
-     *     completed: int,
-     *     inProgress: int,
-     *     overallCompletion: float
+     *     total: int
      * }|null  $scopeSummary
      * @param  list<array{
      *     id: string,
@@ -77,7 +73,6 @@ final class PortalViewProjectPresenter
         $type = trim((string) ($row->type_of_job ?? ''));
         $leadEmail = strtolower(trim((string) ($row->project_lead_email ?? '')));
         $leadName = $leadEmail !== '' ? ($leadsByEmail[$leadEmail] ?? $leadEmail) : 'Unassigned';
-        $completion = self::completionRatio($row->progress_pct ?? null);
 
         return [
             'id' => $id,
@@ -95,9 +90,6 @@ final class PortalViewProjectPresenter
             'scopeSummary' => $scopeSummary ?? [
                 'tierLabel' => '',
                 'total' => 0,
-                'completed' => 0,
-                'inProgress' => 0,
-                'overallCompletion' => $completion,
             ],
             'scopeCodes' => $scopeCodes,
             'trail' => $trail,
@@ -132,22 +124,6 @@ final class PortalViewProjectPresenter
             'rejected' => 'rejected',
             default => 'approved',
         };
-    }
-
-    public static function completionRatio(mixed $progressPct): float
-    {
-        if ($progressPct === null || $progressPct === '') {
-            return 0.0;
-        }
-        $value = (float) $progressPct;
-        if ($value < 0) {
-            return 0.0;
-        }
-        if ($value > 1) {
-            $value = $value / 100;
-        }
-
-        return round(min(1.0, $value), 4);
     }
 
     public static function instant(mixed $value): string

@@ -263,9 +263,6 @@ class PortalViewProjectsTest extends TestCase
         $this->assertSame([
             'tierLabel' => '',
             'total' => 4,
-            'completed' => 1,
-            'inProgress' => 1,
-            'overallCompletion' => 0.375,
         ], $row['scopeSummary']);
         $this->assertSame([
             [
@@ -317,9 +314,6 @@ class PortalViewProjectsTest extends TestCase
         $this->assertSame([
             'tierLabel' => '',
             'total' => 1,
-            'completed' => 0,
-            'inProgress' => 1,
-            'overallCompletion' => 0.5,
         ], $row['scopeSummary']);
         $this->assertSame(['500'], $row['scopeCodes']);
     }

@@ -14,8 +14,14 @@ percentage (portal 62f4fef). **Phases 3-5 built (2026-10-02):**
     (`PortalActivityScopes`; board `scopeOptions`, form options `activityCodes`), shown as flat rows;
   - report projects say `hasLines`, so the report forms hide items and save 0 lines off Engineering;
   - one portal rule lives in `ProjectDepartmentUtility`, one server rule in `PortalProjectWork::isEngineering`.
+- Phase 6, no percentage left (2026-10-02, both repos, uncommitted): Track Projects' Progress %
+  column became Hours + Last Report; Home dropped the Portfolio Progress KPI and its Project
+  Progress list shows hours + last report; Manage Requests' Workforce Capacity projects show hours +
+  last report. `scopeSummary` now carries only `tierLabel`/`total` -- `completed`, `inProgress` and
+  `overallCompletion` left the server, along with Home's `completionRatio`/`portfolioCompletion` and
+  every `progress_pct` read. `PortalHome::activeProjects` adds work via `PortalProjectWork`.
 
-Phases 6-7 are still planned. Repository links for MIS projects arrive with phase 7, not 5. The power side of View Projects
+Phases 7 is still planned. Repository links for MIS projects arrive with phase 7, not 5. The power side of View Projects
 (who may see, add, edit, scope, delete, lead and approve) is finished; see `view-projects-plan.md`.
 This plan is about **what a project page shows**.
 
@@ -207,7 +213,7 @@ An MIS project tracks its work from its Git repositories instead of report lines
 
 ### 6. Track Projects follows
 
-- Replace the Progress meter column with Hours and Last report.
+- Replace the Progress meter column with Hours and Last report. **Built 2026-10-02.**
 - The status filter and department filter stay.
 
 ## Server shape
@@ -219,7 +225,9 @@ An MIS project tracks its work from its Git repositories instead of report lines
   for one project, checked with the same View Projects reach as the board, paged (25 a page).
 - Scope statuses come with the board's scope data, computed from report dates instead of progress.
 - Drop `overallCompletion`, `completed`, `inProgress` from `scopeSummary` once the portal no longer
-  reads them (same commit as the portal change, so nothing breaks in between).
+  reads them (same commit as the portal change, so nothing breaks in between). **Done 2026-10-02:**
+  the portal's `ProjectScopeSummaryModel` reads only `tierLabel`/`total`, and the server stopped
+  sending the rest.
 
 ## Safe order of work (so nothing breaks on the way)
 
@@ -263,7 +271,7 @@ Then, one phase at a time:
    them. The repository links for MIS projects arrive here as an empty list.
 6. **Track Projects:** Hours and Last report replace the Progress column. Home's project progress
    (`completionRatio`) and the Manage Requests view that reads `overallCompletion` switch too; only
-   then do those fields leave the server.
+   then do those fields leave the server. **Built 2026-10-02.**
 7. **Bitbucket:** tables (separate.sql + migration), then the sync tested against faked HTTP
    responses, then the webhook (with its secret checked), then a real read-only token in `.env`,
    then the UI. No real call to Bitbucket happens until the fake-tested sync is green.
