@@ -31,7 +31,6 @@ final class PortalProjectEditor
 
     private const CORE_RESOURCE = 'projects';
 
-
     private const MEMBER_ROLE = 'member';
 
     private const SUPPORT_ROLE = 'support';
@@ -99,7 +98,7 @@ final class PortalProjectEditor
 
     /**
      * What the form picks from: active employees (only those with an email can lead, since the lead is
-     * stored by email), clients, and the departments and job types projects already use.
+     * stored by email), clients, and the departments the company staffs and the job types projects use.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
@@ -810,16 +809,16 @@ final class PortalProjectEditor
     }
 
     /**
+     * The departments the company actually staffs, taken from its employees. Retired buckets
+     * projects were once filed under (Admin, General) are not offered on the form.
+     *
      * @return list<string>
      */
     private function departments(): array
     {
-        $names = [
-            ...$this->connection()->table('projects')->whereNull('deleted_at')->distinct()->pluck('department')->all(),
-            ...$this->connection()->table('employees')->distinct()->pluck('department')->all(),
-        ];
-
-        return $this->distinctSorted($names);
+        return $this->distinctSorted(
+            $this->connection()->table('employees')->distinct()->pluck('department')->all(),
+        );
     }
 
     /**
