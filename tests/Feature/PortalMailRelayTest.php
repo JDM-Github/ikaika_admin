@@ -8,6 +8,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Tests\TestCase;
 
@@ -19,6 +20,10 @@ use Tests\TestCase;
 class PortalMailRelayTest extends TestCase
 {
     private const URL = 'https://relay.test/wp-json/ikaika-portal/v1/mail';
+
+    private const FILES_URL = 'https://relay.test/wp-json/ikaika-portal/v2/mail';
+
+    private const CSV = "item,amount\nTape,45\n";
 
     protected function setUp(): void
     {
@@ -100,5 +105,83 @@ class PortalMailRelayTest extends TestCase
         $this->expectExceptionMessage('set MAIL_RELAY_URL and MAIL_RELAY_KEY');
 
         Mail::mailer('wprelay')->to('alpha@supplier.test')->send(PortalEmailMessages::testMail());
+    }
+
+    // The reported ask: files reach the bridge with the message, on the route that takes them.
+    public function test_a_message_with_files_goes_to_the_v2_route_with_each_file_whole(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('email-attachments/one', '%PDF-1.4 quote');
+        Storage::disk('local')->put('email-attachments/two', self::CSV);
+        Http::fake([self::FILES_URL => Http::response(['ok' => true, 'id' => 'files-1', 'attachments' => 2])]);
+
+        $sent = Mail::mailer('wprelay')->to('alpha@supplier.test')->send($this->mailWithFiles());
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === self::FILES_URL
+            && $request['to'] === ['alpha@supplier.test']
+            && $request['attachments'] === [
+                ['name' => 'Quote.pdf', 'type' => 'application/pdf', 'content' => base64_encode('%PDF-1.4 quote')],
+                ['name' => 'Costs.csv', 'type' => 'text/csv', 'content' => base64_encode(self::CSV)],
+            ]);
+        Http::assertNotSent(fn (Request $request): bool => $request->url() === self::URL);
+        $this->assertSame('250 relayed id=files-1', PortalEmailMessages::acceptance($sent));
+    }
+
+    // A bridge from before v2 would drop the files, so it is never handed them: the send fails instead,
+    // and the reason All Emails shows says what to upload rather than quoting WordPress.
+    public function test_a_bridge_without_v2_fails_the_send_rather_than_dropping_the_files(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('email-attachments/one', '%PDF-1.4 quote');
+        Storage::disk('local')->put('email-attachments/two', 'x');
+        Http::fake([
+            self::FILES_URL => Http::response(['code' => 'rest_no_route', 'message' => 'No route was found matching the URL and request method.'], 404),
+            self::URL => Http::response(['ok' => true, 'id' => 'should-not-happen']),
+        ]);
+
+        try {
+            Mail::mailer('wprelay')->to('alpha@supplier.test')->send($this->mailWithFiles());
+            $this->fail('A message with files must not read as sent through a bridge that cannot carry them.');
+        } catch (TransportException $error) {
+            $this->assertSame('The mail bridge on relay.test needs updating to send files: upload the current ikaika-portal-mail.php '
+                .'to its wp-content/mu-plugins, then send again. [rest_no_route]', $error->getMessage());
+        }
+        Http::assertNotSent(fn (Request $request): bool => $request->url() === self::URL);
+    }
+
+    // Only a missing route means an old bridge: a v2 bridge that turns a message down is quoted as usual.
+    public function test_a_bridge_with_v2_that_refuses_files_says_why_in_its_words(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('email-attachments/one', '%PDF-1.4 quote');
+        Storage::disk('local')->put('email-attachments/two', 'x');
+        Http::fake([self::FILES_URL => Http::response(['ok' => false, 'error' => 'The files come to more than 12 MB.'], 413)]);
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('The mail bridge refused the message (HTTP 413): The files come to more than 12 MB.');
+
+        Mail::mailer('wprelay')->to('alpha@supplier.test')->send($this->mailWithFiles());
+    }
+
+    public function test_files_need_the_bridge_address_to_name_v1(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('email-attachments/one', 'x');
+        Storage::disk('local')->put('email-attachments/two', 'x');
+        config(['mail.mailers.wprelay.endpoint' => 'https://relay.test/mail-bridge']);
+        Http::fake();
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('MAIL_RELAY_URL must end in /ikaika-portal/v1/mail');
+
+        Mail::mailer('wprelay')->to('alpha@supplier.test')->send($this->mailWithFiles());
+    }
+
+    private function mailWithFiles(): PortalEmailMail
+    {
+        return new PortalEmailMail('Files', 'Attached.', null, 'markup', 'markup', null, null, [
+            ['path' => 'email-attachments/one', 'name' => 'Quote.pdf', 'mime' => 'application/pdf'],
+            ['path' => 'email-attachments/two', 'name' => 'Costs.csv', 'mime' => 'text/csv'],
+        ]);
     }
 }

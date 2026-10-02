@@ -132,17 +132,23 @@ final class PortalEmailPresenter
             'sentByIdNo' => $known['idNo'] ?? null,
             'sentByName' => $known['name'] ?? 'Administrator',
             'sentAt' => self::instant($row->date_sent ?? $row->date_created),
+            // Counted by the list's query; a row read without the count carried none it knows of.
+            'attachmentCount' => (int) ($row->getAttribute('attachments_count') ?? 0),
         ];
     }
 
     /**
      * @param  array<int, array{name: string, idNo: ?string}>  $senders
+     * @param  list<array{id: string, name: string, mimeType: string, sizeBytes: int}>  $attachments
      * @return array<string, mixed>
      */
-    public static function detail(EmailMessage $row, array $senders): array
+    public static function detail(EmailMessage $row, array $senders, array $attachments = []): array
     {
         return [
             ...self::message($row, $senders),
+            // The files it carried, each downloadable from All Emails by its id.
+            'attachments' => $attachments,
+            'attachmentCount' => count($attachments),
             'body' => (string) $row->body,
             'format' => self::format($row->format),
             'footerId' => is_numeric($row->footer_id) ? (int) $row->footer_id : null,

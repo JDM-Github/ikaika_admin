@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Mail\SentMessage;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 /**
@@ -22,6 +23,9 @@ use Throwable;
  * recorded against that member alone. A delivered notice also drops an inbox row, because the
  * portal bell is where a member looks. Addresses are used to send and are never stored: the
  * outbox records who was reached, by name.
+ *
+ * Attachments are staged before the send (PortalEmailAttachments) and claimed by its row in the same
+ * transaction that opens it, so a file goes out with one email only and the outbox keeps what it was.
  */
 final class PortalEmailMessages
 {
@@ -63,6 +67,7 @@ final class PortalEmailMessages
         private readonly PortalEmailAudience $audience,
         private readonly PortalTimezone $timezone,
         private readonly PortalAudit $audit,
+        private readonly PortalEmailAttachments $attachments,
     ) {}
 
     /**
@@ -120,9 +125,34 @@ final class PortalEmailMessages
             return [
                 'section' => 'administration',
                 'resource' => 'emails',
-                'data' => PortalEmailPresenter::detail($row, $this->senders($senderId === null ? [] : [$senderId])),
+                'data' => PortalEmailPresenter::detail(
+                    $row,
+                    $this->senders($senderId === null ? [] : [$senderId]),
+                    $this->attachments->forMessage((int) $row->getKey()),
+                ),
             ];
         });
+    }
+
+    /**
+     * One file a sent email carried, for All Emails to hand back. Reading it is logged, as reading
+     * anything a send carried out of the company is.
+     */
+    public function attachment(Employee $actor, Request $request, int $id, string $token): StreamedResponse
+    {
+        $row = $this->rowOrFail($id);
+        $file = $this->attachments->download((int) $row->getKey(), $token);
+        $this->audit->record(
+            $actor,
+            PortalLogAction::VIEW,
+            PortalEmail::CORE_RESOURCE,
+            PortalActivityCopy::downloadedEmailAttachment($file['name'], (string) $row->subject),
+            (string) $row->getKey(),
+            $request,
+            ['attachment' => strtolower(trim($token))],
+        );
+
+        return $file['response'];
     }
 
     /**
@@ -198,6 +228,7 @@ final class PortalEmailMessages
         $footerId = $this->validatedFooterId($request);
         $linkPath = $this->validatedLinkPath($request);
         [$fromName, $replyTo] = $this->sender($actor, $request);
+        $attachments = $this->attachments->staged($actor, $request->input('attachmentIds', []));
         $footer = $footerId === null ? null : $this->blocks->footer($footerId);
         $footerBody = $footer === null ? null : trim((string) $footer->body);
         $footerFormat = $footer === null ? null : $this->blockFormat($footer);
@@ -219,6 +250,7 @@ final class PortalEmailMessages
             $fromName,
             $replyTo,
             $linkPath,
+            $attachments,
         );
     }
 
@@ -257,6 +289,7 @@ final class PortalEmailMessages
      * @param  array{departments: list<string>, roles: list<string>, memberIds: list<int>, emails: list<string>}  $filter
      * @param  list<string>  $cc
      * @param  list<string>  $bcc
+     * @param  list<object>  $attachments  staged rows, checked by PortalEmailAttachments::staged
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     private function deliver(
@@ -276,6 +309,7 @@ final class PortalEmailMessages
         ?string $fromName,
         ?string $replyTo,
         ?string $linkPath,
+        array $attachments = [],
     ): array {
         $recipients = $this->audience->recipients($audience, $filter);
         if ($recipients === []) {
@@ -283,7 +317,9 @@ final class PortalEmailMessages
         }
 
         $employeeId = (int) $actor->getKey();
-        $messageId = $this->openRow(
+        // The row and its files commit together: a file another send claimed first refuses this one whole.
+        $messageId = (int) $this->connection()->transaction(fn (): int => $this->openWithAttachments(
+            $attachments,
             $category,
             $subject,
             $body,
@@ -299,7 +335,8 @@ final class PortalEmailMessages
             $replyTo,
             $recipients,
             $employeeId,
-        );
+        ));
+        $files = PortalEmailAttachments::mailFiles($attachments);
 
         $sent = 0;
         $failures = [];
@@ -308,7 +345,7 @@ final class PortalEmailMessages
             // Typed addresses go as one email, as a mail client sends it: To and Cc on show, Bcc hidden.
             try {
                 Mail::to(array_column($recipients, 'email'))->cc($cc)->bcc($bcc)
-                    ->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo));
+                    ->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo, $files));
                 $sent = count($recipients);
             } catch (Throwable $error) {
                 $reason = $this->reason($error);
@@ -319,7 +356,7 @@ final class PortalEmailMessages
         } else {
             foreach ($recipients as $recipient) {
                 try {
-                    Mail::to($recipient['email'])->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo));
+                    Mail::to($recipient['email'])->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo, $files));
                     $sent++;
                     if ($recipient['id'] !== null) {
                         $reached[] = $recipient['id'];
@@ -340,7 +377,7 @@ final class PortalEmailMessages
         if ($audience !== PortalEmailAudience::CUSTOM && ($cc !== [] || $bcc !== [])) {
             try {
                 $copy = $cc !== [] ? Mail::to($cc)->bcc($bcc) : Mail::bcc($bcc);
-                $copy->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo));
+                $copy->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo, $files));
             } catch (Throwable $error) {
                 $failures[] = ['employeeId' => null, 'name' => self::COPY_NAME, 'reason' => $this->reason($error)];
             }
@@ -381,6 +418,9 @@ final class PortalEmailMessages
                 'recipientCount' => count($recipients),
                 'sent' => $sent,
                 'failed' => $failed,
+                // How many files and how large, never their names: the ledger syncs out.
+                'attachments' => count($attachments),
+                'attachmentBytes' => PortalEmailAttachments::totalBytes($attachments),
             ],
         );
         $this->bumpCache();
@@ -388,7 +428,11 @@ final class PortalEmailMessages
         return [
             'section' => 'administration',
             'resource' => 'emails',
-            'data' => PortalEmailPresenter::detail($this->rowOrFail($messageId), $this->senders([$employeeId])),
+            'data' => PortalEmailPresenter::detail(
+                $this->rowOrFail($messageId),
+                $this->senders([$employeeId]),
+                $this->attachments->forMessage($messageId),
+            ),
         ];
     }
 
@@ -432,6 +476,7 @@ final class PortalEmailMessages
         ?string $footerFormat,
         ?string $fromName,
         ?string $replyTo,
+        array $files = [],
     ): PortalEmailMail {
         return new PortalEmailMail(
             $subject,
@@ -441,6 +486,7 @@ final class PortalEmailMessages
             $footerFormat ?? PortalEmailMarkup::FORMAT_MARKUP,
             $fromName,
             $replyTo,
+            $files,
         );
     }
 
@@ -469,6 +515,55 @@ final class PortalEmailMessages
         }
 
         return [$fromName, $email];
+    }
+
+    /**
+     * Opens the outbox row and hands it its files; run inside the transaction deliver() opens.
+     *
+     * @param  list<object>  $attachments
+     * @param  array{departments: list<string>, roles: list<string>, memberIds: list<int>, emails: list<string>}  $filter
+     * @param  list<string>  $cc
+     * @param  list<string>  $bcc
+     * @param  list<array{id: ?int, name: string, email: string}>  $recipients
+     */
+    private function openWithAttachments(
+        array $attachments,
+        string $category,
+        string $subject,
+        string $body,
+        string $format,
+        ?int $footerId,
+        ?string $footerBody,
+        ?string $footerFormat,
+        string $audience,
+        array $filter,
+        array $cc,
+        array $bcc,
+        ?string $fromName,
+        ?string $replyTo,
+        array $recipients,
+        int $employeeId,
+    ): int {
+        $messageId = $this->openRow(
+            $category,
+            $subject,
+            $body,
+            $format,
+            $footerId,
+            $footerBody,
+            $footerFormat,
+            $audience,
+            $filter,
+            $cc,
+            $bcc,
+            $fromName,
+            $replyTo,
+            $recipients,
+            $employeeId,
+        );
+        $this->attachments->attach($attachments, $messageId);
+
+        return $messageId;
     }
 
     /**
@@ -564,7 +659,7 @@ final class PortalEmailMessages
         string $sort,
         string $dir,
     ): array {
-        $query = $this->within(EmailMessage::query()->select(PortalEmailPresenter::messageColumns()), $category, $from, $to);
+        $query = $this->within(EmailMessage::query()->select(PortalEmailPresenter::messageColumns())->withCount('attachments'), $category, $from, $to);
         if ($status !== null) {
             $query->where('status', $status);
         }

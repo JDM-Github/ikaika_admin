@@ -103,10 +103,13 @@ CREATE TABLE calendar_event_members (
 -- addresses in audience_filter.emails; cc and bcc are the addresses that shared one copy.
 -- from_name and reply_to are set when an administrator sent it as themselves.
 -- recipients is who the send went to, [{name, email}]; null on sends from before it was kept.
+-- email_attachments: a file on the backend's private disk (storage/app/private), staged while
+-- message_id is null and the outbox row's once a send claims it. token is the id the browser
+-- holds; name and mime are what it was mailed as.
 -- Existing databases: the Laravel migrations create_portal_email_tables and
 -- add_format_to_portal_email_tables, add_copies_to_portal_email_messages,
--- add_sender_to_portal_email_messages, seed_portal_email_built_in_blocks and
--- add_recipients_to_portal_email_messages.
+-- add_sender_to_portal_email_messages, seed_portal_email_built_in_blocks,
+-- add_recipients_to_portal_email_messages and create_portal_email_attachments_table.
 -- ============================================================================
 
 CREATE TABLE email_blocks (
@@ -152,6 +155,23 @@ CREATE TABLE email_messages (
     INDEX idx_email_messages_sent_by (sent_by),
     FOREIGN KEY (footer_id) REFERENCES email_blocks(id) ON DELETE SET NULL,
     FOREIGN KEY (sent_by)   REFERENCES employees(id)    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE email_attachments (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    token        CHAR(36)     NOT NULL,
+    message_id   INT          NULL,
+    name         VARCHAR(191) NOT NULL,
+    mime         VARCHAR(127) NOT NULL,
+    size_bytes   INT          NOT NULL,
+    path         VARCHAR(255) NOT NULL,
+    uploaded_by  INT          NOT NULL,
+    date_created DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_email_attachments_token (token),
+    INDEX idx_email_attachments_message (message_id),
+    INDEX idx_email_attachments_staged (uploaded_by, message_id),
+    FOREIGN KEY (message_id)  REFERENCES email_messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (uploaded_by) REFERENCES employees(id)      ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Built-in blocks: the company footer and the Portal email test template. The HTML is

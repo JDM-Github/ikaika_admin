@@ -4,6 +4,7 @@ use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailMessage;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
+use App\Support\Portal\PortalEmailAttachments;
 use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalEmailMessages;
 use App\Support\Portal\PortalMailDiagnostics;
@@ -178,3 +179,11 @@ Artisan::command('portal:mail-test
 
     return 0;
 })->purpose('Send one test email with the current mail settings');
+
+// Each attach clears what was abandoned too; this is for a scheduler, or after a quiet stretch.
+Artisan::command('portal:prune-email-attachments', function (PortalEmailAttachments $attachments): int {
+    $pruned = $attachments->prune();
+    $this->info($pruned === 1 ? 'Cleared 1 attachment that was never sent.' : 'Cleared '.$pruned.' attachments that were never sent.');
+
+    return 0;
+})->purpose('Delete Send Email attachments staged more than a day ago and never sent');

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Portal\Administration\AllActionsController;
 use App\Http\Controllers\Api\Portal\Administration\AllLogsController;
+use App\Http\Controllers\Api\Portal\Administration\EmailAttachmentsController;
 use App\Http\Controllers\Api\Portal\Administration\EmailBlocksController;
 use App\Http\Controllers\Api\Portal\Administration\EmailImagesController;
 use App\Http\Controllers\Api\Portal\Administration\EmailMessagesController;
@@ -52,6 +53,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // Administration / All Emails: the sent list and one sent email.
     Route::middleware(['portal.rule:administration.emails', 'throttle:portal-administration-email'])->group(function (): void {
         Route::get('administration/emails', [EmailMessagesController::class, 'index']);
+        // A file a sent email carried; reading it is logged.
+        Route::get('administration/emails/{id}/attachments/{token}', [EmailMessagesController::class, 'attachment'])
+            ->whereNumber('id');
         Route::get('administration/emails/{id}', [EmailMessagesController::class, 'show'])
             ->whereNumber('id');
     });
@@ -71,4 +75,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
 
     Route::middleware(['portal.rule:email.send', 'throttle:portal-administration-email-send'])
         ->post('administration/emails', [EmailMessagesController::class, 'store']);
+    // Attachments are staged as they are attached, so only someone who may send can attach.
+    Route::middleware(['portal.rule:email.send', 'throttle:portal-administration-email-write'])->group(function (): void {
+        Route::post('administration/email-attachments', [EmailAttachmentsController::class, 'store']);
+        Route::delete('administration/email-attachments/{token}', [EmailAttachmentsController::class, 'destroy']);
+    });
 });
