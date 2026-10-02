@@ -665,3 +665,13 @@ SELECT id, 'manage.users.information', 'all' FROM employees WHERE id_no IN (
     '220202-0002', -- Nathaniel Tanglao
     '220302-0003'  -- Steven Gaurano
 );
+
+-- Steven Gaurano (admin, holds Project Lead at All) gives Fin Donasco and Audie Gantuangko the
+-- Project Lead power for Engineering. A gift, so it counts only while Steven keeps it; made in
+-- Default mode. Both receiver id_nos are active employees loaded from data.sql.
+INSERT INTO access_grants (employee_id, permission_key, reach, granted_by)
+SELECT receiver.id, 'projects.lead', 'department', giver.id
+FROM employees AS receiver
+JOIN employees AS giver ON giver.id_no = '220302-0003'
+WHERE receiver.id_no IN ('220825-0004', '230103-0005');
+
