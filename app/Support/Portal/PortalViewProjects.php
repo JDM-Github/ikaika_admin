@@ -77,6 +77,19 @@ final class PortalViewProjects
     }
 
     /**
+     * One project's effective scope codes: the WBS codes saved from Manage Scopes, else the codes its
+     * pivots or reports name. The editor shows the same list the board does.
+     *
+     * @return list<string>
+     */
+    public function scopeCodesForProject(int $projectId): array
+    {
+        $summaries = $this->scopeSummariesByProject([$projectId]);
+
+        return $summaries[$projectId]['scopeCodes'] ?? [];
+    }
+
+    /**
      * @param  array<string, ?string>  $powers
      * @return array{
      *     section: string,

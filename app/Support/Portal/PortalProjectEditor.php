@@ -740,13 +740,7 @@ final class PortalProjectEditor
                 'supportMembers' => $people[self::SUPPORT_ROLE],
                 'levels' => $levels,
                 'links' => $links,
-                'scopeCodes' => $this->connection()
-                    ->table('projects_wbs_scopes')
-                    ->where('project_id', $projectId)
-                    ->orderBy('wbs_code')
-                    ->pluck('wbs_code')
-                    ->map(static fn (mixed $code): string => (string) $code)
-                    ->all(),
+                'scopeCodes' => $this->projects->scopeCodesForProject($projectId),
             ],
         ];
     }
