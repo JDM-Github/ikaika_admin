@@ -32,6 +32,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware('throttle:portal-projects-write')
         ->put('projects/{id}/scopes', [ProjectsController::class, 'scopes'])
         ->whereNumber('id');
+    // Which activity codes a project type may use on a report; a global change, so All reach only.
+    Route::middleware('throttle:portal-projects-write')
+        ->put('projects/allowed-activities', [ProjectsController::class, 'allowedActivities']);
     /*
      * No rule middleware: Delete projects is checked in PortalProjectDeletion, because a project's lead
      * may delete their own without it. The write throttle is the recycle bin's, where the row lands.

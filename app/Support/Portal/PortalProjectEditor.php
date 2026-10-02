@@ -152,6 +152,10 @@ final class PortalProjectEditor
                 'types' => $this->jobTypes(),
                 // Job types by the department that uses them, so the form offers only the chosen one's.
                 'typesByDepartment' => $this->typesByDepartment(),
+                // Which activity codes each job type may use on a report, keyed by job type.
+                'allowedActivitiesByType' => $this->allowedActivitiesByType(),
+                // Editing a job type's allowed activities is a global change, so it needs All reach.
+                'canManageAllowedActivities' => PortalRules::reach($actor, $request, PortalProjectPowers::EDIT) === 'all',
                 // A project that is not Engineering's picks its scopes from these, by its department.
                 'activityCodes' => PortalActivityScopes::all(),
             ],
@@ -856,6 +860,96 @@ final class PortalProjectEditor
         }
 
         return $types;
+    }
+
+    /**
+     * The activity codes each job type may use on a report, keyed by job type. A type with no rule is
+     * absent, and the report falls back to the whole catalogue for it. Stored prefixes are resolved to
+     * whole codes here, so the form shows ticked codes rather than their digits.
+     *
+     * @return array<string, list<string>>
+     */
+    private function allowedActivitiesByType(): array
+    {
+        $codes = PortalActivityScopes::all();
+        $rows = $this->connection()->table('job_type_allowed_activities')->get(['job_type', 'activity_code_id_initials']);
+
+        $allowed = [];
+        foreach ($rows as $row) {
+            $jobType = $this->text($row->job_type);
+            if ($jobType === null) {
+                continue;
+            }
+            $initials = [];
+            foreach (explode(',', (string) ($row->activity_code_id_initials ?? '')) as $piece) {
+                $value = trim($piece);
+                if ($value !== '') {
+                    $initials[] = $value;
+                }
+            }
+            $chosen = [];
+            foreach ($codes as $code) {
+                foreach ($initials as $prefix) {
+                    if ($code['code'] !== '' && str_starts_with($code['code'], $prefix)) {
+                        $chosen[] = $code['code'];
+                        break;
+                    }
+                }
+            }
+            $allowed[$jobType] = $chosen;
+        }
+
+        return $allowed;
+    }
+
+    /**
+     * Set which activity codes a job type may use. Writes one row, the chosen codes comma-joined; the
+     * report matches them as prefixes, so a stored code allows exactly itself. All reach only.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function saveAllowedActivities(Employee $actor, Request $request): array
+    {
+        if (PortalRules::reach($actor, $request, PortalProjectPowers::EDIT) !== 'all') {
+            abort(403, 'Editing a project type needs Edit projects at every department.');
+        }
+        $data = $request->validate([
+            'jobType' => ['required', 'string', 'max:191'],
+            'activityCodes' => ['present', 'array', 'max:'.self::MAX_SCOPES],
+            'activityCodes.*' => ['string', 'max:32'],
+        ]);
+        $jobType = trim($data['jobType']);
+        if ($jobType === '' || ! in_array($jobType, $this->jobTypes(), true)) {
+            abort(422, 'Choose a project type from the list the form offers.');
+        }
+
+        $known = [];
+        foreach (PortalActivityScopes::all() as $code) {
+            $known[$code['code']] = true;
+        }
+        $codes = [];
+        foreach ($data['activityCodes'] as $raw) {
+            $code = trim((string) $raw);
+            if ($code !== '' && isset($known[$code]) && ! in_array($code, $codes, true)) {
+                $codes[] = $code;
+            }
+        }
+
+        $this->connection()->table('job_type_allowed_activities')->where('job_type', $jobType)->delete();
+        if ($codes !== []) {
+            $this->connection()->table('job_type_allowed_activities')->insert([
+                'job_type' => $jobType,
+                'activity_code_id_initials' => implode(',', $codes),
+            ]);
+        }
+        // The report builder reads this table through its own cache; bump it so the form sees the change.
+        (new PortalReportProjects)->bumpCache();
+
+        return [
+            'section' => 'projects',
+            'resource' => 'allowed-activities',
+            'data' => ['jobType' => $jobType, 'activityCodes' => $codes],
+        ];
     }
 
     /**

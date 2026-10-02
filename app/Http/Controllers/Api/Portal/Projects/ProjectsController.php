@@ -70,6 +70,11 @@ class ProjectsController extends Controller
         return response()->json($this->editor->replaceScopes($this->actor($request), $request, $id));
     }
 
+    public function allowedActivities(Request $request): JsonResponse
+    {
+        return response()->json($this->editor->saveAllowedActivities($this->actor($request), $request));
+    }
+
     public function destroy(Request $request, int $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');
