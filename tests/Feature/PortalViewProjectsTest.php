@@ -270,6 +270,7 @@ class PortalViewProjectsTest extends TestCase
                 'changedOn' => '2026-09-01T08:00:00+00:00',
                 'actorName' => 'Metrics Tester',
                 'summary' => 'Project Edited: Updated scope totals',
+                'actorPhotoUrl' => null,
             ],
         ], $row['trail']);
     }

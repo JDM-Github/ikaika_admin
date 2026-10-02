@@ -41,9 +41,11 @@ final class PortalViewProjectPresenter
      *     id: string,
      *     changedOn: string,
      *     actorName: string,
-     *     summary: string
+     *     summary: string,
+     *     actorPhotoUrl: string|null
      * }>  $trail
      * @param  list<string>  $scopeCodes
+     * @param  array<string, string>  $memberPhotos
      * @return array<string, mixed>
      */
     public static function item(
@@ -54,6 +56,7 @@ final class PortalViewProjectPresenter
         ?array $scopeSummary,
         array $trail,
         array $scopeCodes = [],
+        array $memberPhotos = [],
     ): array {
         $id = (string) (int) $row->id;
         $code = trim((string) ($row->project_number ?? ''));
@@ -86,6 +89,7 @@ final class PortalViewProjectPresenter
             'creationStatus' => self::creationStatus($row->project_creation_status ?? null),
             'areaSquareFeet' => self::area($row->area_sqft ?? null),
             'memberNames' => $memberNames,
+            'memberPhotos' => $memberPhotos,
             'isAssigned' => (bool) ($row->is_assigned ?? false),
             'scopeSummary' => $scopeSummary ?? [
                 'tierLabel' => '',

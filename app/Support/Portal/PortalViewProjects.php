@@ -91,10 +91,13 @@ final class PortalViewProjects
             static fn (object $row): int => (int) $row->id,
             $rows,
         );
-        $memberNames = $this->memberNamesByProject($projectIds);
+        $members = $this->membersByProject($projectIds);
+        $memberNames = $this->namesByProject($members);
+        $memberPhotos = $this->photosByProject($members);
         $clientNames = $this->clientNamesByProject($projectIds);
         $scopeSummaries = $this->scopeSummariesByProject($projectIds);
         $trails = $this->trailsByProject($projectIds);
+        $trailPhotos = $this->actorPhotos($trails);
         $leadsByEmail = $this->leadsByEmail($rows);
         $work = (new PortalProjectWork)->byProject($rows, CarbonImmutable::today());
         $activityCodes = PortalActivityScopes::all();
@@ -107,6 +110,11 @@ final class PortalViewProjects
             if ($scopeSummary !== null) {
                 unset($scopeSummary['scopeCodes']);
             }
+            // Each trail row carries its actor's photo, so the Contributors list shows a face.
+            $trail = array_map(
+                static fn (array $entry): array => [...$entry, 'actorPhotoUrl' => $trailPhotos[$entry['actorName']] ?? null],
+                $trails[$id] ?? [],
+            );
             $projects[] = [
                 ...PortalViewProjectPresenter::item(
                     $row,
@@ -114,8 +122,9 @@ final class PortalViewProjects
                     $leadsByEmail,
                     $clientNames[$id] ?? [],
                     $scopeSummary,
-                    $trails[$id] ?? [],
+                    $trail,
                     $scopeCodes,
+                    $memberPhotos[$id] ?? [],
                 ),
                 ...PortalProjectPowers::flags($powers, $actor, $row),
                 'work' => $work[$id],
@@ -196,10 +205,12 @@ final class PortalViewProjects
     }
 
     /**
+     * Each project's members as {id, name}, so the board can carry their names and their photos.
+     *
      * @param  list<int>  $projectIds
-     * @return array<int, list<string>>
+     * @return array<int, list<array{id: int, name: string}>>
      */
-    private function memberNamesByProject(array $projectIds): array
+    private function membersByProject(array $projectIds): array
     {
         if ($projectIds === []) {
             return [];
@@ -211,6 +222,7 @@ final class PortalViewProjects
             ->whereIn('employees_projects.project_id', $projectIds)
             ->select([
                 'employees_projects.project_id',
+                'employees.id',
                 'employees.first_name',
                 'employees.last_name',
             ])
@@ -218,7 +230,7 @@ final class PortalViewProjects
             ->orderBy('employees.last_name')
             ->get();
 
-        $names = [];
+        $members = [];
         foreach ($rows as $row) {
             $projectId = (int) $row->project_id;
             $name = PortalSubmittedReportPresenter::memberName(
@@ -228,13 +240,101 @@ final class PortalViewProjects
             if ($name === 'Member') {
                 continue;
             }
-            $names[$projectId] ??= [];
-            if (! in_array($name, $names[$projectId], true)) {
-                $names[$projectId][] = $name;
+            $members[$projectId] ??= [];
+            $seen = false;
+            foreach ($members[$projectId] as $existing) {
+                if ($existing['name'] === $name) {
+                    $seen = true;
+                    break;
+                }
+            }
+            if (! $seen) {
+                $members[$projectId][] = ['id' => (int) $row->id, 'name' => $name];
             }
         }
 
+        return $members;
+    }
+
+    /**
+     * @param  array<int, list<array{id: int, name: string}>>  $members
+     * @return array<int, list<string>>
+     */
+    private function namesByProject(array $members): array
+    {
+        $names = [];
+        foreach ($members as $projectId => $list) {
+            $names[$projectId] = array_map(static fn (array $member): string => $member['name'], $list);
+        }
+
         return $names;
+    }
+
+    /**
+     * @param  array<int, list<array{id: int, name: string}>>  $members
+     * @return array<int, array<string, string>>
+     */
+    private function photosByProject(array $members): array
+    {
+        $ids = [];
+        foreach ($members as $list) {
+            foreach ($list as $member) {
+                $ids[] = $member['id'];
+            }
+        }
+        $photos = PortalEmployeePresenter::photoUrls($ids);
+
+        $byProject = [];
+        foreach ($members as $projectId => $list) {
+            $byProject[$projectId] = [];
+            foreach ($list as $member) {
+                if (isset($photos[$member['id']])) {
+                    $byProject[$projectId][$member['name']] = $photos[$member['id']];
+                }
+            }
+        }
+
+        return $byProject;
+    }
+
+    /**
+     * Trail actors are stored as a name, so match them to employees by full name for their photo.
+     *
+     * @param  array<int, list<array{actorName: string}>>  $trails
+     * @return array<string, string>
+     */
+    private function actorPhotos(array $trails): array
+    {
+        $names = [];
+        foreach ($trails as $entries) {
+            foreach ($entries as $entry) {
+                $name = trim($entry['actorName']);
+                if ($name !== '' && $name !== 'System') {
+                    $names[$name] = true;
+                }
+            }
+        }
+        if ($names === []) {
+            return [];
+        }
+
+        $idsByName = PortalEmployeePresenter::idsByFullName();
+        $wanted = [];
+        foreach (array_keys($names) as $name) {
+            if (isset($idsByName[$name])) {
+                $wanted[$name] = $idsByName[$name];
+            }
+        }
+        $photos = PortalEmployeePresenter::photoUrls(array_values($wanted));
+
+        $byName = [];
+        foreach ($wanted as $name => $id) {
+            if (isset($photos[$id])) {
+                $byName[$name] = $photos[$id];
+            }
+        }
+
+        return $byName;
     }
 
     /**

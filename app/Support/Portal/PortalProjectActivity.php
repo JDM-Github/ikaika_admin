@@ -57,6 +57,14 @@ final class PortalProjectActivity
         $hasLines = PortalProjectWork::isEngineering($project->department);
         $visible = static fn (object $row): bool => $seesEveryone || (int) $row->employee_id === $actorId;
 
+        $authorIds = [];
+        foreach ($rows as $row) {
+            if ($row->employee_id !== null) {
+                $authorIds[] = (int) $row->employee_id;
+            }
+        }
+        $authorPhotos = PortalEmployeePresenter::photoUrls($authorIds);
+
         $feed = array_values(array_filter($rows, static function (object $row) use ($visible, $filters): bool {
             return $visible($row)
                 && (! isset($filters['person']) || (int) $row->employee_id === (int) $filters['person'])
@@ -72,7 +80,7 @@ final class PortalProjectActivity
                 'people' => $this->people($rows, $memberIds, $project, $visible),
                 'activities' => $this->activities(array_filter($rows, $visible)),
                 'reports' => array_map(
-                    fn (object $row): array => $this->report($row, $hasLines),
+                    fn (object $row): array => $this->report($row, $hasLines, $authorPhotos),
                     array_slice($feed, ($page - 1) * self::PER_PAGE, self::PER_PAGE),
                 ),
                 'page' => $page,
@@ -119,16 +127,19 @@ final class PortalProjectActivity
             $people[$id]['reports']++;
         }
 
-        $names = $this->connection()->table('employees')->whereIn('id', [...array_keys($people), ...$memberIds])
+        $ids = array_values(array_unique([...array_keys($people), ...$memberIds]));
+        $names = $this->connection()->table('employees')->whereIn('id', $ids)
             ->get(['id', 'first_name', 'last_name', 'email'])->keyBy('id');
+        $photos = PortalEmployeePresenter::photoUrls($ids);
         $list = [];
-        foreach (array_unique([...array_keys($people), ...$memberIds]) as $id) {
+        foreach ($ids as $id) {
             $person = $names[$id] ?? null;
             $work = $people[$id] ?? null;
             $shown = $work !== null && $visible($work['row']);
             $list[] = [
                 'id' => (string) $id,
                 'name' => $person === null ? '' : trim($person->first_name.' '.$person->last_name),
+                'photoUrl' => $photos[$id] ?? null,
                 'isMember' => in_array($id, $memberIds, true),
                 'isLead' => $person !== null && self::leads($person->email, $project->project_lead_email),
                 'hasReported' => $work !== null,
@@ -163,9 +174,10 @@ final class PortalProjectActivity
     }
 
     /**
+     * @param  array<int, string>  $authorPhotos
      * @return array<string, mixed>
      */
-    private function report(object $row, bool $hasLines): array
+    private function report(object $row, bool $hasLines, array $authorPhotos): array
     {
         $code = trim((string) ($row->code ?? ''));
 
@@ -174,6 +186,7 @@ final class PortalProjectActivity
             'workDay' => (string) $row->work_day,
             'personId' => $row->employee_id === null ? null : (string) (int) $row->employee_id,
             'personName' => trim(($row->first_name ?? '').' '.($row->last_name ?? '')),
+            'personPhotoUrl' => $row->employee_id === null ? null : ($authorPhotos[(int) $row->employee_id] ?? null),
             'hours' => is_numeric($row->hours_rendered) ? round((float) $row->hours_rendered, 2) : 0.0,
             'activityCode' => $code === '' ? null : $code,
             'activityName' => $code === '' ? null : PortalProjectWork::activityName($row->name ?? null, $code),
