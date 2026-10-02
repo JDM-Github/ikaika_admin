@@ -364,10 +364,16 @@ class PortalProjectEditorTest extends TestCase
 
     public function test_the_form_options_are_for_those_who_add_edit_or_lead(): void
     {
-        $this->withToken($this->token($this->employee('admin')))->getJson(self::BASE.'/options')
+        $options = $this->withToken($this->token($this->employee('admin')))->getJson(self::BASE.'/options')
             ->assertOk()
             ->assertJsonPath('data.departments', fn (array $departments): bool => in_array('Engineering', $departments, true))
-            ->assertJsonStructure(['data' => ['employees' => [['id', 'name', 'canLead']], 'clients' => [['id', 'name']], 'types']]);
+            ->assertJsonStructure(['data' => ['employees' => [['id', 'name', 'canLead', 'department']], 'clients' => [['id', 'name']], 'types', 'typesByDepartment']]);
+
+        // An executive is never offered as a lead, member or support member.
+        $executiveId = (int) DB::connection('portal')->table('employees')->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")->value('id');
+        if ($executiveId !== 0) {
+            $this->assertNotContains((string) $executiveId, array_column($options->json('data.employees'), 'id'));
+        }
 
         $member = $this->employee('user', 3);
         $token = $this->token($member);

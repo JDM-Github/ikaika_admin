@@ -120,6 +120,7 @@ final class PortalProjectEditor
             $employees[] = [
                 'id' => (string) (int) $row->id,
                 'name' => $this->personName($row),
+                'department' => $this->text($row->department),
                 'canLead' => $reach !== null,
                 'leadsAnywhere' => $reach === 'all',
                 'leadDepartment' => $reach === null || $reach === 'all' ? null : $this->text($row->department),
@@ -149,6 +150,8 @@ final class PortalProjectEditor
                 'departments' => $departments,
                 'addDepartments' => $addDepartments,
                 'types' => $this->jobTypes(),
+                // Job types by the department that uses them, so the form offers only the chosen one's.
+                'typesByDepartment' => $this->typesByDepartment(),
                 // A project that is not Engineering's picks its scopes from these, by its department.
                 'activityCodes' => PortalActivityScopes::all(),
             ],
@@ -803,6 +806,8 @@ final class PortalProjectEditor
         return $this->connection()
             ->table('employees')
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            // Executives are not put on projects: not a lead, a member or a support member.
+            ->whereRaw("LOWER(COALESCE(role_level, '')) <> 'executive'")
             ->orderBy('first_name')
             ->orderBy('last_name')
             ->get(['id', 'first_name', 'last_name', 'email', 'department']);
@@ -827,6 +832,36 @@ final class PortalProjectEditor
     private function jobTypes(): array
     {
         return $this->distinctSorted($this->connection()->table('projects')->distinct()->pluck('type_of_job')->all());
+    }
+
+    /**
+     * Job types grouped by the department that uses them, so the form offers only the chosen one's.
+     *
+     * @return array<string, list<string>>
+     */
+    private function typesByDepartment(): array
+    {
+        $rows = $this->connection()
+            ->table('projects')
+            ->get(['department', 'type_of_job']);
+
+        $types = [];
+        foreach ($rows as $row) {
+            $department = $this->text($row->department);
+            $type = $this->text($row->type_of_job);
+            if ($department === null || $type === null) {
+                continue;
+            }
+            $types[$department] ??= [];
+            if (! in_array($type, $types[$department], true)) {
+                $types[$department][] = $type;
+            }
+        }
+        foreach ($types as $department => $list) {
+            $types[$department] = $this->distinctSorted($list);
+        }
+
+        return $types;
     }
 
     /**
