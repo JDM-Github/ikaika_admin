@@ -12,8 +12,8 @@ use Tests\TestCase;
 
 /**
  * Deleting a project follows Delete projects (projects.delete) at a reach covering it: admins,
- * executives and developers hold it at every department by preset and Developer mode always; members
- * at own, the projects they lead. Nobody else may, whatever their role.
+ * executives and developers hold it at every department by preset and Developer mode always; a member
+ * holds it only where given, at own for the projects they lead. Nobody else may, whatever their role.
  */
 class PortalProjectDeletionTest extends TestCase
 {
@@ -142,6 +142,19 @@ class PortalProjectDeletionTest extends TestCase
     {
         $member = $this->employee('user');
         $token = $this->token($member);
+        // Members hold no Delete by preset: give it at own, the projects they lead.
+        $giver = Employee::query()
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->orderBy('id')
+            ->firstOrFail();
+        DB::connection('portal')->table('access_grants')->insertOrIgnore([
+            'employee_id' => $member->getKey(),
+            'permission_key' => 'projects.delete',
+            'reach' => 'own',
+            'granted_by' => $giver->id,
+            'as_developer' => 0,
+        ]);
 
         $this->deleteAs($token)->assertForbidden();
         $this->assertFalse($this->isDeleted());

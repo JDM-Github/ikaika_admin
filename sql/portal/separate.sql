@@ -582,22 +582,19 @@ UPDATE access_permissions SET only_department = 'MIS', min_tier = 'admin' WHERE 
 -- Developer mode, and no gift reaches it. Existing databases: make_portal_backup_rules_developer_only.
 UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key LIKE 'administration.backup%';
 
--- Members: their own work only. View Projects and Track Projects show only the projects they are on;
--- Edit, Manage scopes and Delete only the projects they lead; they lead their department's projects
--- and may start one for any department, which waits for a Project Manager.
+-- Members: their own work only. View Projects and Track Projects show only the projects they are on.
+-- Leading, editing, scoping, deleting and adding projects are powers an admin (or a lead) gives, not a
+-- member's own, so none of them is a member default -- that is what stops every member from being a lead.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'member', permission_key,
        CASE
-           WHEN permission_key IN ('projects.view', 'projects.track', 'projects.edit', 'projects.scopes', 'projects.delete') THEN 'own'
-           WHEN permission_key = 'projects.lead' THEN 'department'
-           WHEN permission_key = 'projects.create' THEN 'all'
+           WHEN permission_key IN ('projects.view', 'projects.track') THEN 'own'
        END,
        0
 FROM access_permissions
 WHERE permission_key IN (
     'home',
-    'projects', 'projects.view', 'projects.create', 'projects.track', 'projects.track.export',
-    'projects.edit', 'projects.scopes', 'projects.delete', 'projects.lead',
+    'projects', 'projects.view', 'projects.track', 'projects.track.export',
     'reports', 'reports.daily', 'reports.late', 'reports.submitted',
     'reports.submitted.edit', 'reports.submitted.delete', 'reports.submitted.export',
     'requests', 'requests.own', 'requests.own.edit', 'requests.own.cancel', 'requests.own.export',
@@ -666,12 +663,21 @@ SELECT id, 'manage.users.information', 'all' FROM employees WHERE id_no IN (
     '220302-0003'  -- Steven Gaurano
 );
 
--- Steven Gaurano (admin, holds Project Lead at All) gives Fin Donasco and Audie Gantuangko the
--- Project Lead power for Engineering. A gift, so it counts only while Steven keeps it; made in
--- Default mode. Both receiver id_nos are active employees loaded from data.sql.
+-- Steven Gaurano (admin) gives Fin Donasco and Audie Gantuangko what a project lead needs, since none
+-- of it is a member default any more: Project Lead for Engineering, and Edit / Manage scopes / Delete
+-- for the projects they lead (own), plus Add projects anywhere. A gift, so it counts only while Steven
+-- keeps it; made in Default mode. Both receiver id_nos are active employees loaded from data.sql.
 INSERT INTO access_grants (employee_id, permission_key, reach, granted_by)
-SELECT receiver.id, 'projects.lead', 'department', giver.id
+SELECT receiver.id, grant_row.permission_key, grant_row.reach, giver.id
 FROM employees AS receiver
 JOIN employees AS giver ON giver.id_no = '220302-0003'
+JOIN (
+    SELECT 'projects.lead' AS permission_key, 'department' AS reach
+    UNION ALL SELECT 'projects.edit', 'own'
+    UNION ALL SELECT 'projects.scopes', 'own'
+    UNION ALL SELECT 'projects.delete', 'own'
+    UNION ALL SELECT 'projects.create', 'all'
+) AS grant_row
 WHERE receiver.id_no IN ('220825-0004', '230103-0005');
+
 

@@ -13,8 +13,8 @@ use Tests\TestCase;
 
 /**
  * Adding a project follows Add projects (projects.create); editing it and saving its scopes follow Edit
- * projects and Manage scopes at a reach covering it, members holding both for the projects they lead. Every write lands in
- * SQL with a ledger action and a log row, and View Projects reads the saved scopes first.
+ * projects and Manage scopes at a reach covering it, a member holding both only where given, at own for the projects
+ * they lead. Every write lands in SQL with a ledger action and a log row, and View Projects reads the saved scopes first.
  */
 class PortalProjectEditorTest extends TestCase
 {
@@ -51,6 +51,29 @@ class PortalProjectEditorTest extends TestCase
         return $employee;
     }
 
+    /**
+     * A member's project powers are given now, not presets: grant the keys (key => reach) as an admin.
+     *
+     * @param  array<string, string|null>  $reaches
+     */
+    private function grant(Employee $target, array $reaches, ?Employee $giver = null): void
+    {
+        $giver ??= Employee::query()
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->orderBy('id')
+            ->firstOrFail();
+        foreach ($reaches as $key => $reach) {
+            DB::connection('portal')->table('access_grants')->insertOrIgnore([
+                'employee_id' => $target->id,
+                'permission_key' => $key,
+                'reach' => $reach,
+                'granted_by' => $giver->id,
+                'as_developer' => 0,
+            ]);
+        }
+    }
+
     private function token(Employee $employee): string
     {
         return (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
@@ -74,6 +97,8 @@ class PortalProjectEditorTest extends TestCase
     private function payload(array $overrides = []): array
     {
         $lead = $this->employee('user');
+        // A member leads only when given Project Lead; the form refuses a lead who cannot lead.
+        $this->grant($lead, ['projects.lead' => 'department']);
 
         return array_replace([
             'name' => 'Editor Test Project 2020',
@@ -175,11 +200,12 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame('Scopes Changed: 1 scope', $board['trail'][0]['summary']);
     }
 
-    // Members add projects by preset (2026-10-01); without Project Manager for its department the project waits.
+    // Given Add projects anywhere, a member's project still waits where no Project Manager covers its department.
     public function test_a_members_project_waits_for_a_project_manager(): void
     {
         $member = $this->employee('user', 3);
         $admin = $this->employee('admin');
+        $this->grant($member, ['projects.create' => 'all']);
         $this->token($admin);
 
         $response = $this->create($this->token($member), $this->payload())
@@ -201,7 +227,6 @@ class PortalProjectEditorTest extends TestCase
     public function test_without_add_projects_nothing_is_added(): void
     {
         $member = $this->employee('user', 3);
-        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create']);
         $before = DB::connection('portal')->table('projects')->count();
 
         $this->create($this->token($member), $this->payload())
@@ -215,6 +240,7 @@ class PortalProjectEditorTest extends TestCase
     {
         $member = $this->employee('user', 3);
         $token = $this->token($member);
+        $this->grant($member, ['projects.create' => 'all']);
         $payload = $this->payload();
         $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
         unset($payload['scopeCodes']);
@@ -283,6 +309,7 @@ class PortalProjectEditorTest extends TestCase
         $id = $this->liveProjectId();
         $member = $this->employee('user', 3);
         $token = $this->token($member);
+        $this->grant($member, ['projects.edit' => 'own']);
         $payload = $this->payload();
         unset($payload['scopeCodes']);
 
@@ -332,6 +359,8 @@ class PortalProjectEditorTest extends TestCase
         $id = $this->liveProjectId();
         $member = $this->employee('user', 3);
         DB::connection('portal')->table('projects')->where('id', $id)->update(['project_lead_email' => $member->email]);
+        // A personal default is where they start, so a manager's switch-off records a limit, not a gift to take back.
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.edit', 'reach' => 'own']);
         $this->withToken($this->token($member))->getJson(self::BASE.'/'.$id)->assertOk();
 
         DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.edit']);
@@ -375,12 +404,14 @@ class PortalProjectEditorTest extends TestCase
             $this->assertNotContains((string) $executiveId, array_column($options->json('data.employees'), 'id'));
         }
 
+        // A plain member holds none of Add/Edit/Project Lead, so the form is closed to them; given one, it opens.
         $member = $this->employee('user', 3);
         $token = $this->token($member);
-        $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
-        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create']);
-        Cache::flush();
         $this->withToken($token)->getJson(self::BASE.'/options')->assertForbidden();
+
+        $this->grant($member, ['projects.create' => 'all']);
+        Cache::flush();
+        $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
 
         DB::connection('portal')->table('projects')->where('id', $this->liveProjectId())->update(['project_lead_email' => $member->email]);
         $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
@@ -392,6 +423,7 @@ class PortalProjectEditorTest extends TestCase
         $member = $this->employee('user', 3);
         $member->forceFill(['department' => 'MIS'])->save();
         $token = $this->token($member);
+        $this->grant($member, ['projects.create' => 'all']);
         $this->assertContains('Engineering', $this->withToken($token)->getJson(self::BASE.'/options')->assertOk()->json('data.addDepartments'));
 
         DB::connection('portal')->table('access_self_reach')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create', 'reach' => 'department']);
@@ -409,6 +441,7 @@ class PortalProjectEditorTest extends TestCase
         $admin = $this->employee('admin', 1);
 
         $lead->forceFill(['department' => 'MIS'])->save();
+        $this->grant($lead, ['projects.lead' => 'department']);
         $people = collect($this->withToken($token)->getJson(self::BASE.'/options')->assertOk()->json('data.employees'))->keyBy('id');
         $this->assertSame(['canLead' => true, 'leadsAnywhere' => false, 'leadDepartment' => 'MIS'], collect($people[(string) $lead->id])->only(['canLead', 'leadsAnywhere', 'leadDepartment'])->all());
         $this->assertTrue($people[(string) $admin->id]['leadsAnywhere']);
@@ -425,7 +458,7 @@ class PortalProjectEditorTest extends TestCase
     {
         $member = $this->employee('user', 3);
         $member->forceFill(['department' => 'MIS'])->save();
-        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create.direct', 'reach' => null]);
+        $this->grant($member, ['projects.create' => 'all', 'projects.create.direct' => null]);
 
         $id = (int) $this->create($this->token($member), $this->payload())->assertCreated()->json('data.id');
 

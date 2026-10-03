@@ -95,6 +95,8 @@ class PortalViewProjectsTest extends TestCase
         $led = (int) DB::connection('portal')->table('projects')->whereNull('deleted_at')->value('id');
         DB::connection('portal')->table('projects')->where('id', $led)->update(['project_lead_email' => $actor->email]);
         DB::connection('portal')->table('projects')->where('id', '!=', $led)->whereRaw('LOWER(COALESCE(project_lead_email, \'\')) = ?', [strtolower((string) $actor->email)])->update(['project_lead_email' => null]);
+        // Members hold no Edit / Manage scopes / Delete by preset: give them at own, the projects they lead.
+        $this->grant($actor, ['projects.edit' => 'own', 'projects.scopes' => 'own', 'projects.delete' => 'own']);
 
         $rows = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'));
         $this->assertSame(['canEdit' => true, 'canManageScopes' => true, 'canDelete' => true], collect($rows->firstWhere('id', (string) $led))->only(['canEdit', 'canManageScopes', 'canDelete'])->all());
@@ -317,6 +319,29 @@ class PortalViewProjectsTest extends TestCase
             'total' => 1,
         ], $row['scopeSummary']);
         $this->assertSame(['500'], $row['scopeCodes']);
+    }
+
+    /**
+     * A member's project powers are given now, not presets: grant the keys (key => reach) as an executive.
+     *
+     * @param  array<string, string|null>  $reaches
+     */
+    private function grant(Employee $target, array $reaches): void
+    {
+        $giver = Employee::query()
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->orderBy('id')
+            ->firstOrFail();
+        foreach ($reaches as $key => $reach) {
+            DB::connection('portal')->table('access_grants')->insertOrIgnore([
+                'employee_id' => $target->id,
+                'permission_key' => $key,
+                'reach' => $reach,
+                'granted_by' => $giver->id,
+                'as_developer' => 0,
+            ]);
+        }
     }
 
     private function activeMember(): Employee
