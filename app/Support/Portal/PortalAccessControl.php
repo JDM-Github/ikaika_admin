@@ -148,6 +148,9 @@ final class PortalAccessControl
         $editorId = (int) $editor->getKey();
         $target = $this->manageable($graph, $editorId, $targetId);
         $key = $change['key'];
+        if (($change['reach'] ?? null) === 'lead' && ! PortalProjectPowers::supportsLeadReach($key)) {
+            abort(422, 'Only Edit projects, Manage scopes and Delete projects reach the projects you lead.');
+        }
         if ($graph->isDeveloperOnly($key)) {
             abort(422, 'That power comes only with Developer mode, so nobody can give or limit it.');
         }

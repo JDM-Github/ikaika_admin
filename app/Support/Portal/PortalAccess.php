@@ -116,6 +116,9 @@ final class PortalAccess
         if (PortalAccessGraph::reachRank($reach) === 0 || PortalAccessGraph::reachRank($reach) > PortalAccessGraph::reachRank($held['reach'])) {
             abort(422, 'You cannot reach further than you hold that power.');
         }
+        if ($reach === 'lead' && ! PortalProjectPowers::supportsLeadReach($key)) {
+            abort(422, 'Only Edit projects, Manage scopes and Delete projects reach the projects you lead.');
+        }
 
         $rows = DB::connection('portal')->table('access_self_reach');
         if ($reach === $held['reach']) {

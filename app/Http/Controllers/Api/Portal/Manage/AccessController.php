@@ -25,7 +25,7 @@ class AccessController extends Controller
             'key' => ['required', 'string', 'max:191'],
             'action' => ['required', Rule::in([PortalAccessControl::ON, PortalAccessControl::OFF, PortalAccessControl::REACH, PortalAccessControl::LIST, PortalAccessControl::OVERRIDE])],
             'on' => ['nullable', 'boolean'],
-            'reach' => ['nullable', 'string', Rule::in(['own', 'team', 'department', 'all'])],
+            'reach' => ['nullable', 'string', Rule::in(['lead', 'own', 'team', 'department', 'all'])],
             'includeExecutives' => ['nullable', 'boolean'],
             'mode' => ['nullable', 'required_if:action,'.PortalAccessControl::LIST, Rule::in([PortalAccessControl::LIST_NONE, PortalAccessControl::LIST_ALLOW, PortalAccessControl::LIST_BLOCK])],
             'people' => ['nullable', 'array', 'max:500'],

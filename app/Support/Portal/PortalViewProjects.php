@@ -202,6 +202,7 @@ final class PortalViewProjects
                 'projects.google_drive_folder_path',
             ])
             ->selectRaw('CASE WHEN membership.employee_id IS NOT NULL OR '.$leads.' THEN 1 ELSE 0 END as is_assigned', $leadBindings)
+            ->selectRaw('CASE WHEN membership.employee_id IS NOT NULL THEN 1 ELSE 0 END as is_member')
             ->distinct();
 
         // Their own projects at every reach; a department with no name adds nothing.

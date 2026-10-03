@@ -151,7 +151,7 @@ class PortalProjectDeletionTest extends TestCase
         DB::connection('portal')->table('access_grants')->insertOrIgnore([
             'employee_id' => $member->getKey(),
             'permission_key' => 'projects.delete',
-            'reach' => 'own',
+            'reach' => 'lead',
             'granted_by' => $giver->id,
             'as_developer' => 0,
         ]);

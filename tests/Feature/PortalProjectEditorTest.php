@@ -309,7 +309,7 @@ class PortalProjectEditorTest extends TestCase
         $id = $this->liveProjectId();
         $member = $this->employee('user', 3);
         $token = $this->token($member);
-        $this->grant($member, ['projects.edit' => 'own']);
+        $this->grant($member, ['projects.edit' => 'lead']);
         $payload = $this->payload();
         unset($payload['scopeCodes']);
 
@@ -321,6 +321,31 @@ class PortalProjectEditorTest extends TestCase
         DB::connection('portal')->table('projects')->where('id', $id)->update(['project_lead_email' => strtoupper((string) $member->email)]);
         $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk()->assertJsonPath('data.id', (string) $id);
         $this->withToken($token)->patchJson(self::BASE.'/'.$id, $payload)->assertOk();
+    }
+
+    // "Only your own" is the projects a member is on; "the projects you lead" is the led ones, and only those.
+    public function test_own_reaches_the_projects_you_are_on_and_lead_the_projects_you_lead(): void
+    {
+        $member = $this->employee('user', 3);
+        $token = $this->token($member);
+        $portal = DB::connection('portal');
+        $on = $this->liveProjectId();
+        $led = (int) $portal->table('projects')->whereNull('deleted_at')->where('id', '!=', $on)->orderByDesc('id')->value('id');
+        $portal->table('projects')->whereIn('id', [$on, $led])->update(['project_creation_status' => 'Approved', 'requested_by' => null]);
+        $portal->table('projects')->where('id', $on)->update(['project_lead_email' => 'nobody@ikaika.test']);
+        $portal->table('projects')->where('id', $led)->update(['project_lead_email' => $member->email]);
+        $portal->table('employees_projects')->where('employee_id', $member->getKey())->whereIn('project_id', [$on, $led])->delete();
+        $portal->table('employees_projects')->insert(['employee_id' => $member->getKey(), 'project_id' => $on, 'role_on_project' => 'member']);
+
+        // On it but not leading: "own" reaches it, "lead" does not.
+        $this->grant($member, ['projects.edit' => 'own']);
+        $this->withToken($token)->getJson(self::BASE.'/'.$on)->assertOk();
+        $this->withToken($token)->getJson(self::BASE.'/'.$led)->assertForbidden();
+
+        // Leading it but not on it: "lead" reaches it, "own" does not.
+        $portal->table('access_grants')->where('employee_id', $member->getKey())->where('permission_key', 'projects.edit')->update(['reach' => 'lead']);
+        $this->withToken($token)->getJson(self::BASE.'/'.$on)->assertForbidden();
+        $this->withToken($token)->getJson(self::BASE.'/'.$led)->assertOk();
     }
 
     // Switched off, Manage scopes is gone even for an admin who leads nothing, and Edit projects stays.
@@ -360,7 +385,7 @@ class PortalProjectEditorTest extends TestCase
         $member = $this->employee('user', 3);
         DB::connection('portal')->table('projects')->where('id', $id)->update(['project_lead_email' => $member->email]);
         // A personal default is where they start, so a manager's switch-off records a limit, not a gift to take back.
-        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.edit', 'reach' => 'own']);
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.edit', 'reach' => 'lead']);
         $this->withToken($this->token($member))->getJson(self::BASE.'/'.$id)->assertOk();
 
         DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.edit']);

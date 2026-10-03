@@ -56,7 +56,7 @@ final class PortalAccessGraph
     /**
      * @var array<string, int>
      */
-    private const REACH_RANK = ['own' => 1, 'team' => 2, 'department' => 3, 'all' => 4];
+    private const REACH_RANK = ['lead' => 1, 'own' => 2, 'team' => 3, 'department' => 4, 'all' => 5];
 
     /**
      * @var array<string, array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}>>

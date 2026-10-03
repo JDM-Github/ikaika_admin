@@ -665,7 +665,7 @@ SELECT id, 'manage.users.information', 'all' FROM employees WHERE id_no IN (
 
 -- Steven Gaurano (admin) gives Fin Donasco and Audie Gantuangko what a project lead needs, since none
 -- of it is a member default any more: Project Lead for Engineering, and Edit / Manage scopes / Delete
--- for the projects they lead (own), plus Add projects anywhere. A gift, so it counts only while Steven
+-- for the projects they lead (lead), plus Add projects anywhere. A gift, so it counts only while Steven
 -- keeps it; made in Default mode. Both receiver id_nos are active employees loaded from data.sql.
 INSERT INTO access_grants (employee_id, permission_key, reach, granted_by)
 SELECT receiver.id, grant_row.permission_key, grant_row.reach, giver.id
@@ -673,9 +673,9 @@ FROM employees AS receiver
 JOIN employees AS giver ON giver.id_no = '220302-0003'
 JOIN (
     SELECT 'projects.lead' AS permission_key, 'department' AS reach
-    UNION ALL SELECT 'projects.edit', 'own'
-    UNION ALL SELECT 'projects.scopes', 'own'
-    UNION ALL SELECT 'projects.delete', 'own'
+    UNION ALL SELECT 'projects.edit', 'lead'
+    UNION ALL SELECT 'projects.scopes', 'lead'
+    UNION ALL SELECT 'projects.delete', 'lead'
     UNION ALL SELECT 'projects.create', 'all'
 ) AS grant_row
 WHERE receiver.id_no IN ('220825-0004', '230103-0005');

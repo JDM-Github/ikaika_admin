@@ -4,12 +4,14 @@ namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Edit projects, Manage scopes and Delete projects: reach rules under View Projects. All is every
- * project, department the actor's department's plus the ones they lead, own only the ones they lead.
- * Members hold all three at own by preset, so a lead's own project is theirs until a manager limits it
- * or they switch it off. Whoever asked for a project may still edit it while it is not approved.
+ * project, department the actor's department's plus the ones they lead, own the ones they are on,
+ * lead only the ones they lead. Those three reaches are given, not a member's own, so a lead's own
+ * project is theirs until a manager limits it or they switch it off. Whoever asked for a project may
+ * still edit it while it is not approved.
  */
 final class PortalProjectPowers
 {
@@ -26,6 +28,12 @@ final class PortalProjectPowers
     public const DIRECT = 'projects.create.direct';
 
     public const LEAD = 'projects.lead';
+
+    // Only these three reaches a project row, so only they offer the "the projects you lead" reach.
+    public static function supportsLeadReach(string $key): bool
+    {
+        return in_array($key, self::KEYS, true);
+    }
 
     // Whether the rule, at the reach the actor holds it now, covers this project row.
     public static function allows(Employee $actor, Request $request, string $key, object $project): bool
@@ -104,12 +112,36 @@ final class PortalProjectPowers
         if ($reach === 'all') {
             return true;
         }
+        $leads = self::leads($actor, $project->project_lead_email ?? null);
+        if ($reach === 'lead') {
+            return $leads;
+        }
         $own = PortalPreview::department($actor->department);
-        if ($reach === 'department' && $own !== '' && $own === PortalPreview::department($project->department ?? null)) {
-            return true;
+        if ($reach === 'department') {
+            return ($own !== '' && $own === PortalPreview::department($project->department ?? null)) || $leads;
+        }
+        if ($reach === 'own') {
+            return self::isOn($actor, $project);
         }
 
-        return self::leads($actor, $project->project_lead_email ?? null);
+        return false;
+    }
+
+    // On the project: a row on employees_projects. The board carries the flag; a single row reads it.
+    private static function isOn(Employee $actor, object $project): bool
+    {
+        if (isset($project->is_member)) {
+            return (bool) $project->is_member;
+        }
+        $projectId = (int) ($project->id ?? 0);
+        if ($projectId === 0) {
+            return false;
+        }
+
+        return DB::connection('portal')->table('employees_projects')
+            ->where('project_id', $projectId)
+            ->where('employee_id', $actor->getKey())
+            ->exists();
     }
 
     // The lead is matched by email, never by name.

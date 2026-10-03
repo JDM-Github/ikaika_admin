@@ -96,7 +96,7 @@ class PortalViewProjectsTest extends TestCase
         DB::connection('portal')->table('projects')->where('id', $led)->update(['project_lead_email' => $actor->email]);
         DB::connection('portal')->table('projects')->where('id', '!=', $led)->whereRaw('LOWER(COALESCE(project_lead_email, \'\')) = ?', [strtolower((string) $actor->email)])->update(['project_lead_email' => null]);
         // Members hold no Edit / Manage scopes / Delete by preset: give them at own, the projects they lead.
-        $this->grant($actor, ['projects.edit' => 'own', 'projects.scopes' => 'own', 'projects.delete' => 'own']);
+        $this->grant($actor, ['projects.edit' => 'lead', 'projects.scopes' => 'lead', 'projects.delete' => 'lead']);
 
         $rows = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'));
         $this->assertSame(['canEdit' => true, 'canManageScopes' => true, 'canDelete' => true], collect($rows->firstWhere('id', (string) $led))->only(['canEdit', 'canManageScopes', 'canDelete'])->all());
@@ -110,6 +110,19 @@ class PortalViewProjectsTest extends TestCase
 
         $adminRows = collect($this->withToken($this->loginToken($this->activeAdmin()))->getJson('/api/development/portal/projects')->assertOk()->json('data'));
         $this->assertTrue($adminRows->every(static fn (array $row): bool => $row['canEdit'] && $row['canManageScopes'] && $row['canDelete']));
+    }
+
+    // "Only your own" marks a project the person is on, even when somebody else leads it.
+    public function test_own_reach_marks_the_projects_the_person_is_on(): void
+    {
+        $actor = $this->activeMember();
+        $on = (int) DB::connection('portal')->table('employees_projects')->where('employee_id', $actor->getKey())->value('project_id');
+        DB::connection('portal')->table('projects')->where('id', $on)->update(['project_lead_email' => 'nobody@ikaika.test']);
+        $this->grant($actor, ['projects.edit' => 'own']);
+
+        $row = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'))->firstWhere('id', (string) $on);
+        $this->assertNotNull($row);
+        $this->assertTrue($row['canEdit']);
     }
 
     // The list follows View Projects (projects.view): switched off, the page is refused like any other ruled page.

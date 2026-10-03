@@ -221,6 +221,16 @@ class PortalAccessControlTest extends TestCase
         $this->assertSame('department', $this->rule($this->as($this->developer)->getJson("/api/development/portal/manage/access/{$this->admin->id}"), 'manage.requests.leave')['reachWithoutYou']);
     }
 
+    // "The projects you lead" reaches the three project rows and nothing else.
+    public function test_the_lead_reach_belongs_only_to_the_project_rows(): void
+    {
+        $this->change($this->admin, $this->member, ['key' => 'manage.requests.leave', 'action' => 'on', 'reach' => 'lead'])
+            ->assertStatus(422);
+
+        $this->change($this->admin, $this->member, ['key' => 'projects.edit', 'action' => 'on', 'reach' => 'lead'])->assertOk();
+        $this->assertSame('lead', $this->power($this->member, 'projects.edit')['reach'] ?? null);
+    }
+
     // Moving the member out of the admin's department ends the admin's hold over them.
     public function test_a_gift_stops_counting_once_the_giver_no_longer_covers_them(): void
     {
