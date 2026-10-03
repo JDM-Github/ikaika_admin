@@ -442,6 +442,17 @@ class PortalProjectEditorTest extends TestCase
         $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
     }
 
+    // The buckets projects were once filed under stay on the form, alongside the staffed departments.
+    public function test_the_form_offers_the_project_buckets_again(): void
+    {
+        $departments = $this->withToken($this->token($this->employee('admin')))
+            ->getJson(self::BASE.'/options')->assertOk()->json('data.departments');
+
+        $this->assertContains('Engineering', $departments);
+        $this->assertContains('General', $departments);
+        $this->assertContains('Admin', $departments);
+    }
+
     // Add projects reaches departments: narrowed to their own, a member may only start their department's projects.
     public function test_add_projects_reach_limits_the_departments(): void
     {

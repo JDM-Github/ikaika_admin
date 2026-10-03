@@ -812,16 +812,19 @@ final class PortalProjectEditor
     }
 
     /**
-     * The departments the company actually staffs, taken from its employees. Retired buckets
-     * projects were once filed under (Admin, General) are not offered on the form.
+     * The departments the form offers: those the company staffs plus any a live project is filed
+     * under, so older buckets such as Admin and General stay available.
      *
      * @return list<string>
      */
     private function departments(): array
     {
-        return $this->distinctSorted(
-            $this->connection()->table('employees')->distinct()->pluck('department')->all(),
-        );
+        $names = [
+            ...$this->connection()->table('projects')->whereNull('deleted_at')->distinct()->pluck('department')->all(),
+            ...$this->connection()->table('employees')->distinct()->pluck('department')->all(),
+        ];
+
+        return $this->distinctSorted($names);
     }
 
     /**
