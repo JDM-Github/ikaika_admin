@@ -239,6 +239,39 @@ class PortalModule implements ProductModule
                             ],
                         ],
                     ],
+                    'project-settings' => [
+                        'label' => 'Project Settings',
+                        'path' => 'manage/project-settings',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'manage/project-settings',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'manage/project-settings/scopes',
+                                'label' => 'Add scope',
+                                'auth' => true,
+                                'body' => ['code' => '9901', 'name' => 'Test scope', 'department' => 'MIS'],
+                            ],
+                            [
+                                'method' => 'PATCH',
+                                'path' => 'manage/project-settings/scopes/{id}',
+                                'label' => 'Update scope',
+                                'auth' => true,
+                                'body' => ['code' => '9901', 'name' => 'Test scope', 'department' => 'MIS'],
+                            ],
+                            [
+                                'method' => 'DELETE',
+                                'path' => 'manage/project-settings/scopes/{id}',
+                                'label' => 'Delete scope',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
                 ],
             ],
             'reports' => [

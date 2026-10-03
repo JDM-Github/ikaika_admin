@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Portal\Manage\AccessController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
 use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
+use App\Http\Controllers\Api\Portal\Manage\ProjectSettingsController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
@@ -16,6 +17,17 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects-write'])
         ->patch('manage/projects/{id}', [ProjectsController::class, 'update'])
         ->whereNumber('id');
+    // Manage / Project Settings: the reference data a project is filed under. Interim gate is Project
+    // Manager until a power of its own is added.
+    Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects'])
+        ->get('manage/project-settings', [ProjectSettingsController::class, 'index']);
+    Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects-write'])->group(function (): void {
+        Route::post('manage/project-settings/scopes', [ProjectSettingsController::class, 'storeScope']);
+        Route::patch('manage/project-settings/scopes/{id}', [ProjectSettingsController::class, 'updateScope'])
+            ->whereNumber('id');
+        Route::delete('manage/project-settings/scopes/{id}', [ProjectSettingsController::class, 'destroyScope'])
+            ->whereNumber('id');
+    });
     // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.
     Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
         ->get('manage/users', [UsersController::class, 'index']);
