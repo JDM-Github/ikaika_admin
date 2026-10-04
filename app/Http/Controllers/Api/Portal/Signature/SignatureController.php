@@ -26,17 +26,6 @@ class SignatureController extends Controller
         ]);
     }
 
-    // The employee's signature as a downloadable .htm, for Outlook.
-    public function document(Request $request): JsonResponse
-    {
-        $document = $this->signatures->document($this->employee($request));
-        if ($document === null) {
-            abort(404, 'No signature footer is set.');
-        }
-
-        return response()->json(['section' => 'signature', 'resource' => 'signature-document', 'data' => $document]);
-    }
-
     // How a footer body reads for the editor's sample person, before it is saved.
     public function preview(Request $request): JsonResponse
     {

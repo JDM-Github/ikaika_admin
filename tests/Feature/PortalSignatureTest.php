@@ -83,16 +83,6 @@ class PortalSignatureTest extends TestCase
         $this->assertStringNotContainsString('{phone}', $filled);
     }
 
-    public function test_a_member_downloads_their_signature_as_an_htm(): void
-    {
-        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
-
-        $response = $this->withToken($this->token($member))->getJson(self::SIGNATURE.'/document')->assertOk();
-
-        $this->assertStringEndsWith('.htm', (string) $response->json('data.fileName'));
-        $this->assertStringContainsString('<!doctype html>', (string) $response->json('data.html'));
-    }
-
     public function test_a_member_downloads_a_one_click_outlook_installer(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
