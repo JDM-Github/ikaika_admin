@@ -110,9 +110,9 @@ final class PortalEmail
         $subject = $kind === self::KIND_TEMPLATE ? $this->validatedSubject($request, true) : null;
         $format = PortalEmailMarkup::validated($request->input('format'));
         $body = $this->validatedBody($request, $format);
-        // A footer edited from Manage / Signatures must carry the $SIGNATURE token to be usable there.
-        if ($kind === self::KIND_FOOTER && $request->boolean('signature') && ! str_contains(strtoupper($body), '$SIGNATURE')) {
-            abort(422, 'A signature footer needs the $SIGNATURE token.');
+        // A footer edited from Manage / Signatures must carry a signature token to be usable there.
+        if ($kind === self::KIND_FOOTER && $request->boolean('signature') && ! PortalSignature::carriesSignature($body)) {
+            abort(422, 'A signature footer needs a placeholder like {name} or $SIGNATURE.');
         }
         $createdAt = $this->timezone->now();
 
@@ -160,9 +160,9 @@ final class PortalEmail
         $subject = $kind === self::KIND_TEMPLATE ? $this->validatedSubject($request, true) : null;
         $format = PortalEmailMarkup::validated($request->input('format'));
         $body = $this->validatedBody($request, $format);
-        // A footer edited from Manage / Signatures must carry the $SIGNATURE token to be usable there.
-        if ($kind === self::KIND_FOOTER && $request->boolean('signature') && ! str_contains(strtoupper($body), '$SIGNATURE')) {
-            abort(422, 'A signature footer needs the $SIGNATURE token.');
+        // A footer edited from Manage / Signatures must carry a signature token to be usable there.
+        if ($kind === self::KIND_FOOTER && $request->boolean('signature') && ! PortalSignature::carriesSignature($body)) {
+            abort(422, 'A signature footer needs a placeholder like {name} or $SIGNATURE.');
         }
 
         $this->connection()->table('email_blocks')->where('id', $id)->update([

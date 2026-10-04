@@ -16,7 +16,26 @@ final class PortalSignature
 {
     private const TOKEN = '$SIGNATURE';
 
+    // The dynamic tokens a footer may place where the person's own details go. A footer carrying any
+    // of them (or $SIGNATURE for the whole block) is a signature footer.
+    public const PLACEHOLDERS = ['name', 'title', 'email', 'phone', 'department', 'location'];
+
     public function __construct(private readonly PortalEmployeeSignature $employees) {}
+
+    // Whether a footer body is usable as a signature: it carries $SIGNATURE or a {placeholder}.
+    public static function carriesSignature(string $body): bool
+    {
+        if (str_contains(strtoupper($body), self::TOKEN)) {
+            return true;
+        }
+        foreach (self::PLACEHOLDERS as $key) {
+            if (stripos($body, '{'.$key.'}') !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /**
      * The footers that can be a signature (their body carries the token), oldest first.
@@ -104,7 +123,7 @@ final class PortalSignature
 
     private function hasToken(string $body): bool
     {
-        return str_contains(strtoupper($body), self::TOKEN);
+        return self::carriesSignature($body);
     }
 
     /**
@@ -116,7 +135,21 @@ final class PortalSignature
         $format = strtolower(trim((string) $footer->format));
         $html = $format === 'html' ? $body : PortalEmailMarkup::html($body);
 
-        return str_ireplace(self::TOKEN, $this->detailsHtml($values), $html);
+        // $SIGNATURE drops the whole details block; the {placeholder}s place one value each.
+        $html = str_ireplace(self::TOKEN, $this->detailsHtml($values), $html);
+        $map = [
+            '{name}' => $values['name'],
+            '{title}' => $values['title'],
+            '{email}' => $values['email'],
+            '{phone}' => $values['phoneNumber'],
+            '{department}' => $values['department'],
+            '{location}' => $values['location'],
+        ];
+        foreach ($map as $token => $value) {
+            $html = str_ireplace($token, htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'), $html);
+        }
+
+        return $html;
     }
 
     /**

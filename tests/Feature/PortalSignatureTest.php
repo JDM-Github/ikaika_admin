@@ -80,7 +80,7 @@ class PortalSignatureTest extends TestCase
 
         $this->withToken($token)->postJson(self::BLOCKS, [
             'kind' => 'footer', 'name' => 'No token', 'format' => 'html', 'body' => '<p>Plain</p>', 'signature' => true,
-        ])->assertStatus(422)->assertJsonPath('message', 'A signature footer needs the $SIGNATURE token.');
+        ])->assertStatus(422)->assertJsonPath('message', 'A signature footer needs a placeholder like {name} or $SIGNATURE.');
 
         $this->withToken($token)->postJson(self::BLOCKS, [
             'kind' => 'footer', 'name' => 'With token', 'format' => 'html', 'body' => '<p>$SIGNATURE</p>', 'signature' => true,

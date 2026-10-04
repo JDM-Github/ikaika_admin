@@ -203,8 +203,14 @@ FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
 SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
   <tr>
-    <td style="padding:16px 0 0 0;border-top:2px solid #1f4e8c;">
-      $SIGNATURE
+    <td style="padding:16px 0 0 0;border-top:2px solid #1f4e8c;font-size:13px;line-height:20px;color:#374151;">
+      <strong style="font-size:14px;font-weight:700;color:#1f4e8c;">{name}</strong><br>
+      {title} &middot; {department}<br>
+      <a href="mailto:{email}" style="color:#374151;text-decoration:none;">{email}</a>
+      &nbsp;&middot;&nbsp;
+      {phone}
+      &nbsp;&middot;&nbsp;
+      {location}
     </td>
   </tr>
   <tr>
