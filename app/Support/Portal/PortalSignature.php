@@ -40,7 +40,33 @@ final class PortalSignature
         return false;
     }
 
-    // How a footer body reads for the editor's sample person, before it is saved.
+    // How a footer body reads for one person, keeping its own format: placeholders filled, so the
+    // same footer can ride under an email and match whoever sends it. Used by the email composer.
+    public function fill(Employee $employee, string $body, string $format): string
+    {
+        $values = $this->employees->values($employee);
+        $isHtml = strtolower(trim($format)) === 'html';
+        $map = [
+            '{name}' => $values['name'],
+            '{title}' => $values['title'],
+            '{email}' => $values['email'],
+            '{phone}' => $values['phoneNumber'],
+            '{department}' => $values['department'],
+            '{location}' => $values['location'],
+        ];
+        foreach ($map as $token => $value) {
+            $replacement = $isHtml ? htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8') : (string) $value;
+            $body = str_ireplace($token, $replacement, $body);
+        }
+        if (! $isHtml) {
+            return $body;
+        }
+        $body = str_ireplace(self::TOKEN, $this->detailsHtml($values), $body);
+
+        return $this->tidy($body);
+    }
+
+    // How a footer body reads for the editor's sample person, as finished HTML, before it is saved.
     public function preview(Employee $employee, string $body, string $format): string
     {
         return $this->renderBody((object) ['body' => $body, 'format' => $format], $this->employees->values($employee));

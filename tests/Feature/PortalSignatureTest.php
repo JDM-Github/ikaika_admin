@@ -57,11 +57,29 @@ class PortalSignatureTest extends TestCase
     public function test_a_member_reads_their_own_signature_from_a_footer(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+        $member->forceFill(['phone_number' => '555-0100', 'location' => 'Cebu'])->save();
 
         $response = $this->withToken($this->token($member))->getJson(self::SIGNATURE)->assertOk();
+        $html = (string) $response->json('data.html');
 
         $this->assertSame('Company signature', $response->json('data.brand'));
-        $this->assertStringContainsString($member->first_name, (string) $response->json('data.html'));
+        $this->assertStringContainsString($member->first_name, $html);
+        // The details come from the full employee row, not the session columns the model carries.
+        $this->assertStringContainsString('555-0100', $html);
+        $this->assertStringContainsString('Cebu', $html);
+    }
+
+    public function test_a_footer_reads_for_the_person_when_it_rides_under_an_email(): void
+    {
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+        $member->forceFill(['phone_number' => '555-0200'])->save();
+
+        $filled = app(PortalSignature::class)
+            ->fill($member, '<p>{name} - {phone}</p>', 'html');
+
+        $this->assertStringContainsString($member->first_name, $filled);
+        $this->assertStringContainsString('555-0200', $filled);
+        $this->assertStringNotContainsString('{phone}', $filled);
     }
 
     public function test_a_member_downloads_their_signature_as_an_htm(): void

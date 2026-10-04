@@ -23,15 +23,18 @@ final class PortalEmployeeSignature
      */
     public function values(Employee $employee): array
     {
-        $row = $this->row((int) $employee->getKey());
+        $id = (int) $employee->getKey();
+        $row = $this->row($id);
+        // The signed-in model carries session columns only, so the fallback reads the full row.
+        $person = $this->connection()->table('employees')->where('id', $id)->first(['job_title', 'email', 'phone_number', 'department', 'location']);
 
         return [
             'name' => PortalAccessGraph::name($employee),
-            'title' => $this->pick($row->title ?? null, $employee->job_title),
-            'email' => $this->pick($row->email ?? null, $employee->email),
-            'phoneNumber' => $this->pick($row->phone_number ?? null, $employee->phone_number),
-            'department' => $this->pick($row->department ?? null, $employee->department),
-            'location' => $this->pick($row->location ?? null, $employee->location),
+            'title' => $this->pick($row->title ?? null, $person->job_title ?? null),
+            'email' => $this->pick($row->email ?? null, $person->email ?? null),
+            'phoneNumber' => $this->pick($row->phone_number ?? null, $person->phone_number ?? null),
+            'department' => $this->pick($row->department ?? null, $person->department ?? null),
+            'location' => $this->pick($row->location ?? null, $person->location ?? null),
             'footerId' => $row !== null && $row->footer_id !== null ? (int) $row->footer_id : null,
         ];
     }

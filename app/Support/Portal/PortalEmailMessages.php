@@ -68,6 +68,7 @@ final class PortalEmailMessages
         private readonly PortalTimezone $timezone,
         private readonly PortalAudit $audit,
         private readonly PortalEmailAttachments $attachments,
+        private readonly PortalSignature $signature,
     ) {}
 
     /**
@@ -195,6 +196,11 @@ final class PortalEmailMessages
             $footerBody = $footer === null ? null : trim((string) $footer->body);
             $footerFormat = $this->blockFormat($footer);
         }
+        // A footer carrying signature placeholders reads for whoever is composing, like a signature.
+        $sender = $request->attributes->get('portalEmployee');
+        if ($sender instanceof Employee) {
+            $footerBody = $this->fillFooter($footerBody, $footerFormat, $sender);
+        }
 
         return [
             'section' => 'administration',
@@ -232,6 +238,8 @@ final class PortalEmailMessages
         $footer = $footerId === null ? null : $this->blocks->footer($footerId);
         $footerBody = $footer === null ? null : trim((string) $footer->body);
         $footerFormat = $footer === null ? null : $this->blockFormat($footer);
+        // A footer carrying signature placeholders reads for whoever is sending, like a signature.
+        $footerBody = $this->fillFooter($footerBody, $footerFormat, $actor);
 
         return $this->deliver(
             $actor,
@@ -849,6 +857,16 @@ final class PortalEmailMessages
     private function blockFormat(?EmailBlock $block): string
     {
         return PortalEmailMarkup::format($block?->format) ?? PortalEmailMarkup::FORMAT_MARKUP;
+    }
+
+    // A footer with signature placeholders reads for the sender; a plain one is left as it is.
+    private function fillFooter(?string $body, ?string $format, ?Employee $sender): ?string
+    {
+        if ($body === null || $sender === null) {
+            return $body;
+        }
+
+        return $this->signature->fill($sender, $body, $format ?? PortalEmailMarkup::FORMAT_MARKUP);
     }
 
     private function validatedFooterId(Request $request): ?int
