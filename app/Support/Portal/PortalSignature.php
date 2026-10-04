@@ -158,9 +158,20 @@ final class PortalSignature
     private function transportRuleScript(string $html): string
     {
         return "\$ErrorActionPreference = 'Stop'\r\n"
-            ."# Creates the org-wide IKAIKA email signature as an Exchange transport rule. Server-side,\r\n"
-            ."# so users cannot edit it and the new Outlook is covered. Run as an Exchange Online admin\r\n"
-            ."# (Connect-ExchangeOnline first). Add -SentToScope NotInOrganization to limit it to outside mail.\r\n"
+            ."# Creates the org-wide IKAIKA email signature as an Exchange transport rule: server-side, so\r\n"
+            ."# users cannot edit it and the new Outlook is covered. Run it once as an Exchange Online admin\r\n"
+            ."# (right-click the file, Run with PowerShell, or: powershell -ExecutionPolicy Bypass -File).\r\n"
+            ."# It installs the module and signs you in if needed. Add -SentToScope NotInOrganization to\r\n"
+            ."# limit the signature to mail sent outside the company.\r\n"
+            ."\r\n"
+            ."if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {\r\n"
+            ."  Write-Host 'Installing the Exchange Online module (one time)...'\r\n"
+            ."  Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber\r\n"
+            ."}\r\n"
+            ."Import-Module ExchangeOnlineManagement\r\n"
+            ."Write-Host 'Signing in to Exchange Online...'\r\n"
+            ."Connect-ExchangeOnline -ShowBanner:\$false\r\n"
+            ."\r\n"
             ."\$rule = 'IKAIKA email signature'\r\n"
             ."\$html = @'\r\n"
             .$html."\r\n"
@@ -168,7 +179,8 @@ final class PortalSignature
             ."if (\$html.Length -gt 5000) { throw ('The signature is ' + \$html.Length + ' characters; Exchange allows 5000.') }\r\n"
             ."if (Get-TransportRule -Identity \$rule -ErrorAction SilentlyContinue) { Remove-TransportRule -Identity \$rule -Confirm:\$false }\r\n"
             ."New-TransportRule -Name \$rule -FromScope InOrganization -ApplyHtmlDisclaimerLocation Append -ApplyHtmlDisclaimerFallbackAction Wrap -ApplyHtmlDisclaimerText \$html\r\n"
-            ."Write-Host ('Transport rule \"' + \$rule + '\" is in place.')\r\n";
+            ."Write-Host ('Transport rule \"' + \$rule + '\" is in place.')\r\n"
+            ."Disconnect-ExchangeOnline -Confirm:\$false\r\n";
     }
 
     /**
