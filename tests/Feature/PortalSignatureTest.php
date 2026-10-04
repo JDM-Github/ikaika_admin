@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalEmployeeSignature;
 use App\Support\Portal\PortalSignature;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
@@ -95,14 +96,19 @@ class PortalSignatureTest extends TestCase
     public function test_a_member_downloads_a_one_click_outlook_installer(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+        $email = (string) app(PortalEmployeeSignature::class)->values($member)['email'];
 
         $response = $this->withToken($this->token($member))->getJson(self::SIGNATURE.'/installer')->assertOk();
 
         $this->assertStringEndsWith('.cmd', (string) $response->json('data.fileName'));
         $script = (string) $response->json('data.script');
         $this->assertStringContainsString('@echo off', $script);
-        // The signature travels base64-encoded, and the script sets it as the default for Outlook.
+        // The signature travels base64-encoded, and the script targets this person's own account.
         $this->assertStringContainsString('IKAIKA_B64=', $script);
+        $this->assertStringContainsString('IKAIKA_EMAIL='.$email, $script);
+        $this->assertStringContainsString('9375CFF0413111d3B88A00104B2A6676', $script);
+        $this->assertStringContainsString('Reply-Forward Signature', $script);
+        // The all-accounts default stays as the fallback for a machine with no matching profile.
         $this->assertStringContainsString('NewSignature', $script);
     }
 

@@ -96,35 +96,58 @@ final class PortalSignature
         if ($document === null) {
             return null;
         }
-        $name = trim((string) preg_replace('/[^\w \-]/', '', (string) $this->employees->values($employee)['name']));
+        $values = $this->employees->values($employee);
+        $name = trim((string) preg_replace('/[^\w \-]/', '', (string) $values['name']));
         if ($name === '') {
             $name = 'IKAIKA Signature';
         }
+        // The address the per-account registry key is matched on; cmd-safe, so odd characters cannot break the file.
+        $email = trim((string) preg_replace('/["%&<>|^]/', '', (string) $values['email']));
 
         return [
             'fileName' => 'Install-IKAIKA-Signature.cmd',
-            'script' => $this->cmdScript($name, base64_encode($document['html'])),
+            'script' => $this->cmdScript($name, $email, base64_encode($document['html'])),
         ];
     }
 
     // The .cmd carries the signature base64 and a PowerShell one-liner: write the .htm, then set the
-    // default signature on every Office version present. Idempotent, so re-running updates it.
-    private function cmdScript(string $name, string $base64): string
+    // default on the account whose address matches (keeping Outlook's own value type), falling back to
+    // the all-accounts default when no profile matches. Idempotent, so re-running updates it.
+    private function cmdScript(string $name, string $email, string $base64): string
     {
-        $command = '$dir = Join-Path $env:APPDATA \'Microsoft\\Signatures\'; '
-            .'New-Item -ItemType Directory -Force -Path $dir | Out-Null; '
-            .'$path = Join-Path $dir ($env:IKAIKA_SIG + \'.htm\'); '
-            .'[IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:IKAIKA_B64)); '
-            .'foreach ($v in @(\'16.0\',\'15.0\')) { '
-            .'$k = \'HKCU:\\Software\\Microsoft\\Office\\\' + $v + \'\\Common\\MailSettings\'; '
-            .'if (Test-Path $k) { '
-            .'Set-ItemProperty -Path $k -Name \'NewSignature\' -Value $env:IKAIKA_SIG -ErrorAction SilentlyContinue; '
-            .'Set-ItemProperty -Path $k -Name \'ReplySignature\' -Value $env:IKAIKA_SIG -ErrorAction SilentlyContinue } }; '
-            .'Write-Host (\'Signature installed for \' + $env:IKAIKA_SIG)';
+        $command = '$sig=$env:IKAIKA_SIG; $email=$env:IKAIKA_EMAIL; '
+            .'$dir=Join-Path $env:APPDATA \'Microsoft\Signatures\'; '
+            .'New-Item -ItemType Directory -Force -Path $dir|Out-Null; '
+            .'$path=Join-Path $dir ($sig+\'.htm\'); '
+            .'[IO.File]::WriteAllBytes($path,[Convert]::FromBase64String($env:IKAIKA_B64)); '
+            .'function T($v){ if($v -is [byte[]]){[Text.Encoding]::Unicode.GetString($v).Trim([char]0)} elseif($v -is [string]){$v.Trim([char]0)} else {$null} }; '
+            .'$noise=\'PSPath\',\'PSParentPath\',\'PSChildName\',\'PSDrive\',\'PSProvider\'; $hit=$false; '
+            .'foreach($ver in @(\'16.0\',\'15.0\')){ '
+            .'$profiles=\'HKCU:\Software\Microsoft\Office\\\'+$ver+\'\Outlook\Profiles\'; '
+            .'if(-not(Test-Path $profiles)){continue}; '
+            .'foreach($prof in Get-ChildItem $profiles){ '
+            .'$root=Join-Path $prof.PSPath \'9375CFF0413111d3B88A00104B2A6676\'; '
+            .'if(-not(Test-Path $root)){continue}; '
+            .'foreach($acct in Get-ChildItem $root){ '
+            .'$texts=(Get-ItemProperty $acct.PSPath).PSObject.Properties|Where-Object{$_.Name -notin $noise}|ForEach-Object{T $_.Value}|Where-Object{$_}; '
+            .'if($texts -contains $email){ '
+            .'foreach($n in @(\'New Signature\',\'Reply-Forward Signature\')){ '
+            .'$kind=\'String\'; try{$kind=(Get-Item $acct.PSPath).GetValueKind($n).ToString()}catch{}; '
+            .'if($kind -eq \'Binary\'){ Set-ItemProperty $acct.PSPath $n ([Text.Encoding]::Unicode.GetBytes($sig+[char]0)) -Type Binary } '
+            .'else { Set-ItemProperty $acct.PSPath $n $sig -Type String } }; '
+            .'$hit=$true } } } }; '
+            .'if(-not $hit){ '
+            .'foreach($v in @(\'16.0\',\'15.0\')){ '
+            .'$k=\'HKCU:\Software\Microsoft\Office\\\'+$v+\'\Common\MailSettings\'; '
+            .'if(Test-Path $k){ '
+            .'Set-ItemProperty $k \'NewSignature\' $sig -ErrorAction SilentlyContinue; '
+            .'Set-ItemProperty $k \'ReplySignature\' $sig -ErrorAction SilentlyContinue } } }; '
+            .'Write-Host (\'Signature installed for \'+$sig)';
 
         return "@echo off\r\n"
             ."setlocal\r\n"
             .'set "IKAIKA_SIG='.$name."\"\r\n"
+            .'set "IKAIKA_EMAIL='.$email."\"\r\n"
             .'set "IKAIKA_B64='.$base64."\"\r\n"
             .'powershell -NoProfile -ExecutionPolicy Bypass -Command "'.$command.'"'."\r\n"
             ."echo.\r\n"
