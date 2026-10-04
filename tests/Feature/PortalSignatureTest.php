@@ -62,6 +62,16 @@ class PortalSignatureTest extends TestCase
         $this->assertStringContainsString($member->first_name, (string) $response->json('data.html'));
     }
 
+    public function test_a_member_downloads_their_signature_as_an_htm(): void
+    {
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+
+        $response = $this->withToken($this->token($member))->getJson(self::SIGNATURE.'/document')->assertOk();
+
+        $this->assertStringEndsWith('.htm', (string) $response->json('data.fileName'));
+        $this->assertStringContainsString('<!doctype html>', (string) $response->json('data.html'));
+    }
+
     public function test_the_templates_are_edited_behind_the_power(): void
     {
         $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");

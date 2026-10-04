@@ -30,6 +30,17 @@ class SignatureController extends Controller
         return response()->json($this->signatures->index());
     }
 
+    // The employee's signature as a downloadable .htm, logo inlined for Outlook.
+    public function document(Request $request): JsonResponse
+    {
+        $document = $this->signatures->document($this->employee($request));
+        if ($document === null) {
+            abort(404, 'No signature template is set.');
+        }
+
+        return response()->json(['section' => 'signature', 'resource' => 'signature-document', 'data' => $document]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         return response()->json($this->signatures->addTemplate($this->employee($request), $request));

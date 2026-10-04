@@ -6,6 +6,7 @@ use App\Modules\Portal\Models\Employee;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 
 /**
  * Email signature templates. A template is a brand's fixed fields (company, website, logo, accent,
@@ -39,6 +40,28 @@ final class PortalSignature
             'templateId' => (string) (int) $template->id,
             'html' => $this->html($template, $this->employees->values($employee)),
         ];
+    }
+
+    /**
+     * The employee's signature as a standalone .htm document for Outlook, with the logo inlined as a
+     * data URI so a mail client that blocks remote images still shows it. Null when no template is set.
+     *
+     * @return array{fileName: string, html: string}|null
+     */
+    public function document(Employee $employee): ?array
+    {
+        $template = $this->defaultTemplate();
+        if ($template === null) {
+            return null;
+        }
+        $values = $this->employees->values($employee);
+        $body = $this->html($template, $values, true);
+        $slug = trim((string) preg_replace('/[^a-z0-9]+/i', '-', strtolower((string) $values['name'])), '-');
+        $fileName = 'signature'.($slug === '' ? '' : '-'.$slug).'.htm';
+        $html = '<!doctype html><html><head><meta charset="utf-8"><title>'.htmlspecialchars((string) $values['name'], ENT_QUOTES, 'UTF-8').'</title></head>'
+            .'<body style="margin:0;padding:12px;background:#ffffff;">'.$body.'</body></html>';
+
+        return ['fileName' => $fileName, 'html' => $html];
     }
 
     /**
@@ -131,7 +154,7 @@ final class PortalSignature
     /**
      * @param  array{name: ?string, title: ?string, email: ?string, phoneNumber: ?string, department: ?string, location: ?string}  $values
      */
-    private function html(object $template, array $values): string
+    private function html(object $template, array $values, bool $inlineLogo = false): string
     {
         $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
         $join = static function (array $parts): string {
@@ -141,8 +164,8 @@ final class PortalSignature
         };
 
         $accent = $e($template->accent_color ?? '#2563eb');
-        $logo = trim((string) ($template->logo_url ?? ''));
-        $logoCell = $logo === ''
+        $logo = $this->logoSrc($template, $inlineLogo);
+        $logoCell = $logo === null
             ? ''
             : '<td style="padding-right:16px;border-right:3px solid '.$accent.';vertical-align:top;">'
                 .'<img alt="'.$e($template->brand).'" src="'.$e($logo).'" style="display:block;max-width:132px;height:auto;border:0;"></td>';
@@ -167,9 +190,34 @@ final class PortalSignature
         }
 
         return '<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;">'
-            .'<tr>'.$logoCell.'<td style="padding-left:'.($logo === '' ? '0' : '16px').';vertical-align:top;">'.$rows.'</td></tr>'
+            .'<tr>'.$logoCell.'<td style="padding-left:'.($logo === null ? '0' : '16px').';vertical-align:top;">'.$rows.'</td></tr>'
             .'<tr><td colspan="2" style="padding-top:8px;font-size:11px;color:#6b7280;">'.$company.'</td></tr>'
             .'</table>';
+    }
+
+    // The logo as given, or fetched and inlined as a data URI so a mail client that blocks remote
+    // images still shows it. A fetch that fails falls back to the URL.
+    private function logoSrc(object $template, bool $inline): ?string
+    {
+        $url = trim((string) ($template->logo_url ?? ''));
+        if ($url === '') {
+            return null;
+        }
+        if (! $inline) {
+            return $url;
+        }
+        try {
+            $response = Http::timeout(5)->get($url);
+            if ($response->successful() && $response->body() !== '') {
+                $type = trim((string) $response->header('Content-Type')) ?: 'image/png';
+
+                return 'data:'.$type.';base64,'.base64_encode($response->body());
+            }
+        } catch (\Throwable) {
+            // Fall back to the hosted URL.
+        }
+
+        return $url;
     }
 
     /**
