@@ -106,6 +106,21 @@ class PortalSignatureTest extends TestCase
         $this->assertStringContainsString('NewSignature', $script);
     }
 
+    public function test_it_builds_an_exchange_transport_rule_script_with_directory_tokens(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+
+        $response = $this->withToken($this->token($admin))->getJson(self::SIGNATURE.'/transport-rule')->assertOk();
+
+        $this->assertStringEndsWith('.ps1', (string) $response->json('data.fileName'));
+        $script = (string) $response->json('data.script');
+        $this->assertStringContainsString('New-TransportRule', $script);
+        $this->assertStringContainsString('-FromScope InOrganization', $script);
+        // The person's fields become Active Directory tokens, so one rule covers everyone.
+        $this->assertStringContainsString('%%DisplayName%%', $script);
+        $this->assertStringNotContainsString('{name}', $script);
+    }
+
     public function test_empty_placeholders_drop_their_separators(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");

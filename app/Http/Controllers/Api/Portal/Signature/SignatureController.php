@@ -63,6 +63,18 @@ class SignatureController extends Controller
         return response()->json(['section' => 'signature', 'resource' => 'signature-installer', 'data' => $installer]);
     }
 
+    // A PowerShell script for IT: the org-wide Exchange transport rule that appends the company
+    // signature server-side, locked and reaching every client including the new Outlook.
+    public function transportRule(): JsonResponse
+    {
+        $rule = $this->signatures->transportRule();
+        if ($rule === null) {
+            abort(404, 'No signature footer is set.');
+        }
+
+        return response()->json(['section' => 'signature', 'resource' => 'signature-transport-rule', 'data' => $rule]);
+    }
+
     private function employee(Request $request): Employee
     {
         $employee = $request->attributes->get('portalEmployee');

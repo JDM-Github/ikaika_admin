@@ -20,6 +20,17 @@ final class PortalSignature
     // of them (or $SIGNATURE for the whole block) is a signature footer.
     public const PLACEHOLDERS = ['name', 'title', 'email', 'phone', 'department', 'location'];
 
+    // The Active Directory tokens the Exchange transport rule uses, one per placeholder, so a single
+    // rule reads each sender's own details and covers the whole company.
+    private const AD_TOKENS = [
+        'name' => '%%DisplayName%%',
+        'title' => '%%Title%%',
+        'email' => '%%WindowsEmailAddress%%',
+        'phoneNumber' => '%%Phone%%',
+        'department' => '%%Department%%',
+        'location' => '%%City%%',
+    ];
+
     public function __construct(private readonly PortalEmployeeSignature $employees) {}
 
     // Whether a footer body is usable as a signature: it carries $SIGNATURE or a {placeholder},
@@ -122,6 +133,45 @@ final class PortalSignature
     }
 
     /**
+     * A PowerShell script for IT to create the org-wide Exchange transport rule: the company signature
+     * appended server-side, so it is locked (users cannot edit it) and reaches every client, including
+     * the new Outlook, which no local file can. The person's fields come from Active Directory tokens,
+     * so one rule covers everyone. Null when no signature footer is set.
+     *
+     * @return array{fileName: string, script: string}|null
+     */
+    public function transportRule(): ?array
+    {
+        $footer = $this->defaultFooter();
+        if ($footer === null) {
+            return null;
+        }
+
+        return [
+            'fileName' => 'Install-IKAIKA-Signature-Rule.ps1',
+            'script' => $this->transportRuleScript($this->renderBody($footer, self::AD_TOKENS)),
+        ];
+    }
+
+    // The rule is replaced if it already exists, so re-running updates the signature in place. A
+    // single-quoted here-string leaves the HTML untouched; Exchange caps the text at 5000 characters.
+    private function transportRuleScript(string $html): string
+    {
+        return "\$ErrorActionPreference = 'Stop'\r\n"
+            ."# Creates the org-wide IKAIKA email signature as an Exchange transport rule. Server-side,\r\n"
+            ."# so users cannot edit it and the new Outlook is covered. Run as an Exchange Online admin\r\n"
+            ."# (Connect-ExchangeOnline first). Add -SentToScope NotInOrganization to limit it to outside mail.\r\n"
+            ."\$rule = 'IKAIKA email signature'\r\n"
+            ."\$html = @'\r\n"
+            .$html."\r\n"
+            ."'@\r\n"
+            ."if (\$html.Length -gt 5000) { throw ('The signature is ' + \$html.Length + ' characters; Exchange allows 5000.') }\r\n"
+            ."if (Get-TransportRule -Identity \$rule -ErrorAction SilentlyContinue) { Remove-TransportRule -Identity \$rule -Confirm:\$false }\r\n"
+            ."New-TransportRule -Name \$rule -FromScope InOrganization -ApplyHtmlDisclaimerLocation Append -ApplyHtmlDisclaimerFallbackAction Wrap -ApplyHtmlDisclaimerText \$html\r\n"
+            ."Write-Host ('Transport rule \"' + \$rule + '\" is in place.')\r\n";
+    }
+
+    /**
      * The footers that can be a signature (their body carries the token), oldest first.
      *
      * @return list<array{id: string, name: string}>
@@ -188,6 +238,12 @@ final class PortalSignature
             }
         }
 
+        return $this->defaultFooter();
+    }
+
+    // The company signature footer every unassigned person falls back to: the first token footer.
+    private function defaultFooter(): ?object
+    {
         foreach ($this->footerRows() as $row) {
             if ($this->hasToken((string) $row->body)) {
                 return $row;
