@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalSignature;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
@@ -89,6 +90,26 @@ class PortalSignatureTest extends TestCase
 
         $this->assertStringContainsString($member->first_name, $html);
         $this->assertStringNotContainsString('&middot;', $html);
+    }
+
+    public function test_the_token_scan_ignores_style_blocks(): void
+    {
+        $this->assertFalse(PortalSignature::carriesSignature('<style>.x {name} {email}</style>'));
+        $this->assertFalse(PortalSignature::carriesSignature('<p>No token here</p>'));
+        $this->assertTrue(PortalSignature::carriesSignature('<p>{name}</p>'));
+        $this->assertTrue(PortalSignature::carriesSignature('<p>$SIGNATURE</p>'));
+    }
+
+    public function test_the_editor_previews_the_wording(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+
+        $html = (string) $this->withToken($this->token($admin))
+            ->postJson('/api/development/portal/signature/preview', ['body' => '<p>{name} - {email}</p>', 'format' => 'html'])
+            ->assertOk()
+            ->json('data.html');
+
+        $this->assertStringContainsString($admin->first_name, $html);
     }
 
     public function test_a_signature_footer_must_carry_the_token(): void

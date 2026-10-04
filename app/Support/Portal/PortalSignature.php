@@ -22,19 +22,28 @@ final class PortalSignature
 
     public function __construct(private readonly PortalEmployeeSignature $employees) {}
 
-    // Whether a footer body is usable as a signature: it carries $SIGNATURE or a {placeholder}.
+    // Whether a footer body is usable as a signature: it carries $SIGNATURE or a {placeholder},
+    // ignoring style/script blocks and comments, where braces appear for other reasons.
     public static function carriesSignature(string $body): bool
     {
-        if (str_contains(strtoupper($body), self::TOKEN)) {
+        $scan = (string) preg_replace('/<(style|script)\b[^>]*>.*?<\/\1>/is', '', $body);
+        $scan = (string) preg_replace('/<!--.*?-->/s', '', $scan);
+        if (str_contains(strtoupper($scan), self::TOKEN)) {
             return true;
         }
         foreach (self::PLACEHOLDERS as $key) {
-            if (stripos($body, '{'.$key.'}') !== false) {
+            if (stripos($scan, '{'.$key.'}') !== false) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    // How a footer body reads for the editor's sample person, before it is saved.
+    public function preview(Employee $employee, string $body, string $format): string
+    {
+        return $this->renderBody((object) ['body' => $body, 'format' => $format], $this->employees->values($employee));
     }
 
     /**

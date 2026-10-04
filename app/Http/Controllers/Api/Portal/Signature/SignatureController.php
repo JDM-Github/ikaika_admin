@@ -37,6 +37,21 @@ class SignatureController extends Controller
         return response()->json(['section' => 'signature', 'resource' => 'signature-document', 'data' => $document]);
     }
 
+    // How a footer body reads for the editor's sample person, before it is saved.
+    public function preview(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'body' => ['required', 'string', 'max:20000'],
+            'format' => ['required', 'string', 'in:markup,html'],
+        ]);
+
+        return response()->json([
+            'section' => 'signature',
+            'resource' => 'signature-preview',
+            'data' => ['html' => $this->signatures->preview($this->employee($request), $data['body'], $data['format'])],
+        ]);
+    }
+
     private function employee(Request $request): Employee
     {
         $employee = $request->attributes->get('portalEmployee');

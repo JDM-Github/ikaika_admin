@@ -9,4 +9,7 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::get('signature', [SignatureController::class, 'show']);
     // The same signature as a downloadable .htm (logo inlined), for Outlook.
     Route::get('signature/document', [SignatureController::class, 'document']);
+    // The editor's preview of a footer body, for Manage / Signatures.
+    Route::middleware('portal.rule:email.library')
+        ->post('signature/preview', [SignatureController::class, 'preview']);
 });
