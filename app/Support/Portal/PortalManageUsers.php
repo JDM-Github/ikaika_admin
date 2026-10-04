@@ -47,6 +47,7 @@ final class PortalManageUsers
         private readonly PortalAudit $audit,
         private readonly CoreLedger $ledger,
         private readonly PortalEmployeeSignature $signatures,
+        private readonly PortalSignature $signature,
     ) {}
 
     /**
@@ -330,6 +331,8 @@ final class PortalManageUsers
             // The signature block the portal curates, and whether this viewer may edit it.
             'canEditProfile' => PortalRules::holds($viewer, $request, PortalEmployeeSignature::RULE),
             'signature' => $this->signatures->values($target),
+            // The signature footers (those carrying $SIGNATURE) an editor may assign.
+            'signatureFooters' => $this->signature->footers(),
         ];
     }
 

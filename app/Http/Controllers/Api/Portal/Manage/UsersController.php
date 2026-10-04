@@ -55,6 +55,7 @@ class UsersController extends Controller
             'phoneNumber' => ['nullable', 'string', 'max:50'],
             'department' => ['nullable', 'string', 'max:100'],
             'location' => ['nullable', 'string', 'max:100'],
+            'footerId' => ['nullable', 'integer', 'min:1'],
         ]);
 
         return response()->json($this->users->updateProfile($actor, $id, $validated, $request));

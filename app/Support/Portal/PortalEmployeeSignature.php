@@ -19,7 +19,7 @@ final class PortalEmployeeSignature
     public function __construct(private readonly PortalAudit $audit) {}
 
     /**
-     * @return array{name: ?string, title: ?string, email: ?string, phoneNumber: ?string, department: ?string, location: ?string}
+     * @return array{name: ?string, title: ?string, email: ?string, phoneNumber: ?string, department: ?string, location: ?string, footerId: ?int}
      */
     public function values(Employee $employee): array
     {
@@ -32,21 +32,24 @@ final class PortalEmployeeSignature
             'phoneNumber' => $this->pick($row->phone_number ?? null, $employee->phone_number),
             'department' => $this->pick($row->department ?? null, $employee->department),
             'location' => $this->pick($row->location ?? null, $employee->location),
+            'footerId' => $row !== null && $row->footer_id !== null ? (int) $row->footer_id : null,
         ];
     }
 
     /**
      * @param  array<string, mixed>  $fields
-     * @return array{name: ?string, title: ?string, email: ?string, phoneNumber: ?string, department: ?string, location: ?string}
+     * @return array{name: ?string, title: ?string, email: ?string, phoneNumber: ?string, department: ?string, location: ?string, footerId: ?int}
      */
     public function update(Employee $actor, Employee $target, array $fields, Request $request): array
     {
+        $footerId = (int) ($fields['footerId'] ?? 0);
         $columns = [
             'title' => $this->text($fields['title'] ?? null),
             'email' => $this->text($fields['email'] ?? null),
             'phone_number' => $this->text($fields['phoneNumber'] ?? null),
             'department' => $this->text($fields['department'] ?? null),
             'location' => $this->text($fields['location'] ?? null),
+            'footer_id' => $footerId > 0 ? $footerId : null,
             'updated_at' => now(),
         ];
         $this->connection()->table('employee_signatures')->updateOrInsert(

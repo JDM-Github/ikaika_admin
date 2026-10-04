@@ -110,6 +110,10 @@ final class PortalEmail
         $subject = $kind === self::KIND_TEMPLATE ? $this->validatedSubject($request, true) : null;
         $format = PortalEmailMarkup::validated($request->input('format'));
         $body = $this->validatedBody($request, $format);
+        // A footer edited from Manage / Signatures must carry the $SIGNATURE token to be usable there.
+        if ($kind === self::KIND_FOOTER && $request->boolean('signature') && ! str_contains(strtoupper($body), '$SIGNATURE')) {
+            abort(422, 'A signature footer needs the $SIGNATURE token.');
+        }
         $createdAt = $this->timezone->now();
 
         $id = (int) $this->connection()->table('email_blocks')->insertGetId([
@@ -156,6 +160,10 @@ final class PortalEmail
         $subject = $kind === self::KIND_TEMPLATE ? $this->validatedSubject($request, true) : null;
         $format = PortalEmailMarkup::validated($request->input('format'));
         $body = $this->validatedBody($request, $format);
+        // A footer edited from Manage / Signatures must carry the $SIGNATURE token to be usable there.
+        if ($kind === self::KIND_FOOTER && $request->boolean('signature') && ! str_contains(strtoupper($body), '$SIGNATURE')) {
+            abort(422, 'A signature footer needs the $SIGNATURE token.');
+        }
 
         $this->connection()->table('email_blocks')->where('id', $id)->update([
             'name' => $name,

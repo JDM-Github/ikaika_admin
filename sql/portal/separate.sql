@@ -197,6 +197,24 @@ SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width
   </tr>
 </table>', 'html', id
 FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+-- A signature footer: the $SIGNATURE token is replaced with the person's own details when it is used
+-- as an email signature (Manage / Signatures, and each employee's Settings). The plain Company footer
+-- above has no token, so it is usable in email but cannot be a signature.
+INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
+SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
+  <tr>
+    <td style="padding:16px 0 0 0;border-top:2px solid #1f4e8c;">
+      $SIGNATURE
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:16px 0 0 0;font-size:11px;line-height:16px;color:#9ca3af;">
+      This message may contain confidential information and is meant only
+      for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
+    </td>
+  </tr>
+</table>', 'html', id
+FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
 SELECT 'template', 'Portal email test', 'notice', 'Portal email test', '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
   <tr>
@@ -585,7 +603,6 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.users.information', 'manage.users', 'Show employee information', 'See the private details of the people in {UserName|Your} reach: birthday, address, contact, government and tax numbers, bank details and emergency contact.', 1, 1, 'admin', 848),
 ('manage.users.profile', 'manage.users', 'Edit profiles', 'Edit the signature and profile details of the people in {UserName|Your} reach: title, email, phone, department and location.', 0, 1, 'admin', 849),
 ('email.images.global', 'email', 'Global images', 'Add and delete the images everyone can use in an email. Anyone who can open Email can already use them. Only administrators can hold it.', 0, 1, 'admin', 983),
-('signature.template', 'administration', 'Signature templates', 'Edit the company email signature templates every employee''s signature is built from.', 0, 1, 'admin', 990),
 ('developer', NULL, 'Developer', 'Tools for the people who build the portal.', 0, 1, 'developer', 1100),
 ('developer.rules', 'developer', 'Rule catalog', 'Change the rule list and what each role starts with.', 0, 1, 'developer', 1110),
 ('developer.flag', 'developer', 'Developer flag', 'Mark or unmark someone as a developer.', 0, 1, 'developer', 1120),
@@ -760,6 +777,7 @@ WHERE department IS NOT NULL AND TRIM(department) <> ''
 CREATE TABLE IF NOT EXISTS employee_signatures (
     id           INT AUTO_INCREMENT PRIMARY KEY,
     employee_id  INT          NOT NULL,
+    footer_id    INT          NULL,
     title        VARCHAR(255) NULL,
     email        VARCHAR(255) NULL,
     phone_number VARCHAR(50)  NULL,
@@ -767,31 +785,6 @@ CREATE TABLE IF NOT EXISTS employee_signatures (
     location     VARCHAR(100) NULL,
     updated_at   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY employee_signatures_employee (employee_id),
-    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+    FOREIGN KEY (footer_id) REFERENCES email_blocks(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ============================================================================
--- SIGNATURE TEMPLATES - the company blocks an employee's email signature is built from
--- A template is a brand's fixed fields (company, website, logo, accent, disclaimer); the signature
--- itself is rendered in code from these plus the employee's details, so the format stays locked.
--- Edited behind the signature.template power. Multiple brands can exist; the default one is used
--- until a person is assigned another.
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS signature_templates (
-    id           INT AUTO_INCREMENT PRIMARY KEY,
-    brand        VARCHAR(100) NOT NULL,
-    company_name VARCHAR(191) NOT NULL,
-    website      VARCHAR(191) NULL,
-    address      VARCHAR(255) NULL,
-    logo_url     VARCHAR(500) NULL,
-    accent_color VARCHAR(20)  NULL,
-    disclaimer   TEXT         NULL,
-    is_default   TINYINT(1)   NOT NULL DEFAULT 0,
-    created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY signature_templates_brand (brand)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-INSERT IGNORE INTO signature_templates (brand, company_name, website, accent_color, is_default)
-VALUES ('IKAIKA', 'IKAIKA BIM', 'ikaikabim.com', '#2563eb', 1);

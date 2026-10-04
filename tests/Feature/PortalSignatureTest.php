@@ -10,9 +10,10 @@ use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
- * Email signatures: a member reads their own rendered signature (Settings); the templates are edited
- * behind the signature.template power. The signature is rendered in code from the template plus the
- * employee's details, so the format is locked.
+ * Email signatures: a signature is a footer (email_blocks kind footer) whose body carries the
+ * $SIGNATURE token, rendered with the employee's own details. A member reads their own on Settings;
+ * the footers are edited with the email footers (the email.library power), and a footer saved as a
+ * signature must carry the token.
  */
 class PortalSignatureTest extends TestCase
 {
@@ -25,7 +26,7 @@ class PortalSignatureTest extends TestCase
 
     private const SIGNATURE = '/api/development/portal/signature';
 
-    private const TEMPLATES = '/api/development/portal/manage/signature-templates';
+    private const BLOCKS = '/api/development/portal/administration/email-blocks';
 
     protected function setUp(): void
     {
@@ -52,13 +53,13 @@ class PortalSignatureTest extends TestCase
         return (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
     }
 
-    public function test_a_member_reads_their_own_signature(): void
+    public function test_a_member_reads_their_own_signature_from_a_footer(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
 
         $response = $this->withToken($this->token($member))->getJson(self::SIGNATURE)->assertOk();
 
-        $this->assertSame('IKAIKA', $response->json('data.brand'));
+        $this->assertSame('Company signature', $response->json('data.brand'));
         $this->assertStringContainsString($member->first_name, (string) $response->json('data.html'));
     }
 
@@ -72,28 +73,19 @@ class PortalSignatureTest extends TestCase
         $this->assertStringContainsString('<!doctype html>', (string) $response->json('data.html'));
     }
 
-    public function test_the_templates_are_edited_behind_the_power(): void
+    public function test_a_signature_footer_must_carry_the_token(): void
     {
         $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
-        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+        $token = $this->token($admin);
 
-        $this->withToken($this->token($member))->getJson(self::TEMPLATES)->assertForbidden();
+        $this->withToken($token)->postJson(self::BLOCKS, [
+            'kind' => 'footer', 'name' => 'No token', 'format' => 'html', 'body' => '<p>Plain</p>', 'signature' => true,
+        ])->assertStatus(422)->assertJsonPath('message', 'A signature footer needs the $SIGNATURE token.');
 
-        $adminToken = $this->token($admin);
-        $list = $this->withToken($adminToken)->getJson(self::TEMPLATES)->assertOk()->json('data.templates');
-        $this->assertSame('IKAIKA', $list[0]['brand']);
+        $this->withToken($token)->postJson(self::BLOCKS, [
+            'kind' => 'footer', 'name' => 'With token', 'format' => 'html', 'body' => '<p>$SIGNATURE</p>', 'signature' => true,
+        ])->assertCreated();
 
-        $added = $this->withToken($adminToken)->postJson(self::TEMPLATES, ['brand' => 'SVM', 'companyName' => 'SVM Inc', 'website' => 'svm.com'])->assertOk();
-        $row = collect($added->json('data.templates'))->firstWhere('brand', 'SVM');
-        $this->assertNotNull($row);
-        $this->assertFalse($row['isDefault']);
-
-        $this->withToken($adminToken)->postJson(self::TEMPLATES, ['brand' => 'svm', 'companyName' => 'Other'])->assertStatus(422);
-
-        $this->withToken($adminToken)->patchJson(self::TEMPLATES.'/'.$row['id'], ['brand' => 'SVM', 'companyName' => 'SVM Services'])->assertOk();
-        $this->assertSame('SVM Services', DB::connection('portal')->table('signature_templates')->where('id', $row['id'])->value('company_name'));
-
-        $this->withToken($adminToken)->deleteJson(self::TEMPLATES.'/'.$row['id'])->assertOk();
-        $this->withToken($adminToken)->deleteJson(self::TEMPLATES.'/'.$row['id'])->assertNotFound();
+        $this->assertTrue(DB::connection('portal')->table('email_blocks')->where('name', 'With token')->exists());
     }
 }

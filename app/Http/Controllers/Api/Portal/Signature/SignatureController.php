@@ -10,7 +10,8 @@ use Illuminate\Http\Request;
 
 /**
  * Email signatures. `show` is the signed-in employee's own rendered signature (any member, on
- * Settings); the rest edit the company templates behind the signature.template power.
+ * Settings); `document` is the same as a downloadable .htm. Signatures are footers carrying the
+ * $SIGNATURE token, edited with the email footers (the email.library power) on Manage / Signatures.
  */
 class SignatureController extends Controller
 {
@@ -25,35 +26,15 @@ class SignatureController extends Controller
         ]);
     }
 
-    public function index(): JsonResponse
-    {
-        return response()->json($this->signatures->index());
-    }
-
-    // The employee's signature as a downloadable .htm, logo inlined for Outlook.
+    // The employee's signature as a downloadable .htm, for Outlook.
     public function document(Request $request): JsonResponse
     {
         $document = $this->signatures->document($this->employee($request));
         if ($document === null) {
-            abort(404, 'No signature template is set.');
+            abort(404, 'No signature footer is set.');
         }
 
         return response()->json(['section' => 'signature', 'resource' => 'signature-document', 'data' => $document]);
-    }
-
-    public function store(Request $request): JsonResponse
-    {
-        return response()->json($this->signatures->addTemplate($this->employee($request), $request));
-    }
-
-    public function update(Request $request, int $id): JsonResponse
-    {
-        return response()->json($this->signatures->updateTemplate($this->employee($request), $request, $id));
-    }
-
-    public function destroy(Request $request, int $id): JsonResponse
-    {
-        return response()->json($this->signatures->removeTemplate($this->employee($request), $request, $id));
     }
 
     private function employee(Request $request): Employee
