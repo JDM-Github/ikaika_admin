@@ -28,6 +28,7 @@ Route::prefix('portal')->middleware(RequirePortalLocation::class)->group(functio
     require __DIR__.'/reports.php';
     require __DIR__.'/requests.php';
     require __DIR__.'/calendar.php';
+    require __DIR__.'/signature.php';
     require __DIR__.'/access.php';
     require __DIR__.'/developer.php';
     require __DIR__.'/administration.php';

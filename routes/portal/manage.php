@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Portal\Manage\ProjectSettingsController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
+use App\Http\Controllers\Api\Portal\Signature\SignatureController;
 use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
@@ -49,6 +50,15 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:manage.users.profile', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/profile', [UsersController::class, 'updateProfile'])
         ->whereNumber('id');
+    // Signature templates, edited behind the signature.template power.
+    Route::middleware(['portal.rule:signature.template', 'throttle:portal-manage-users'])->group(function (): void {
+        Route::get('manage/signature-templates', [SignatureController::class, 'index']);
+        Route::post('manage/signature-templates', [SignatureController::class, 'store']);
+        Route::patch('manage/signature-templates/{id}', [SignatureController::class, 'update'])
+            ->whereNumber('id');
+        Route::delete('manage/signature-templates/{id}', [SignatureController::class, 'destroy'])
+            ->whereNumber('id');
+    });
     // Each kind on the queue and its Approve or reject follow their own rule inside PortalManageRequests.
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests'])
         ->get('manage/requests', [RequestsController::class, 'index']);

@@ -585,6 +585,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.users.information', 'manage.users', 'Show employee information', 'See the private details of the people in {UserName|Your} reach: birthday, address, contact, government and tax numbers, bank details and emergency contact.', 1, 1, 'admin', 848),
 ('manage.users.profile', 'manage.users', 'Edit profiles', 'Edit the signature and profile details of the people in {UserName|Your} reach: title, email, phone, department and location.', 0, 1, 'admin', 849),
 ('email.images.global', 'email', 'Global images', 'Add and delete the images everyone can use in an email. Anyone who can open Email can already use them. Only administrators can hold it.', 0, 1, 'admin', 983),
+('signature.template', 'administration', 'Signature templates', 'Edit the company email signature templates every employee''s signature is built from.', 0, 1, 'admin', 990),
 ('developer', NULL, 'Developer', 'Tools for the people who build the portal.', 0, 1, 'developer', 1100),
 ('developer.rules', 'developer', 'Rule catalog', 'Change the rule list and what each role starts with.', 0, 1, 'developer', 1110),
 ('developer.flag', 'developer', 'Developer flag', 'Mark or unmark someone as a developer.', 0, 1, 'developer', 1120),
@@ -768,3 +769,29 @@ CREATE TABLE IF NOT EXISTS employee_signatures (
     UNIQUE KEY employee_signatures_employee (employee_id),
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- SIGNATURE TEMPLATES - the company blocks an employee's email signature is built from
+-- A template is a brand's fixed fields (company, website, logo, accent, disclaimer); the signature
+-- itself is rendered in code from these plus the employee's details, so the format stays locked.
+-- Edited behind the signature.template power. Multiple brands can exist; the default one is used
+-- until a person is assigned another.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS signature_templates (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    brand        VARCHAR(100) NOT NULL,
+    company_name VARCHAR(191) NOT NULL,
+    website      VARCHAR(191) NULL,
+    address      VARCHAR(255) NULL,
+    logo_url     VARCHAR(500) NULL,
+    accent_color VARCHAR(20)  NULL,
+    disclaimer   TEXT         NULL,
+    is_default   TINYINT(1)   NOT NULL DEFAULT 0,
+    created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY signature_templates_brand (brand)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO signature_templates (brand, company_name, website, accent_color, is_default)
+VALUES ('IKAIKA', 'IKAIKA BIM', 'ikaikabim.com', '#2563eb', 1);
