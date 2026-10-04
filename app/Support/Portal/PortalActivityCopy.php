@@ -332,6 +332,11 @@ final class PortalActivityCopy
         return self::YOU.' deleted '.($global ? 'a global' : 'an').' email image';
     }
 
+    public static function downloadedEmailAttachment(string $name, string $subject): string
+    {
+        return self::YOU.' downloaded '.$name.' from the email "'.$subject.'"';
+    }
+
     public static function sentEmail(string $subject, int $count): string
     {
         $label = $count === 1 ? '1 member' : $count.' members';

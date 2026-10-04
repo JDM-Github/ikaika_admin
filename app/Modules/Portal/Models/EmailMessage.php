@@ -4,6 +4,7 @@ namespace App\Modules\Portal\Models;
 
 use App\Modules\Support\ProductModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EmailMessage extends ProductModel
 {
@@ -43,5 +44,10 @@ class EmailMessage extends ProductModel
     public function footer(): BelongsTo
     {
         return $this->belongsTo(EmailBlock::class, 'footer_id');
+    }
+
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(EmailAttachment::class, 'message_id');
     }
 }
