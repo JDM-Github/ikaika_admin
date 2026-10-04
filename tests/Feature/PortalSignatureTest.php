@@ -73,6 +73,24 @@ class PortalSignatureTest extends TestCase
         $this->assertStringContainsString('<!doctype html>', (string) $response->json('data.html'));
     }
 
+    public function test_empty_placeholders_drop_their_separators(): void
+    {
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+        $member->forceFill(['phone_number' => null, 'location' => null])->save();
+
+        $footerId = (int) DB::connection('portal')->table('email_blocks')->insertGetId([
+            'kind' => 'footer', 'name' => 'Tidy test', 'category' => null, 'subject' => null,
+            'body' => '<p>{name} &middot; {phone} &middot; {location}</p>', 'format' => 'html',
+            'created_by' => $member->getKey(), 'date_created' => now(),
+        ]);
+        DB::connection('portal')->table('employee_signatures')->insert(['employee_id' => $member->getKey(), 'footer_id' => $footerId]);
+
+        $html = (string) $this->withToken($this->token($member))->getJson(self::SIGNATURE)->assertOk()->json('data.html');
+
+        $this->assertStringContainsString($member->first_name, $html);
+        $this->assertStringNotContainsString('&middot;', $html);
+    }
+
     public function test_a_signature_footer_must_carry_the_token(): void
     {
         $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");

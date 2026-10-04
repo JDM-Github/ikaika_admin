@@ -149,7 +149,18 @@ final class PortalSignature
             $html = str_ireplace($token, htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'), $html);
         }
 
-        return $html;
+        return $this->tidy($html);
+    }
+
+    // An empty placeholder leaves two separators in a row, and one dangling before a closing tag.
+    // Collapse the run and drop the dangling one, so "email · · " reads "email".
+    private function tidy(string $html): string
+    {
+        $pad = '(?:&nbsp;|\s)*';
+        $dot = '(?:&middot;|·)';
+        $html = (string) preg_replace('/'.$dot.'(?:'.$pad.$dot.')+/u', '&middot;', $html);
+
+        return (string) preg_replace('/'.$pad.$dot.$pad.'(?=<\/|$)/iu', '', $html);
     }
 
     /**
