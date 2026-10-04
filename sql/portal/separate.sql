@@ -201,33 +201,40 @@ FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
 -- as an email signature (Manage / Signatures, and each employee's Settings). The plain Company footer
 -- above has no token, so it is usable in email but cannot be a signature.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
-SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
+SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;color:#374151;">
   <tr>
-    <td width="72" valign="middle" style="width:72px;padding:0 16px 0 0;">
-      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="56" style="display:block;width:56px;height:auto;border:0;">
+    <td width="150" valign="top" style="width:150px;padding:2px 20px 0 0;border-right:2px solid #1f4e8c;">
+      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA" width="110" style="display:block;width:110px;height:auto;border:0;">
     </td>
-    <td valign="middle" style="padding:2px 0 2px 16px;border-left:2px solid #1f4e8c;font-size:13px;line-height:20px;color:#374151;">
-      <strong style="font-size:14px;font-weight:700;color:#1f4e8c;letter-spacing:0.3px;">IKAIKA BIM</strong><br>
-      <a href="https://ikaikabim.com" target="_blank" style="color:#374151;text-decoration:none;">ikaikabim.com</a>
-      &nbsp;&middot;&nbsp;
-      <a href="mailto:info@ikaikabim.com" style="color:#374151;text-decoration:none;">info@ikaikabim.com</a>
+    <td valign="top" style="padding:2px 0 0 20px;">
+      <div style="font-size:20px;line-height:26px;font-weight:700;color:#1f4e8c;">{name}</div>
+      <div style="font-size:15px;line-height:22px;color:#6b7280;">{title} &middot; {department}</div>
+      <div style="font-size:14px;line-height:24px;padding-top:12px;">
+        <span style="color:#1f4e8c;">&#9993;</span>&nbsp; <a href="mailto:{email}" style="color:#374151;text-decoration:none;">{email}</a>
+        &nbsp;&nbsp;|&nbsp;&nbsp;
+        <span style="color:#1f4e8c;">&#9742;</span>&nbsp; {phone}
+        &nbsp;&nbsp;|&nbsp;&nbsp;
+        <span style="color:#1f4e8c;">&#8962;</span>&nbsp; {location}
+      </div>
+      <div style="padding-top:18px;">
+        <div style="font-size:17px;line-height:24px;font-weight:700;color:#1f4e8c;">IKAIKA BIM</div>
+        <div style="font-size:14px;line-height:22px;padding-top:2px;">
+          <a href="https://ikaikabim.com" style="color:#374151;text-decoration:none;">ikaikabim.com</a>
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          <a href="mailto:info@ikaikabim.com" style="color:#374151;text-decoration:none;">info@ikaikabim.com</a>
+        </div>
+      </div>
     </td>
   </tr>
   <tr>
-    <td colspan="2" style="padding:16px 0 0 0;font-size:13px;line-height:20px;color:#374151;">
-      <strong style="font-size:14px;font-weight:700;color:#1f4e8c;">{name}</strong><br>
-      {title} &middot; {department}<br>
-      <a href="mailto:{email}" style="color:#374151;text-decoration:none;">{email}</a>
-      &nbsp;&middot;&nbsp;
-      {phone}
-      &nbsp;&middot;&nbsp;
-      {location}
-    </td>
+    <td colspan="2" style="height:20px;font-size:0;line-height:0;">&nbsp;</td>
   </tr>
   <tr>
-    <td colspan="2" style="padding:16px 0 0 0;font-size:11px;line-height:16px;color:#9ca3af;">
-      This message may contain confidential information and is meant only
-      for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
+    <td colspan="2" style="border-top:1px solid #d1d5db;font-size:0;line-height:0;">&nbsp;</td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding-top:10px;font-size:12px;line-height:18px;color:#9ca3af;">
+      This message may contain confidential information and is meant only for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
     </td>
   </tr>
 </table>', 'html', id

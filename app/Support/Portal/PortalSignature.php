@@ -187,15 +187,16 @@ final class PortalSignature
         return $this->tidy($html);
     }
 
-    // An empty placeholder leaves two separators in a row, and one dangling before a closing tag.
-    // Collapse the run and drop the dangling one, so "email · · " reads "email".
+    // An empty placeholder leaves two separators in a row (an icon between them), and one dangling
+    // before a closing tag. Collapse a run into a single separator of the same kind, and drop the
+    // dangling one. An icon span counts as padding, so its orphaned separator goes with it.
     private function tidy(string $html): string
     {
-        $pad = '(?:&nbsp;|\s)*';
-        $dot = '(?:&middot;|·)';
-        $html = (string) preg_replace('/'.$dot.'(?:'.$pad.$dot.')+/u', '&middot;', $html);
+        $icon = '<span\b[^>]*>[^<]*<\/span>';
+        $pad = '(?:(?:&nbsp;|\s)|'.$icon.')*';
+        $html = (string) preg_replace('/(&middot;|·|\|)(?:'.$pad.'(?1))+/u', '$1', $html);
 
-        return (string) preg_replace('/'.$pad.$dot.$pad.'(?=<\/|$)/iu', '', $html);
+        return (string) preg_replace('/'.$pad.'(?:&middot;|·|\|)'.$pad.'(?=<\/|$)/iu', '', $html);
     }
 
     /**
