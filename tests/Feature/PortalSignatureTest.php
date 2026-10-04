@@ -92,6 +92,20 @@ class PortalSignatureTest extends TestCase
         $this->assertStringContainsString('<!doctype html>', (string) $response->json('data.html'));
     }
 
+    public function test_a_member_downloads_a_one_click_outlook_installer(): void
+    {
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+
+        $response = $this->withToken($this->token($member))->getJson(self::SIGNATURE.'/installer')->assertOk();
+
+        $this->assertStringEndsWith('.cmd', (string) $response->json('data.fileName'));
+        $script = (string) $response->json('data.script');
+        $this->assertStringContainsString('@echo off', $script);
+        // The signature travels base64-encoded, and the script sets it as the default for Outlook.
+        $this->assertStringContainsString('IKAIKA_B64=', $script);
+        $this->assertStringContainsString('NewSignature', $script);
+    }
+
     public function test_empty_placeholders_drop_their_separators(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");

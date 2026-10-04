@@ -73,6 +73,55 @@ final class PortalSignature
     }
 
     /**
+     * A one-click installer for Windows Outlook: a .cmd that writes the signature .htm into the
+     * Signatures folder and sets it as the default for new mail and replies. Unsigned for now, so
+     * Windows and antivirus may warn before it runs. Null when no signature footer is set.
+     *
+     * @return array{fileName: string, script: string}|null
+     */
+    public function installer(Employee $employee): ?array
+    {
+        $document = $this->document($employee);
+        if ($document === null) {
+            return null;
+        }
+        $name = trim((string) preg_replace('/[^\w \-]/', '', (string) $this->employees->values($employee)['name']));
+        if ($name === '') {
+            $name = 'IKAIKA Signature';
+        }
+
+        return [
+            'fileName' => 'Install-IKAIKA-Signature.cmd',
+            'script' => $this->cmdScript($name, base64_encode($document['html'])),
+        ];
+    }
+
+    // The .cmd carries the signature base64 and a PowerShell one-liner: write the .htm, then set the
+    // default signature on every Office version present. Idempotent, so re-running updates it.
+    private function cmdScript(string $name, string $base64): string
+    {
+        $command = '$dir = Join-Path $env:APPDATA \'Microsoft\\Signatures\'; '
+            .'New-Item -ItemType Directory -Force -Path $dir | Out-Null; '
+            .'$path = Join-Path $dir ($env:IKAIKA_SIG + \'.htm\'); '
+            .'[IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:IKAIKA_B64)); '
+            .'foreach ($v in @(\'16.0\',\'15.0\')) { '
+            .'$k = \'HKCU:\\Software\\Microsoft\\Office\\\' + $v + \'\\Common\\MailSettings\'; '
+            .'if (Test-Path $k) { '
+            .'Set-ItemProperty -Path $k -Name \'NewSignature\' -Value $env:IKAIKA_SIG -ErrorAction SilentlyContinue; '
+            .'Set-ItemProperty -Path $k -Name \'ReplySignature\' -Value $env:IKAIKA_SIG -ErrorAction SilentlyContinue } }; '
+            .'Write-Host (\'Signature installed for \' + $env:IKAIKA_SIG)';
+
+        return "@echo off\r\n"
+            ."setlocal\r\n"
+            .'set "IKAIKA_SIG='.$name."\"\r\n"
+            .'set "IKAIKA_B64='.$base64."\"\r\n"
+            .'powershell -NoProfile -ExecutionPolicy Bypass -Command "'.$command.'"'."\r\n"
+            ."echo.\r\n"
+            ."echo Done. Open Outlook and your signature is ready.\r\n"
+            ."pause\r\n";
+    }
+
+    /**
      * The footers that can be a signature (their body carries the token), oldest first.
      *
      * @return list<array{id: string, name: string}>

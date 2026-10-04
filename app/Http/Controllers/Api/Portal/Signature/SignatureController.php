@@ -52,6 +52,17 @@ class SignatureController extends Controller
         ]);
     }
 
+    // A one-click Windows Outlook installer (.cmd) for the employee's own signature.
+    public function installer(Request $request): JsonResponse
+    {
+        $installer = $this->signatures->installer($this->employee($request));
+        if ($installer === null) {
+            abort(404, 'No signature footer is set.');
+        }
+
+        return response()->json(['section' => 'signature', 'resource' => 'signature-installer', 'data' => $installer]);
+    }
+
     private function employee(Request $request): Employee
     {
         $employee = $request->attributes->get('portalEmployee');
