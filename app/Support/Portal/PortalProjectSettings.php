@@ -8,9 +8,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 
 /**
- * Manage / Project Settings: the reference data a project is filed under. A scope here is an activity
- * code a non-Engineering department reports on (activity_codes); adding one offers it on Add/Edit
- * Project and the report builder for its department. Engineering's scopes are the WBS tree, read only.
+ * Manage / Project Settings: the reference data a project is filed under, all editable here.
+ *
+ * A scope is an activity code a non-Engineering department reports on (activity_codes). A job type is
+ * a type of project a department uses (job_types). A department is a bucket a project is filed under
+ * (departments). The Add/Edit Project form offers these lists unioned with what live projects and
+ * employees already use, so adding one here shows up and an old value is never lost.
  */
 final class PortalProjectSettings
 {
@@ -31,7 +34,25 @@ final class PortalProjectSettings
             ];
         }
 
-        return ['section' => 'manage', 'resource' => 'project-settings', 'data' => ['scopes' => $scopes]];
+        $jobTypes = [];
+        foreach ($this->connection()->table('job_types')->orderBy('department')->orderBy('name')->get(['id', 'department', 'name']) as $row) {
+            $jobTypes[] = [
+                'id' => (string) (int) $row->id,
+                'department' => trim((string) $row->department),
+                'name' => trim((string) $row->name),
+            ];
+        }
+
+        $departments = [];
+        foreach ($this->connection()->table('departments')->orderBy('name')->get(['id', 'name']) as $row) {
+            $departments[] = ['id' => (string) (int) $row->id, 'name' => trim((string) $row->name)];
+        }
+
+        return [
+            'section' => 'manage',
+            'resource' => 'project-settings',
+            'data' => ['scopes' => $scopes, 'jobTypes' => $jobTypes, 'departments' => $departments],
+        ];
     }
 
     /**
@@ -48,7 +69,7 @@ final class PortalProjectSettings
         if ($code === '') {
             abort(422, 'Give the scope a code.');
         }
-        if ($this->taken($code)) {
+        if ($this->codeTaken($code)) {
             abort(422, 'That scope code is already on the list.');
         }
 
@@ -81,7 +102,7 @@ final class PortalProjectSettings
         if ($code === '') {
             abort(422, 'Give the scope a code.');
         }
-        if ($this->taken($code, $id)) {
+        if ($this->codeTaken($code, $id)) {
             abort(422, 'That scope code is already on the list.');
         }
 
@@ -113,9 +134,130 @@ final class PortalProjectSettings
         return $this->index();
     }
 
-    private function taken(string $code, ?int $exceptId = null): bool
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function addJobType(Employee $actor, Request $request): array
     {
-        $query = $this->connection()->table('activity_codes')->whereRaw('LOWER(TRIM(id_no)) = ?', [mb_strtolower($code)]);
+        $data = $request->validate([
+            'department' => ['required', 'string', 'max:100'],
+            'name' => ['required', 'string', 'max:255'],
+        ]);
+        $name = trim($data['name']);
+        $department = trim($data['department']);
+        if ($name === '') {
+            abort(422, 'Give the project type a name.');
+        }
+        if ($this->jobTypeTaken($department, $name)) {
+            abort(422, 'That project type is already on the list for this department.');
+        }
+
+        $id = (int) $this->connection()->table('job_types')->insertGetId(['department' => $department, 'name' => $name]);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.settings.type', '{UserName|You} added the project type '.$name, (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section, resource, data}
+     */
+    public function updateJobType(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('job_types')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That project type was not found.');
+        }
+        $data = $request->validate([
+            'department' => ['required', 'string', 'max:100'],
+            'name' => ['required', 'string', 'max:255'],
+        ]);
+        $name = trim($data['name']);
+        $department = trim($data['department']);
+        if ($name === '') {
+            abort(422, 'Give the project type a name.');
+        }
+        if ($this->jobTypeTaken($department, $name, $id)) {
+            abort(422, 'That project type is already on the list for this department.');
+        }
+
+        $oldName = trim((string) $row->name);
+        $this->connection()->table('job_types')->where('id', $id)->update(['department' => $department, 'name' => $name]);
+        // The report builder keys a type's allowed activities by name, so a rename carries them over.
+        if ($oldName !== $name) {
+            $this->connection()->table('job_type_allowed_activities')->where('job_type', $oldName)->update(['job_type' => $name]);
+        }
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.settings.type', '{UserName|You} changed the project type '.$name, (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function removeJobType(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('job_types')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That project type was not found.');
+        }
+
+        $this->connection()->table('job_types')->where('id', $id)->delete();
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.settings.type', '{UserName|You} removed the project type '.trim((string) $row->name), (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function addDepartment(Employee $actor, Request $request): array
+    {
+        $data = $request->validate(['name' => ['required', 'string', 'max:100']]);
+        $name = trim($data['name']);
+        if ($name === '') {
+            abort(422, 'Give the department a name.');
+        }
+        if ($this->departmentTaken($name)) {
+            abort(422, 'That department is already on the list.');
+        }
+
+        $id = (int) $this->connection()->table('departments')->insertGetId(['name' => $name]);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.settings.department', '{UserName|You} added the department '.$name, (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function removeDepartment(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('departments')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That department was not found.');
+        }
+
+        $this->connection()->table('departments')->where('id', $id)->delete();
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.settings.department', '{UserName|You} removed the department '.trim((string) $row->name), (string) $id, $request);
+
+        return $this->index();
+    }
+
+    private function codeTaken(string $code, ?int $exceptId = null): bool
+    {
+        return $this->taken('activity_codes', 'id_no', $code, $exceptId);
+    }
+
+    private function jobTypeTaken(string $department, string $name, ?int $exceptId = null): bool
+    {
+        $query = $this->connection()->table('job_types')
+            ->whereRaw('LOWER(TRIM(department)) = ?', [mb_strtolower($department)])
+            ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($name)]);
         if ($exceptId !== null) {
             $query->where('id', '!=', $exceptId);
         }
@@ -123,7 +265,22 @@ final class PortalProjectSettings
         return $query->exists();
     }
 
-    // The report builder and the boards read these codes through caches; bump both so a change shows.
+    private function departmentTaken(string $name, ?int $exceptId = null): bool
+    {
+        return $this->taken('departments', 'name', $name, $exceptId);
+    }
+
+    private function taken(string $table, string $column, string $value, ?int $exceptId): bool
+    {
+        $query = $this->connection()->table($table)->whereRaw('LOWER(TRIM('.$column.')) = ?', [mb_strtolower($value)]);
+        if ($exceptId !== null) {
+            $query->where('id', '!=', $exceptId);
+        }
+
+        return $query->exists();
+    }
+
+    // The report builder and the boards read these lists through caches; bump both so a change shows.
     private function bump(): void
     {
         (new PortalReportProjects)->bumpCache();

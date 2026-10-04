@@ -27,6 +27,14 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
             ->whereNumber('id');
         Route::delete('manage/project-settings/scopes/{id}', [ProjectSettingsController::class, 'destroyScope'])
             ->whereNumber('id');
+        Route::post('manage/project-settings/job-types', [ProjectSettingsController::class, 'storeJobType']);
+        Route::patch('manage/project-settings/job-types/{id}', [ProjectSettingsController::class, 'updateJobType'])
+            ->whereNumber('id');
+        Route::delete('manage/project-settings/job-types/{id}', [ProjectSettingsController::class, 'destroyJobType'])
+            ->whereNumber('id');
+        Route::post('manage/project-settings/departments', [ProjectSettingsController::class, 'storeDepartment']);
+        Route::delete('manage/project-settings/departments/{id}', [ProjectSettingsController::class, 'destroyDepartment'])
+            ->whereNumber('id');
     });
     // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.
     Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])

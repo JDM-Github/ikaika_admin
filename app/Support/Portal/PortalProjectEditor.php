@@ -822,6 +822,8 @@ final class PortalProjectEditor
         $names = [
             ...$this->connection()->table('projects')->whereNull('deleted_at')->distinct()->pluck('department')->all(),
             ...$this->connection()->table('employees')->distinct()->pluck('department')->all(),
+            // What Manage / Project Settings adds, so a department added there is offered.
+            ...$this->connection()->table('departments')->distinct()->pluck('name')->all(),
         ];
 
         return $this->distinctSorted($names);
@@ -832,7 +834,13 @@ final class PortalProjectEditor
      */
     private function jobTypes(): array
     {
-        return $this->distinctSorted($this->connection()->table('projects')->distinct()->pluck('type_of_job')->all());
+        $names = [
+            ...$this->connection()->table('projects')->distinct()->pluck('type_of_job')->all(),
+            // What Manage / Project Settings adds, so a job type added there is offered.
+            ...$this->connection()->table('job_types')->distinct()->pluck('name')->all(),
+        ];
+
+        return $this->distinctSorted($names);
     }
 
     /**
@@ -850,6 +858,18 @@ final class PortalProjectEditor
         foreach ($rows as $row) {
             $department = $this->text($row->department);
             $type = $this->text($row->type_of_job);
+            if ($department === null || $type === null) {
+                continue;
+            }
+            $types[$department] ??= [];
+            if (! in_array($type, $types[$department], true)) {
+                $types[$department][] = $type;
+            }
+        }
+        // Job types added on Manage / Project Settings belong to the department that owns them.
+        foreach ($this->connection()->table('job_types')->get(['department', 'name']) as $row) {
+            $department = $this->text($row->department);
+            $type = $this->text($row->name);
             if ($department === null || $type === null) {
                 continue;
             }

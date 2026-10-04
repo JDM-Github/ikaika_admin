@@ -123,4 +123,40 @@ class PortalProjectSettingsTest extends TestCase
         $this->withToken($token)->patchJson(self::BASE.'/scopes/99999999', ['code' => 'X', 'name' => 'X', 'department' => 'MIS'])->assertNotFound();
         $this->withToken($token)->deleteJson(self::BASE.'/scopes/99999999')->assertNotFound();
     }
+
+    public function test_a_project_type_is_added_edited_and_removed(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $token = $this->token($admin);
+
+        $added = $this->withToken($token)->postJson(self::BASE.'/job-types', ['department' => 'MIS', 'name' => 'Test type 9901'])->assertOk();
+        $row = collect($added->json('data.jobTypes'))->firstWhere('name', 'Test type 9901');
+        $this->assertNotNull($row);
+        $this->assertSame('MIS', $row['department']);
+
+        $this->withToken($token)->patchJson(self::BASE.'/job-types/'.$row['id'], ['department' => 'MIS', 'name' => 'Test type 9902'])
+            ->assertOk()
+            ->assertJsonPath('data.jobTypes', fn (array $types): bool => collect($types)->contains(fn (array $type): bool => $type['id'] === $row['id'] && $type['name'] === 'Test type 9902'));
+
+        $this->withToken($token)->postJson(self::BASE.'/job-types', ['department' => 'MIS', 'name' => 'test type 9902'])->assertStatus(422);
+
+        $this->withToken($token)->deleteJson(self::BASE.'/job-types/'.$row['id'])
+            ->assertOk()
+            ->assertJsonPath('data.jobTypes', fn (array $types): bool => collect($types)->doesntContain(fn (array $type): bool => $type['id'] === $row['id']));
+    }
+
+    public function test_a_department_is_added_and_removed(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $token = $this->token($admin);
+
+        $added = $this->withToken($token)->postJson(self::BASE.'/departments', ['name' => 'Test Dept'])->assertOk();
+        $row = collect($added->json('data.departments'))->firstWhere('name', 'Test Dept');
+        $this->assertNotNull($row);
+
+        $this->withToken($token)->postJson(self::BASE.'/departments', ['name' => 'test dept'])->assertStatus(422);
+
+        $this->withToken($token)->deleteJson(self::BASE.'/departments/'.$row['id'])->assertOk();
+        $this->withToken($token)->deleteJson(self::BASE.'/departments/'.$row['id'])->assertNotFound();
+    }
 }

@@ -681,3 +681,36 @@ JOIN (
 WHERE receiver.id_no IN ('220825-0004', '230103-0005');
 
 
+
+-- ============================================================================
+-- PROJECT REFERENCE DATA - Manage / Project Settings
+-- departments and job_types are the lists Add/Edit Project offers, editable on that page.
+-- They start from what projects and employees already use, and the form unions them with the
+-- distinct values on live projects, so a type added there shows up and an old one survives.
+-- Existing databases: run the two CREATE statements and their seeds.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS departments (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY departments_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS job_types (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    department  VARCHAR(100) NOT NULL,
+    name        VARCHAR(255) NOT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY job_types_department_name (department, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO departments (name)
+SELECT DISTINCT department FROM projects WHERE department IS NOT NULL AND TRIM(department) <> ''
+UNION
+SELECT DISTINCT department FROM employees WHERE department IS NOT NULL AND TRIM(department) <> '';
+
+INSERT IGNORE INTO job_types (department, name)
+SELECT DISTINCT department, type_of_job FROM projects
+WHERE department IS NOT NULL AND TRIM(department) <> ''
+  AND type_of_job IS NOT NULL AND TRIM(type_of_job) <> '';

@@ -32,6 +32,31 @@ class ProjectSettingsController extends Controller
         return response()->json($this->settings->removeScope($this->editor($request), $request, $id));
     }
 
+    public function storeJobType(Request $request): JsonResponse
+    {
+        return response()->json($this->settings->addJobType($this->editor($request), $request));
+    }
+
+    public function updateJobType(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->updateJobType($this->editor($request), $request, $id));
+    }
+
+    public function destroyJobType(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->removeJobType($this->editor($request), $request, $id));
+    }
+
+    public function storeDepartment(Request $request): JsonResponse
+    {
+        return response()->json($this->settings->addDepartment($this->editor($request), $request));
+    }
+
+    public function destroyDepartment(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->removeDepartment($this->editor($request), $request, $id));
+    }
+
     private function editor(Request $request): Employee
     {
         $editor = $request->attributes->get('portalEmployee');
