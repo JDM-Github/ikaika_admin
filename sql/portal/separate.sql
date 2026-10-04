@@ -177,22 +177,45 @@ CREATE TABLE email_attachments (
 -- Built-in blocks: the company footer and the Portal email test template. The HTML is
 -- database/seeders/email/*.html, inlined here; its logo is in Cloudinary's global folder.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
-SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
+SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;color:#374151;">
   <tr>
-    <td width="72" valign="middle" style="width:72px;padding:0 16px 0 0;">
-      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="56" style="display:block;width:56px;height:auto;border:0;">
+    <!-- Logo -->
+    <td width="95" valign="middle" style="width:95px;padding:2px 4px 2px 0;border-right:2px solid #1f4e8c;">
+      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="82" style="display:block;width:82px;max-width:82px;height:auto;border:0;outline:none;text-decoration:none;" />
     </td>
-    <td valign="middle" style="padding:2px 0 2px 16px;border-left:2px solid #1f4e8c;font-size:13px;line-height:20px;color:#374151;">
-      <strong style="font-size:14px;font-weight:700;color:#1f4e8c;letter-spacing:0.3px;">IKAIKA BIM</strong><br>
-      <a href="https://ikaikabim.com" target="_blank" style="color:#374151;text-decoration:none;">ikaikabim.com</a>
-      &nbsp;&middot;&nbsp;
-      <a href="mailto:info@ikaikabim.com" style="color:#374151;text-decoration:none;">info@ikaikabim.com</a>
+    <!-- Company Information -->
+    <td valign="middle" style="padding:2px 0 2px 14px;">
+      <!-- Company -->
+      <div style="font-size:18px;line-height:22px;font-weight:700;color:#1f4e8c;">IKAIKA BIM</div>
+      <!-- Company Contact -->
+      <div style="font-size:12px;line-height:18px;color:#64748b;">
+        <a href="https://ikaikabim.com" style="color:#64748b;text-decoration:none;">ikaikabim.com</a>
+        &nbsp;&middot;&nbsp;
+        <a href="mailto:info@ikaikabim.com" style="color:#64748b;text-decoration:none;">info@ikaikabim.com</a>
+      </div>
+      <!-- Source -->
+      <div style="margin-top:6px;font-size:12px;line-height:18px;color:#64748b;">
+        <span style="font-weight:600;color:#1f4e8c;">IKAIKA Portal</span>
+        &nbsp;&middot;&nbsp;
+        Automated communication
+      </div>
+      <!-- Location -->
+      <div style="margin-top:3px;font-size:11px;line-height:16px;color:#64748b;">
+        11th Floor, SM Aura Office Tower &nbsp;&middot;&nbsp; 26th St. corner McKinley Parkway
+      </div>
+      <div style="font-size:11px;line-height:16px;color:#64748b;">
+        Fort Bonifacio, Taguig City, Metro Manila, Philippines
+      </div>
     </td>
   </tr>
+  <!-- Divider -->
   <tr>
-    <td colspan="2" style="padding:16px 0 0 0;font-size:11px;line-height:16px;color:#9ca3af;">
-      This message may contain confidential information and is meant only
-      for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
+    <td colspan="2" style="padding-top:12px;border-bottom:1px solid #d1d9e2;font-size:0;line-height:0;">&nbsp;</td>
+  </tr>
+  <!-- Confidentiality Notice -->
+  <tr>
+    <td colspan="2" style="padding-top:6px;font-size:10px;line-height:14px;color:#94a3b8;">
+      This message may contain confidential information and is meant only for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
     </td>
   </tr>
 </table>', 'html', id
@@ -201,24 +224,28 @@ FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
 -- as an email signature (Manage / Signatures, and each employee's Settings). The plain Company footer
 -- above has no token, so it is usable in email but cannot be a signature.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
-SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:720px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;color:#374151;">
+SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;color:#374151;">
   <tr>
     <!-- Logo -->
-    <td width="115" valign="middle" style="width:115px;padding:2px 5px 2px 0;border-right:2px solid #1f4e8c;">
-      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="100" style="display:block;width:100px;max-width:100px;height:auto;border:0;outline:none;text-decoration:none;" />
+    <td width="95" valign="middle" style="width:95px;padding:2px 4px 2px 0;border-right:2px solid #1f4e8c;">
+      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="82" style="display:block;width:82px;max-width:82px;height:auto;border:0;outline:none;text-decoration:none;" />
     </td>
     <!-- Information -->
-    <td valign="middle" style="padding:2px 0 2px 18px;">
-      <div style="font-size:21px;line-height:25px;font-weight:700;color:#1f4e8c;">{name}</div>
-      <div style="font-size:15px;line-height:20px;color:#64748b;">{title}&nbsp;&middot;&nbsp;{department}</div>
-      <div style="font-size:14px;line-height:20px;color:#475569;white-space:nowrap;">
+    <td valign="middle" style="padding:2px 0 2px 14px;">
+      <!-- Name -->
+      <div style="font-size:18px;line-height:22px;font-weight:700;color:#1f4e8c;">{name}</div>
+      <!-- Position -->
+      <div style="font-size:13px;line-height:18px;color:#64748b;">{title}&nbsp;&middot;&nbsp;{department}</div>
+      <!-- Personal Contact -->
+      <div style="font-size:12px;line-height:18px;color:#475569;white-space:nowrap;">
         <a href="mailto:{email}" style="color:#475569;text-decoration:none;">{email}</a>
         &nbsp;&middot;&nbsp;{phone}
         &nbsp;&middot;&nbsp;{location}
       </div>
-      <div style="margin-top:11px;">
-        <div style="font-size:17px;line-height:21px;font-weight:700;color:#1f4e8c;">IKAIKA BIM</div>
-        <div style="font-size:14px;line-height:20px;white-space:nowrap;">
+      <!-- Company -->
+      <div style="margin-top:8px;">
+        <div style="font-size:15px;line-height:19px;font-weight:700;color:#1f4e8c;">IKAIKA BIM</div>
+        <div style="font-size:12px;line-height:17px;white-space:nowrap;">
           <a href="https://ikaikabim.com" style="color:#64748b;text-decoration:none;">ikaikabim.com</a>
           &nbsp;&middot;&nbsp;
           <a href="mailto:info@ikaikabim.com" style="color:#64748b;text-decoration:none;">info@ikaikabim.com</a>
@@ -228,11 +255,11 @@ SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" wi
   </tr>
   <!-- Divider -->
   <tr>
-    <td colspan="2" style="padding-top:16px;border-bottom:1px solid #d1d9e2;font-size:0;line-height:0;">&nbsp;</td>
+    <td colspan="2" style="padding-top:12px;border-bottom:1px solid #d1d9e2;font-size:0;line-height:0;">&nbsp;</td>
   </tr>
   <!-- Confidentiality Notice -->
   <tr>
-    <td colspan="2" style="padding-top:8px;font-size:11px;line-height:16px;color:#94a3b8;">
+    <td colspan="2" style="padding-top:6px;font-size:10px;line-height:14px;color:#94a3b8;">
       This message may contain confidential information and is meant only for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
     </td>
   </tr>

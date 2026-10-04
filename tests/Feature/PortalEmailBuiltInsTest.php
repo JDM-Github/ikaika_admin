@@ -74,7 +74,7 @@ class PortalEmailBuiltInsTest extends TestCase
 
         $this->assertStringContainsString('/c_limit,w_112,f_auto,q_auto/', $footer);
         $this->assertStringContainsString('/email-upload/global/', $footer);
-        $this->assertStringContainsString('width="56"', $footer);
+        $this->assertStringContainsString('width="82"', $footer);
         $this->assertDoesNotMatchRegularExpression('#email-upload/\d+/#', $footer.$this->migration()::body('portal-email-test.html'));
     }
 }
