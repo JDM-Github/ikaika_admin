@@ -123,14 +123,21 @@ class PortalAccessTest extends TestCase
             'projects.delete' => 'all', 'projects.lead' => 'all', 'projects.create' => 'all', 'projects.create.direct' => null,
             'projects.manager' => 'all', 'projects.track' => 'all', 'projects.track.export' => null,
         ];
+        // Project Settings is Developer mode only, so only the developer preset names it. Admins lead
+        // only their own department; Nathaniel and Steven are given lead at all as a personal default.
+        $developer = [...$everything, 'projects.settings' => null];
+        $admin = $everything;
+        $admin['projects.lead'] = 'department';
         ksort($everything);
+        ksort($developer);
+        ksort($admin);
         foreach ($presets as &$rules) {
             ksort($rules);
         }
 
-        $this->assertSame($everything, $presets['admin']);
+        $this->assertSame($admin, $presets['admin']);
         $this->assertSame($everything, $presets['executive']);
-        $this->assertSame($everything, $presets['developer']);
+        $this->assertSame($developer, $presets['developer']);
         $this->assertSame([
             'projects' => null, 'projects.track' => 'own', 'projects.track.export' => null, 'projects.view' => 'own',
         ], $presets['member']);

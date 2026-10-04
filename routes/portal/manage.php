@@ -17,11 +17,11 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects-write'])
         ->patch('manage/projects/{id}', [ProjectsController::class, 'update'])
         ->whereNumber('id');
-    // Manage / Project Settings: the reference data a project is filed under. Interim gate is Project
-    // Manager until a power of its own is added.
-    Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects'])
+    // Manage / Project Settings is a work in progress, so Developer mode only for now: its rule is
+    // held only while a developer is in Developer mode.
+    Route::middleware(['portal.rule:projects.settings', 'throttle:portal-projects'])
         ->get('manage/project-settings', [ProjectSettingsController::class, 'index']);
-    Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects-write'])->group(function (): void {
+    Route::middleware(['portal.rule:projects.settings', 'throttle:portal-projects-write'])->group(function (): void {
         Route::post('manage/project-settings/scopes', [ProjectSettingsController::class, 'storeScope']);
         Route::patch('manage/project-settings/scopes/{id}', [ProjectSettingsController::class, 'updateScope'])
             ->whereNumber('id');

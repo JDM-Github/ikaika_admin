@@ -10,9 +10,9 @@ use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
- * Manage / Project Settings: the scopes (activity codes) a department may report on. The page is
- * gated by Project Manager until it has a power of its own; adding, editing and removing re-read the
- * same list for everyone.
+ * Manage / Project Settings: the reference data a project is filed under. The page is a work in
+ * progress, so its `projects.settings` rule is Developer-mode-only for now: a developer in Developer
+ * mode opens it, an admin in Default does not.
  */
 class PortalProjectSettingsTest extends TestCase
 {
@@ -51,6 +51,19 @@ class PortalProjectSettingsTest extends TestCase
         return (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
     }
 
+    // The page's rule is Developer mode only, so every working call signs in a developer and turns it on.
+    private function developerToken(): string
+    {
+        $developer = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->where('is_developer', true)
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->orderBy('id')
+            ->firstOrFail();
+
+        return $this->developerModeOn($this->token($developer));
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
@@ -67,17 +80,18 @@ class PortalProjectSettingsTest extends TestCase
         return $response->json('data.scopes');
     }
 
-    public function test_a_member_without_project_manager_is_refused(): void
+    public function test_the_page_is_developer_mode_only(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
 
         $this->withToken($this->token($member))->getJson(self::BASE)->assertForbidden();
+        $this->withToken($this->token($admin))->getJson(self::BASE)->assertForbidden();
     }
 
     public function test_the_list_returns_each_scope_with_its_department(): void
     {
-        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
-        $scopes = $this->scopes($this->withToken($this->token($admin))->getJson(self::BASE)->assertOk());
+        $scopes = $this->scopes($this->withToken($this->developerToken())->getJson(self::BASE)->assertOk());
         $first = $scopes[0] ?? null;
 
         $this->assertNotNull($first);
@@ -88,8 +102,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_scope_is_added_edited_and_removed(): void
     {
-        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
-        $token = $this->token($admin);
+        $token = $this->developerToken();
 
         $added = $this->add($token, ['code' => 'MIS-9001', 'name' => 'Test drafting', 'department' => 'MIS'])->assertOk();
         $row = collect($this->scopes($added))->firstWhere('code', 'MIS-9001');
@@ -108,8 +121,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_duplicate_code_is_refused(): void
     {
-        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
-        $token = $this->token($admin);
+        $token = $this->developerToken();
 
         $this->add($token, ['code' => 'MIS-9002', 'name' => 'First', 'department' => 'MIS'])->assertOk();
         $this->add($token, ['code' => 'mis-9002', 'name' => 'Second', 'department' => 'MIS'])->assertStatus(422);
@@ -117,8 +129,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_missing_scope_cannot_be_changed(): void
     {
-        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
-        $token = $this->token($admin);
+        $token = $this->developerToken();
 
         $this->withToken($token)->patchJson(self::BASE.'/scopes/99999999', ['code' => 'X', 'name' => 'X', 'department' => 'MIS'])->assertNotFound();
         $this->withToken($token)->deleteJson(self::BASE.'/scopes/99999999')->assertNotFound();
@@ -126,8 +137,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_project_type_is_added_edited_and_removed(): void
     {
-        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
-        $token = $this->token($admin);
+        $token = $this->developerToken();
 
         $added = $this->withToken($token)->postJson(self::BASE.'/job-types', ['department' => 'MIS', 'name' => 'Test type 9901'])->assertOk();
         $row = collect($added->json('data.jobTypes'))->firstWhere('name', 'Test type 9901');
@@ -147,8 +157,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_department_is_added_and_removed(): void
     {
-        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
-        $token = $this->token($admin);
+        $token = $this->developerToken();
 
         $added = $this->withToken($token)->postJson(self::BASE.'/departments', ['name' => 'Test Dept'])->assertOk();
         $row = collect($added->json('data.departments'))->firstWhere('name', 'Test Dept');

@@ -469,20 +469,21 @@ class PortalProjectEditorTest extends TestCase
         $this->create($token, $this->payload())->assertForbidden()->assertJsonPath('message', 'Your Add projects power does not reach that department.');
     }
 
-    // Project Lead says who may lead where: a member leads only their department's projects, an admin any.
+    // Project Lead says who may lead where: given at department, only their own department's project;
+    // the two managers (lead at every department, a personal default) lead any.
     public function test_the_lead_must_hold_project_lead_for_the_department(): void
     {
         $token = $this->token($this->employee('admin'));
         $lead = $this->employee('user');
-        $admin = $this->employee('admin', 1);
+        $manager = Employee::query()->where('id_no', '220302-0003')->firstOrFail();
 
         $lead->forceFill(['department' => 'MIS'])->save();
         $this->grant($lead, ['projects.lead' => 'department']);
         $people = collect($this->withToken($token)->getJson(self::BASE.'/options')->assertOk()->json('data.employees'))->keyBy('id');
         $this->assertSame(['canLead' => true, 'leadsAnywhere' => false, 'leadDepartment' => 'MIS'], collect($people[(string) $lead->id])->only(['canLead', 'leadsAnywhere', 'leadDepartment'])->all());
-        $this->assertTrue($people[(string) $admin->id]['leadsAnywhere']);
+        $this->assertTrue($people[(string) $manager->id]['leadsAnywhere']);
         $this->create($token, $this->payload())->assertStatus(422)->assertJsonPath('message', 'That person cannot lead a project of this department. Choose a lead from the list.');
-        $this->create($token, $this->payload(['leadId' => $admin->id]))->assertCreated();
+        $this->create($token, $this->payload(['leadId' => $manager->id]))->assertCreated();
 
         DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $lead->getKey(), 'permission_key' => 'projects.lead']);
         $people = collect($this->withToken($token)->getJson(self::BASE.'/options')->assertOk()->json('data.employees'))->keyBy('id');

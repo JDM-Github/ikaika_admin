@@ -49,7 +49,7 @@ class PortalRulesTest extends TestCase
     {
         $catalog = DB::connection('portal')->table('access_permissions')->get()->keyBy('permission_key');
         $presets = DB::connection('portal')->table('access_presets')->where('role', 'executive')->get()->keyBy('permission_key');
-        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers'];
+        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.settings'];
 
         foreach ($catalog as $key => $rule) {
             $isLeftOut = collect($leftOut)->contains(static fn (string $root): bool => $key === $root || str_starts_with((string) $key, $root.'.'));

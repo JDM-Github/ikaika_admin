@@ -452,6 +452,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.manager', 'projects', 'Project Manager', 'Approve or reject the projects waiting on Manage / Projects for {UserName|Your} department or every department, and add projects there without waiting.', 1, 1, 225),
 ('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
+('projects.settings', 'projects', 'Project Settings', 'Open Manage / Project Settings.', 0, 1, 240),
 
 ('reports', NULL, 'Reports', 'Open the Reports section of the sidebar.', 0, 1, 300),
 ('reports.daily', 'reports', 'Daily Report', 'File {UserName|Your} timesheet for today.', 0, 1, 310),
@@ -581,6 +582,8 @@ UPDATE access_permissions SET only_department = 'MIS', min_tier = 'admin' WHERE 
 -- All Backups is parked until Airtable is retired (docs/power/backups-plan.md): developers only, in
 -- Developer mode, and no gift reaches it. Existing databases: make_portal_backup_rules_developer_only.
 UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key LIKE 'administration.backup%';
+-- Manage / Project Settings is a work in progress: Developer mode only for now, like Backup.
+UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key = 'projects.settings';
 
 -- Members: their own work only. View Projects and Track Projects show only the projects they are on.
 -- Leading, editing, scoping, deleting and adding projects are powers an admin (or a lead) gives, not a
@@ -612,7 +615,7 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'admin', permission_key,
        CASE
            WHEN supports_reach = 0 THEN NULL
-           WHEN permission_key IN ('projects.view', 'projects.track', 'projects.manager', 'projects.edit', 'projects.scopes', 'projects.delete', 'projects.lead', 'projects.create', 'administration.actions') THEN 'all'
+           WHEN permission_key IN ('projects.view', 'projects.track', 'projects.manager', 'projects.edit', 'projects.scopes', 'projects.delete', 'projects.create', 'administration.actions') THEN 'all'
            ELSE 'department'
        END,
        0
@@ -624,6 +627,7 @@ WHERE permission_key NOT LIKE 'developer%'
   AND permission_key <> 'manage.users.information'
   AND permission_key <> 'administration.logs.developers'
   AND permission_key <> 'email.images.global'
+  AND permission_key <> 'projects.settings'
   AND permission_key NOT LIKE '%.unlisted';
 
 -- Executives: every department and executives' logs, without the developer tools and without the
@@ -635,7 +639,7 @@ SELECT 'executive', permission_key,
        permission_key = 'administration.logs'
 FROM access_permissions
 WHERE permission_key NOT LIKE 'developer%'
-  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers')
+  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.settings')
   AND permission_key NOT LIKE 'reports.%'
   AND permission_key NOT LIKE 'requests.%'
   AND permission_key NOT LIKE 'user.%'
@@ -659,6 +663,15 @@ INSERT INTO access_personal (employee_id, permission_key, reach)
 SELECT id, 'administration.actions.sync', NULL FROM employees WHERE id_no = '220202-0002'; -- Nathaniel Tanglao
 INSERT INTO access_personal (employee_id, permission_key, reach)
 SELECT id, 'manage.users.information', 'all' FROM employees WHERE id_no IN (
+    '220202-0002', -- Nathaniel Tanglao
+    '220302-0003'  -- Steven Gaurano
+);
+
+-- Admins lead only their own department by preset. Nathaniel (MIS) and Steven (Engineering) manage
+-- their departments, so they alone lead at every department; anyone else is a department-only lead
+-- until a power-holder gives them more on Manage / Users.
+INSERT INTO access_personal (employee_id, permission_key, reach)
+SELECT id, 'projects.lead', 'all' FROM employees WHERE id_no IN (
     '220202-0002', -- Nathaniel Tanglao
     '220302-0003'  -- Steven Gaurano
 );

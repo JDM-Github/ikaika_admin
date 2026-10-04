@@ -194,7 +194,9 @@ class PortalManageUsersRulesTest extends TestCase
             '220202-0002:administration.logs.developers:-',
             '220202-0002:manage.users.access.peers:-',
             '220202-0002:manage.users.information:all',
+            '220202-0002:projects.lead:all',
             '220302-0003:manage.users.information:all',
+            '220302-0003:projects.lead:all',
         ], $this->seededDefaults);
     }
 
