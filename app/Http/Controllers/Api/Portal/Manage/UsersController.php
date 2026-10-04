@@ -41,4 +41,22 @@ class UsersController extends Controller
             $request,
         ));
     }
+
+    public function updateProfile(Request $request, int $id): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        $validated = $request->validate([
+            'title' => ['nullable', 'string', 'max:255'],
+            'email' => ['nullable', 'email', 'max:255'],
+            'phoneNumber' => ['nullable', 'string', 'max:50'],
+            'department' => ['nullable', 'string', 'max:100'],
+            'location' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        return response()->json($this->users->updateProfile($actor, $id, $validated, $request));
+    }
 }

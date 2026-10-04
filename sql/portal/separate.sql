@@ -583,6 +583,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.users.access.peers', 'manage.users.access', 'Manage other admins', 'Change the role and Access Rules of fellow administrators in {UserName|Your} reach, not only members. Only administrators can hold it.', 0, 1, 'admin', 846),
 ('administration.logs.developers', 'administration.logs', 'See developers'' activity', 'See what developers did in All Logs and All Actions, sign-ins included. What they did in Developer mode reads "a developer" to anyone not in Developer mode. Only executives and MIS administrators can hold it.', 0, 1, 'admin', 922),
 ('manage.users.information', 'manage.users', 'Show employee information', 'See the private details of the people in {UserName|Your} reach: birthday, address, contact, government and tax numbers, bank details and emergency contact.', 1, 1, 'admin', 848),
+('manage.users.profile', 'manage.users', 'Edit profiles', 'Edit the signature and profile details of the people in {UserName|Your} reach: title, email, phone, department and location.', 0, 1, 'admin', 849),
 ('email.images.global', 'email', 'Global images', 'Add and delete the images everyone can use in an email. Anyone who can open Email can already use them. Only administrators can hold it.', 0, 1, 'admin', 983),
 ('developer', NULL, 'Developer', 'Tools for the people who build the portal.', 0, 1, 'developer', 1100),
 ('developer.rules', 'developer', 'Rule catalog', 'Change the rule list and what each role starts with.', 0, 1, 'developer', 1110),
@@ -747,3 +748,23 @@ INSERT IGNORE INTO job_types (department, name)
 SELECT DISTINCT department, type_of_job FROM projects
 WHERE department IS NOT NULL AND TRIM(department) <> ''
   AND type_of_job IS NOT NULL AND TRIM(type_of_job) <> '';
+
+-- ============================================================================
+-- EMPLOYEE SIGNATURES - Manage / Users, the portal's own editable copy
+-- Airtable syncs into the portal one way and overwrites the mapped employees columns on every run,
+-- so the details an employee's signature shows are kept here instead: edited in the portal and read
+-- back as "portal value, else employees value". The first step toward the portal owning the data.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS employee_signatures (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id  INT          NOT NULL,
+    title        VARCHAR(255) NULL,
+    email        VARCHAR(255) NULL,
+    phone_number VARCHAR(50)  NULL,
+    department   VARCHAR(100) NULL,
+    location     VARCHAR(100) NULL,
+    updated_at   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY employee_signatures_employee (employee_id),
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

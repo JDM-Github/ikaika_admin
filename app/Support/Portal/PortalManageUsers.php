@@ -46,6 +46,7 @@ final class PortalManageUsers
     public function __construct(
         private readonly PortalAudit $audit,
         private readonly CoreLedger $ledger,
+        private readonly PortalEmployeeSignature $signatures,
     ) {}
 
     /**
@@ -258,15 +259,8 @@ final class PortalManageUsers
      */
     public function profile(Employee $viewer, int $id, Request $request): array
     {
-        $query = Employee::query();
-        $this->applyReach($query, $viewer, PortalRules::reach($viewer, $request, self::RULE));
-        $target = $query->find($id);
-        if (! $target instanceof Employee) {
-            abort(404, 'Unknown member.');
-        }
-
-        $seesExecutives = PortalRole::isExecutive($viewer->role, $viewer->role_level) || PortalDeveloperMode::isOn($viewer, $request);
-        $withPrivate = PortalRules::covers(PortalRules::reach($viewer, $request, self::INFORMATION_RULE), $viewer, $target, $seesExecutives);
+        $target = $this->inReach($viewer, $id, $request);
+        $withPrivate = $this->seesPrivate($viewer, $target, $request);
         if ($withPrivate && ! $target->is($viewer)) {
             $this->audit->record(
                 $viewer,
@@ -282,7 +276,60 @@ final class PortalManageUsers
         return [
             'section' => 'manage',
             'resource' => 'users',
-            'data' => PortalManageUserPresenter::profile($target, PortalEmployeePresenter::photoUrl($target), $withPrivate),
+            'data' => $this->profileData($viewer, $target, $request, $withPrivate),
+        ];
+    }
+
+    /**
+     * Edit one person's signature profile (the portal's own copy). Their private details are not
+     * touched; only the fields a signature shows. The Edit profiles power gates the route.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function updateProfile(Employee $actor, int $id, array $fields, Request $request): array
+    {
+        $target = $this->inReach($actor, $id, $request);
+        $this->signatures->update($actor, $target, $fields, $request);
+        $this->bumpCache();
+
+        return [
+            'section' => 'manage',
+            'resource' => 'users',
+            'data' => $this->profileData($actor, $target, $request, $this->seesPrivate($actor, $target, $request)),
+        ];
+    }
+
+    // The person, when they are inside the viewer's Users reach; 404 otherwise, as if they did not exist.
+    private function inReach(Employee $viewer, int $id, Request $request): Employee
+    {
+        $query = Employee::query();
+        $this->applyReach($query, $viewer, PortalRules::reach($viewer, $request, self::RULE));
+        $target = $query->find($id);
+        if (! $target instanceof Employee) {
+            abort(404, 'Unknown member.');
+        }
+
+        return $target;
+    }
+
+    private function seesPrivate(Employee $viewer, Employee $target, Request $request): bool
+    {
+        $seesExecutives = PortalRole::isExecutive($viewer->role, $viewer->role_level) || PortalDeveloperMode::isOn($viewer, $request);
+
+        return PortalRules::covers(PortalRules::reach($viewer, $request, self::INFORMATION_RULE), $viewer, $target, $seesExecutives);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function profileData(Employee $viewer, Employee $target, Request $request, bool $withPrivate): array
+    {
+        return [
+            ...PortalManageUserPresenter::profile($target, PortalEmployeePresenter::photoUrl($target), $withPrivate),
+            // The signature block the portal curates, and whether this viewer may edit it.
+            'canEditProfile' => PortalRules::holds($viewer, $request, PortalEmployeeSignature::RULE),
+            'signature' => $this->signatures->values($target),
         ];
     }
 

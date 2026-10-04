@@ -45,6 +45,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:manage.users.role', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/role', [UsersController::class, 'updateRole'])
         ->whereNumber('id');
+    // Edit profiles: the portal's own copy of an employee's signature details (Airtable is read only).
+    Route::middleware(['portal.rule:manage.users.profile', 'throttle:portal-manage-users-write'])
+        ->patch('manage/users/{id}/profile', [UsersController::class, 'updateProfile'])
+        ->whereNumber('id');
     // Each kind on the queue and its Approve or reject follow their own rule inside PortalManageRequests.
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests'])
         ->get('manage/requests', [RequestsController::class, 'index']);

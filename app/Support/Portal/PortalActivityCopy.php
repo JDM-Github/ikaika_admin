@@ -337,6 +337,11 @@ final class PortalActivityCopy
         return self::YOU.' downloaded '.$name.' from the email "'.$subject.'"';
     }
 
+    public static function editedSignatureProfile(Employee $target): string
+    {
+        return self::YOU.' edited the signature profile of '.self::displayName($target);
+    }
+
     public static function sentEmail(string $subject, int $count): string
     {
         $label = $count === 1 ? '1 member' : $count.' members';

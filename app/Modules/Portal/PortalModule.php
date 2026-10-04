@@ -191,6 +191,13 @@ class PortalModule implements ProductModule
                                 'auth' => true,
                                 'body' => ['role' => 'Admin'],
                             ],
+                            [
+                                'method' => 'PATCH',
+                                'path' => 'manage/users/{id}/profile',
+                                'label' => 'Edit profile',
+                                'auth' => true,
+                                'body' => ['title' => 'Director', 'email' => 'name@ikaikabim.com', 'phoneNumber' => '123', 'department' => 'Engineering', 'location' => 'Cebu'],
+                            ],
                         ],
                     ],
                     'requests' => [
