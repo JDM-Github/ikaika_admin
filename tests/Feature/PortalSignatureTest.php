@@ -24,7 +24,7 @@ class PortalSignatureTest extends TestCase
     /**
      * @var list<string>
      */
-    protected array $connectionsToTransact = ['portal'];
+    protected array $connectionsToTransact = ['portal', 'core'];
 
     private const SIGNATURE = '/api/development/portal/signature';
 
@@ -102,19 +102,44 @@ class PortalSignatureTest extends TestCase
         $this->assertStringContainsString('NewSignature', $script);
     }
 
-    public function test_it_builds_an_exchange_transport_rule_script_with_directory_tokens(): void
+    public function test_it_builds_one_exchange_rule_per_active_employee_from_their_portal_signature(): void
     {
         $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user' AND email LIKE '%@%'");
+        $leaver = $this->employee("LOWER(COALESCE(role, '')) = 'user' AND email LIKE '%@%' AND id != ".(int) $member->getKey());
+        $leaverEmail = strtolower((string) DB::connection('portal')->table('employees')->where('id', $leaver->getKey())->value('email'));
+        $leaver->forceFill(['status' => 'Inactive'])->save();
+
+        // The member's own footer is used, with a fixed sentence the rule can recognise in replies.
+        $footerId = (int) DB::connection('portal')->table('email_blocks')->insertGetId([
+            'kind' => 'footer', 'name' => 'Rule test', 'category' => null, 'subject' => null,
+            'body' => "<p>{name} &middot; {phone}</p>\n<p>Rule test notice:   kept between ourselves, \u{00A9} IKAIKA. Second sentence.</p>",
+            'format' => 'html', 'created_by' => $member->getKey(), 'date_created' => now(),
+        ]);
+        DB::connection('portal')->table('employee_signatures')->updateOrInsert(['employee_id' => $member->getKey()], ['footer_id' => $footerId]);
+        $memberEmail = strtolower((string) app(PortalEmployeeSignature::class)->values($member)['email']);
 
         $response = $this->withToken($this->token($admin))->getJson(self::SIGNATURE.'/transport-rule')->assertOk();
 
         $this->assertStringEndsWith('.ps1', (string) $response->json('data.fileName'));
         $script = (string) $response->json('data.script');
-        $this->assertStringContainsString('New-TransportRule', $script);
-        $this->assertStringContainsString('-FromScope InOrganization', $script);
-        // The person's fields become Active Directory tokens, so one rule covers everyone.
-        $this->assertStringContainsString('%%DisplayName%%', $script);
+        // Each person's rule carries their rendered signature; no Microsoft 365 profile tokens.
+        $this->assertStringContainsString("Email = '".$memberEmail."'", $script);
+        $this->assertStringContainsString("Name = 'IKAIKA signature #".$member->getKey().' (', $script);
+        $this->assertStringContainsString('Rule test notice: kept between ourselves, &#169; IKAIKA.', $script);
+        $this->assertStringContainsString("Marker = 'Rule test notice: kept between ourselves'", $script);
+        $this->assertStringNotContainsString('%%', $script);
         $this->assertStringNotContainsString('{name}', $script);
+        $this->assertSame(0, preg_match('/[\x80-\xFF]/', $script), 'The script stays ASCII for Windows PowerShell.');
+        // A leaver gets no rule, and the old single rule and stale per-person rules are removed.
+        $this->assertStringNotContainsString("Email = '".$leaverEmail."'", $script);
+        $this->assertStringContainsString("-eq 'IKAIKA email signature'", $script);
+        $this->assertStringContainsString("-like 'IKAIKA signature #*'", $script);
+        // Invites are skipped, an unchangeable message goes out as is, and the window waits to be read.
+        $this->assertStringContainsString("ExceptIfMessageTypeMatches = 'Calendaring'", $script);
+        $this->assertStringContainsString("ApplyHtmlDisclaimerFallbackAction = 'Ignore'", $script);
+        $this->assertStringContainsString('Exchange Administrator or Global Administrator role', $script);
+        $this->assertStringContainsString("Read-Host 'Press Enter to close'", $script);
     }
 
     public function test_empty_placeholders_drop_their_separators(): void
@@ -169,5 +194,67 @@ class PortalSignatureTest extends TestCase
         ])->assertCreated();
 
         $this->assertTrue(DB::connection('portal')->table('email_blocks')->where('name', 'With token')->exists());
+    }
+
+    public function test_an_admin_chooses_the_default_signature_footer(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+        DB::connection('portal')->table('employee_signatures')->where('employee_id', $member->getKey())->update(['footer_id' => null]);
+        $footerId = $this->footer('Default test', '<p>Default test {name}</p>', $admin);
+        $adminToken = $this->token($admin);
+        $memberToken = $this->token($member);
+
+        $response = $this->withToken($adminToken)->putJson(self::SIGNATURE.'/default', ['footerId' => $footerId])->assertOk();
+
+        $this->assertSame((string) $footerId, $response->json('data.footerId'));
+        $log = DB::connection('portal')->table('logs')->orderByDesc('id')->first(['employee_id', 'record_id', 'message']);
+        $this->assertSame((int) $admin->getKey(), (int) $log->employee_id);
+        $this->assertSame((string) $footerId, (string) $log->record_id);
+        $this->assertStringContainsString('the default signature', (string) $log->message);
+        $this->withToken($adminToken)->getJson(self::SIGNATURE.'/default')->assertOk()->assertJsonPath('data.footerId', (string) $footerId);
+        // Anyone without their own footer now gets the default, on Settings and in the Exchange rules.
+        $signature = $this->withToken($memberToken)->getJson(self::SIGNATURE)->assertOk();
+        $this->assertSame((string) $footerId, $signature->json('data.footerId'));
+        $this->assertStringContainsString('Default test', (string) $signature->json('data.html'));
+        $script = (string) $this->withToken($adminToken)->getJson(self::SIGNATURE.'/transport-rule')->assertOk()->json('data.script');
+        $this->assertStringContainsString('Default test', $script);
+    }
+
+    public function test_only_a_signature_footer_can_be_the_default(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $plainId = $this->footer('Plain test', '<p>No placeholders here</p>', $admin);
+
+        $this->withToken($this->token($admin))->putJson(self::SIGNATURE.'/default', ['footerId' => $plainId])->assertStatus(422);
+        $this->withToken($this->token($admin))->putJson(self::SIGNATURE.'/default', ['footerId' => 999999999])->assertNotFound();
+    }
+
+    public function test_a_removed_default_falls_back_to_the_oldest_signature_footer(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        DB::connection('core')->table('settings')->where('product', 'portal')->where('setting_key', 'signature.default_footer')->delete();
+        $oldest = $this->withToken($this->token($admin))->getJson(self::SIGNATURE.'/default')->assertOk()->json('data.footerId');
+        $footerId = $this->footer('Short lived', '<p>{name}</p>', $admin);
+        $this->withToken($this->token($admin))->putJson(self::SIGNATURE.'/default', ['footerId' => $footerId])->assertOk();
+
+        DB::connection('portal')->table('email_blocks')->where('id', $footerId)->delete();
+
+        $this->withToken($this->token($admin))->getJson(self::SIGNATURE.'/default')->assertOk()->assertJsonPath('data.footerId', $oldest);
+    }
+
+    public function test_a_member_cannot_choose_the_default(): void
+    {
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+
+        $this->withToken($this->token($member))->putJson(self::SIGNATURE.'/default', ['footerId' => 1])->assertForbidden();
+    }
+
+    private function footer(string $name, string $body, Employee $by): int
+    {
+        return (int) DB::connection('portal')->table('email_blocks')->insertGetId([
+            'kind' => 'footer', 'name' => $name, 'category' => null, 'subject' => null,
+            'body' => $body, 'format' => 'html', 'created_by' => $by->getKey(), 'date_created' => now(),
+        ]);
     }
 }

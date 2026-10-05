@@ -52,8 +52,30 @@ class SignatureController extends Controller
         return response()->json(['section' => 'signature', 'resource' => 'signature-installer', 'data' => $installer]);
     }
 
-    // A PowerShell script for IT: the org-wide Exchange transport rule that appends the company
-    // signature server-side, locked and reaching every client including the new Outlook.
+    // The footer everyone without their own assigned footer gets: Settings, the installer and the
+    // Exchange rules all use it.
+    public function defaultFooter(): JsonResponse
+    {
+        return response()->json([
+            'section' => 'signature',
+            'resource' => 'signature-default',
+            'data' => ['footerId' => $this->signatures->defaultFooterId()],
+        ]);
+    }
+
+    public function setDefaultFooter(Request $request): JsonResponse
+    {
+        $data = $request->validate(['footerId' => ['required', 'integer', 'min:1']]);
+
+        return response()->json([
+            'section' => 'signature',
+            'resource' => 'signature-default',
+            'data' => ['footerId' => $this->signatures->setDefault($this->employee($request), (int) $data['footerId'], $request)],
+        ]);
+    }
+
+    // A PowerShell script for IT: one Exchange transport rule per active employee, each appending that
+    // person's signature server-side, locked and reaching every client including the new Outlook.
     public function transportRule(): JsonResponse
     {
         $rule = $this->signatures->transportRule();

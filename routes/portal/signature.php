@@ -12,7 +12,12 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // The editor's preview of a footer body, for Manage / Signatures.
     Route::middleware('portal.rule:email.library')
         ->post('signature/preview', [SignatureController::class, 'preview']);
-    // The org-wide Exchange transport rule script, for IT, from the signature library.
+    // The default signature footer, read and chosen on Manage / Signatures.
+    Route::middleware('portal.rule:email.library')
+        ->get('signature/default', [SignatureController::class, 'defaultFooter']);
+    Route::middleware('portal.rule:email.library')
+        ->put('signature/default', [SignatureController::class, 'setDefaultFooter']);
+    // The Exchange transport rules script (one rule per active employee), for IT, from the signature library.
     Route::middleware('portal.rule:email.library')
         ->get('signature/transport-rule', [SignatureController::class, 'transportRule']);
 });
