@@ -113,10 +113,13 @@ class PortalSubmittedReportsTest extends TestCase
 
         $first = $daily['entries'][0];
         $this->assertSame(
-            ['id', 'projectLabel', 'activityLabel', 'earnCodeLabel', 'hoursRendered', 'elementChange'],
+            ['id', 'projectLabel', 'activityLabel', 'earnCodeLabel', 'hoursRendered', 'elementChange', 'projectId', 'projectDepartment'],
             array_keys($first),
         );
         $this->assertNotSame('Unassigned', $first['projectLabel']);
+        // The project the line was filed on, so an MIS line can show its code instead of items.
+        $this->assertSame((string) $project->id, $first['projectId']);
+        $this->assertSame(is_string($project->department ?? null) && trim($project->department) !== '' ? trim($project->department) : null, $first['projectDepartment']);
         $this->assertArrayNotHasKey('approval', $daily);
         $this->assertArrayNotHasKey('late_submission_approval', $daily);
         $this->assertArrayNotHasKey('approver_remarks', $daily);

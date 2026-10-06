@@ -927,7 +927,8 @@ final class PortalSubmittedReports
             $ids[] = (int) $line->id;
         }
 
-        $projects = $this->projectLabels($ids);
+        $projectRefs = [];
+        $projects = $this->projectLabels($ids, $projectRefs);
         $activities = $this->activityLabels($ids);
         $earnCodes = $this->earnCodeLabels($ids);
 
@@ -965,6 +966,7 @@ final class PortalSubmittedReports
                 $earnCodes[$id] ?? [],
                 $line->hours_rendered ?? 0,
                 $line->change_in_elements ?? 0,
+                $projectRefs[$id] ?? null,
             );
         }
 
@@ -1168,10 +1170,13 @@ final class PortalSubmittedReports
     }
 
     /**
+     * Fills $refs with each line's project id and department in the same read, for the person's own list.
+     *
      * @param  list<int>  $reportIds
+     * @param  array<int, array{id: int, department: ?string}>  $refs
      * @return array<int, list<string>>
      */
-    private function projectLabels(array $reportIds): array
+    private function projectLabels(array $reportIds, array &$refs = []): array
     {
         $labels = [];
         foreach ($this->chunks($reportIds) as $chunk) {
@@ -1181,12 +1186,15 @@ final class PortalSubmittedReports
                 ->whereIn('pivot.user_report_id', $chunk)
                 ->select([
                     'pivot.user_report_id',
+                    'projects.id',
+                    'projects.department',
                     'projects.project_number',
                     'projects.project_name',
                 ])
                 ->get();
 
             foreach ($rows as $row) {
+                $refs[(int) $row->user_report_id] ??= ['id' => (int) $row->id, 'department' => $this->text($row->department ?? null)];
                 $labels[(int) $row->user_report_id][] = PortalSubmittedReportPresenter::projectLabel(
                     $row->project_number ?? null,
                     $row->project_name ?? null,
