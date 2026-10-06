@@ -191,7 +191,11 @@ Artisan::command('portal:prune-email-attachments', function (PortalEmailAttachme
     return 0;
 })->purpose('Delete Send Email attachments staged more than a day ago and never sent');
 
-Artisan::command('portal:bitbucket-sync', function (PortalBitbucketSync $sync): int {
+Artisan::command('portal:bitbucket-sync
+    {--recount : Count the lines of every commit again, after the counting rules change}', function (PortalBitbucketSync $sync): int {
+    if ($this->option('recount')) {
+        $this->info($sync->recount().' commits will be counted again.');
+    }
     $outcomes = $sync->syncLinked();
     if ($outcomes === []) {
         $this->info('No project links a Bitbucket repository yet.');

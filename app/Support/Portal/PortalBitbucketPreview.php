@@ -80,7 +80,7 @@ final class PortalBitbucketPreview
                 'isMerge' => $read['isMerge'],
                 // A merge is listed but, as in the sync, never counted.
                 'lines' => $read['isMerge'] ? ['added' => 0, 'removed' => 0, 'files' => 0] : PortalBitbucketSync::lines($files),
-                'files' => array_map(static fn (array $file): array => [...$file, 'generated' => PortalBitbucketSync::isGenerated($file['path'])], $files),
+                'files' => array_map(static fn (array $file): array => [...$file, 'generated' => PortalBitbucketSync::skips($file)], $files),
             ];
         }
 

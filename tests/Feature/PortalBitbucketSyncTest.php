@@ -225,12 +225,55 @@ class PortalBitbucketSyncTest extends TestCase
         $this->getJson('/api/development/portal/reports/code-activity?day=06/01/2020', $this->headersFor($developer))->assertStatus(422);
     }
 
+    // The dashboard's code tiles: whole-history totals for a project that links a repository, none for one that does not.
+    public function test_the_board_carries_each_linked_projects_code(): void
+    {
+        $this->fakeBitbucket();
+        app(PortalBitbucketSync::class)->syncLinked();
+        $portal = DB::connection('portal');
+        $portal->table('employees_projects')->insert(['project_id' => $this->projectId, 'employee_id' => (int) $this->developer->id, 'role_on_project' => 'member']);
+        $developer = Employee::query()->findOrFail((int) $this->developer->id);
+
+        $summary = app(PortalProjectCodeActivity::class)->summariesByProject([$this->projectId, $this->projectId + 100000]);
+        $this->assertSame([$this->projectId], array_keys($summary));
+        $this->assertSame(
+            ['repositories' => 1, 'commits' => 3, 'linesAdded' => 30, 'linesRemoved' => 15, 'filesChanged' => 6, 'activeDays' => 3, 'contributors' => 2, 'lastCommitOn' => '2020-01-06', 'uncounted' => 0],
+            $summary[$this->projectId],
+        );
+
+        $board = collect($this->getJson('/api/development/portal/projects', $this->headersFor($developer))->assertOk()->json('data'));
+        $item = $board->firstWhere('id', (string) $this->projectId);
+        $this->assertNotNull($item);
+        $this->assertSame(3, $item['codeActivity']['commits']);
+        // The project's own code (its number) is untouched by the code tiles.
+        $this->assertIsString($item['code']);
+        $this->assertNull($board->first(fn (array $other): bool => $other['id'] !== (string) $this->projectId && $other['codeActivity'] !== null));
+    }
+
+    // After the counting rules change, --recount counts every stored commit again; merges stay uncounted.
+    public function test_recount_counts_every_commit_again(): void
+    {
+        $this->fakeBitbucket();
+        app(PortalBitbucketSync::class)->syncLinked();
+
+        $this->artisan('portal:bitbucket-sync', ['--recount' => true])
+            ->expectsOutputToContain('3 commits will be counted again.')
+            ->expectsOutputToContain('ikaika-web/fixture-sync-2020: 0 new commits, 3 counted')
+            ->assertExitCode(0);
+    }
+
     public function test_generated_paths_never_count(): void
     {
         foreach (['package-lock.json', 'app/composer.lock', 'node_modules/a.js', 'graphify-out/graph.json', 'public/app.min.js', 'dist/x.js'] as $path) {
             $this->assertTrue(PortalBitbucketSync::isGenerated($path), $path);
         }
-        foreach (['src/app.ts', 'app/Support/Portal/PortalBitbucketSync.php', 'docs/build-notes.md'] as $path) {
+        foreach (['sql/portal/data.sql', 'migrations/outputs/users/export/User Reports.json', '.claude/skills/x/live.js', 'reference/lib/main.dart'] as $path) {
+            $this->assertTrue(PortalBitbucketSync::isGenerated($path), $path);
+        }
+        // One file changing more than 5,000 lines is taken as generated, whatever its name.
+        $this->assertTrue(PortalBitbucketSync::skips(['path' => 'src/huge.ts', 'added' => 4000, 'removed' => 1001]));
+        $this->assertFalse(PortalBitbucketSync::skips(['path' => 'src/huge.ts', 'added' => 4000, 'removed' => 1000]));
+        foreach (['src/app.ts', 'app/Support/Portal/PortalBitbucketSync.php', 'docs/build-notes.md', 'sql/portal/separate.sql'] as $path) {
             $this->assertFalse(PortalBitbucketSync::isGenerated($path), $path);
         }
     }

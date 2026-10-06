@@ -89,4 +89,60 @@ final class PortalProjectCodeActivity
 
         return array_values($projects);
     }
+
+    /**
+     * Each project's code over its whole history, for the View Projects dashboard: only projects that link
+     * a repository appear, so another project shows no code tiles at all. Merges never count.
+     *
+     * @param  list<int>  $projectIds
+     * @return array<int, array{repositories: int, commits: int, linesAdded: int, linesRemoved: int, filesChanged: int, activeDays: int, contributors: int, lastCommitOn: ?string, uncounted: int}>
+     */
+    public function summariesByProject(array $projectIds): array
+    {
+        if ($projectIds === []) {
+            return [];
+        }
+        $connection = DB::connection('portal');
+        $repositories = $connection->table('projects_bitbucket_repositories')
+            ->whereIn('project_id', $projectIds)
+            ->selectRaw('project_id, COUNT(*) as repositories')
+            ->groupBy('project_id')
+            ->pluck('repositories', 'project_id');
+        if ($repositories->isEmpty()) {
+            return [];
+        }
+        $totals = $connection->table('projects_bitbucket_repositories as links')
+            ->join('bitbucket_commits as commits', 'commits.repository_id', '=', 'links.repository_id')
+            ->whereIn('links.project_id', $repositories->keys()->all())
+            ->where('commits.is_merge', false)
+            ->selectRaw('links.project_id, COUNT(*) as commits')
+            ->selectRaw('COALESCE(SUM(commits.lines_added), 0) as lines_added')
+            ->selectRaw('COALESCE(SUM(commits.lines_removed), 0) as lines_removed')
+            ->selectRaw('COALESCE(SUM(commits.files_changed), 0) as files_changed')
+            ->selectRaw('COUNT(DISTINCT commits.committed_on) as active_days')
+            ->selectRaw('COUNT(DISTINCT COALESCE(commits.employee_id, commits.author_email)) as contributors')
+            ->selectRaw('MAX(commits.committed_on) as last_commit_on')
+            ->selectRaw('SUM(CASE WHEN commits.counted_at IS NULL THEN 1 ELSE 0 END) as uncounted')
+            ->groupBy('links.project_id')
+            ->get()
+            ->keyBy('project_id');
+
+        $summaries = [];
+        foreach ($repositories as $projectId => $count) {
+            $row = $totals->get($projectId);
+            $summaries[(int) $projectId] = [
+                'repositories' => (int) $count,
+                'commits' => (int) ($row->commits ?? 0),
+                'linesAdded' => (int) ($row->lines_added ?? 0),
+                'linesRemoved' => (int) ($row->lines_removed ?? 0),
+                'filesChanged' => (int) ($row->files_changed ?? 0),
+                'activeDays' => (int) ($row->active_days ?? 0),
+                'contributors' => (int) ($row->contributors ?? 0),
+                'lastCommitOn' => $row?->last_commit_on === null ? null : (string) $row->last_commit_on,
+                'uncounted' => (int) ($row->uncounted ?? 0),
+            ];
+        }
+
+        return $summaries;
+    }
 }

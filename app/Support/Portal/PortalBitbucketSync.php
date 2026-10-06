@@ -30,7 +30,16 @@ final class PortalBitbucketSync
         '#(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb|composer\.lock|Gemfile\.lock|Podfile\.lock)$#i',
         '#(^|/)(vendor|node_modules|graphify-out|dist|build|coverage|\.expo)/#i',
         '#\.(min\.js|min\.css|map)$#i',
+        // Data rather than code: seed dumps and migration exports, regenerated whole each time.
+        '#(^|/)data\.sql$#i',
+        '#(^|/)(outputs|exports?)/#i',
+        // Copied-in tooling and the Flutter original the portal was ported from.
+        '#(^|/)(\.claude|reference)/#i',
     ];
+
+    // ponytail: a size heuristic; one file changing more than this in a commit is taken as generated
+    // (a dump or an export no pattern names). Name the path in GENERATED instead when one turns up.
+    private const MAX_FILE_LINES = 5000;
 
     public function __construct(private readonly PortalBitbucketClient $client) {}
 
@@ -215,7 +224,7 @@ final class PortalBitbucketSync
     {
         $lines = ['added' => 0, 'removed' => 0, 'files' => 0];
         foreach ($files as $file) {
-            if (self::isGenerated($file['path'])) {
+            if (self::skips($file)) {
                 continue;
             }
             $lines['added'] += $file['added'];
@@ -230,6 +239,28 @@ final class PortalBitbucketSync
     public static function companyToday(): string
     {
         return Carbon::now(self::COMPANY_ZONE)->toDateString();
+    }
+
+    /**
+     * Whether a changed file stays out of the counts: a generated path, or one too large to be written by hand.
+     *
+     * @param  array{path: string, added: int, removed: int}  $file
+     */
+    public static function skips(array $file): bool
+    {
+        return self::isGenerated($file['path']) || $file['added'] + $file['removed'] > self::MAX_FILE_LINES;
+    }
+
+    /**
+     * Every commit of a linked repository counted again on the next runs, after the counting rules change;
+     * merges stay uncounted, and an unlinked repository is never synced, so it is left alone.
+     */
+    public function recount(): int
+    {
+        return $this->connection()->table('bitbucket_commits')
+            ->where('is_merge', false)
+            ->whereIn('repository_id', fn ($linked) => $linked->select('repository_id')->from('projects_bitbucket_repositories'))
+            ->update(['counted_at' => null]);
     }
 
     public static function isGenerated(string $path): bool

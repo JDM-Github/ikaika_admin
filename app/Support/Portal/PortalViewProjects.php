@@ -113,6 +113,7 @@ final class PortalViewProjects
         $trailPhotos = $this->actorPhotos($trails);
         $leadsByEmail = $this->leadsByEmail($rows);
         $work = (new PortalProjectWork)->byProject($rows, CarbonImmutable::today());
+        $code = (new PortalProjectCodeActivity)->summariesByProject($projectIds);
         $activityCodes = PortalActivityScopes::all();
 
         $projects = [];
@@ -145,6 +146,8 @@ final class PortalViewProjects
                     $members[$id] ?? [],
                 ),
                 'work' => $work[$id],
+                // Commits from linked Bitbucket repositories (MIS); null when the project links none.
+                'codeActivity' => $code[$id] ?? null,
                 'scopeOptions' => PortalActivityScopes::forDepartment($activityCodes, $row->department ?? null),
             ];
         }
