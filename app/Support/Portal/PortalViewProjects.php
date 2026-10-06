@@ -161,6 +161,7 @@ final class PortalViewProjects
         $leadsByEmail = $this->leadsByEmail($rows);
         $work = (new PortalProjectWork)->byProject($rows, CarbonImmutable::today());
         $code = (new PortalProjectCodeActivity)->summariesByProject($projectIds);
+        $repositoryLinks = (new PortalProjectRepositories)->linksByProject($projectIds);
         $topMembers = $this->topMembers($rows, $work, (new PortalProjectCodeActivity)->topByProject($projectIds));
         $activityCodes = PortalActivityScopes::all();
 
@@ -177,17 +178,20 @@ final class PortalViewProjects
                 static fn (array $entry): array => [...$entry, 'actorPhotoUrl' => $trailPhotos[$entry['actorName']] ?? null],
                 $trails[$id] ?? [],
             );
+            $item = PortalViewProjectPresenter::item(
+                $row,
+                $memberNames[$id] ?? [],
+                $leadsByEmail,
+                $clientNames[$id] ?? [],
+                $scopeSummary,
+                $trail,
+                $scopeCodes,
+                $memberPhotos[$id] ?? [],
+            );
+            // An MIS project's Bitbucket repositories join its links on the Details tab.
+            $item['links'] = [...$item['links'], ...($repositoryLinks[$id] ?? [])];
             $projects[] = [
-                ...PortalViewProjectPresenter::item(
-                    $row,
-                    $memberNames[$id] ?? [],
-                    $leadsByEmail,
-                    $clientNames[$id] ?? [],
-                    $scopeSummary,
-                    $trail,
-                    $scopeCodes,
-                    $memberPhotos[$id] ?? [],
-                ),
+                ...$item,
                 ...PortalProjectPowers::flags($powers, $actor, $row),
                 'team' => PortalViewProjectPresenter::team(
                     $leadsByEmail[strtolower(trim((string) ($row->project_lead_email ?? '')))] ?? null,

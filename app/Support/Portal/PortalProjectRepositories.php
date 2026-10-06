@@ -89,6 +89,35 @@ final class PortalProjectRepositories
     }
 
     /**
+     * Each project's repositories as Details links, for the projects that link any.
+     *
+     * @param  list<int>  $projectIds
+     * @return array<int, list<array{label: string, url: string}>>
+     */
+    public function linksByProject(array $projectIds): array
+    {
+        if ($projectIds === []) {
+            return [];
+        }
+        $rows = $this->connection()
+            ->table('projects_bitbucket_repositories as links')
+            ->join('bitbucket_repositories as repositories', 'repositories.id', '=', 'links.repository_id')
+            ->whereIn('links.project_id', $projectIds)
+            ->orderBy('repositories.workspace')
+            ->orderBy('repositories.repo_slug')
+            ->get(['links.project_id', 'repositories.workspace', 'repositories.repo_slug']);
+        $byProject = [];
+        foreach ($rows as $row) {
+            $byProject[(int) $row->project_id][] = [
+                'label' => 'Bitbucket: '.$row->repo_slug,
+                'url' => 'https://bitbucket.org/'.rawurlencode($row->workspace).'/'.rawurlencode($row->repo_slug),
+            ];
+        }
+
+        return $byProject;
+    }
+
+    /**
      * Links exactly these repositories to the project, adding any repository not yet known. A
      * repository no project links any more stays, with its commits, for when one links it again.
      *

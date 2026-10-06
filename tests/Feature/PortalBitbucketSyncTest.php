@@ -232,6 +232,7 @@ class PortalBitbucketSyncTest extends TestCase
         app(PortalBitbucketSync::class)->syncLinked();
         $portal = DB::connection('portal');
         $portal->table('employees_projects')->insert(['project_id' => $this->projectId, 'employee_id' => (int) $this->developer->id, 'role_on_project' => 'member']);
+        $portal->table('projects')->where('id', $this->projectId)->update(['msteams_project_link' => 'N/A', 'ms_loop_link' => 'https://loop.microsoft.com/p/1']);
         $developer = Employee::query()->findOrFail((int) $this->developer->id);
 
         $summary = app(PortalProjectCodeActivity::class)->summariesByProject([$this->projectId, $this->projectId + 100000]);
@@ -248,6 +249,11 @@ class PortalBitbucketSyncTest extends TestCase
         // MIS: the top member changed the most lines (2 matched commits, 30 lines); everyone who opens the project sees it.
         $this->assertSame(['id' => (string) $this->developer->id, 'measure' => 'linesChanged', 'value' => 30, 'hours' => null, 'commits' => 2], array_diff_key($item['topMember'], ['name' => true, 'photoUrl' => true]));
         $this->assertArrayNotHasKey('topItems', $item['work']);
+        // A placeholder link is no link; the linked repository joins the Details links.
+        $this->assertSame([
+            ['label' => 'MS Loop', 'url' => 'https://loop.microsoft.com/p/1'],
+            ['label' => 'Bitbucket: fixture-sync-2020', 'url' => 'https://bitbucket.org/ikaika-web/fixture-sync-2020'],
+        ], $item['links']);
         // The project's own code (its number) is untouched by the code tiles.
         $this->assertIsString($item['code']);
         $this->assertNull($board->first(fn (array $other): bool => $other['id'] !== (string) $this->projectId && $other['codeActivity'] !== null));

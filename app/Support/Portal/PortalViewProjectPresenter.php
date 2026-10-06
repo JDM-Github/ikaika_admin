@@ -172,6 +172,8 @@ final class PortalViewProjectPresenter
     /**
      * @return list<array{label: string, url: string}>
      */
+    private const NO_LINK = ['n/a', 'na', 'none', 'nil', '-', '--', 'tbd', 'tba', 'null'];
+
     private static function links(object $row): array
     {
         $candidates = [
@@ -185,7 +187,8 @@ final class PortalViewProjectPresenter
         $links = [];
         foreach ($candidates as $label => $raw) {
             $url = trim((string) $raw);
-            if ($url === '') {
+            // Airtable fills a missing link with a placeholder such as N/A; that is no link to show.
+            if ($url === '' || in_array(strtolower($url), self::NO_LINK, true)) {
                 continue;
             }
             $links[] = ['label' => $label, 'url' => $url];
