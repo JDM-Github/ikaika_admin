@@ -19,7 +19,7 @@ use Throwable;
 final class PortalBitbucketSync
 {
     // The day a report reads is the company's (the zone project numbers use), whoever pushed and when.
-    private const COMPANY_ZONE = 'Asia/Manila';
+    public const COMPANY_ZONE = 'Asia/Manila';
 
     public const COUNT_PER_RUN = 300;
 
@@ -130,20 +130,10 @@ final class PortalBitbucketSync
             ->limit($limit)
             ->pluck('hash');
         foreach ($pending as $hash) {
-            $added = 0;
-            $removed = 0;
-            $files = 0;
-            foreach ($this->client->diffstat($repository->workspace, $repository->repo_slug, (string) $hash) as $file) {
-                if (self::isGenerated($file['path'])) {
-                    continue;
-                }
-                $added += $file['added'];
-                $removed += $file['removed'];
-                $files++;
-            }
+            $lines = self::lines($this->client->diffstat($repository->workspace, $repository->repo_slug, (string) $hash));
             $this->connection()->table('bitbucket_commits')
                 ->where('repository_id', (int) $repository->id)->where('hash', $hash)
-                ->update(['lines_added' => $added, 'lines_removed' => $removed, 'files_changed' => $files, 'counted_at' => now()]);
+                ->update(['lines_added' => $lines['added'], 'lines_removed' => $lines['removed'], 'files_changed' => $lines['files'], 'counted_at' => now()]);
         }
 
         return count($pending);
@@ -157,6 +147,35 @@ final class PortalBitbucketSync
      * @return array<string, mixed>|null
      */
     private function row(int $repositoryId, array $commit, array $employees): ?array
+    {
+        $read = self::read($commit);
+        if ($read === null) {
+            return null;
+        }
+
+        return [
+            'repository_id' => $repositoryId,
+            'hash' => $read['hash'],
+            'author_name' => $read['authorName'],
+            'author_email' => $read['authorEmail'],
+            'employee_id' => $read['authorEmail'] === null ? null : ($employees[$read['authorEmail']] ?? null),
+            'committed_at' => $read['committedAt'],
+            'committed_on' => $read['committedOn'],
+            'message' => $read['message'],
+            'is_merge' => $read['isMerge'],
+            // A merge repeats its parents' lines, so it is never counted and never fetched.
+            'counted_at' => $read['isMerge'] ? now() : null,
+        ];
+    }
+
+    /**
+     * What a Bitbucket commit says, read the way the sync stores it (the preview command reads it the same
+     * way), or null when it has no usable hash or date.
+     *
+     * @param  array<string, mixed>  $commit
+     * @return array{hash: string, authorName: ?string, authorEmail: ?string, committedAt: string, committedOn: string, message: ?string, isMerge: bool}|null
+     */
+    public static function read(array $commit): ?array
     {
         $hash = $commit['hash'] ?? null;
         $date = $commit['date'] ?? null;
@@ -174,22 +193,43 @@ final class PortalBitbucketSync
             ? [trim($match[1]), strtolower(trim($match[2]))]
             : [$raw, ''];
         $parents = is_array($commit['parents'] ?? null) ? count($commit['parents']) : 0;
-        $isMerge = $parents > 1;
-        $message = is_string($commit['message'] ?? null) ? mb_substr($commit['message'], 0, 60000) : null;
 
         return [
-            'repository_id' => $repositoryId,
             'hash' => $hash,
-            'author_name' => $name === '' ? null : mb_substr($name, 0, 255),
-            'author_email' => $email === '' ? null : mb_substr($email, 0, 255),
-            'employee_id' => $email === '' ? null : ($employees[$email] ?? null),
-            'committed_at' => $moment->copy()->utc()->format('Y-m-d H:i:s'),
-            'committed_on' => $moment->copy()->setTimezone(self::COMPANY_ZONE)->toDateString(),
-            'message' => $message,
-            'is_merge' => $isMerge,
-            // A merge repeats its parents' lines, so it is never counted and never fetched.
-            'counted_at' => $isMerge ? now() : null,
+            'authorName' => $name === '' ? null : mb_substr($name, 0, 255),
+            'authorEmail' => $email === '' ? null : mb_substr($email, 0, 255),
+            'committedAt' => $moment->copy()->utc()->format('Y-m-d H:i:s'),
+            'committedOn' => $moment->copy()->setTimezone(self::COMPANY_ZONE)->toDateString(),
+            'message' => is_string($commit['message'] ?? null) ? mb_substr($commit['message'], 0, 60000) : null,
+            'isMerge' => $parents > 1,
         ];
+    }
+
+    /**
+     * A commit's lines and files, generated and vendored files left out.
+     *
+     * @param  list<array{path: string, added: int, removed: int}>  $files
+     * @return array{added: int, removed: int, files: int}
+     */
+    public static function lines(array $files): array
+    {
+        $lines = ['added' => 0, 'removed' => 0, 'files' => 0];
+        foreach ($files as $file) {
+            if (self::isGenerated($file['path'])) {
+                continue;
+            }
+            $lines['added'] += $file['added'];
+            $lines['removed'] += $file['removed'];
+            $lines['files']++;
+        }
+
+        return $lines;
+    }
+
+    // Today's calendar day in company time, the day a Daily Report covers.
+    public static function companyToday(): string
+    {
+        return Carbon::now(self::COMPANY_ZONE)->toDateString();
     }
 
     public static function isGenerated(string $path): bool
