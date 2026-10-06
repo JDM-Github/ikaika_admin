@@ -264,6 +264,21 @@ final class PortalActivityCopy
         return self::YOU.' changed '.self::displayName($target)."'s role to ".$role;
     }
 
+    public static function addedUser(Employee $employee): string
+    {
+        return self::YOU.' added '.self::displayName($employee).' as a user';
+    }
+
+    public static function changedSomeoneDepartment(Employee $target, string $department): string
+    {
+        return self::YOU.' moved '.self::displayName($target).' to the '.$department.' department';
+    }
+
+    public static function notifyDepartmentChanged(string $department, string $by): string
+    {
+        return 'You were moved to the '.$department.' department by '.$by.'.';
+    }
+
     public static function ownRoleChanged(Employee $actor, string $role, ?Request $request = null): string
     {
         return self::YOUR.' role was changed to '.$role.' by '.self::actorName($actor, $request);

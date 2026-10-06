@@ -5,6 +5,7 @@ namespace App\Support\Portal;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Core\CoreLedger;
 use App\Support\Core\CoreRecycleKey;
+use Carbon\Carbon;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -24,6 +25,16 @@ use Illuminate\Validation\Rule;
  *
  * Every save also writes the project's Trail history (PortalProjectTrail); an edit's row says what
  * changed, and an edit that changed nothing writes none.
+ *
+ * A new project is numbered YY + its client's two-digit code + that client's next two-digit counter
+ * for the year (260202: 2026, client 02, its second project), the year as Manila keeps it. The number
+ * leads the stored name ("260202 Stockton Facility"), as on every project from Airtable, and is kept
+ * in project_number; it never changes, and is never given twice, deleted projects included. The form
+ * edits the name without it.
+ *
+ * Every project needs its links (Engineering's six, any other department's four), and an Engineering
+ * project an area above 0 and a level of detail for each discipline. No two live projects share a
+ * name, whatever its case, spacing or number.
  */
 final class PortalProjectEditor
 {
@@ -84,6 +95,27 @@ final class PortalProjectEditor
         'project_scope_t4_tasks',
     ];
 
+    private const LEVEL_LABELS = [
+        'structural' => 'Structural',
+        'architectural' => 'Architectural',
+        'electrical' => 'Electrical',
+        'plumbing' => 'Plumbing',
+        'mechanical-duct' => 'Mechanical Duct',
+        'fire-protection' => 'Fire Protection',
+    ];
+
+    private const LINK_LABELS = [
+        'forma' => 'Forma',
+        'ms-teams' => 'MS Teams',
+        'ms-planner' => 'MS Planner',
+        'ms-loop' => 'MS Loop',
+        'panoramic' => 'Panoramic Photos',
+        'google-drive' => 'Google Drive Folder',
+    ];
+
+    // Project numbers follow the company's year, wherever the person adding is.
+    private const COMPANY_ZONE = 'Asia/Manila';
+
     private const MAX_PEOPLE = 200;
 
     private const MAX_SCOPES = 300;
@@ -133,11 +165,20 @@ final class PortalProjectEditor
             static fn (string $department): bool => PortalProjectPowers::reachesDepartment($addReach, $actor->department, $department),
         ));
 
+        $counters = $this->usedCounters($this->year());
         $clients = [];
-        foreach ($this->connection()->table('clients')->orderBy('name')->get(['id', 'name']) as $row) {
+        foreach ($this->connection()->table('clients')->orderBy('name')->get(['id', 'name', 'client_id']) as $row) {
             $name = $this->text($row->name);
             if ($name !== null) {
-                $clients[] = ['id' => (string) (int) $row->id, 'name' => $name];
+                $code = self::clientCode($row->client_id);
+                $next = $code === null ? null : ($counters[$code] ?? 0) + 1;
+                $clients[] = [
+                    'id' => (string) (int) $row->id,
+                    'name' => $name,
+                    'code' => $code,
+                    // What Add Project shows before saving; the save takes the next free one then.
+                    'nextNumber' => $next === null || $next > 99 ? null : $this->year().$code.sprintf('%02d', $next),
+                ];
             }
         }
 
@@ -191,9 +232,20 @@ final class PortalProjectEditor
         $isApproved = $this->approval->covers($actor, $request, $fields['columns']['department'])
             || PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
 
-        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId, $request, $isApproved): int {
+        $numbered = null;
+        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId, $request, $isApproved, &$numbered): int {
+            // The client's row is the lock that keeps two projects from taking one number.
+            $client = $this->connection()->table('clients')->where('id', $fields['clientId'])->lockForUpdate()->first(['id', 'client_id']);
+            if ($client === null) {
+                abort(422, 'Choose a client from the list.');
+            }
+            $this->assertNameFree($fields['name'], null);
+            $number = $this->nextNumber($client);
+            $numbered = $number.' '.$fields['name'];
             $projectId = (int) $this->connection()->table('projects')->insertGetId([
                 ...$fields['columns'],
+                'project_number' => $number,
+                'project_name' => $numbered,
                 'project_creation_status' => $isApproved ? PortalProjectApproval::APPROVED : PortalProjectApproval::PENDING,
                 'project_creation_approver' => $isApproved ? $this->personName($actor) : null,
                 'project_approver_email' => $isApproved ? $this->text($actor->email ?? null) : null,
@@ -224,13 +276,13 @@ final class PortalProjectEditor
             $actor,
             PortalLogAction::INSERT,
             self::CORE_RESOURCE,
-            PortalActivityCopy::addedProject($fields['name']),
+            PortalActivityCopy::addedProject((string) $numbered),
             (string) $projectId,
             $request,
-            ['projectName' => $fields['name'], 'department' => $fields['columns']['department']],
+            ['projectName' => $numbered, 'department' => $fields['columns']['department']],
         );
         if (! $isApproved) {
-            $this->approval->notifyManagers($actor, $request, $projectId, $fields['name'], $fields['columns']['department'], false);
+            $this->approval->notifyManagers($actor, $request, $projectId, (string) $numbered, $fields['columns']['department'], false);
         }
         $this->projects->bumpCache();
 
@@ -248,6 +300,8 @@ final class PortalProjectEditor
         $this->assertMay($actor, $row, $request, PortalProjectPowers::EDIT);
 
         $fields = $this->validatedFields($request, $projectId);
+        [$number] = self::split($row);
+        $fields['columns']['project_name'] = $number === null ? $fields['name'] : $number.' '.$fields['name'];
         $changes = $this->changes($projectId, $fields);
         $isResubmitted = $row->project_creation_status === PortalProjectApproval::REJECTED
             && ! $this->approval->covers($actor, $request, $fields['columns']['department']);
@@ -260,6 +314,7 @@ final class PortalProjectEditor
         ] : $fields['columns'];
 
         $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted): void {
+            $this->assertNameFree($fields['name'], $projectId);
             $this->connection()->table('projects')->where('id', $projectId)->update($columns);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
@@ -387,9 +442,12 @@ final class PortalProjectEditor
             'links.*' => 'link',
         ]);
 
-        $name = $this->text($data['name']);
+        $name = $this->text(preg_replace('/\s+/u', ' ', (string) $data['name']));
         if ($name === null) {
             abort(422, 'A project name is required.');
+        }
+        if ($projectId === null && preg_match('/^\d{5,6}\s/', $name) === 1) {
+            abort(422, 'Leave the project number out of the name; it is added when the project is saved.');
         }
 
         $department = $this->text($data['department']);
@@ -411,6 +469,30 @@ final class PortalProjectEditor
         $isEngineering = PortalProjectWork::isEngineering($department);
         $area = $isEngineering && isset($data['area']) ? round((float) $data['area'], 2) : null;
         $status = self::STATUSES[$data['status']];
+        if ($isEngineering && ($area === null || $area <= 0)) {
+            abort(422, 'An Engineering project needs its area in square feet, above 0.');
+        }
+        if ($isEngineering) {
+            $missing = [];
+            foreach (self::LEVEL_LABELS as $discipline => $label) {
+                if ($this->text($data['levels'][$discipline] ?? null) === null) {
+                    $missing[] = $label;
+                }
+            }
+            if ($missing !== []) {
+                abort(422, 'An Engineering project needs a level of detail for '.self::listed($missing).'.');
+            }
+        }
+        $missingLinks = [];
+        foreach (self::LINK_LABELS as $kind => $label) {
+            $carried = $isEngineering || ! in_array($kind, self::ENGINEERING_LINKS, true);
+            if ($carried && $this->text($data['links'][$kind] ?? null) === null) {
+                $missingLinks[] = $label;
+            }
+        }
+        if ($missingLinks !== []) {
+            abort(422, 'Every project needs its links. Add '.self::listed($missingLinks).'.');
+        }
 
         $columns = [
             'project_name' => $name,
@@ -469,8 +551,9 @@ final class PortalProjectEditor
         $parts = [];
 
         foreach (['project_name' => 'Name', 'department' => 'Department', 'type_of_job' => 'Type'] as $column => $label) {
-            $old = $this->text($before->{$column} ?? null);
-            $new = $this->text($after[$column] ?? null);
+            // A name is told apart from its number, which never changes.
+            $old = $column === 'project_name' ? $this->text(self::split($before)[1]) : $this->text($before->{$column} ?? null);
+            $new = $column === 'project_name' ? $this->text($fields['name']) : $this->text($after[$column] ?? null);
             if ($old !== $new) {
                 $parts[] = $label.': '.($old ?? 'none').' to '.($new ?? 'none');
             }
@@ -724,13 +807,15 @@ final class PortalProjectEditor
             $links[$kind] = $this->text($row->{$column} ?? null) ?? '';
         }
         $area = $row->area_sqft ?? null;
+        [$number, $name] = self::split($row);
 
         return [
             'section' => 'projects',
             'resource' => 'project',
             'data' => [
                 'id' => (string) $projectId,
-                'name' => $this->text($row->project_name ?? null) ?? '',
+                'number' => $number,
+                'name' => $name,
                 'leadId' => $lead === null ? null : (string) (int) $lead->id,
                 'leadName' => $lead === null ? null : $this->personName($lead),
                 'clientId' => $clientId === null ? null : (string) (int) $clientId,
@@ -788,12 +873,115 @@ final class PortalProjectEditor
             ->table('projects')
             ->where('id', $projectId)
             ->whereNull('deleted_at')
-            ->first(['id', 'project_name', 'department', 'project_lead_email', 'project_creation_status', 'requested_by']);
+            ->first(['id', 'project_number', 'project_name', 'department', 'project_lead_email', 'project_creation_status', 'requested_by']);
         if ($row === null) {
             abort(404, 'That project was not found.');
         }
 
         return $row;
+    }
+
+    /**
+     * The project's number and its name without it: project_number when there is one, else a number
+     * leading the name ("260134 JMH PH2"), else none.
+     *
+     * @return array{0: ?string, 1: string}
+     */
+    public static function split(object $row): array
+    {
+        $name = trim((string) ($row->project_name ?? ''));
+        $number = trim((string) ($row->project_number ?? ''));
+        if (preg_match('/^(\d+)\s+(.+)$/', $name, $match) === 1 && ($number === '' || $number === $match[1])) {
+            return [$match[1], trim($match[2])];
+        }
+
+        return [$number === '' ? null : $number, $name];
+    }
+
+    // Names are compared without their number, case or extra spaces, among live projects.
+    private function assertNameFree(string $name, ?int $exceptId): void
+    {
+        $key = self::nameKey($name);
+        $rows = $this->connection()
+            ->table('projects')
+            ->whereNull('deleted_at')
+            ->where('project_name', 'like', '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $name).'%')
+            ->when($exceptId !== null, static fn ($query) => $query->where('id', '<>', $exceptId))
+            ->lockForUpdate()
+            ->get(['id', 'project_number', 'project_name']);
+        foreach ($rows as $row) {
+            [, $other] = self::split($row);
+            if (self::nameKey($other) === $key) {
+                abort(422, 'A project named "'.$name.'" already exists ('.trim((string) $row->project_name).'). Choose another name.');
+            }
+        }
+    }
+
+    private function nextNumber(object $client): string
+    {
+        $code = self::clientCode($client->client_id);
+        if ($code === null) {
+            abort(422, 'That client has no two-digit client code, so the project cannot be numbered. Give the client a code first.');
+        }
+        $year = $this->year();
+        $next = ($this->usedCounters($year)[$code] ?? 0) + 1;
+        if ($next > 99) {
+            abort(422, 'This client has used all 99 project numbers for 20'.$year.'.');
+        }
+
+        return $year.$code.sprintf('%02d', $next);
+    }
+
+    /**
+     * The highest counter each client code has used this year, deleted projects included.
+     *
+     * @return array<string, int>
+     */
+    private function usedCounters(string $year): array
+    {
+        $rows = $this->connection()
+            ->table('projects')
+            ->where(static function ($query) use ($year): void {
+                $query->where('project_number', 'like', $year.'%')->orWhere('project_name', 'like', $year.'%');
+            })
+            ->get(['project_number', 'project_name']);
+        $used = [];
+        foreach ($rows as $row) {
+            foreach ([(string) ($row->project_number ?? ''), (string) ($row->project_name ?? '')] as $text) {
+                if (preg_match('/^'.$year.'(\d{2})(\d{2})(?:\s|$)/', trim($text), $match) === 1) {
+                    $used[$match[1]] = max($used[$match[1]] ?? 0, (int) $match[2]);
+                }
+            }
+        }
+
+        return $used;
+    }
+
+    private function year(): string
+    {
+        return Carbon::now(self::COMPANY_ZONE)->format('y');
+    }
+
+    private static function clientCode(mixed $value): ?string
+    {
+        $code = trim((string) $value);
+
+        return preg_match('/^\d{2}$/', $code) === 1 ? $code : null;
+    }
+
+    private static function nameKey(string $name): string
+    {
+        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $name)));
+    }
+
+    /**
+     * @param  list<string>  $items
+     */
+    private static function listed(array $items): string
+    {
+        return count($items) === 1
+            ? $items[0]
+            : implode(', ', array_slice($items, 0, -1)).' and '.$items[count($items) - 1];
     }
 
     /**
