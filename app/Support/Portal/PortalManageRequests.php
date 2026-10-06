@@ -332,7 +332,8 @@ final class PortalManageRequests
     private function notifyOwnerOfDecision(Employee $actor, array $applied, Request $request): void
     {
         $owner = $applied['owner'];
-        if (! $owner instanceof Employee) {
+        // A flagged member must never learn they are flagged, so a flag decision leaves them no notice or log line.
+        if (! $owner instanceof Employee || $applied['kind'] === 'flag') {
             return;
         }
 

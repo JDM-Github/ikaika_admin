@@ -779,98 +779,13 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertSame(1, (int) $junction->is_flag);
     }
 
-    // The member's own view of Flag Reports: no name, since it can only ever be their own.
-    public function test_get_reports_flagged_returns_only_the_signed_in_member_s_own_flagged_reports(): void
+    // The member's own Flag Reports read is gone: a flagged member must never learn they are flagged.
+    public function test_a_member_cannot_read_their_own_flagged_reports(): void
     {
         $actor = $this->activeMember();
-        $other = $this->otherActiveMember($actor);
-        DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
-        $this->insertWarning($actor, 'Active');
-        $project = $this->firstOwnProject($actor);
-        $activity = $this->firstActivity();
-        $today = $this->freeDate($actor, 0);
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
 
-        $this->postJson('/api/development/portal/reports/submitted', [
-            'kind' => 'daily',
-            'reports' => [[
-                'reportDate' => $today,
-                'remarks' => 'Filed while on a warning',
-                'entries' => [[
-                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
-                        $project->project_number ?? null,
-                        $project->project_name ?? null,
-                    ),
-                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
-                        $activity->name ?? null,
-                        $activity->id_no ?? null,
-                    ),
-                    'hoursRendered' => 8,
-                    'elementChange' => 1,
-                ]],
-            ]],
-        ], $headers)->assertCreated();
-        // A different member's unrelated report, flagged or not, must never leak into this read.
-        $this->insertLine($other, [
-            'report_date' => $today,
-            'remarks' => 'OTHER-EMPLOYEE-SECRET',
-        ], $project, $activity, $this->firstEarnCode());
-
-        $response = $this->getJson(
-            '/api/development/portal/reports/flagged?from='.$today.'&to='.$today,
-            $headers,
-        )->assertOk()
-            ->assertJsonPath('section', 'reports')
-            ->assertJsonPath('resource', 'flagged');
-
-        $data = $response->json('data');
-        $this->assertIsArray($data);
-        $this->assertCount(1, $data);
-        $row = $data[0];
-        $this->assertIsArray($row);
-        $this->assertNull($row['memberName']);
-        $this->assertIsString($row['id']);
-        $this->assertSame($today, $row['submittedOn']);
-        $this->assertSame('daily', $row['kind']);
-        $this->assertSame('pending', $row['status']);
-        $this->assertNull($row['approverRemarks']);
-        $this->assertStringNotContainsString('OTHER-EMPLOYEE-SECRET', $response->getContent());
-    }
-
-    // A report filed without an active warning is never flagged, so it never appears here.
-    public function test_get_reports_flagged_omits_a_report_that_was_never_flagged(): void
-    {
-        $actor = $this->activeMember();
-        DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
-        $project = $this->firstOwnProject($actor);
-        $activity = $this->firstActivity();
-        $today = $this->freeDate($actor, 0);
-        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
-
-        $this->postJson('/api/development/portal/reports/submitted', [
-            'kind' => 'daily',
-            'reports' => [[
-                'reportDate' => $today,
-                'remarks' => 'Filed with no warning on file',
-                'entries' => [[
-                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
-                        $project->project_number ?? null,
-                        $project->project_name ?? null,
-                    ),
-                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
-                        $activity->name ?? null,
-                        $activity->id_no ?? null,
-                    ),
-                    'hoursRendered' => 8,
-                    'elementChange' => 1,
-                ]],
-            ]],
-        ], $headers)->assertCreated();
-
-        $this->getJson(
-            '/api/development/portal/reports/flagged?from='.$today.'&to='.$today,
-            $headers,
-        )->assertOk()->assertJsonPath('data', []);
+        $this->getJson('/api/development/portal/reports/flagged', $headers)->assertNotFound();
     }
 
     public function test_a_late_report_files_against_an_older_day_and_reads_back_as_late(): void

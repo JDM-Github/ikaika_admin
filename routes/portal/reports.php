@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\Api\Portal\Reports\FlaggedController;
 use App\Http\Controllers\Api\Portal\Reports\ProjectsController;
 use App\Http\Controllers\Api\Portal\Reports\SubmittedController;
 use App\Http\Middleware\AuthenticatePortalJwt;
@@ -23,9 +22,7 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         });
         // User Requests' Late tab: their own late reports, read by that page or the Late Report form.
         Route::get('reports/late', [SubmittedController::class, 'late'])->middleware('portal.rule:requests.own|reports.late');
-        // Same data source (PortalSubmittedReports), same throttle -- a filtered read, not a
-        // separate resource.
-        Route::get('reports/flagged', [FlaggedController::class, 'index']);
+        // No member read of their own flagged reports: a flagged member must never learn they are flagged.
     });
 
     Route::middleware('throttle:portal-reports-submitted-write')->group(function (): void {
