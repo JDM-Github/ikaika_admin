@@ -49,6 +49,7 @@ class PortalBitbucketTablesTest extends TestCase
             'hash' => str_repeat('a', 40),
             'author_email' => 'nobody@example.com',
             'committed_at' => '2020-01-06 01:00:00',
+            'committed_on' => '2020-01-06',
             'lines_added' => 12,
             'lines_removed' => 3,
             'files_changed' => 2,
@@ -74,7 +75,7 @@ class PortalBitbucketTablesTest extends TestCase
     {
         $portal = DB::connection('portal');
         $repository = (int) $portal->table('bitbucket_repositories')->insertGetId(['workspace' => 'ikaika-web', 'repo_slug' => 'fixture-unique-2020']);
-        $commit = ['repository_id' => $repository, 'hash' => str_repeat('b', 40), 'committed_at' => '2020-01-06 01:00:00'];
+        $commit = ['repository_id' => $repository, 'hash' => str_repeat('b', 40), 'committed_at' => '2020-01-06 01:00:00', 'committed_on' => '2020-01-06'];
         $portal->table('bitbucket_commits')->insert($commit);
 
         $this->assertThrows(fn () => $portal->table('bitbucket_commits')->insert($commit), QueryException::class);

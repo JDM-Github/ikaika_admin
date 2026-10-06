@@ -41,6 +41,12 @@ return [
         'base' => env('AIRTABLE_BASE_ID'),
     ],
 
+    // A read-only Bitbucket access token for MIS projects' code activity; it lives in .env alone.
+    'bitbucket' => [
+        'token' => env('BITBUCKET_TOKEN'),
+        'base_url' => 'https://api.bitbucket.org/2.0',
+    ],
+
     'cloudinary' => [
         'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
         'api_key' => env('CLOUDINARY_API_KEY'),

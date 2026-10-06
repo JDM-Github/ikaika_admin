@@ -3,6 +3,7 @@
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailMessage;
 use App\Support\Airtable\PortalAirtableSync;
+use App\Support\Portal\PortalBitbucketSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
 use App\Support\Portal\PortalEmailAttachments;
 use App\Support\Portal\PortalEmailMarkup;
@@ -187,3 +188,19 @@ Artisan::command('portal:prune-email-attachments', function (PortalEmailAttachme
 
     return 0;
 })->purpose('Delete Send Email attachments staged more than a day ago and never sent');
+
+Artisan::command('portal:bitbucket-sync', function (PortalBitbucketSync $sync): int {
+    $outcomes = $sync->syncLinked();
+    if ($outcomes === []) {
+        $this->info('No project links a Bitbucket repository yet.');
+
+        return 0;
+    }
+    foreach ($outcomes as $repository => $outcome) {
+        is_string($outcome)
+            ? $this->error($repository.': '.$outcome)
+            : $this->info($repository.': '.$outcome['listed'].' new commits, '.$outcome['counted'].' counted');
+    }
+
+    return in_array(true, array_map('is_string', $outcomes), true) ? 1 : 0;
+})->purpose('Read new commits and their lines from every Bitbucket repository a project links');

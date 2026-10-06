@@ -395,8 +395,12 @@ CREATE TABLE IF NOT EXISTS projects_wbs_scopes (
 -- per commit per repository, whichever branches carry it; author_email is matched to
 -- employees.email (employee_id NULL = "Unknown author", never dropped); is_merge rows are kept but
 -- never counted, so lines stay with whoever wrote them. Only linked repositories are ever synced.
--- committed_at is UTC. message is internal (lead, managers, Admin+ only). Portal-only: never synced.
--- Existing databases: the Laravel migration create_portal_bitbucket_tables.
+-- committed_at is UTC; committed_on is that moment's calendar day in company time (Asia/Manila), the
+-- day a Daily or Late Report for that date reads, so work counts on the day it was written, not
+-- pushed. counted_at NULL means its line counts are not fetched yet (a big history fills over several
+-- runs); history_complete says one listing reached the first commit, so later runs may stop early.
+-- message is internal (lead, managers, Admin+ only). Portal-only: never synced.
+-- Existing databases: the Laravel migrations create_portal_bitbucket_tables, add_portal_bitbucket_commit_day.
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS bitbucket_repositories (
@@ -405,6 +409,7 @@ CREATE TABLE IF NOT EXISTS bitbucket_repositories (
     repo_slug       VARCHAR(128) NOT NULL,
     last_synced_at  TIMESTAMP    NULL,
     last_sync_error VARCHAR(255) NULL,
+    history_complete TINYINT(1)  NOT NULL DEFAULT 0,
     created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_bitbucket_repositories (workspace, repo_slug)
 );
@@ -424,14 +429,16 @@ CREATE TABLE IF NOT EXISTS bitbucket_commits (
     author_email  VARCHAR(255)     NULL,
     employee_id   INT              NULL,
     committed_at  DATETIME         NOT NULL,
+    committed_on  DATE             NOT NULL,
     message       TEXT             NULL,
     lines_added   INT UNSIGNED     NOT NULL DEFAULT 0,
     lines_removed INT UNSIGNED     NOT NULL DEFAULT 0,
     files_changed INT UNSIGNED     NOT NULL DEFAULT 0,
     is_merge      TINYINT(1)       NOT NULL DEFAULT 0,
+    counted_at    TIMESTAMP        NULL,
     PRIMARY KEY (repository_id, hash),
     KEY ix_bitbucket_commits_repository_day (repository_id, committed_at),
-    KEY ix_bitbucket_commits_employee_day (employee_id, committed_at),
+    KEY ix_bitbucket_commits_employee_day (employee_id, committed_on),
     CONSTRAINT fk_bitbucket_commits_repository FOREIGN KEY (repository_id) REFERENCES bitbucket_repositories (id) ON DELETE CASCADE,
     CONSTRAINT fk_bitbucket_commits_employee FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE SET NULL
 );
