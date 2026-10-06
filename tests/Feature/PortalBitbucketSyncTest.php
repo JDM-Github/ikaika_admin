@@ -262,6 +262,34 @@ class PortalBitbucketSyncTest extends TestCase
             ->assertExitCode(0);
     }
 
+    // The Activity tab: each person's code beside their hours, and a report row shows the code of the day it covers.
+    public function test_the_activity_tab_shows_code_by_person_and_report_day(): void
+    {
+        $this->fakeBitbucket();
+        app(PortalBitbucketSync::class)->syncLinked();
+        $portal = DB::connection('portal');
+        $developerId = (int) $this->developer->id;
+        $portal->table('employees_projects')->insert(['project_id' => $this->projectId, 'employee_id' => $developerId, 'role_on_project' => 'member']);
+        $reportId = (int) $portal->table('user_reports')->insertGetId(['report_date' => '2020-01-06', 'hours_rendered' => 8]);
+        $portal->table('projects_user_reports')->insert(['project_id' => $this->projectId, 'user_report_id' => $reportId]);
+        $portal->table('employees_user_reports')->insert(['employee_id' => $developerId, 'user_report_id' => $reportId]);
+        // Someone else's commit: a member who is not the lead sees that they committed, never how much.
+        $other = (int) $portal->table('employees')->where('id', '<>', $developerId)->whereNotNull('email')->orderBy('id')->value('id');
+        $portal->table('bitbucket_commits')->insert([
+            'repository_id' => $this->repositoryId, 'hash' => str_repeat('f', 40), 'employee_id' => $other,
+            'committed_at' => '2020-01-06 02:00:00', 'committed_on' => '2020-01-06', 'lines_added' => 99, 'counted_at' => now(),
+        ]);
+        $developer = Employee::query()->findOrFail($developerId);
+
+        $page = $this->getJson('/api/development/portal/projects/'.$this->projectId.'/activity', $this->headersFor($developer))->assertOk();
+
+        $people = collect($page->json('data.people'))->keyBy('id');
+        $this->assertSame(['commits' => 2, 'linesAdded' => 20, 'linesRemoved' => 10, 'lastCommitOn' => '2020-01-06'], $people[(string) $developerId]['code']);
+        $this->assertNull($people[(string) $other]['code']);
+        $report = collect($page->json('data.reports'))->firstWhere('id', (string) $reportId);
+        $this->assertSame(['commits' => 1, 'linesAdded' => 10, 'linesRemoved' => 5], $report['code'] ?? null);
+    }
+
     public function test_generated_paths_never_count(): void
     {
         foreach (['package-lock.json', 'app/composer.lock', 'node_modules/a.js', 'graphify-out/graph.json', 'public/app.min.js', 'dist/x.js'] as $path) {

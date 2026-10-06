@@ -145,4 +145,39 @@ final class PortalProjectCodeActivity
 
         return $summaries;
     }
+
+    /**
+     * A project's code by person and day, for its Activity tab: each person's totals, and each person's
+     * day so a report row can show the code of the day it covers. Unmatched authors and merges never count.
+     *
+     * @return array{people: array<int, array{commits: int, linesAdded: int, linesRemoved: int, lastCommitOn: string}>, days: array<string, array{commits: int, linesAdded: int, linesRemoved: int}>}
+     */
+    public function byPersonForProject(int $projectId): array
+    {
+        $rows = DB::connection('portal')->table('bitbucket_commits as commits')
+            ->whereIn('commits.repository_id', fn ($linked) => $linked->select('repository_id')
+                ->from('projects_bitbucket_repositories')->where('project_id', $projectId))
+            ->whereNotNull('commits.employee_id')
+            ->where('commits.is_merge', false)
+            ->groupBy('commits.employee_id', 'commits.committed_on')
+            ->selectRaw('commits.employee_id, commits.committed_on, COUNT(*) as commits')
+            ->selectRaw('COALESCE(SUM(commits.lines_added), 0) as lines_added')
+            ->selectRaw('COALESCE(SUM(commits.lines_removed), 0) as lines_removed')
+            ->get();
+
+        $people = [];
+        $days = [];
+        foreach ($rows as $row) {
+            $id = (int) $row->employee_id;
+            $day = (string) $row->committed_on;
+            $days[$id.'|'.$day] = ['commits' => (int) $row->commits, 'linesAdded' => (int) $row->lines_added, 'linesRemoved' => (int) $row->lines_removed];
+            $people[$id] ??= ['commits' => 0, 'linesAdded' => 0, 'linesRemoved' => 0, 'lastCommitOn' => $day];
+            $people[$id]['commits'] += (int) $row->commits;
+            $people[$id]['linesAdded'] += (int) $row->lines_added;
+            $people[$id]['linesRemoved'] += (int) $row->lines_removed;
+            $people[$id]['lastCommitOn'] = max($people[$id]['lastCommitOn'], $day);
+        }
+
+        return ['people' => $people, 'days' => $days];
+    }
 }
