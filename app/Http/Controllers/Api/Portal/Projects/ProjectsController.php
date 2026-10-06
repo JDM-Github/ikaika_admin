@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Portal\Projects;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalManageProjects;
 use App\Support\Portal\PortalProjectActivity;
 use App\Support\Portal\PortalProjectDeletion;
 use App\Support\Portal\PortalProjectEditor;
@@ -18,6 +19,7 @@ class ProjectsController extends Controller
         private readonly PortalProjectDeletion $deletion,
         private readonly PortalProjectEditor $editor,
         private readonly PortalProjectActivity $activity,
+        private readonly PortalManageProjects $approvals,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -38,6 +40,11 @@ class ProjectsController extends Controller
         }
 
         return response()->json($this->projects->track($actor, $request));
+    }
+
+    public function mine(Request $request): JsonResponse
+    {
+        return response()->json($this->approvals->mine($this->actor($request), $request));
     }
 
     public function options(Request $request): JsonResponse
