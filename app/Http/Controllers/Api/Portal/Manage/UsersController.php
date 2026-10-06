@@ -42,6 +42,22 @@ class UsersController extends Controller
         ));
     }
 
+    // What Add user offers: the next ID No. and the departments the actor's Users reach covers.
+    public function newUser(Request $request): JsonResponse
+    {
+        return response()->json($this->users->newUserOptions($this->actor($request), $request));
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        return response()->json($this->users->addUser($this->actor($request), $request), 201);
+    }
+
+    public function updateDepartment(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->users->changeDepartment($this->actor($request), $id, $request));
+    }
+
     public function updateProfile(Request $request, int $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');
@@ -59,5 +75,15 @@ class UsersController extends Controller
         ]);
 
         return response()->json($this->users->updateProfile($actor, $id, $validated, $request));
+    }
+
+    private function actor(Request $request): Employee
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return $actor;
     }
 }

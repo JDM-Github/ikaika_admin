@@ -35,6 +35,11 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::post('manage/project-settings/departments', [ProjectSettingsController::class, 'storeDepartment']);
         Route::delete('manage/project-settings/departments/{id}', [ProjectSettingsController::class, 'destroyDepartment'])
             ->whereNumber('id');
+        Route::post('manage/project-settings/clients', [ProjectSettingsController::class, 'storeClient']);
+        Route::patch('manage/project-settings/clients/{id}', [ProjectSettingsController::class, 'updateClient'])
+            ->whereNumber('id');
+        Route::delete('manage/project-settings/clients/{id}', [ProjectSettingsController::class, 'destroyClient'])
+            ->whereNumber('id');
     });
     // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.
     Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
@@ -44,6 +49,15 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->whereNumber('id');
     Route::middleware(['portal.rule:manage.users.role', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/role', [UsersController::class, 'updateRole'])
+        ->whereNumber('id');
+    // Add users: a new employee in the portal, before Airtable has them. Change departments: the
+    // department the portal files someone under, which their reaches and leading follow.
+    Route::middleware(['portal.rule:manage.users.add', 'throttle:portal-manage-users'])
+        ->get('manage/users/new', [UsersController::class, 'newUser']);
+    Route::middleware(['portal.rule:manage.users.add', 'throttle:portal-manage-users-write'])
+        ->post('manage/users', [UsersController::class, 'store']);
+    Route::middleware(['portal.rule:manage.users.department', 'throttle:portal-manage-users-write'])
+        ->patch('manage/users/{id}/department', [UsersController::class, 'updateDepartment'])
         ->whereNumber('id');
     // Edit profiles: the portal's own copy of an employee's signature details (Airtable is read only).
     Route::middleware(['portal.rule:manage.users.profile', 'throttle:portal-manage-users-write'])

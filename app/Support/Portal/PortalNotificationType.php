@@ -27,6 +27,8 @@ final class PortalNotificationType
 
     public const ROLE_CHANGED = 'manage.users.role';
 
+    public const DEPARTMENT_CHANGED = 'manage.users.department';
+
     public const PROJECT_REQUESTED = 'projects.requested';
 
     public const PROJECT_APPROVED = 'projects.approved';

@@ -57,6 +57,21 @@ class ProjectSettingsController extends Controller
         return response()->json($this->settings->removeDepartment($this->editor($request), $request, $id));
     }
 
+    public function storeClient(Request $request): JsonResponse
+    {
+        return response()->json($this->settings->addClient($this->editor($request), $request));
+    }
+
+    public function updateClient(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->updateClient($this->editor($request), $request, $id));
+    }
+
+    public function destroyClient(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->removeClient($this->editor($request), $request, $id));
+    }
+
     private function editor(Request $request): Employee
     {
         $editor = $request->attributes->get('portalEmployee');

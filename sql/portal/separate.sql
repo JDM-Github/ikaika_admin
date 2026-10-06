@@ -651,7 +651,9 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.users.access.peers', 'manage.users.access', 'Manage other admins', 'Change the role and Access Rules of fellow administrators in {UserName|Your} reach, not only members. Only administrators can hold it.', 0, 1, 'admin', 846),
 ('administration.logs.developers', 'administration.logs', 'See developers'' activity', 'See what developers did in All Logs and All Actions, sign-ins included. What they did in Developer mode reads "a developer" to anyone not in Developer mode. Only executives and MIS administrators can hold it.', 0, 1, 'admin', 922),
 ('manage.users.information', 'manage.users', 'Show employee information', 'See the private details of the people in {UserName|Your} reach: birthday, address, contact, government and tax numbers, bank details and emergency contact.', 1, 1, 'admin', 848),
+('manage.users.add', 'manage.users', 'Add users', 'Add someone to the portal before Airtable has them, in {UserName|Your} department or any department.', 0, 1, 'admin', 847),
 ('manage.users.profile', 'manage.users', 'Edit profiles', 'Edit the signature and profile details of the people in {UserName|Your} reach: title, email, phone, department and location.', 0, 1, 'admin', 849),
+('manage.users.department', 'manage.users', 'Change departments', 'Move someone to another department: the one their reaches and the projects they may lead follow.', 0, 1, 'admin', 850),
 ('email.images.global', 'email', 'Global images', 'Add and delete the images everyone can use in an email. Anyone who can open Email can already use them. Only administrators can hold it.', 0, 1, 'admin', 983),
 ('developer', NULL, 'Developer', 'Tools for the people who build the portal.', 0, 1, 'developer', 1100),
 ('developer.rules', 'developer', 'Rule catalog', 'Change the rule list and what each role starts with.', 0, 1, 'developer', 1110),
@@ -664,7 +666,7 @@ UPDATE access_permissions SET supports_list = 1 WHERE permission_key IN ('manage
 -- Managing fellow admins and changing roles are for administrators and above, and stay with MIS
 -- among admins; executives hold them anywhere.
 UPDATE access_permissions SET only_department = 'MIS', min_tier = 'admin' WHERE permission_key IN (
-    'manage.users.access.peers', 'manage.users.role', 'administration.logs.developers',
+    'manage.users.access.peers', 'manage.users.role', 'manage.users.add', 'manage.users.department', 'administration.logs.developers',
     'administration.actions', 'administration.actions.sync', 'administration.actions.export'
 );
 
@@ -675,18 +677,20 @@ UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key LIKE '
 UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key = 'projects.settings';
 
 -- Members: their own work only. View Projects and Track Projects show only the projects they are on.
--- Leading, editing, scoping, deleting and adding projects are powers an admin (or a lead) gives, not a
+-- Leading, editing, scoping and deleting projects are powers an admin (or a lead) gives, not a
 -- member's own, so none of them is a member default -- that is what stops every member from being a lead.
+-- Adding is everyone's (2026-10-06): a member's project waits for a Project Manager who covers it.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'member', permission_key,
        CASE
            WHEN permission_key IN ('projects.view', 'projects.track') THEN 'own'
+           WHEN permission_key = 'projects.create' THEN 'all'
        END,
        0
 FROM access_permissions
 WHERE permission_key IN (
     'home',
-    'projects', 'projects.view', 'projects.track', 'projects.track.export',
+    'projects', 'projects.view', 'projects.track', 'projects.track.export', 'projects.create',
     'reports', 'reports.daily', 'reports.late', 'reports.submitted',
     'reports.submitted.edit', 'reports.submitted.delete', 'reports.submitted.export',
     'requests', 'requests.own', 'requests.own.edit', 'requests.own.cancel', 'requests.own.export',

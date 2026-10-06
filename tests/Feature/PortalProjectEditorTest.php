@@ -8,6 +8,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -100,8 +101,9 @@ class PortalProjectEditorTest extends TestCase
         // A member leads only when given Project Lead; the form refuses a lead who cannot lead.
         $this->grant($lead, ['projects.lead' => 'department']);
 
+        // A fresh name each time: no two live projects may share one.
         return array_replace([
-            'name' => 'Editor Test Project 2020',
+            'name' => 'Editor Test Project '.Str::random(8),
             'leadId' => $lead->id,
             'clientId' => (int) DB::connection('portal')->table('clients')->orderBy('id')->value('id'),
             'department' => 'Engineering',
@@ -110,8 +112,19 @@ class PortalProjectEditorTest extends TestCase
             'status' => 'on-hold',
             'memberIds' => [$this->employee('user', 1)->id],
             'supportMemberIds' => [$this->employee('user', 2)->id],
-            'levels' => ['structural' => '300', 'architectural' => 'N/A', 'electrical' => null],
-            'links' => ['forma' => 'https://autodeskforma.com/project', 'google-drive' => '/Shared drives/Projects/Editor'],
+            // An Engineering project needs every level of detail and every link.
+            'levels' => [
+                'structural' => '300', 'architectural' => 'N/A', 'electrical' => '200',
+                'plumbing' => '200', 'mechanical-duct' => '250', 'fire-protection' => '100',
+            ],
+            'links' => [
+                'forma' => 'https://autodeskforma.com/project',
+                'ms-teams' => 'https://teams.microsoft.com/l/channel/editor',
+                'ms-planner' => 'https://tasks.office.com/plan/editor',
+                'ms-loop' => 'https://loop.microsoft.com/p/editor',
+                'panoramic' => 'https://panoramic.example.com/tour/editor',
+                'google-drive' => '/Shared drives/Projects/Editor',
+            ],
             'scopeCodes' => $this->scopeCodes(),
         ], $overrides);
     }
@@ -142,13 +155,15 @@ class PortalProjectEditorTest extends TestCase
 
         $row = DB::connection('portal')->table('projects')->where('id', $id)->first();
         $this->assertNotNull($row);
-        $this->assertSame('Editor Test Project 2020', $row->project_name);
+        // Numbered YY + client code + counter, the number leading the stored name.
+        $this->assertMatchesRegularExpression('/^\d{6}$/', (string) $row->project_number);
+        $this->assertSame($row->project_number.' '.$payload['name'], $row->project_name);
         $this->assertSame('Approved', $row->project_creation_status);
         $this->assertSame($admin->email, $row->project_approver_email);
         $this->assertSame('On Hold', $row->status);
         $this->assertSame('LOD 300', $row->st_lod);
         $this->assertSame('N/A', $row->ar_lod);
-        $this->assertNull($row->el_lod);
+        $this->assertSame('LOD 200', $row->el_lod);
         $this->assertSame('/Shared drives/Projects/Editor', $row->google_drive_folder_path);
         $this->assertSame(Employee::query()->findOrFail($payload['leadId'])->email, $row->project_lead_email);
         $this->assertSame(['member', 'support'], DB::connection('portal')->table('employees_projects')->where('project_id', $id)->orderBy('role_on_project')->pluck('role_on_project')->all());
@@ -159,7 +174,7 @@ class PortalProjectEditorTest extends TestCase
             ->assertJsonPath('data.levels.structural', '300')
             ->assertJsonPath('data.leadId', (string) $payload['leadId']);
         $this->assertTrue(DB::connection('core')->table('actions')->where('database_target', 'portal.projects')->where('record_id', (string) $id)->where('action_type', CoreActionType::ADD)->exists());
-        $this->assertSame('{UserName|You} added the project Editor Test Project 2020', DB::connection('portal')->table('logs')->where('resource', 'projects')->where('record_id', (string) $id)->value('message'));
+        $this->assertSame('{UserName|You} added the project '.$row->project_name, DB::connection('portal')->table('logs')->where('resource', 'projects')->where('record_id', (string) $id)->value('message'));
     }
 
     /**
@@ -192,7 +207,7 @@ class PortalProjectEditorTest extends TestCase
         $name = trim($admin->first_name.' '.$admin->last_name);
         $this->assertSame([
             ['action_name' => 'Project Creation', 'created_by' => $name, 'remarks' => null],
-            ['action_name' => 'Project Edited', 'created_by' => $name, 'remarks' => 'Name: Editor Test Project 2020 to Trail Renamed 2020; Status: Ongoing to On Hold; Area: 1,250 to 1,300 sq ft'],
+            ['action_name' => 'Project Edited', 'created_by' => $name, 'remarks' => 'Name: '.$payload['name'].' to Trail Renamed 2020; Status: Ongoing to On Hold; Area: 1,250 to 1,300 sq ft'],
             ['action_name' => 'Scopes Changed', 'created_by' => $name, 'remarks' => '1 scope'],
         ], $this->trail($id));
 
@@ -224,9 +239,11 @@ class PortalProjectEditorTest extends TestCase
         $this->assertFalse(DB::connection('portal')->table('notifications')->where('employee_id', $member->getKey())->where('type', 'projects.requested')->exists());
     }
 
+    // Anyone may add a project (2026-10-06); only someone whose Add projects is switched off may not.
     public function test_without_add_projects_nothing_is_added(): void
     {
         $member = $this->employee('user', 3);
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create']);
         $before = DB::connection('portal')->table('projects')->count();
 
         $this->create($this->token($member), $this->payload())
@@ -271,7 +288,7 @@ class PortalProjectEditorTest extends TestCase
         $inactive = (int) DB::connection('portal')->table('employees')->whereRaw("LOWER(COALESCE(status, '')) != 'active'")->value('id');
 
         $this->create($token, $this->payload(['scopeCodes' => ['999-99']]))->assertStatus(422)->assertJsonPath('message', 'Choose scopes from the list.');
-        $this->create($token, $this->payload(['links' => ['forma' => 'javascript:alert(1)']]))->assertStatus(422)->assertJsonPath('message', 'Each link must start with http:// or https://.');
+        $this->create($token, $this->payload(['links' => [...$this->payload()['links'], 'forma' => 'javascript:alert(1)']]))->assertStatus(422)->assertJsonPath('message', 'Each link must start with http:// or https://.');
         $this->create($token, $this->payload(['memberIds' => [$inactive]]))->assertStatus(422)->assertJsonPath('message', 'Choose members from the list.');
         $this->create($token, $this->payload(['department' => 'Nowhere']))->assertStatus(422)->assertJsonPath('message', 'Choose a department from the list.');
         $this->create($token, $this->payload(['status' => 'paused']))->assertStatus(422);
@@ -429,12 +446,17 @@ class PortalProjectEditorTest extends TestCase
             $this->assertNotContains((string) $executiveId, array_column($options->json('data.employees'), 'id'));
         }
 
-        // A plain member holds none of Add/Edit/Project Lead, so the form is closed to them; given one, it opens.
+        // Every member may add, so the form opens for them; with Add projects switched off and nothing
+        // else, it is closed, and given it back it opens again.
         $member = $this->employee('user', 3);
         $token = $this->token($member);
+        $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
+
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create']);
+        Cache::flush();
         $this->withToken($token)->getJson(self::BASE.'/options')->assertForbidden();
 
-        $this->grant($member, ['projects.create' => 'all']);
+        DB::connection('portal')->table('access_toggles')->where('employee_id', $member->getKey())->delete();
         Cache::flush();
         $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
 
@@ -510,7 +532,10 @@ class PortalProjectEditorTest extends TestCase
             'department' => 'MIS',
             'leadId' => $admin->id,
             'scopeCodes' => [],
-            'links' => ['forma' => 'https://autodeskforma.com/p', 'panoramic' => 'https://pano.example.com', 'ms-teams' => 'https://teams.microsoft.com/l/1'],
+            'links' => [
+                'forma' => 'https://autodeskforma.com/p', 'panoramic' => 'https://pano.example.com', 'ms-teams' => 'https://teams.microsoft.com/l/1',
+                'ms-planner' => 'https://tasks.office.com/plan/1', 'ms-loop' => 'https://loop.microsoft.com/p/1', 'google-drive' => '/Shared drives/Projects/MIS',
+            ],
         ]);
 
         $id = (int) $this->create($this->token($admin), $payload)->assertCreated()->json('data.id');

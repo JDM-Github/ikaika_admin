@@ -140,6 +140,10 @@ final class PortalViewProjects
                     $memberPhotos[$id] ?? [],
                 ),
                 ...PortalProjectPowers::flags($powers, $actor, $row),
+                'team' => PortalViewProjectPresenter::team(
+                    $leadsByEmail[strtolower(trim((string) ($row->project_lead_email ?? '')))] ?? null,
+                    $members[$id] ?? [],
+                ),
                 'work' => $work[$id],
                 'scopeOptions' => PortalActivityScopes::forDepartment($activityCodes, $row->department ?? null),
             ];
@@ -236,12 +240,15 @@ final class PortalViewProjects
             ->whereIn('employees_projects.project_id', $projectIds)
             ->select([
                 'employees_projects.project_id',
+                'employees_projects.role_on_project',
                 'employees.id',
                 'employees.first_name',
                 'employees.last_name',
             ])
             ->orderBy('employees.first_name')
             ->orderBy('employees.last_name')
+            // A person's member row before their support row, so someone on both reads as a member.
+            ->orderBy('employees_projects.role_on_project')
             ->get();
 
         $members = [];
@@ -254,6 +261,8 @@ final class PortalViewProjects
             if ($name === 'Member') {
                 continue;
             }
+            // Support only when that is all they are on it; any other row makes them a member.
+            $role = strtolower(trim((string) $row->role_on_project)) === 'support' ? 'support' : 'member';
             $members[$projectId] ??= [];
             $seen = false;
             foreach ($members[$projectId] as $existing) {
@@ -263,7 +272,7 @@ final class PortalViewProjects
                 }
             }
             if (! $seen) {
-                $members[$projectId][] = ['id' => (int) $row->id, 'name' => $name];
+                $members[$projectId][] = ['id' => (int) $row->id, 'name' => $name, 'role' => $role];
             }
         }
 

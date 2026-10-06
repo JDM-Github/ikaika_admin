@@ -168,4 +168,71 @@ class PortalProjectSettingsTest extends TestCase
         $this->withToken($token)->deleteJson(self::BASE.'/departments/'.$row['id'])->assertOk();
         $this->withToken($token)->deleteJson(self::BASE.'/departments/'.$row['id'])->assertNotFound();
     }
+
+    // The reported ask: a new client, with the two-digit code its project numbers carry.
+    public function test_a_client_is_added_with_the_next_free_code_and_numbers_its_projects(): void
+    {
+        $token = $this->developerToken();
+        $page = $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $next = (string) $page->json('data.nextClientCode');
+        $this->assertMatchesRegularExpression('/^\d{2}$/', $next);
+        $this->assertNotContains($next, array_column($page->json('data.clients'), 'code'));
+        $withProjects = collect($page->json('data.clients'))->firstWhere('projects', '>', 0);
+        $this->assertNotNull($withProjects, 'No client with projects to check the count against.');
+
+        $added = collect($this->withToken($token)->postJson(self::BASE.'/clients', ['name' => '  Kona   Builders ', 'code' => $next])
+            ->assertOk()->json('data.clients'))->firstWhere('code', $next);
+        $this->assertSame(['name' => 'Kona Builders', 'code' => $next, 'projects' => 0], collect($added)->only(['name', 'code', 'projects'])->all());
+
+        // Add Project numbers the new client's first project with its code.
+        $option = collect($this->withToken($token)->getJson('/api/development/portal/projects/options')->assertOk()->json('data.clients'))->firstWhere('id', $added['id']);
+        $this->assertSame(now('Asia/Manila')->format('y').$next.'01', $option['nextNumber']);
+    }
+
+    public function test_a_client_needs_a_free_name_and_a_free_two_digit_code(): void
+    {
+        $token = $this->developerToken();
+        $taken = collect($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data.clients'))->first();
+        $free = (string) $this->withToken($token)->getJson(self::BASE)->json('data.nextClientCode');
+
+        $this->withToken($token)->postJson(self::BASE.'/clients', ['name' => 'Seven Builders', 'code' => '7'])
+            ->assertStatus(422)->assertJsonPath('message', 'A client code is two digits, like 07.');
+        $this->withToken($token)->postJson(self::BASE.'/clients', ['name' => 'Seven Builders', 'code' => $taken['code']])
+            ->assertStatus(422)->assertJsonPath('message', 'Another client already has the code '.$taken['code'].'.');
+        $this->withToken($token)->postJson(self::BASE.'/clients', ['name' => strtoupper($taken['name']), 'code' => $free])
+            ->assertStatus(422)->assertJsonPath('message', 'That client is already on the list.');
+        $this->withToken($token)->postJson(self::BASE.'/clients', ['name' => '   ', 'code' => $free])->assertStatus(422);
+    }
+
+    // A client's code is in its project numbers: renamed freely, recoded only before any project.
+    public function test_a_client_with_projects_keeps_its_code_and_its_place_on_the_list(): void
+    {
+        $token = $this->developerToken();
+        $page = $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $used = collect($page->json('data.clients'))->firstWhere('projects', '>', 0);
+        $free = (string) $page->json('data.nextClientCode');
+
+        $this->withToken($token)->patchJson(self::BASE.'/clients/'.$used['id'], ['name' => $used['name'].' Inc', 'code' => $free])
+            ->assertStatus(422)->assertJsonPath('message', "This client's code is already in its project numbers, so it cannot change.");
+        $renamed = collect($this->withToken($token)->patchJson(self::BASE.'/clients/'.$used['id'], ['name' => $used['name'].' Inc', 'code' => $used['code']])
+            ->assertOk()->json('data.clients'))->firstWhere('id', $used['id']);
+        $this->assertSame($used['name'].' Inc', $renamed['name']);
+        $this->withToken($token)->deleteJson(self::BASE.'/clients/'.$used['id'])
+            ->assertStatus(422)->assertJsonPath('message', 'This client has projects, so it stays on the list.');
+
+        // A client nobody has used yet can be recoded and removed.
+        $new = collect($this->withToken($token)->postJson(self::BASE.'/clients', ['name' => 'Waipahu Works', 'code' => $free])->assertOk()->json('data.clients'))->firstWhere('code', $free);
+        $recode = (string) $this->withToken($token)->getJson(self::BASE)->json('data.nextClientCode');
+        $this->withToken($token)->patchJson(self::BASE.'/clients/'.$new['id'], ['name' => 'Waipahu Works', 'code' => $recode])->assertOk();
+        $this->withToken($token)->deleteJson(self::BASE.'/clients/'.$new['id'])->assertOk();
+        $this->withToken($token)->deleteJson(self::BASE.'/clients/'.$new['id'])->assertNotFound();
+        $this->withToken($token)->patchJson(self::BASE.'/clients/'.$new['id'], ['name' => 'Gone', 'code' => $recode])->assertNotFound();
+    }
+
+    public function test_clients_are_developer_mode_only_like_the_rest_of_the_page(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+
+        $this->withToken($this->token($admin))->postJson(self::BASE.'/clients', ['name' => 'Nope Ltd', 'code' => '98'])->assertForbidden();
+    }
 }

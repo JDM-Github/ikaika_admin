@@ -15,13 +15,28 @@ use Illuminate\Support\Str;
  *
  * A body or footer in the html format is an administrator's own HTML and goes out as written. A
  * whole document (one with its own <html>) is the email itself: nothing wraps it, and the footer
- * goes in just before its </body>.
+ * goes where it marks FOOTER_SLOT, or else just before its </body>.
+ *
+ * The letter format is markup set in the letter design (letter()): a letterhead, the message on a
+ * white sheet, the footer at its foot. The design is a whole document, so the HTML of a letter -- what
+ * the preview hands back for one with no footer -- sends exactly as the letter does, and a writer can
+ * change the design there.
  */
 final class PortalEmailMarkup
 {
     public const FORMAT_MARKUP = 'markup';
 
     public const FORMAT_HTML = 'html';
+
+    public const FORMAT_LETTER = 'letter';
+
+    // Where a whole document wants the footer; kept, unseen, when there is none, so the HTML stays a design.
+    public const FOOTER_SLOT = '<!-- portal:footer -->';
+
+    private const BRAND_COLOR = '#1f4e8c';
+
+    // The company mark the Company footer carries.
+    private const LETTER_LOGO = 'https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png';
 
     private const MAX_MARKUP = 20000;
 
@@ -66,7 +81,7 @@ final class PortalEmailMarkup
     {
         $format = strtolower(trim((string) $value));
 
-        return in_array($format, [self::FORMAT_MARKUP, self::FORMAT_HTML], true) ? $format : null;
+        return in_array($format, [self::FORMAT_MARKUP, self::FORMAT_HTML, self::FORMAT_LETTER], true) ? $format : null;
     }
 
     /**
@@ -114,7 +129,19 @@ final class PortalEmailMarkup
             : '<hr style="border:none;border-top:1px solid '.self::RULE_COLOR.';margin:24px 0 12px">'
                 .'<div style="color:'.self::MUTED_COLOR.';font-size:13px">'.self::fragment($footer, $footerFormat).'</div>';
 
+        if ($bodyFormat === self::FORMAT_LETTER) {
+            $body = self::letter(self::html($body));
+            $bodyFormat = self::FORMAT_HTML;
+        }
+
         if ($bodyFormat === self::FORMAT_HTML && stripos($body, '<html') !== false) {
+            if ($footerHtml === '') {
+                return $body;
+            }
+            $slot = strpos($body, self::FOOTER_SLOT);
+            if ($slot !== false) {
+                return substr_replace($body, $footerHtml, $slot, strlen(self::FOOTER_SLOT));
+            }
             $close = strripos($body, '</body>');
 
             return $close === false
@@ -132,6 +159,67 @@ final class PortalEmailMarkup
     private static function fragment(string $text, string $format): string
     {
         return $format === self::FORMAT_HTML ? $text : self::html($text);
+    }
+
+    /**
+     * The letter design around a message already in HTML. Tables and inline styles, as mail clients
+     * need; laid out line by line, since a writer who takes the HTML changes the design here.
+     */
+    public static function letter(string $content): string
+    {
+        $font = 'font-family:'.self::FONT_STACK;
+
+        return implode("\n", [
+            '<!DOCTYPE html>',
+            '<html lang="en">',
+            '<head>',
+            '<meta charset="utf-8">',
+            '<meta name="viewport" content="width=device-width,initial-scale=1">',
+            self::FONT_HEAD,
+            '</head>',
+            '<body style="margin:0;padding:0;background-color:#f3f4f6;">',
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6;border-collapse:collapse;">',
+            '  <tr>',
+            '    <td align="center" style="padding:24px 12px;">',
+            '      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;border-collapse:separate;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:12px;">',
+            '        <!-- Letterhead -->',
+            '        <tr>',
+            '          <td style="height:6px;line-height:6px;font-size:0;background-color:'.self::BRAND_COLOR.';border-radius:12px 12px 0 0;">&nbsp;</td>',
+            '        </tr>',
+            '        <tr>',
+            '          <td style="padding:22px 32px 18px;border-bottom:1px solid #e5e7eb;">',
+            '            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+            '              <tr>',
+            '                <td width="44" valign="middle" style="width:44px;padding:0 12px 0 0;">',
+            '                  <img src="'.self::LETTER_LOGO.'" alt="IKAIKA BIM" width="44" style="display:block;width:44px;height:auto;border:0;">',
+            '                </td>',
+            '                <td valign="middle" style="'.$font.';">',
+            '                  <div style="font-size:15px;line-height:20px;font-weight:700;letter-spacing:0.3px;color:'.self::BRAND_COLOR.';">IKAIKA BIM</div>',
+            '                  <div style="font-size:12px;line-height:18px;color:#6b7280;">ikaikabim.com</div>',
+            '                </td>',
+            '              </tr>',
+            '            </table>',
+            '          </td>',
+            '        </tr>',
+            '        <!-- Letter -->',
+            '        <tr>',
+            '          <td style="padding:28px 32px 12px;'.$font.';font-size:15px;line-height:1.6;color:'.self::TEXT_COLOR.';">',
+            $content,
+            '          </td>',
+            '        </tr>',
+            '        <!-- Footer: the one picked under the message goes in at portal:footer. -->',
+            '        <tr>',
+            '          <td style="padding:0 32px 28px;'.$font.';">',
+            '            '.self::FOOTER_SLOT,
+            '          </td>',
+            '        </tr>',
+            '      </table>',
+            '    </td>',
+            '  </tr>',
+            '</table>',
+            '</body>',
+            '</html>',
+        ]);
     }
 
     public static function html(string $markup): string

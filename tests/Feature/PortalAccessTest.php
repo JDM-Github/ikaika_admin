@@ -138,8 +138,9 @@ class PortalAccessTest extends TestCase
         $this->assertSame($admin, $presets['admin']);
         $this->assertSame($everything, $presets['executive']);
         $this->assertSame($developer, $presets['developer']);
+        // Anyone may add a project (2026-10-06); a member's waits for a Project Manager.
         $this->assertSame([
-            'projects' => null, 'projects.track' => 'own', 'projects.track.export' => null, 'projects.view' => 'own',
+            'projects' => null, 'projects.create' => 'all', 'projects.track' => 'own', 'projects.track.export' => null, 'projects.view' => 'own',
         ], $presets['member']);
     }
 

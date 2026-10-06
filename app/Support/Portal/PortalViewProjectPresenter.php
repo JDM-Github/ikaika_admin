@@ -59,15 +59,9 @@ final class PortalViewProjectPresenter
         array $memberPhotos = [],
     ): array {
         $id = (string) (int) $row->id;
-        $code = trim((string) ($row->project_number ?? ''));
-        $name = trim((string) ($row->project_name ?? ''));
-        if ($code === '' && preg_match('/^(\d+)\s+(.+)$/', $name, $match) === 1) {
-            $code = $match[1];
-            $name = trim($match[2]);
-        }
-        if ($code === '') {
-            $code = $id;
-        }
+        [$number, $name] = PortalProjectEditor::split($row);
+        // A project with no number is listed by its id, and sorts after the numbered ones.
+        $code = $number ?? $id;
         if ($name === '') {
             $name = 'Project';
         }
@@ -98,7 +92,30 @@ final class PortalViewProjectPresenter
             'scopeCodes' => $scopeCodes,
             'trail' => $trail,
             'links' => self::links($row),
+            'numbered' => $number !== null,
         ];
+    }
+
+    /**
+     * Project Team: the lead first, then the members, then the support members; the lead once, even
+     * when they are a member too.
+     *
+     * @param  list<array{id: int, name: string, role?: string}>  $members
+     * @return list<array{name: string, role: string}>
+     */
+    public static function team(?string $leadName, array $members): array
+    {
+        $team = $leadName === null ? [] : [['name' => $leadName, 'role' => 'lead']];
+        foreach (['member', 'support'] as $role) {
+            foreach ($members as $member) {
+                if (($member['role'] ?? 'member') !== $role || in_array($member['name'], array_column($team, 'name'), true)) {
+                    continue;
+                }
+                $team[] = ['name' => $member['name'], 'role' => $role];
+            }
+        }
+
+        return $team;
     }
 
     public static function status(mixed $status): string

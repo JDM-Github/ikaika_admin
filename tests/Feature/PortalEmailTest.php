@@ -613,6 +613,75 @@ class PortalEmailTest extends TestCase
         $this->assertSame('<html><p>x</p><hr', substr(PortalEmailMarkup::document('<html><p>x</p>', 'f', 'html'), 0, 17));
     }
 
+    // A whole document can say where the footer goes; without one, the slot stays, unseen.
+    public function test_a_whole_document_takes_the_footer_where_it_marks_it(): void
+    {
+        $page = '<html><body><div>'.PortalEmailMarkup::FOOTER_SLOT.'</div><p>After</p></body></html>';
+
+        $this->assertSame('<html><body><div><hr', substr(PortalEmailMarkup::document($page, '**MIS**', 'html'), 0, 20));
+        $this->assertStringContainsString('</div></div><p>After</p></body>', PortalEmailMarkup::document($page, '**MIS**', 'html'));
+        $this->assertSame($page, PortalEmailMarkup::document($page, null, 'html'));
+    }
+
+    // The reported ask: a letter that looks the same whether it is written in Formatted or in HTML.
+    public function test_a_letter_is_its_markup_in_the_letter_design_and_its_html_sends_the_same(): void
+    {
+        $markup = "Dear **Team**,\n\nWe meet at [Venue].\n\n- [First topic]";
+
+        $letter = PortalEmailMarkup::document($markup, "Regards,\n**MIS**", PortalEmailMarkup::FORMAT_LETTER);
+
+        $this->assertSame('letter', PortalEmailMarkup::format(' Letter '));
+        $this->assertStringStartsWith('<!DOCTYPE html>', $letter);
+        $this->assertStringContainsString('IKAIKA BIM</div>', $letter);
+        $this->assertStringContainsString('<strong>Team</strong>', $letter);
+        $this->assertStringContainsString('We meet at [Venue].', $letter);
+        $this->assertStringContainsString('<li style="margin:0 0 4px">[First topic]</li>', $letter);
+        // The footer sits at the foot of the sheet, inside the design rather than under it.
+        $this->assertStringNotContainsString(PortalEmailMarkup::FOOTER_SLOT, $letter);
+        $this->assertMatchesRegularExpression(
+            '#<!-- Footer:.*?<td[^>]*>\s*<hr[^>]*>.*<strong>MIS</strong>.*?</td>\s*</tr>\s*</table>\s*</td>\s*</tr>\s*</table>\s*</body>#s',
+            $letter,
+        );
+
+        // Its HTML is the design itself, footer slot and all, and sent as HTML it is the same email.
+        $html = PortalEmailMarkup::document($markup, null, PortalEmailMarkup::FORMAT_LETTER);
+        $this->assertStringContainsString(PortalEmailMarkup::FOOTER_SLOT, $html);
+        $this->assertSame($letter, PortalEmailMarkup::document($html, "Regards,\n**MIS**", PortalEmailMarkup::FORMAT_HTML));
+    }
+
+    public function test_a_letter_is_previewed_sent_and_saved_as_a_letter(): void
+    {
+        Mail::fake();
+        $headers = $this->authHeaders();
+        $body = "Dear Team,\n\nThe office is closed on **Friday**.";
+
+        $html = $this->postJson(self::BASE.'/administration/emails/preview', ['body' => $body, 'format' => 'letter'], $headers)
+            ->assertOk()
+            ->json('data.html');
+        $this->assertSame(PortalEmailMarkup::document($body, null, 'letter'), $html);
+
+        $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice',
+            'subject' => 'Closed on Friday',
+            'body' => $body,
+            'format' => 'letter',
+            'audience' => 'everyone',
+        ], $headers)->assertCreated()->assertJsonPath('data.format', 'letter');
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->render() === $html);
+
+        $this->postJson(self::BASE.'/administration/email-blocks', [
+            'kind' => 'template',
+            'name' => 'Closure letter',
+            'category' => 'notice',
+            'subject' => 'Closed on Friday',
+            'body' => $body,
+            'format' => 'letter',
+        ], $headers)->assertCreated()->assertJsonPath('data.format', 'letter');
+
+        // A letter is held to markup's limit, not HTML's.
+        $this->postJson(self::BASE.'/administration/emails/preview', ['body' => str_repeat('a', 20001), 'format' => 'letter'], $headers)->assertStatus(422);
+    }
+
     // Typed addresses go as one real email with its Cc and Bcc, as Outlook sends it; no member is told.
     public function test_a_custom_audience_sends_one_email_with_real_cc_and_bcc(): void
     {
