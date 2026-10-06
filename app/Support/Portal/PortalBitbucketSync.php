@@ -4,6 +4,7 @@ namespace App\Support\Portal;
 
 use Carbon\Carbon;
 use Illuminate\Database\Connection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Throwable;
@@ -20,7 +21,10 @@ final class PortalBitbucketSync
     // The day a report reads is the company's (the zone project numbers use), whoever pushed and when.
     private const COMPANY_ZONE = 'Asia/Manila';
 
-    private const COUNT_PER_RUN = 300;
+    public const COUNT_PER_RUN = 300;
+
+    // Long enough for a full run; a crashed run frees the repository again once it lapses.
+    private const LOCK_SECONDS = 900;
 
     private const GENERATED = [
         '#(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb|composer\.lock|Gemfile\.lock|Podfile\.lock)$#i',
@@ -50,20 +54,28 @@ final class PortalBitbucketSync
     }
 
     /**
-     * @return array{listed: int, counted: int}|string the counts, or the error it stopped on
+     * One repository, never twice at once: a push's sync and the hourly one take turns.
+     *
+     * @return array{listed: int, counted: int}|string the counts, or why it stopped
      */
-    public function sync(object $repository): array|string
+    public function sync(object $repository, int $countLimit = self::COUNT_PER_RUN): array|string
     {
         $id = (int) $repository->id;
+        $lock = Cache::lock('portal-bitbucket-sync:'.$id, self::LOCK_SECONDS);
+        if (! $lock->get()) {
+            return 'Already syncing.';
+        }
         try {
             $listed = $this->list($repository);
-            $counted = $this->count($repository);
+            $counted = $this->count($repository, $countLimit);
         } catch (Throwable $error) {
             // A client failure says only Bitbucket's status and message; anything else stays generic.
             $message = $error instanceof RuntimeException ? mb_substr($error->getMessage(), 0, 255) : 'The sync failed.';
             $this->connection()->table('bitbucket_repositories')->where('id', $id)->update(['last_sync_error' => $message]);
 
             return $message;
+        } finally {
+            $lock->release();
         }
         $this->connection()->table('bitbucket_repositories')->where('id', $id)->update([
             'last_synced_at' => now(),
@@ -109,13 +121,13 @@ final class PortalBitbucketSync
     }
 
     // Lines for the newest commits still uncounted, at most a batch per run.
-    private function count(object $repository): int
+    private function count(object $repository, int $limit): int
     {
         $pending = $this->connection()->table('bitbucket_commits')
             ->where('repository_id', (int) $repository->id)
             ->whereNull('counted_at')
             ->orderByDesc('committed_at')
-            ->limit(self::COUNT_PER_RUN)
+            ->limit($limit)
             ->pluck('hash');
         foreach ($pending as $hash) {
             $added = 0;

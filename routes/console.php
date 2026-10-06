@@ -13,6 +13,7 @@ use App\Support\Portal\PortalManageRequests;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -204,3 +205,6 @@ Artisan::command('portal:bitbucket-sync', function (PortalBitbucketSync $sync): 
 
     return in_array(true, array_map('is_string', $outcomes), true) ? 1 : 0;
 })->purpose('Read new commits and their lines from every Bitbucket repository a project links');
+
+// The backstop for a missed push webhook, and what finishes counting a long history; needs the server's schedule:run cron.
+Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
