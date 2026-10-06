@@ -165,3 +165,13 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - Run `vendor/bin/phpunit` to call the test runner directly. It accepts the same file path and `--filter=testName` arguments.
 
 </laravel-boost-guidelines>
+
+# Deployment (Bluehost Test Server)
+
+Read `deployment/README.md` before touching anything deploy-related. The Test Server is live at `https://eox.vhu.mybluehost.me/website_a85fbf18/central-api/` (the admin workspace UI) and is deployed with `deployment\deploy.ps1` (build, upload, deploy over SSH alias `bluehost`). Local data is copied with `deployment\copy-databases.ps1`.
+
+- Everything server-side lives in `/home2/eoxvhumy/apps/test-server/` (`app/`, `.env`, `db.env`, `scripts/`, `upload/`, `backups/`). Never add folders to the server's home directory.
+- Do not run `route:cache` (or `optimize`) on the server: cached routes answer 405 for `/central-api/` when Laravel sits in a subfolder. The scripts run `config:cache`, `event:cache` and `view:cache` only.
+- Scripts in `deployment/server/` must stay LF; bash on the server breaks on CRLF.
+- Laravel's dotenv keeps the **last** value of a repeated key; the server's `.env` is `test-server/.env` followed by `db.env`. Apply edits with `scripts/apply-env.sh`, never by copying into `app/`.
+- Staging (`ikaikabim.com/staging/central-api`, `~/apps/central-platform`, `INSTALLATION.md`) is a separate, older setup.

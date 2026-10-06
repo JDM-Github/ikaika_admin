@@ -41,3 +41,5 @@ migrations/*.sql
 /migrations/generate/__pycache__/
 # Local copies of other systems' code, kept for reference while working on email.
 email-test/
+
+/deployment/out/

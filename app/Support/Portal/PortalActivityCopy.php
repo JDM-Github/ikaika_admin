@@ -337,6 +337,11 @@ final class PortalActivityCopy
         return self::YOU.' deleted the '.self::emailBlockKind($kind).' '.$name;
     }
 
+    public static function madeDefaultSignature(string $name): string
+    {
+        return self::YOU.' made the footer '.$name.' the default signature';
+    }
+
     public static function uploadedEmailImage(bool $global = false): string
     {
         return self::YOU.' uploaded '.($global ? 'a global' : 'an').' email image';
