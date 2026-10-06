@@ -11,6 +11,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // Track Projects follows its rule: its own read, so the list obeys its reach, not View Projects'.
     Route::middleware(['throttle:portal-projects', 'portal.rule:projects.track'])
         ->get('projects/track', [ProjectsController::class, 'track']);
+    // My Projects: the projects the person added, so it follows Add projects.
+    Route::middleware(['throttle:portal-projects', 'portal.rule:projects.create'])
+        ->get('projects/mine', [ProjectsController::class, 'mine']);
     /*
      * No rule middleware on the form's routes: PortalProjectEditor checks Add projects on create, and
      * Edit projects on the rest, because a project's lead may edit their own without it.

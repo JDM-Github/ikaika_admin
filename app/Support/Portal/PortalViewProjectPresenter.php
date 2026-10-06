@@ -28,7 +28,8 @@ final class PortalViewProjectPresenter
      *     panoramic_link: mixed,
      *     ms_loop_link: mixed,
      *     google_drive_folder_path: mixed,
-     *     is_assigned: mixed
+     *     is_assigned: mixed,
+     *     is_lead?: mixed
      * }  $row
      * @param  list<string>  $memberNames
      * @param  array<string, string>  $leadsByEmail
@@ -85,6 +86,8 @@ final class PortalViewProjectPresenter
             'memberNames' => $memberNames,
             'memberPhotos' => $memberPhotos,
             'isAssigned' => (bool) ($row->is_assigned ?? false),
+            // The person reading the board leads this project, so the list can say so.
+            'isLeading' => (bool) ($row->is_lead ?? false),
             'scopeSummary' => $scopeSummary ?? [
                 'tierLabel' => '',
                 'total' => 0,

@@ -161,6 +161,45 @@ class PortalManageProjectsTest extends TestCase
         $this->assertSame('Project Creation Rejected', $this->latestTrail());
         $this->assertStringContainsString('Pick the right client', (string) DB::connection('portal')->table('notifications')
             ->where('employee_id', $this->member->getKey())->where('type', 'projects.rejected')->value('message'));
+        // A rejected project may be missing from the requester's board, so the notice opens Created Projects.
+        $this->assertSame('/projects/created-projects', DB::connection('portal')->table('notifications')
+            ->where('employee_id', $this->member->getKey())->where('type', 'projects.rejected')->orderByDesc('id')->value('link_path'));
+    }
+
+    // Created Projects lists only what the person added, by approval, with the project's own status.
+    public function test_my_projects_lists_only_what_i_added(): void
+    {
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.create', 'reach' => 'all']);
+        $othersId = (int) DB::connection('portal')->table('projects')->insertGetId([
+            'project_name' => 'Someone Else 2020',
+            'department' => 'Engineering',
+            'status' => 'On Hold',
+            'project_creation_status' => 'Pending',
+            'requested_by' => $this->admin->getKey(),
+            'requested_at' => now(),
+        ]);
+        $token = $this->token($this->member);
+
+        $response = $this->withToken($token)->getJson('/api/development/portal/projects/mine')->assertOk();
+        $ids = array_column($response->json('data'), 'id');
+        $this->assertContains((string) $this->projectId, $ids);
+        $this->assertNotContains((string) $othersId, $ids);
+        $item = collect($response->json('data'))->firstWhere('id', (string) $this->projectId);
+        $this->assertSame('pending', $item['creationStatus']);
+        $this->assertSame('ongoing', $item['projectStatus']);
+        $this->assertGreaterThanOrEqual(1, $response->json('counts.pending'));
+
+        // Every approval comes in one read; the page splits them into its tabs.
+        $this->decide($this->admin, ['decision' => 'approve'])->assertOk();
+        $after = $this->withToken($token)->getJson('/api/development/portal/projects/mine')->assertOk();
+        $this->assertSame('approved', collect($after->json('data'))->firstWhere('id', (string) $this->projectId)['creationStatus'] ?? null);
+        $this->assertGreaterThanOrEqual(1, $after->json('counts.approved'));
+    }
+
+    public function test_my_projects_needs_add_projects(): void
+    {
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.create']);
+        $this->withToken($this->token($this->member))->getJson('/api/development/portal/projects/mine')->assertForbidden();
     }
 
     public function test_without_project_manager_the_page_is_refused(): void

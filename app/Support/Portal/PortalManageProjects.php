@@ -47,8 +47,7 @@ final class PortalManageProjects
      */
     public function list(Employee $actor, Request $request): array
     {
-        $tab = $request->query('status');
-        $tab = is_string($tab) && array_key_exists($tab, self::STATUSES) ? $tab : 'pending';
+        $tab = $this->tab($request);
         $reach = PortalRules::reach($actor, $request, PortalProjectApproval::RULE);
 
         $counts = [];
@@ -65,6 +64,32 @@ final class PortalManageProjects
         return [
             'section' => 'manage',
             'resource' => 'projects',
+            'data' => $this->items($rows->all()),
+            'counts' => $counts,
+        ];
+    }
+
+    /**
+     * Created Projects (2026-10-06): every project the person added, whatever its approval, in one read so
+     * the page switches its Waiting / Approved / Rejected tabs without asking again.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>, counts: array<string, int>}
+     */
+    public function mine(Employee $actor, Request $request): array
+    {
+        $own = fn (): Builder => $this->connection()->table('projects')
+            ->whereNull('deleted_at')
+            ->where('requested_by', (int) $actor->getKey());
+
+        $counts = [];
+        foreach (self::STATUSES as $key => $status) {
+            $counts[$key] = $own()->where('project_creation_status', $status)->count();
+        }
+        $rows = $own()->orderByDesc('requested_at')->orderByDesc('id')->limit(self::DECIDED_LIMIT)->get();
+
+        return [
+            'section' => 'projects',
+            'resource' => 'mine',
             'data' => $this->items($rows->all()),
             'counts' => $counts,
         ];
@@ -135,8 +160,9 @@ final class PortalManageProjects
                 $isApproved ? PortalNotificationType::PROJECT_APPROVED : PortalNotificationType::PROJECT_REJECTED,
                 $isApproved ? 'Project approved' : 'Project rejected',
                 PortalActivityCopy::notifyProjectDecided(PortalActivityCopy::actorName($actor, $request), $name, $isApproved, $remarks),
-                PortalShellPath::VIEW_PROJECTS,
-                'Open projects',
+                // A rejected project may not be on the requester's board, but it is always on Created Projects.
+                $isApproved ? PortalShellPath::VIEW_PROJECTS : PortalShellPath::CREATED_PROJECTS,
+                $isApproved ? 'Open projects' : 'Open Created Projects',
                 ['recordId' => (string) $projectId],
             );
         }
@@ -149,6 +175,13 @@ final class PortalManageProjects
             'resource' => 'projects',
             'data' => $this->items($fresh === null ? [] : [$fresh])[0] ?? [],
         ];
+    }
+
+    private function tab(Request $request): string
+    {
+        $tab = $request->query('status');
+
+        return is_string($tab) && array_key_exists($tab, self::STATUSES) ? $tab : 'pending';
     }
 
     // The live projects whose department the reach covers: all, the person's own, or none.
@@ -212,6 +245,7 @@ final class PortalManageProjects
                 'name' => $this->text($row->project_name ?? null) ?? 'Project',
                 'department' => $this->text($row->department ?? null),
                 'typeLabel' => $this->text($row->type_of_job ?? null),
+                'projectStatus' => PortalViewProjectPresenter::status($row->status ?? null),
                 'leadName' => $leadEmail === '' ? null : ($byEmail[$leadEmail] ?? null),
                 'requestedByName' => ($row->requested_by ?? null) === null ? null : ($byId[(int) $row->requested_by] ?? null),
                 'requestedAt' => $requestedAt === null ? null : PortalViewProjectPresenter::instant($requestedAt),

@@ -17,6 +17,8 @@ final class PortalShellPath
 
     public const VIEW_PROJECTS = '/projects/projects';
 
+    public const CREATED_PROJECTS = '/projects/created-projects';
+
     public const SUBMITTED_REPORTS = '/reports/submitted-reports';
 
     public const DAILY_REPORT = '/reports/daily-report';

@@ -124,19 +124,19 @@ class PortalProjectNumbersTest extends TestCase
         $this->create($admin)->assertCreated();
     }
 
-    // The reported ask: links are required -- Engineering's six, any other department's four.
-    public function test_every_project_needs_its_links(): void
+    // Engineering needs all six links; another department's are optional (2026-10-06).
+    public function test_only_an_engineering_project_needs_its_links(): void
     {
         $admin = $this->engineeringAdmin();
 
         $this->create($admin, ['links' => [...self::LINKS, 'ms-loop' => ' ', 'panoramic' => '']])->assertStatus(422)
-            ->assertJsonPath('message', 'Every project needs its links. Add MS Loop and Panoramic Photos.');
+            ->assertJsonPath('message', 'An Engineering project needs its links. Add MS Loop and Panoramic Photos.');
 
         $mis = $this->misLead();
-        $this->create($mis, ['department' => 'MIS', 'leadId' => (int) $mis->getKey(), 'area' => null, 'levels' => [], 'links' => [...self::LINKS, 'forma' => '', 'panoramic' => '', 'ms-planner' => '']])
+        $this->create($mis, ['department' => 'MIS', 'leadId' => (int) $mis->getKey(), 'area' => null, 'levels' => [], 'links' => ['ms-teams' => 'teams.microsoft.com/x']])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Every project needs its links. Add MS Planner.');
-        $this->create($mis, ['department' => 'MIS', 'leadId' => (int) $mis->getKey(), 'area' => null, 'levels' => [], 'links' => [...self::LINKS, 'forma' => '', 'panoramic' => '']])
+            ->assertJsonPath('message', 'Each link must start with http:// or https://.');
+        $this->create($mis, ['department' => 'MIS', 'leadId' => (int) $mis->getKey(), 'area' => null, 'levels' => [], 'links' => []])
             ->assertCreated();
     }
 
