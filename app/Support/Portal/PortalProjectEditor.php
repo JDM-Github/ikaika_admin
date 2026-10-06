@@ -32,8 +32,8 @@ use Illuminate\Validation\Rule;
  * in project_number; it never changes, and is never given twice, deleted projects included. The form
  * edits the name without it.
  *
- * Every project needs its links (Engineering's six, any other department's four), and an Engineering
- * project an area above 0 and a level of detail for each discipline. No two live projects share a
+ * An Engineering project needs all six links, an area above 0 and a level of detail for each
+ * discipline; any other department's links are optional, though a filled one is still checked. No two live projects share a
  * name, whatever its case, spacing or number.
  */
 final class PortalProjectEditor
@@ -484,14 +484,13 @@ final class PortalProjectEditor
             }
         }
         $missingLinks = [];
-        foreach (self::LINK_LABELS as $kind => $label) {
-            $carried = $isEngineering || ! in_array($kind, self::ENGINEERING_LINKS, true);
-            if ($carried && $this->text($data['links'][$kind] ?? null) === null) {
+        foreach ($isEngineering ? self::LINK_LABELS : [] as $kind => $label) {
+            if ($this->text($data['links'][$kind] ?? null) === null) {
                 $missingLinks[] = $label;
             }
         }
         if ($missingLinks !== []) {
-            abort(422, 'Every project needs its links. Add '.self::listed($missingLinks).'.');
+            abort(422, 'An Engineering project needs its links. Add '.self::listed($missingLinks).'.');
         }
 
         $columns = [
