@@ -180,4 +180,37 @@ final class PortalProjectCodeActivity
 
         return ['people' => $people, 'days' => $days];
     }
+
+    /**
+     * Who changed the most lines on each project that links a repository, with their commits.
+     *
+     * @param  list<int>  $projectIds
+     * @return array<int, array{employeeId: int, linesChanged: int, commits: int}>
+     */
+    public function topByProject(array $projectIds): array
+    {
+        if ($projectIds === []) {
+            return [];
+        }
+        $rows = DB::connection('portal')->table('projects_bitbucket_repositories as links')
+            ->join('bitbucket_commits as commits', 'commits.repository_id', '=', 'links.repository_id')
+            ->whereIn('links.project_id', $projectIds)
+            ->whereNotNull('commits.employee_id')
+            ->where('commits.is_merge', false)
+            ->groupBy('links.project_id', 'commits.employee_id')
+            ->selectRaw('links.project_id, commits.employee_id, COUNT(*) as commits')
+            ->selectRaw('COALESCE(SUM(commits.lines_added + commits.lines_removed), 0) as lines_changed')
+            ->get();
+
+        $top = [];
+        foreach ($rows as $row) {
+            $projectId = (int) $row->project_id;
+            $changed = (int) $row->lines_changed;
+            if ($changed > 0 && (! isset($top[$projectId]) || $changed > $top[$projectId]['linesChanged'])) {
+                $top[$projectId] = ['employeeId' => (int) $row->employee_id, 'linesChanged' => $changed, 'commits' => (int) $row->commits];
+            }
+        }
+
+        return $top;
+    }
 }

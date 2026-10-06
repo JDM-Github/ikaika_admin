@@ -245,6 +245,9 @@ class PortalBitbucketSyncTest extends TestCase
         $item = $board->firstWhere('id', (string) $this->projectId);
         $this->assertNotNull($item);
         $this->assertSame(3, $item['codeActivity']['commits']);
+        // MIS: the top member changed the most lines (2 matched commits, 30 lines); everyone who opens the project sees it.
+        $this->assertSame(['id' => (string) $this->developer->id, 'measure' => 'linesChanged', 'value' => 30, 'hours' => null, 'commits' => 2], array_diff_key($item['topMember'], ['name' => true, 'photoUrl' => true]));
+        $this->assertArrayNotHasKey('topItems', $item['work']);
         // The project's own code (its number) is untouched by the code tiles.
         $this->assertIsString($item['code']);
         $this->assertNull($board->first(fn (array $other): bool => $other['id'] !== (string) $this->projectId && $other['codeActivity'] !== null));

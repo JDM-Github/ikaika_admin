@@ -70,6 +70,53 @@ final class PortalViewProjects
         });
     }
 
+    /**
+     * Each Engineering and MIS project's top member, named and pictured, for everyone who can open it.
+     *
+     * @param  list<object>  $rows
+     * @param  array<int, array<string, mixed>>  $work
+     * @param  array<int, array{employeeId: int, linesChanged: int, commits: int}>  $code
+     * @return array<int, array{id: string, name: string, photoUrl: ?string, measure: string, value: int, hours: ?float, commits: ?int}>
+     */
+    private function topMembers(array $rows, array $work, array $code): array
+    {
+        $picked = [];
+        foreach ($rows as $row) {
+            $id = (int) $row->id;
+            $items = $work[$id]['topItems'] ?? null;
+            if (PortalProjectWork::isEngineering($row->department ?? null) && is_array($items)) {
+                $picked[$id] = ['employeeId' => $items['employeeId'], 'measure' => 'items', 'value' => $items['items'], 'hours' => $items['hours'], 'commits' => null];
+            } elseif (PortalProjectRepositories::appliesTo($row->department ?? null) && isset($code[$id])) {
+                $picked[$id] = ['employeeId' => $code[$id]['employeeId'], 'measure' => 'linesChanged', 'value' => $code[$id]['linesChanged'], 'hours' => null, 'commits' => $code[$id]['commits']];
+            }
+        }
+        if ($picked === []) {
+            return [];
+        }
+        $ids = array_values(array_unique(array_column($picked, 'employeeId')));
+        $names = $this->connection()->table('employees')->whereIn('id', $ids)->get(['id', 'first_name', 'last_name'])->keyBy('id');
+        $photos = PortalEmployeePresenter::photoUrls($ids);
+
+        $members = [];
+        foreach ($picked as $projectId => $top) {
+            $person = $names[$top['employeeId']] ?? null;
+            if ($person === null) {
+                continue;
+            }
+            $members[$projectId] = [
+                'id' => (string) $top['employeeId'],
+                'name' => trim($person->first_name.' '.$person->last_name),
+                'photoUrl' => $photos[$top['employeeId']] ?? null,
+                'measure' => $top['measure'],
+                'value' => $top['value'],
+                'hours' => $top['hours'],
+                'commits' => $top['commits'],
+            ];
+        }
+
+        return $members;
+    }
+
     public function bumpCache(): void
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
@@ -114,6 +161,7 @@ final class PortalViewProjects
         $leadsByEmail = $this->leadsByEmail($rows);
         $work = (new PortalProjectWork)->byProject($rows, CarbonImmutable::today());
         $code = (new PortalProjectCodeActivity)->summariesByProject($projectIds);
+        $topMembers = $this->topMembers($rows, $work, (new PortalProjectCodeActivity)->topByProject($projectIds));
         $activityCodes = PortalActivityScopes::all();
 
         $projects = [];
@@ -145,7 +193,9 @@ final class PortalViewProjects
                     $leadsByEmail[strtolower(trim((string) ($row->project_lead_email ?? '')))] ?? null,
                     $members[$id] ?? [],
                 ),
-                'work' => $work[$id],
+                'work' => array_diff_key($work[$id], ['topItems' => true]),
+                // Who did the most: items on Engineering, lines changed on MIS; null for any other project.
+                'topMember' => $topMembers[$id] ?? null,
                 // Commits from linked Bitbucket repositories (MIS); null when the project links none.
                 'codeActivity' => $code[$id] ?? null,
                 'scopeOptions' => PortalActivityScopes::forDepartment($activityCodes, $row->department ?? null),
