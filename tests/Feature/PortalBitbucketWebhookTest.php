@@ -40,6 +40,7 @@ class PortalBitbucketWebhookTest extends TestCase
         $this->withoutMiddleware(ThrottleRequests::class);
         config(['services.bitbucket.token' => 'fixture-token', 'services.bitbucket.webhook_secret' => self::SECRET]);
         $portal = DB::connection('portal');
+        $portal->table('projects_bitbucket_repositories')->delete();
         $projectId = (int) $portal->table('projects')->insertGetId([
             'project_name' => 'Bitbucket Webhook Fixture 2020',
             'department' => 'MIS',

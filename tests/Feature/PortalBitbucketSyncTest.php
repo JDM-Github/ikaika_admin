@@ -2,12 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalBitbucketSync;
 use App\Support\Portal\PortalProjectCodeActivity;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Tests\Concerns\ActsAsPortalEmployee;
 use Tests\TestCase;
 
 /**
@@ -17,6 +19,7 @@ use Tests\TestCase;
  */
 class PortalBitbucketSyncTest extends TestCase
 {
+    use ActsAsPortalEmployee;
     use DatabaseTransactions;
 
     /**
@@ -39,7 +42,16 @@ class PortalBitbucketSyncTest extends TestCase
         parent::setUp();
         config(['services.bitbucket.token' => self::TOKEN]);
         $portal = DB::connection('portal');
-        $this->developer = $portal->table('employees')->whereNotNull('email')->where('email', 'like', '%@%')->orderBy('id')->first(['id', 'email']);
+        // Only this test's repository is linked (inside the transaction), so real links are never synced here.
+        $portal->table('projects_bitbucket_repositories')->delete();
+        foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'access_self_reach', 'developer_modes'] as $table) {
+            $portal->table($table)->delete();
+        }
+        // An active member who can sign in, whose preset files Daily Reports, so the report endpoint can be asked as them.
+        $this->developer = $portal->table('employees')->whereNotNull('email')->where('email', 'like', '%@%')
+            ->whereNotNull('id_no')->where('id_no', '!=', '')->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role, '')) = 'user'")
+            ->orderBy('id')->first(['id', 'email', 'id_no']);
         $this->projectId = (int) $portal->table('projects')->insertGetId([
             'project_name' => 'Bitbucket Sync Fixture 2020',
             'department' => 'MIS',
@@ -193,6 +205,24 @@ class PortalBitbucketSyncTest extends TestCase
         $this->artisan('portal:bitbucket-sync')
             ->expectsOutputToContain('ikaika-web/fixture-sync-2020: 4 new commits, 3 counted')
             ->assertExitCode(0);
+    }
+
+    // The report forms read one person's day across every project, each commit listed with its time.
+    public function test_the_report_form_reads_its_own_day_by_project(): void
+    {
+        $this->fakeBitbucket();
+        app(PortalBitbucketSync::class)->syncLinked();
+        $developer = Employee::query()->findOrFail((int) $this->developer->id);
+
+        $day = $this->getJson('/api/development/portal/reports/code-activity?day=2020-01-06', $this->headersFor($developer))->assertOk();
+
+        $project = collect($day->json('data'))->firstWhere('projectId', (string) $this->projectId);
+        $this->assertNotNull($project);
+        $this->assertSame([1, 10, 5, 2, 0], [$project['commits'], $project['linesAdded'], $project['linesRemoved'], $project['filesChanged'], $project['uncounted']]);
+        $this->assertSame(['hash' => 'aaaaaaa', 'time' => '01:30', 'repository' => 'fixture-sync-2020', 'message' => 'Work a', 'linesAdded' => 10, 'linesRemoved' => 5], $project['entries'][0]);
+        $this->assertSame([], collect($this->getJson('/api/development/portal/reports/code-activity?day=2020-01-05', $this->headersFor($developer))->json('data'))
+            ->where('projectId', (string) $this->projectId)->all());
+        $this->getJson('/api/development/portal/reports/code-activity?day=06/01/2020', $this->headersFor($developer))->assertStatus(422);
     }
 
     public function test_generated_paths_never_count(): void

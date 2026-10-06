@@ -2,6 +2,7 @@
 
 namespace App\Support\Portal;
 
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -12,6 +13,9 @@ use Illuminate\Support\Facades\DB;
  */
 final class PortalProjectCodeActivity
 {
+    // A report shows at most this many commits per project; the totals still count every one.
+    private const LISTED = 20;
+
     /**
      * @return array{commits: int, linesAdded: int, linesRemoved: int, filesChanged: int, uncounted: int}
      */
@@ -38,5 +42,51 @@ final class PortalProjectCodeActivity
             // Commits whose lines are still being fetched; their counts join on a later run.
             'uncounted' => (int) ($totals->uncounted ?? 0),
         ];
+    }
+
+    /**
+     * One person's code on one day for every project its repositories are linked to, what the Daily and
+     * Late Report forms show beside each project. A commit in a repository two projects share shows on both.
+     *
+     * @return list<array{projectId: string, commits: int, linesAdded: int, linesRemoved: int, filesChanged: int, uncounted: int, entries: list<array{hash: string, time: string, repository: string, message: string, linesAdded: int, linesRemoved: int}>}>
+     */
+    public function forPersonDay(int $employeeId, string $day): array
+    {
+        $rows = DB::connection('portal')->table('bitbucket_commits as commits')
+            ->join('projects_bitbucket_repositories as links', 'links.repository_id', '=', 'commits.repository_id')
+            ->join('bitbucket_repositories as repositories', 'repositories.id', '=', 'commits.repository_id')
+            ->where('commits.employee_id', $employeeId)
+            ->where('commits.committed_on', $day)
+            ->where('commits.is_merge', false)
+            ->orderByDesc('commits.committed_at')
+            ->get([
+                'links.project_id', 'commits.hash', 'commits.committed_at', 'commits.message', 'commits.counted_at',
+                'commits.lines_added', 'commits.lines_removed', 'commits.files_changed', 'repositories.repo_slug',
+            ]);
+
+        $projects = [];
+        foreach ($rows as $row) {
+            $id = (string) (int) $row->project_id;
+            $projects[$id] ??= ['projectId' => $id, 'commits' => 0, 'linesAdded' => 0, 'linesRemoved' => 0, 'filesChanged' => 0, 'uncounted' => 0, 'entries' => []];
+            $project = &$projects[$id];
+            $project['commits']++;
+            $project['linesAdded'] += (int) $row->lines_added;
+            $project['linesRemoved'] += (int) $row->lines_removed;
+            $project['filesChanged'] += (int) $row->files_changed;
+            $project['uncounted'] += $row->counted_at === null ? 1 : 0;
+            if (count($project['entries']) < self::LISTED) {
+                $project['entries'][] = [
+                    'hash' => substr((string) $row->hash, 0, 7),
+                    'time' => Carbon::parse((string) $row->committed_at, 'UTC')->setTimezone(PortalBitbucketSync::COMPANY_ZONE)->format('H:i'),
+                    'repository' => (string) $row->repo_slug,
+                    'message' => trim(strtok((string) $row->message, "\n") ?: ''),
+                    'linesAdded' => (int) $row->lines_added,
+                    'linesRemoved' => (int) $row->lines_removed,
+                ];
+            }
+            unset($project);
+        }
+
+        return array_values($projects);
     }
 }
