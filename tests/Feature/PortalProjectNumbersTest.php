@@ -3,20 +3,22 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalProjectRepositories;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\Concerns\ActsAsPortalEmployee;
 use Tests\TestCase;
 
 /**
  * The rules Add Project gained on 2026-10-06, on top of PortalProjectEditor: a project is numbered
  * YY + client code + counter; no two live projects share a name; an Engineering project needs its
- * area and every level of detail, and every project its links; anyone may add one; and View Projects'
- * Project Team says who leads, who is a member and who supports.
+ * area, every level of detail and its links; an MIS project tracks Bitbucket repositories; anyone may
+ * add one; and View Projects' Project Team says who leads, who is a member and who supports.
  */
 class PortalProjectNumbersTest extends TestCase
 {
@@ -138,6 +140,54 @@ class PortalProjectNumbersTest extends TestCase
             ->assertJsonPath('message', 'Each link must start with http:// or https://.');
         $this->create($mis, ['department' => 'MIS', 'leadId' => (int) $mis->getKey(), 'area' => null, 'levels' => [], 'links' => []])
             ->assertCreated();
+    }
+
+    // An MIS project takes its repositories as workspace/repository, a bitbucket.org link or an SSH address.
+    public function test_an_mis_project_keeps_its_bitbucket_repositories_once_each(): void
+    {
+        $mis = $this->misLead();
+        $misProject = ['department' => 'MIS', 'leadId' => (int) $mis->getKey(), 'area' => null, 'levels' => [], 'links' => []];
+
+        $created = $this->create($mis, [...$misProject, 'repositories' => [
+            'https://bitbucket.org/IKAIKA-web/Portal-Frontend.git',
+            'ikaika-web/portal-frontend',
+            'git@bitbucket.org:ikaika-web/admin.git',
+            ' ',
+        ]])->assertCreated();
+        $this->assertSame(['ikaika-web/admin', 'ikaika-web/portal-frontend'], $created->json('data.repositories'));
+        $id = (int) $created->json('data.id');
+        $this->assertSame(2, DB::connection('portal')->table('projects_bitbucket_repositories')->where('project_id', $id)->count());
+
+        // Saving the set again replaces it, and the edit's trail says so.
+        $this->patchJson(self::BASE.'/'.$id, $this->body([...$misProject, 'name' => $created->json('data.name'), 'repositories' => ['ikaika-web/admin']]), $this->headersOf($mis))
+            ->assertOk()
+            ->assertJsonPath('data.repositories', ['ikaika-web/admin']);
+        $this->assertStringContainsString('Repositories changed', (string) DB::connection('portal')->table('projects_action_history')
+            ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
+            ->where('projects_action_history.project_id', $id)->orderByDesc('project_action_history.id')->value('project_action_history.remarks'));
+
+        $this->create($mis, [...$misProject, 'repositories' => ['not a repository']])->assertStatus(422)
+            ->assertJsonPath('message', 'Enter each repository as workspace/repository or its bitbucket.org link.');
+    }
+
+    public function test_a_repository_link_may_point_inside_the_repository_but_twenty_is_the_most(): void
+    {
+        $this->assertSame('ikaika-web/admin', PortalProjectRepositories::normalize('https://bitbucket.org/ikaika-web/admin/src/main/'));
+        $this->assertNull(PortalProjectRepositories::normalize('https://github.com/ikaika-web/admin'));
+        $this->assertFalse(PortalProjectRepositories::appliesTo('Engineering'));
+
+        $this->assertThrows(
+            fn () => PortalProjectRepositories::parse(array_map(static fn (int $i): string => 'ikaika-web/repo-'.$i, range(1, 21))),
+            HttpException::class,
+        );
+    }
+
+    // Only MIS tracks code from Bitbucket; another department's project keeps no repositories.
+    public function test_an_engineering_project_keeps_no_repositories(): void
+    {
+        $created = $this->create($this->engineeringAdmin(), ['repositories' => ['ikaika-web/portal-frontend']])->assertCreated();
+
+        $this->assertSame([], $created->json('data.repositories'));
     }
 
     // The reported ask: anyone may add a project; one added by a member waits for a Project Manager.
