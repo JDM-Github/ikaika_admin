@@ -131,110 +131,48 @@ final class PortalSignature
     }
 
     /**
-     * A one-click installer for Windows Outlook: a .cmd that writes the signature .htm into the
-     * Signatures folder and sets it as the default for new mail and replies. Unsigned for now, so
-     * Windows and antivirus may warn before it runs. Null when no signature footer is set.
+     * The people the Exchange rules can cover: active employees with their own valid address, oldest
+     * first, each with the footer they would get. Manage / Signatures lists them so some can be left out.
      *
-     * @return array{fileName: string, script: string}|null
+     * @return list<array{id: string, name: string, email: string, footer: string}>
      */
-    public function installer(Employee $employee): ?array
+    public function rulePeople(): array
     {
-        $document = $this->document($employee);
-        if ($document === null) {
-            return null;
+        $rows = [];
+        foreach ($this->ruleCandidates() as $candidate) {
+            $rows[] = [
+                'id' => (string) (int) $candidate['employee']->getKey(),
+                'name' => trim((string) $candidate['values']['name']),
+                'email' => $candidate['email'],
+                'footer' => trim((string) $candidate['footer']->name),
+            ];
         }
-        $values = $this->employees->values($employee);
-        $name = trim((string) preg_replace('/[^\w \-]/', '', (string) $values['name']));
-        if ($name === '') {
-            $name = 'IKAIKA Signature';
-        }
-        // The address the per-account registry key is matched on; cmd-safe, so odd characters cannot break the file.
-        $email = trim((string) preg_replace('/["%&<>|^]/', '', (string) $values['email']));
 
-        return [
-            'fileName' => 'Install-IKAIKA-Signature.cmd',
-            'script' => $this->cmdScript($name, $email, base64_encode($document['html'])),
-        ];
-    }
-
-    // The .cmd carries the signature base64 and a PowerShell one-liner: write the .htm, then set the
-    // default on the account whose address matches (keeping Outlook's own value type), falling back to
-    // the all-accounts default when no profile matches. Idempotent, so re-running updates it.
-    private function cmdScript(string $name, string $email, string $base64): string
-    {
-        $command = '$sig=$env:IKAIKA_SIG; $email=$env:IKAIKA_EMAIL; '
-            .'$dir=Join-Path $env:APPDATA \'Microsoft\Signatures\'; '
-            .'New-Item -ItemType Directory -Force -Path $dir|Out-Null; '
-            .'$path=Join-Path $dir ($sig+\'.htm\'); '
-            .'[IO.File]::WriteAllBytes($path,[Convert]::FromBase64String($env:IKAIKA_B64)); '
-            .'function T($v){ if($v -is [byte[]]){[Text.Encoding]::Unicode.GetString($v).Trim([char]0)} elseif($v -is [string]){$v.Trim([char]0)} else {$null} }; '
-            .'$noise=\'PSPath\',\'PSParentPath\',\'PSChildName\',\'PSDrive\',\'PSProvider\'; $hit=$false; '
-            .'foreach($ver in @(\'16.0\',\'15.0\')){ '
-            .'$profiles=\'HKCU:\Software\Microsoft\Office\\\'+$ver+\'\Outlook\Profiles\'; '
-            .'if(-not(Test-Path $profiles)){continue}; '
-            .'foreach($prof in Get-ChildItem $profiles){ '
-            .'$root=Join-Path $prof.PSPath \'9375CFF0413111d3B88A00104B2A6676\'; '
-            .'if(-not(Test-Path $root)){continue}; '
-            .'foreach($acct in Get-ChildItem $root){ '
-            .'$texts=(Get-ItemProperty $acct.PSPath).PSObject.Properties|Where-Object{$_.Name -notin $noise}|ForEach-Object{T $_.Value}|Where-Object{$_}; '
-            .'if($texts -contains $email){ '
-            .'foreach($n in @(\'New Signature\',\'Reply-Forward Signature\')){ '
-            .'$kind=\'String\'; try{$kind=(Get-Item $acct.PSPath).GetValueKind($n).ToString()}catch{}; '
-            .'if($kind -eq \'Binary\'){ Set-ItemProperty $acct.PSPath $n ([Text.Encoding]::Unicode.GetBytes($sig+[char]0)) -Type Binary } '
-            .'else { Set-ItemProperty $acct.PSPath $n $sig -Type String } }; '
-            .'$hit=$true } } } }; '
-            .'if(-not $hit){ '
-            .'foreach($v in @(\'16.0\',\'15.0\')){ '
-            .'$k=\'HKCU:\Software\Microsoft\Office\\\'+$v+\'\Common\MailSettings\'; '
-            .'if(Test-Path $k){ '
-            .'Set-ItemProperty $k \'NewSignature\' $sig -ErrorAction SilentlyContinue; '
-            .'Set-ItemProperty $k \'ReplySignature\' $sig -ErrorAction SilentlyContinue } } }; '
-            .'Write-Host (\'Signature installed for \'+$sig)';
-
-        return "@echo off\r\n"
-            ."setlocal\r\n"
-            .'set "IKAIKA_SIG='.$name."\"\r\n"
-            .'set "IKAIKA_EMAIL='.$email."\"\r\n"
-            .'set "IKAIKA_B64='.$base64."\"\r\n"
-            .'powershell -NoProfile -ExecutionPolicy Bypass -Command "'.$command.'"'."\r\n"
-            ."echo.\r\n"
-            ."echo Done. Open Outlook and your signature is ready.\r\n"
-            ."pause\r\n";
+        return $rows;
     }
 
     /**
      * A PowerShell script for IT that sets the company signature as Exchange transport rules: one rule
-     * per active employee, each carrying that person's signature exactly as Settings shows it (their own
-     * footer, their portal details), so nothing has to be filled in Microsoft 365. Server-side, so it is
-     * locked and reaches every client, including the new Outlook. Null when no signature footer is set
-     * or no active employee has an email address.
+     * per chosen active employee (everyone when no ids are given), each carrying that person's signature
+     * exactly as Settings shows it (their own footer, their portal details), so nothing has to be filled
+     * in Microsoft 365. Server-side, so it is locked and reaches every client, including the new Outlook.
+     * Anyone left out loses their rule when the script runs. Null when nobody is left to cover.
      *
+     * @param  list<int>|null  $employeeIds
      * @return array{fileName: string, script: string}|null
      */
-    public function transportRule(): ?array
+    public function transportRule(?array $employeeIds = null): ?array
     {
-        if ($this->defaultFooter() === null) {
-            return null;
-        }
-
         $people = [];
-        $employees = Employee::query()->whereRaw("LOWER(COALESCE(status, '')) = 'active'")->orderBy('id')->get();
-        foreach ($employees as $employee) {
-            $values = $this->employees->values($employee);
-            $email = strtolower(trim((string) $values['email']));
-            // Exchange matches the sender's address, so a missing or shared one cannot carry a rule.
-            if (filter_var($email, FILTER_VALIDATE_EMAIL) === false || isset($people[$email])) {
+        foreach ($this->ruleCandidates() as $candidate) {
+            if ($employeeIds !== null && ! in_array((int) $candidate['employee']->getKey(), $employeeIds, true)) {
                 continue;
             }
-            $footer = $this->footerFor($employee);
-            if ($footer === null) {
-                continue;
-            }
-            $people[$email] = [
-                'name' => mb_substr(self::RULE_PREFIX.$employee->getKey().' ('.$email.')', 0, 64),
-                'email' => $email,
-                'marker' => $this->replyMarker((string) $footer->body),
-                'html' => $this->ruleHtml($this->renderBody($footer, $values)),
+            $people[] = [
+                'name' => mb_substr(self::RULE_PREFIX.$candidate['employee']->getKey().' ('.$candidate['email'].')', 0, 64),
+                'email' => $candidate['email'],
+                'marker' => $this->replyMarker((string) $candidate['footer']->body),
+                'html' => $this->ruleHtml($this->renderBody($candidate['footer'], $candidate['values'])),
             ];
         }
         if ($people === []) {
@@ -243,8 +181,34 @@ final class PortalSignature
 
         return [
             'fileName' => 'Install-IKAIKA-Signature-Rules.ps1',
-            'script' => $this->transportRuleScript(array_values($people)),
+            'script' => $this->transportRuleScript($people),
         ];
+    }
+
+    /**
+     * Active employees who can carry a rule. Exchange matches the sender's address, so a missing or
+     * shared one is skipped; the first person with an address keeps it.
+     *
+     * @return list<array{employee: Employee, values: array<string, mixed>, email: string, footer: object}>
+     */
+    private function ruleCandidates(): array
+    {
+        $candidates = [];
+        $employees = Employee::query()->whereRaw("LOWER(COALESCE(status, '')) = 'active'")->orderBy('id')->get();
+        foreach ($employees as $employee) {
+            $values = $this->employees->values($employee);
+            $email = strtolower(trim((string) $values['email']));
+            if (filter_var($email, FILTER_VALIDATE_EMAIL) === false || isset($candidates[$email])) {
+                continue;
+            }
+            $footer = $this->footerFor($employee);
+            if ($footer === null) {
+                continue;
+            }
+            $candidates[$email] = ['employee' => $employee, 'values' => $values, 'email' => $email, 'footer' => $footer];
+        }
+
+        return array_values($candidates);
     }
 
     // Exchange takes the signature as one string: whitespace runs collapse (they render the same, and the
@@ -284,8 +248,7 @@ final class PortalSignature
 
     /**
      * Each person becomes a hashtable with their rule name, address, reply marker and signature HTML in a
-     * single-quoted here-string (left untouched by PowerShell). The script keeps its window open, so the
-     * person running it can read the result, and names a missing admin role instead of a vague failure.
+     * single-quoted here-string (left untouched by PowerShell).
      *
      * @param  list<array{name: string, email: string, marker: string, html: string}>  $people
      */
@@ -302,7 +265,7 @@ final class PortalSignature
                 ."        }\n";
         }
 
-        $script = <<<'PS'
+        $header = <<<'PS'
 # Sets the IKAIKA email signature in Exchange Online: one mail flow rule per person, each carrying
 # that person's signature exactly as the portal shows it. Exchange adds it after Send, so nobody can
 # edit it, and every Outlook (the new one included) shows it.
@@ -313,30 +276,8 @@ final class PortalSignature
 #
 # People in this file: __COUNT__. A message that already contains the signature's notice (a reply in
 # a thread that has it) is skipped, so copies do not pile up. Meeting invites are skipped too.
-
-$ErrorActionPreference = 'Stop'
-try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    # 3.7.0 is the first version with -DisableWAM, used below.
-    $module = Get-Module -ListAvailable -Name ExchangeOnlineManagement | Sort-Object Version -Descending | Select-Object -First 1
-    if (-not $module -or $module.Version -lt [version]'3.7.0') {
-        Write-Host 'Installing the Exchange Online module (one time)...'
-        Install-Module ExchangeOnlineManagement -MinimumVersion 3.7.0 -Scope CurrentUser -Force -AllowClobber
-    }
-    Import-Module ExchangeOnlineManagement -MinimumVersion 3.7.0
-    Write-Host 'Signing in to Exchange Online (a browser window opens)...'
-    # WAM, the default sign-in on Windows, can return without connecting; the browser flow is reliable.
-    Connect-ExchangeOnline -DisableWAM -ShowBanner:$false
-    $account = (Get-ConnectionInformation | Where-Object { $_.State -eq 'Connected' } | Select-Object -First 1).UserPrincipalName
-    if (-not $account) {
-        throw 'Not signed in to Exchange Online. Run: Connect-ExchangeOnline -Device  then run this script again.'
-    }
-    # Exchange only loads the commands an account may use, so a missing one means a missing role.
-    if (-not (Get-Command New-TransportRule -ErrorAction SilentlyContinue)) {
-        throw ($account + ' is signed in but may not manage mail flow rules. It needs the Exchange Administrator or Global Administrator role.')
-    }
-    Write-Host ('Signed in as ' + $account)
-
+PS;
+        $body = <<<'PS'
     $people = @(
 __PEOPLE__    )
 
@@ -391,6 +332,82 @@ __PEOPLE__    )
 
     Write-Host ''
     Write-Host ('Done: ' + $done + ' of ' + $people.Count + ' people. It can take up to 30 minutes to reach outgoing mail.') -ForegroundColor Green
+PS;
+
+        return $this->exchangeScript($header, $body, ['__COUNT__' => (string) count($people), '__PEOPLE__' => $entries]);
+    }
+
+    /**
+     * A PowerShell script for IT that removes every IKAIKA signature rule (the per-person ones and the old
+     * single rule), so mail stops getting the server-side signature. Run as the same kind of admin.
+     *
+     * @return array{fileName: string, script: string}
+     */
+    public function transportRuleRemover(): array
+    {
+        $header = <<<'PS'
+# Removes the IKAIKA email signature from Exchange Online: every mail flow rule the signature script
+# made (one per person, plus the old single rule). Other mail flow rules are not touched. Email stops
+# getting the signature within about 30 minutes; people's own Outlook signatures are not affected.
+#
+# Run it as a Microsoft 365 admin (Exchange Administrator or Global Administrator role): right-click
+# the file, Run with PowerShell, and sign in when the browser opens.
+PS;
+        $body = <<<'PS'
+    $rules = @(Get-TransportRule | Where-Object { $_.Name -like '__PREFIX__*' -or $_.Name -eq '__LEGACY__' })
+    if ($rules.Count -eq 0) {
+        Write-Host 'No IKAIKA signature rules found; nothing to remove.' -ForegroundColor Green
+    }
+    else {
+        foreach ($rule in $rules) {
+            Remove-TransportRule -Identity $rule.Identity -Confirm:$false
+            Write-Host ('Removed ' + $rule.Name)
+        }
+        Write-Host ''
+        Write-Host ('Done: removed ' + $rules.Count + ' rule(s). It can take up to 30 minutes to reach outgoing mail.') -ForegroundColor Green
+    }
+PS;
+
+        return ['fileName' => 'Remove-IKAIKA-Signature-Rules.ps1', 'script' => $this->exchangeScript($header, $body)];
+    }
+
+    // Wraps a script body in what both Exchange scripts share: TLS, the module (3.7.0+ for -DisableWAM),
+    // the browser sign-in, a check that names a missing admin role, and a window that stays open so the
+    // person running it can read the result. CRLF, as Windows tools expect.
+    /**
+     * @param  array<string, string>  $values  placeholder => text, applied after the rule names, in order
+     */
+    private function exchangeScript(string $header, string $body, array $values = []): string
+    {
+        $preamble = <<<'PS'
+$ErrorActionPreference = 'Stop'
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    # 3.7.0 is the first version with -DisableWAM, used below.
+    $module = Get-Module -ListAvailable -Name ExchangeOnlineManagement | Sort-Object Version -Descending | Select-Object -First 1
+    if (-not $module -or $module.Version -lt [version]'3.7.0') {
+        Write-Host 'Installing the Exchange Online module (one time)...'
+        # Windows PowerShell 5.1 would otherwise stop to ask for the NuGet provider that Install-Module needs.
+        if (-not (Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue)) {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
+        }
+        Install-Module ExchangeOnlineManagement -MinimumVersion 3.7.0 -Scope CurrentUser -Force -AllowClobber
+    }
+    Import-Module ExchangeOnlineManagement -MinimumVersion 3.7.0
+    Write-Host 'Signing in to Exchange Online (a browser window opens)...'
+    # WAM, the default sign-in on Windows, can return without connecting; the browser flow is reliable.
+    Connect-ExchangeOnline -DisableWAM -ShowBanner:$false
+    $account = (Get-ConnectionInformation | Where-Object { $_.State -eq 'Connected' } | Select-Object -First 1).UserPrincipalName
+    if (-not $account) {
+        throw 'Not signed in to Exchange Online. Run: Connect-ExchangeOnline -Device  then run this script again.'
+    }
+    # Exchange only loads the commands an account may use, so a missing one means a missing role.
+    if (-not (Get-Command New-TransportRule -ErrorAction SilentlyContinue)) {
+        throw ($account + ' is signed in but may not manage mail flow rules. It needs the Exchange Administrator or Global Administrator role.')
+    }
+    Write-Host ('Signed in as ' + $account)
+PS;
+        $tail = <<<'PS'
 }
 catch {
     Write-Host ''
@@ -401,13 +418,9 @@ finally {
     Read-Host 'Press Enter to close'
 }
 PS;
-
-        // The people go in last, so their signature text is never searched for the other placeholders.
-        $script = str_replace(
-            ['__COUNT__', '__PREFIX__', '__LEGACY__', '__PEOPLE__'],
-            [(string) count($people), self::RULE_PREFIX, self::LEGACY_RULE, $entries],
-            $script,
-        );
+        // The caller's values go last, so signature text in them is never searched for the rule names.
+        $values = ['__PREFIX__' => self::RULE_PREFIX, '__LEGACY__' => self::LEGACY_RULE] + $values;
+        $script = str_replace(array_keys($values), array_values($values), $header."\n\n".$preamble."\n\n".$body."\n".$tail);
 
         return str_replace("\n", "\r\n", str_replace("\r\n", "\n", $script));
     }
@@ -446,26 +459,6 @@ PS;
             'footerId' => (string) (int) $footer->id,
             'html' => $this->renderBody($footer, $this->employees->values($employee)),
         ];
-    }
-
-    /**
-     * The employee's signature as a standalone .htm document for Outlook. Null when none is set.
-     *
-     * @return array{fileName: string, html: string}|null
-     */
-    public function document(Employee $employee): ?array
-    {
-        $rendered = $this->render($employee);
-        if ($rendered === null) {
-            return null;
-        }
-        $name = (string) $this->employees->values($employee)['name'];
-        $slug = trim((string) preg_replace('/[^a-z0-9]+/i', '-', strtolower($name)), '-');
-        $fileName = 'signature'.($slug === '' ? '' : '-'.$slug).'.htm';
-        $html = '<!doctype html><html><head><meta charset="utf-8"><title>'.htmlspecialchars($name, ENT_QUOTES, 'UTF-8').'</title></head>'
-            .'<body style="margin:0;padding:12px;background:#ffffff;">'.$rendered['html'].'</body></html>';
-
-        return ['fileName' => $fileName, 'html' => $html];
     }
 
     // The employee's chosen footer when it is a token footer, else the default footer.

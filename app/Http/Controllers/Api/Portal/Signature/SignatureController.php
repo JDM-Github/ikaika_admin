@@ -10,8 +10,9 @@ use Illuminate\Http\Request;
 
 /**
  * Email signatures. `show` is the signed-in employee's own rendered signature (any member, on
- * Settings); `document` is the same as a downloadable .htm. Signatures are footers carrying the
- * $SIGNATURE token, edited with the email footers (the email.library power) on Manage / Signatures.
+ * Settings, where it is copied to paste into Outlook). Signatures are footers carrying the $SIGNATURE
+ * token, edited with the email footers (the email.library power) on Manage / Signatures, which also
+ * hands IT the Exchange rule scripts.
  */
 class SignatureController extends Controller
 {
@@ -41,19 +42,7 @@ class SignatureController extends Controller
         ]);
     }
 
-    // A one-click Windows Outlook installer (.cmd) for the employee's own signature.
-    public function installer(Request $request): JsonResponse
-    {
-        $installer = $this->signatures->installer($this->employee($request));
-        if ($installer === null) {
-            abort(404, 'No signature footer is set.');
-        }
-
-        return response()->json(['section' => 'signature', 'resource' => 'signature-installer', 'data' => $installer]);
-    }
-
-    // The footer everyone without their own assigned footer gets: Settings, the installer and the
-    // Exchange rules all use it.
+    // The footer everyone without their own assigned footer gets: Settings and the Exchange rules use it.
     public function defaultFooter(): JsonResponse
     {
         return response()->json([
@@ -76,14 +65,37 @@ class SignatureController extends Controller
 
     // A PowerShell script for IT: one Exchange transport rule per active employee, each appending that
     // person's signature server-side, locked and reaching every client including the new Outlook.
-    public function transportRule(): JsonResponse
+    // ?employeeIds=1,2,3 covers only those people; anyone left out loses their rule when it runs.
+    public function transportRule(Request $request): JsonResponse
     {
-        $rule = $this->signatures->transportRule();
+        $ids = null;
+        if ($request->query->has('employeeIds')) {
+            $ids = array_values(array_unique(array_filter(
+                array_map('intval', explode(',', (string) $request->query('employeeIds'))),
+                static fn (int $id): bool => $id > 0,
+            )));
+            if ($ids === []) {
+                abort(422, 'Choose at least one person, or use the rule remover to take the signature off everyone.');
+            }
+        }
+        $rule = $this->signatures->transportRule($ids);
         if ($rule === null) {
-            abort(404, 'No signature footer is set.');
+            abort(404, $ids === null ? 'No signature footer is set.' : 'None of the chosen people can carry a signature rule.');
         }
 
         return response()->json(['section' => 'signature', 'resource' => 'signature-transport-rule', 'data' => $rule]);
+    }
+
+    // Who the Exchange rules can cover, for the picker on Manage / Signatures.
+    public function rulePeople(): JsonResponse
+    {
+        return response()->json(['section' => 'signature', 'resource' => 'signature-rule-people', 'data' => $this->signatures->rulePeople()]);
+    }
+
+    // The undo for transportRule: a script that removes every IKAIKA signature rule.
+    public function transportRuleRemover(): JsonResponse
+    {
+        return response()->json(['section' => 'signature', 'resource' => 'signature-transport-rule-remover', 'data' => $this->signatures->transportRuleRemover()]);
     }
 
     private function employee(Request $request): Employee

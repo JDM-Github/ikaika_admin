@@ -83,23 +83,12 @@ class PortalSignatureTest extends TestCase
         $this->assertStringNotContainsString('{phone}', $filled);
     }
 
-    public function test_a_member_downloads_a_one_click_outlook_installer(): void
+    public function test_there_is_no_outlook_installer_any_more(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
-        $email = (string) app(PortalEmployeeSignature::class)->values($member)['email'];
 
-        $response = $this->withToken($this->token($member))->getJson(self::SIGNATURE.'/installer')->assertOk();
-
-        $this->assertStringEndsWith('.cmd', (string) $response->json('data.fileName'));
-        $script = (string) $response->json('data.script');
-        $this->assertStringContainsString('@echo off', $script);
-        // The signature travels base64-encoded, and the script targets this person's own account.
-        $this->assertStringContainsString('IKAIKA_B64=', $script);
-        $this->assertStringContainsString('IKAIKA_EMAIL='.$email, $script);
-        $this->assertStringContainsString('9375CFF0413111d3B88A00104B2A6676', $script);
-        $this->assertStringContainsString('Reply-Forward Signature', $script);
-        // The all-accounts default stays as the fallback for a machine with no matching profile.
-        $this->assertStringContainsString('NewSignature', $script);
+        // Settings copies the signature to paste into Outlook by hand; the .cmd installer was removed.
+        $this->withToken($this->token($member))->getJson(self::SIGNATURE.'/installer')->assertNotFound();
     }
 
     public function test_it_builds_one_exchange_rule_per_active_employee_from_their_portal_signature(): void
@@ -140,6 +129,55 @@ class PortalSignatureTest extends TestCase
         $this->assertStringContainsString("ApplyHtmlDisclaimerFallbackAction = 'Ignore'", $script);
         $this->assertStringContainsString('Exchange Administrator or Global Administrator role', $script);
         $this->assertStringContainsString("Read-Host 'Press Enter to close'", $script);
+    }
+
+    public function test_it_lists_who_the_rules_can_cover_and_builds_the_script_for_only_the_chosen_people(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user' AND email LIKE '%@%'");
+        $other = $this->employee("LOWER(COALESCE(role, '')) = 'user' AND email LIKE '%@%' AND id != ".(int) $member->getKey());
+        $signatures = app(PortalEmployeeSignature::class);
+        $memberEmail = strtolower((string) $signatures->values($member)['email']);
+        $otherEmail = strtolower((string) $signatures->values($other)['email']);
+        $token = $this->token($admin);
+
+        $people = $this->withToken($token)->getJson(self::SIGNATURE.'/transport-rule/people')->assertOk()->json('data');
+
+        $ids = array_column($people, 'id');
+        $this->assertContains((string) $member->getKey(), $ids);
+        $row = $people[array_search((string) $member->getKey(), $ids, true)];
+        $this->assertSame($memberEmail, $row['email']);
+        $this->assertNotSame('', $row['footer']);
+
+        $script = (string) $this->withToken($token)
+            ->getJson(self::SIGNATURE.'/transport-rule?employeeIds='.$member->getKey())
+            ->assertOk()->json('data.script');
+
+        $this->assertStringContainsString("Email = '".$memberEmail."'", $script);
+        $this->assertStringNotContainsString("Email = '".$otherEmail."'", $script);
+        $this->assertStringContainsString('# People in this file: 1.', $script);
+        // Windows PowerShell 5.1 gets the NuGet provider without stopping to ask.
+        $this->assertStringContainsString('Install-PackageProvider -Name NuGet', $script);
+        $this->withToken($token)->getJson(self::SIGNATURE.'/transport-rule?employeeIds=')->assertStatus(422);
+        $this->withToken($token)->getJson(self::SIGNATURE.'/transport-rule?employeeIds=999999999')->assertNotFound();
+        $this->withToken($this->token($member))->getJson(self::SIGNATURE.'/transport-rule/people')->assertForbidden();
+    }
+
+    public function test_it_builds_a_script_that_removes_every_signature_rule(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+
+        $response = $this->withToken($this->token($admin))->getJson(self::SIGNATURE.'/transport-rule/remover')->assertOk();
+
+        $this->assertSame('Remove-IKAIKA-Signature-Rules.ps1', $response->json('data.fileName'));
+        $script = (string) $response->json('data.script');
+        // Only the signature's own rules: the per-person prefix and the old single rule.
+        $this->assertStringContainsString('-like \'IKAIKA signature #*\' -or $_.Name -eq \'IKAIKA email signature\'', $script);
+        $this->assertStringContainsString('Remove-TransportRule', $script);
+        $this->assertStringNotContainsString('New-TransportRule -Name', $script);
+        $this->assertStringContainsString("Read-Host 'Press Enter to close'", $script);
+        $this->withToken($this->token($member))->getJson(self::SIGNATURE.'/transport-rule/remover')->assertForbidden();
     }
 
     public function test_empty_placeholders_drop_their_separators(): void

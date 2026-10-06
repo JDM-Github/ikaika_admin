@@ -291,5 +291,5 @@ Then, one phase at a time:
 
 - Recommended (2026-10-01): keep the **merge commit** strategy, not squash; the squash guard in
   step 7 is only a fallback.
-- `?` Bitbucket: the whole workspace, or only the repositories linked to a project.
+- Decided 2026-10-06 (user): Bitbucket syncs **only the repositories linked to a project**, never the whole workspace.
 - Parked: per-scope target lines for Engineering, shown as "x of target y lines", never a percentage.
