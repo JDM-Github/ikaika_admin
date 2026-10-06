@@ -341,6 +341,17 @@ final class PortalViewProjects
      * @param  array<int, list<array{id: int, name: string}>>  $members
      * @return array<int, list<string>>
      */
+    /**
+     * Member names per project, members before support people, for a list that only needs names.
+     *
+     * @param  list<int>  $projectIds
+     * @return array<int, list<string>>
+     */
+    public function memberNamesByProject(array $projectIds): array
+    {
+        return $this->namesByProject($this->membersByProject($projectIds));
+    }
+
     private function namesByProject(array $members): array
     {
         $names = [];

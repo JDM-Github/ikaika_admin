@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
@@ -178,6 +179,7 @@ class PortalManageProjectsTest extends TestCase
             'requested_by' => $this->admin->getKey(),
             'requested_at' => now(),
         ]);
+        DB::connection('portal')->table('employees_projects')->insert(['project_id' => $this->projectId, 'employee_id' => $this->member->getKey(), 'role_on_project' => 'member']);
         $token = $this->token($this->member);
 
         $response = $this->withToken($token)->getJson('/api/development/portal/projects/mine')->assertOk();
@@ -187,6 +189,7 @@ class PortalManageProjectsTest extends TestCase
         $item = collect($response->json('data'))->firstWhere('id', (string) $this->projectId);
         $this->assertSame('pending', $item['creationStatus']);
         $this->assertSame('ongoing', $item['projectStatus']);
+        $this->assertContains(PortalSubmittedReportPresenter::memberName($this->member->first_name, $this->member->last_name), $item['memberNames']);
         $this->assertGreaterThanOrEqual(1, $response->json('counts.pending'));
 
         // Every approval comes in one read; the page splits them into its tabs.

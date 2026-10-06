@@ -236,6 +236,8 @@ final class PortalManageProjects
             }
         }
 
+        $memberNames = $this->projects->memberNamesByProject(array_map(static fn (object $row): int => (int) $row->id, $rows));
+
         $items = [];
         foreach ($rows as $row) {
             $leadEmail = strtolower(trim((string) ($row->project_lead_email ?? '')));
@@ -247,6 +249,7 @@ final class PortalManageProjects
                 'typeLabel' => $this->text($row->type_of_job ?? null),
                 'projectStatus' => PortalViewProjectPresenter::status($row->status ?? null),
                 'leadName' => $leadEmail === '' ? null : ($byEmail[$leadEmail] ?? null),
+                'memberNames' => $memberNames[(int) $row->id] ?? [],
                 'requestedByName' => ($row->requested_by ?? null) === null ? null : ($byId[(int) $row->requested_by] ?? null),
                 'requestedAt' => $requestedAt === null ? null : PortalViewProjectPresenter::instant($requestedAt),
                 'creationStatus' => PortalViewProjectPresenter::creationStatus($row->project_creation_status ?? null),
