@@ -95,7 +95,47 @@ Select-String -Path .env -Pattern '^(MAIL_MAILER|MAIL_RELAY_URL|MAIL_RELAY_KEY)=
 ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
 ```
 
-Settings still empty on the Test Server: `CLOUDINARY_*` (email image uploads) and `AIRTABLE_*`. Leave Airtable empty so test data is never synced into the real base.
+Settings still empty on the Test Server: `CLOUDINARY_*` (email image uploads), `AIRTABLE_*` and `BITBUCKET_*` (see below). Leave Airtable empty so test data is never synced into the real base.
+
+## Bitbucket code activity (MIS projects)
+
+MIS projects count commits and lines from the Bitbucket repositories linked on their Add/Edit Project form. Each commit counts on its own day in Manila time, so a Daily or Late Report for a date shows that date's work. Three things make it run on the Test Server.
+
+**1. Two settings** in `~/apps/test-server/.env` (see "Changing a setting"), then `apply-env.sh`:
+
+```text
+BITBUCKET_TOKEN=          an Atlassian API token with only read:repository:bitbucket
+BITBUCKET_WEBHOOK_SECRET= any long random string, also typed into each webhook below
+```
+
+Make the token under a dedicated read-only Bitbucket user if you can: it reads everything its account can. Without a secret, every webhook delivery is refused.
+
+**2. A push webhook on each linked repository.** Bitbucket → the repository → Repository settings → Webhooks → Add webhook:
+
+| Field | Value |
+| --- | --- |
+| URL | `https://eox.vhu.mybluehost.me/website_a85fbf18/central-api/api/staging/bitbucket/webhook` |
+| Secret | the `BITBUCKET_WEBHOOK_SECRET` value |
+| Triggers | Repository push |
+
+A push syncs that repository at once. "View requests" on the webhook shows each delivery: `202` is good, `401` means the secret differs.
+
+**3. The scheduler cron**, so the hourly sync runs (it catches a missed webhook and finishes counting a long history). cPanel → Cron Jobs → every minute (`* * * * *`):
+
+```text
+cd ~/apps/test-server/app && php artisan schedule:run >> /dev/null 2>&1
+```
+
+If `php` there is not PHP 8.3 or newer, use the full path from `ssh bluehost "which php; php -v"`.
+
+**Check it:**
+
+```powershell
+ssh bluehost "cd ~/apps/test-server/app && php artisan portal:bitbucket-preview ikaika-web/ikaika_portal_frontend_rewrite"
+ssh bluehost "cd ~/apps/test-server/app && php artisan portal:bitbucket-sync"
+```
+
+The preview shows one day's commits and saves nothing; the sync prints `<repository>: N new commits, N counted` per linked repository. A first sync of a long history takes a few minutes.
 
 ## Roll back
 
@@ -189,3 +229,5 @@ Run `deploy.ps1` here, then the portal's `deploy.ps1`.
 | `uapi ... failed` | cPanel refused (name taken, quota). The error says which |
 | `Access denied` during import | `db.env` doesn't match the `eoxvhumy_ts` user any more. Delete the user in cPanel and `db.env`, then rerun `copy-databases.ps1` |
 | Microsoft login: redirect mismatch | Azure and `PORTAL_AZURE_REDIRECT_URI` must both be exactly the portal URL |
+| `Bitbucket HTTP 401` from the sync | `BITBUCKET_TOKEN` is wrong, expired (they last a year at most) or lacks `read:repository:bitbucket` |
+| Webhook deliveries answer `401` | The webhook's secret and `BITBUCKET_WEBHOOK_SECRET` differ, or the setting was not applied |
