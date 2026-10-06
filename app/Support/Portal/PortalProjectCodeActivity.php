@@ -13,8 +13,8 @@ use Illuminate\Support\Facades\DB;
  */
 final class PortalProjectCodeActivity
 {
-    // A report shows at most this many commits per project; the totals still count every one.
-    private const LISTED = 20;
+    // The report's code dialog lists the day's commits up to this many per project; the totals count every one.
+    private const LISTED = 200;
 
     /**
      * @return array{commits: int, linesAdded: int, linesRemoved: int, filesChanged: int, uncounted: int}
