@@ -86,6 +86,8 @@ class PortalViewProjectsTest extends TestCase
         $row = collect($rows)->firstWhere('id', (string) $led);
         $this->assertNotNull($row);
         $this->assertTrue($row['isAssigned']);
+        $this->assertTrue($row['isLeading']);
+        $this->assertNotContains(true, array_column(array_filter($rows, fn (array $item): bool => $item['id'] !== (string) $led && strcasecmp((string) $item['leadName'], (string) $row['leadName']) !== 0), 'isLeading'));
     }
 
     // Each project says what this person may do with it: a member only the ones they lead, an admin every one.
