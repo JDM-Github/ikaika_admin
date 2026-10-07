@@ -25,6 +25,13 @@ try {
     Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $stage 'public/hot'), (Join-Path $stage 'public/fonts-manifest.dev.json')
     Copy-Item (Join-Path $PSScriptRoot 'server/.htaccess') (Join-Path $stage 'public/.htaccess')
 
+    # Tracker table patches ride along; deploy-admin.sh runs each one (no migration reaches the tracker database).
+    $patches = Join-Path $root 'sql/transaction_tracker/patches'
+    if (Test-Path $patches) {
+        New-Item -ItemType Directory -Force (Join-Path $stage 'sql/transaction_tracker') | Out-Null
+        Copy-Item -Recurse $patches (Join-Path $stage 'sql/transaction_tracker/patches')
+    }
+
     # bootstrap and storage ship as empty skeletons so no local cache, log, or session leaks out.
     New-Item -ItemType Directory -Force (Join-Path $stage 'bootstrap/cache') | Out-Null
     Copy-Item (Join-Path $root 'bootstrap/app.php'), (Join-Path $root 'bootstrap/providers.php') (Join-Path $stage 'bootstrap')

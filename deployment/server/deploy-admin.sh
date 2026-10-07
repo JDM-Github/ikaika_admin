@@ -63,6 +63,34 @@ mv "$NEW" "$APP_DIR"
 cd "$APP_DIR"
 php artisan optimize:clear
 php artisan migrate --force
+
+# The tracker database is the transaction tracker's own, so no Laravel migration reaches it: its table
+# changes ship as patches that are safe to rerun (CREATE TABLE IF NOT EXISTS, and so on).
+echo "== Tracker patches"
+if [ -f "$ROOT/db.env" ] && compgen -G "$APP_DIR/sql/transaction_tracker/patches/*.sql" > /dev/null; then
+    (
+        # shellcheck disable=SC1091
+        source "$ROOT/db.env"
+        for patch in "$APP_DIR"/sql/transaction_tracker/patches/*.sql; do
+            echo "   $(basename "$patch")"
+            # The USE line names the local database; the server's comes from db.env instead.
+            grep -v '^USE ' "$patch" | MYSQL_PWD=$DB_PASSWORD mysql -u "$DB_USERNAME" --default-character-set=utf8mb4 "$TRACKER_DB_DATABASE"
+        done
+    )
+else
+    echo "   none"
+fi
+
+# The scheduler drives the hourly Bitbucket sync and any later scheduled job; cPanel's Cron Jobs page shows this line too.
+echo "== Scheduler cron"
+CRON_LINE="* * * * * cd $APP_DIR && $(command -v php) artisan schedule:run >> /dev/null 2>&1"
+if crontab -l 2>/dev/null | grep -Fq 'artisan schedule:run'; then
+    echo "   already set"
+else
+    { crontab -l 2>/dev/null || true; echo "$CRON_LINE"; } | crontab -
+    echo "   added"
+fi
+
 # No route:cache: cached routes answer 405 for the folder URL (/central-api/) when Laravel sits in a subfolder.
 php artisan config:cache && php artisan event:cache && php artisan view:cache
 

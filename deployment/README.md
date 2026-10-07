@@ -14,20 +14,22 @@ From `C:\IKAIKA\ikaika_admin` in PowerShell:
 
 | Task | Command |
 | --- | --- |
+| **Deploy everything** (settings, admin, then portal) | `powershell -ExecutionPolicy Bypass -File deployment\deploy-all.ps1` |
 | Deploy the admin | `powershell -ExecutionPolicy Bypass -File deployment\deploy.ps1` |
+| Send your local secret settings to the server | `powershell -ExecutionPolicy Bypass -File deployment\push-env.ps1` |
 | Copy your local databases to the Test Server (**replaces its data**) | `powershell -ExecutionPolicy Bypass -File deployment\copy-databases.ps1` |
 | Copy just one database | `... copy-databases.ps1 -Only portal` (or `core`, `tracker`, `estimator`) |
 | Change a server setting | see [Changing a setting](#changing-a-setting) |
 
 Each command asks for the SSH key passphrase twice, once for the upload and once for the server step. To type it once per session, see [Optional: passphrase once](#optional-passphrase-once).
 
-**Deploy order:** admin first, then the portal (`ikaika-portal\deployment\deploy.ps1`), because the portal calls the admin.
+**Deploy order:** admin first, then the portal (`ikaika-portal\deployment\deploy.ps1`), because the portal calls the admin. `deploy-all.ps1` does exactly that, after sending the settings (`-SkipSettings` leaves them out, `-SkipBuild` reuses the last builds). It expects the portal repo next to this one (`C:\IKAIKA\ikaika-portal`); `-PortalRepo` points it elsewhere.
 
 **What `deploy.ps1` does:**
 1. Runs `build.ps1`: builds CSS and fonts for the subfolder and packs `out/central-platform.zip`.
 2. Uploads the zip and the server scripts.
 3. On the server, `deploy-admin.sh` unpacks the zip, runs `composer install`, and swaps in the new release.
-4. It then migrates, republishes the public folder, prunes old backups, and prints the health check.
+4. It then migrates, applies the tracker patches (`sql/transaction_tracker/patches/*.sql`, safe to rerun), adds the every-minute scheduler cron if it is missing, republishes the public folder, prunes old backups, and prints the health check.
 
 Expected last lines:
 
@@ -60,11 +62,14 @@ Databases: `eoxvhumy_ts_core`, `eoxvhumy_ts_portal`, `eoxvhumy_ts_tracker`, `eox
 
 | File | Runs on | Does |
 | --- | --- | --- |
-| `deploy.ps1` | your PC | build, upload, deploy (the one you normally run) |
+| `deploy-all.ps1` | your PC | settings, admin, then portal in one go |
+| `deploy.ps1` | your PC | build, upload, deploy the admin |
+| `push-env.ps1` | your PC | sends the secret settings from your local `.env`, replacing the server's lines, then applies them |
 | `copy-databases.ps1` | your PC | dump local databases, upload, create any missing database, import |
 | `build.ps1` | your PC | builds `out/central-platform.zip` only |
 | `dump-local-databases.ps1` | your PC | dumps local databases to `out/db/*.sql` only |
-| `server/deploy-admin.sh` | server | install, swap, migrate, publish, prune |
+| `server/deploy-admin.sh` | server | install, swap, migrate, tracker patches, scheduler cron, publish, prune |
+| `server/merge-env.sh` | server | replaces the keys `push-env.ps1` sends in `test-server/.env`, then runs `apply-env.sh` |
 | `server/create-databases.sh` | server | creates the databases and user through cPanel `uapi`; safe to rerun |
 | `server/import-databases.sh` | server | loads the uploaded dumps, then deletes them |
 | `server/setup-env.sh` | server, once | builds `test-server/.env` from staging's |
@@ -88,39 +93,26 @@ ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
 
 `apply-env.sh` rebuilds `app/.env` from `.env` plus `db.env` and refreshes Laravel's config cache. It ends with `Applied. Mailer: ...`. Don't copy `.env` into `app/` by hand, because that would drop the database lines.
 
-**Email** goes through the WordPress bridge on ikaikabim.com (`MAIL_MAILER=wprelay`), the same as local. That route arrives in Outlook without the "can't verify sender" banner. To copy your local mail lines to the server again (the key is piped, never shown):
+**Email** goes through the WordPress bridge on ikaikabim.com (`MAIL_MAILER=wprelay`), the same as local. That route arrives in Outlook without the "can't verify sender" banner.
+
+**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
+
+- Cloudinary (email images, reimbursement receipts): until its keys are on the server, uploads answer "Image upload is not configured." / "Receipt upload is not configured.".
+- Airtable stays empty on the Test Server so test data is never synced into the real base.
+
+To see which settings the server has (names only, no values):
 
 ```powershell
-Select-String -Path .env -Pattern '^(MAIL_MAILER|MAIL_RELAY_URL|MAIL_RELAY_KEY)=' | ForEach-Object Line | ssh bluehost "cat >> ~/apps/test-server/.env"
-ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
+ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET MAIL_RELAY_URL MAIL_RELAY_KEY; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
 ```
 
-Settings still empty on the Test Server: `CLOUDINARY_*` (email image uploads), `AIRTABLE_*` and `BITBUCKET_*` (see below). Leave Airtable empty so test data is never synced into the real base.
-
-**Cloudinary** (email images and reimbursement receipts) works only once its three keys are in the server's `.env`: a deploy never copies your local `.env`, by design. Until then uploads answer "Image upload is not configured." / "Receipt upload is not configured.". Copy them from your local `.env` the same way as the mail lines (piped, never shown):
-
-```powershell
-Select-String -Path .env -Pattern '^CLOUDINARY_(CLOUD_NAME|API_KEY|API_SECRET)=' | ForEach-Object Line | ssh bluehost "cat >> ~/apps/test-server/.env"
-ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
-```
-
-To see which of these settings the server has (names only, no values):
-
-```powershell
-ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
-```
-
-**Finance / Accounts** needs the `account_fund_transfers` table in the tracker database; a deploy never creates tracker tables. Until it exists the page says "We could not load the accounts.". Run once (from this repo; the server's `db.env` supplies the database, user and password, so nothing secret is typed):
-
-```powershell
-Get-Content sql	ransaction_trackerccount_fund_transfers.sql | Where-Object { $_ -notmatch '^USE ' } | ssh bluehost 'source ~/apps/test-server/db.env && MYSQL_PWD=$DB_PASSWORD mysql -u "$DB_USERNAME" "$TRACKER_DB_DATABASE"'
-```
+**Tracker tables** (e.g. Finance / Accounts' `account_fund_transfers`): the tracker database is the transaction tracker's own, so no Laravel migration reaches it. Its changes live in `sql/transaction_tracker/patches/` and every admin deploy runs each one, so they must be safe to rerun (`CREATE TABLE IF NOT EXISTS`, ...). A new one: add a dated file there; fresh installs also need it in `schema.sql`. A missing table shows as "We could not load the accounts." or a similar load error.
 
 ## Bitbucket code activity (MIS projects)
 
 MIS projects count commits and lines from the Bitbucket repositories linked on their Add/Edit Project form. Each commit counts on its own day in Manila time, so a Daily or Late Report for a date shows that date's work. Three things make it run on the Test Server.
 
-**1. Two settings** in `~/apps/test-server/.env` (see "Changing a setting"), then `apply-env.sh`:
+**1. Two settings**, sent by `push-env.ps1` from your local `.env` (see "Changing a setting"):
 
 ```text
 BITBUCKET_TOKEN=          an Atlassian API token with only read:repository:bitbucket
@@ -139,13 +131,7 @@ Make the token under a dedicated read-only Bitbucket user if you can: it reads e
 
 A push syncs that repository at once. "View requests" on the webhook shows each delivery: `202` is good, `401` means the secret differs.
 
-**3. The scheduler cron**, so the hourly sync runs (it catches a missed webhook and finishes counting a long history). cPanel → Cron Jobs → every minute (`* * * * *`):
-
-```text
-cd ~/apps/test-server/app && php artisan schedule:run >> /dev/null 2>&1
-```
-
-If `php` there is not PHP 8.3 or newer, use the full path from `ssh bluehost "which php; php -v"`.
+**3. The scheduler cron**, so the hourly sync runs (it catches a missed webhook, picks up a newly linked repository and finishes counting a long history). Every admin deploy adds it if it is missing, so there is nothing to do by hand; cPanel → Cron Jobs lists it as an every-minute `... artisan schedule:run` line. Without the cron or a webhook nothing syncs by itself: linking a repository on a project does not start a sync.
 
 **Check it:**
 
