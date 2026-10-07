@@ -2,12 +2,14 @@
 
 use App\Http\Controllers\Api\Portal\Manage\AccessController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
+use App\Http\Controllers\Api\Portal\Manage\FlaggedMembersController;
 use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
 use App\Http\Controllers\Api\Portal\Manage\ProjectSettingsController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
 use App\Http\Middleware\AuthenticatePortalJwt;
+use App\Support\Portal\PortalFlaggedMembers;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
@@ -89,6 +91,14 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->whereNumber('id');
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
+    // Flagged users: whoever may approve or reject flagged reports puts people on review and takes them off.
+    Route::middleware(['portal.rule:'.PortalFlaggedMembers::RULE, 'throttle:portal-manage-requests'])
+        ->get('manage/flagged-members', [FlaggedMembersController::class, 'index']);
+    Route::middleware(['portal.rule:'.PortalFlaggedMembers::RULE, 'throttle:portal-manage-requests-write'])->group(function (): void {
+        Route::post('manage/flagged-members', [FlaggedMembersController::class, 'store']);
+        Route::delete('manage/flagged-members/{id}', [FlaggedMembersController::class, 'destroy'])
+            ->whereNumber('id');
+    });
     Route::middleware(['portal.rule:manage.requests.reimbursement.payout', 'throttle:portal-manage-requests-write'])
         ->post('manage/requests/reimbursement/{id}/payout-receipt', [RequestsController::class, 'storePayoutReceipt'])
         ->whereNumber('id');

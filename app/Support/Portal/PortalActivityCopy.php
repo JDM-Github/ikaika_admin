@@ -103,6 +103,17 @@ final class PortalActivityCopy
             : $who.' rejected the project '.$name.($remarks === null ? '.' : ': '.$remarks);
     }
 
+    // Logged under the approver only: the person flagged never sees it.
+    public static function flaggedMember(string $memberName): string
+    {
+        return self::YOU.' flagged '.$memberName.' for report review';
+    }
+
+    public static function unflaggedMember(string $memberName): string
+    {
+        return self::YOU.' took '.$memberName.' off report review';
+    }
+
     public static function decidedProject(string $name, bool $isApproved): string
     {
         return self::YOU.($isApproved ? ' approved' : ' rejected').' the project '.$name;

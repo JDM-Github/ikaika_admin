@@ -226,6 +226,32 @@ class PortalModule implements ProductModule
                             ],
                         ],
                     ],
+                    'flagged-members' => [
+                        'label' => 'Flagged users',
+                        'path' => 'manage/flagged-members',
+                        'requires_admin' => true,
+                        'operations' => [
+                            [
+                                'method' => 'GET',
+                                'path' => 'manage/flagged-members',
+                                'label' => 'List',
+                                'auth' => true,
+                            ],
+                            [
+                                'method' => 'POST',
+                                'path' => 'manage/flagged-members',
+                                'label' => 'Flag',
+                                'auth' => true,
+                                'body' => ['employeeId' => 1, 'reason' => 'Reports need a second look this month.'],
+                            ],
+                            [
+                                'method' => 'DELETE',
+                                'path' => 'manage/flagged-members/{id}',
+                                'label' => 'Unflag',
+                                'auth' => true,
+                            ],
+                        ],
+                    ],
                     'access' => [
                         'label' => 'Access Rules',
                         'path' => 'manage/access/{id}',

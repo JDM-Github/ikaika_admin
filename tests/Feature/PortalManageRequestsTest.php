@@ -655,6 +655,109 @@ class PortalManageRequestsTest extends TestCase
         $this->assertNull($item['receiptThumbUrl']);
     }
 
+    // Flagged users (supervisor, 2026-10-07): an approver puts someone on review, and they are never told.
+    public function test_an_approver_flags_a_member_who_is_never_told(): void
+    {
+        [$member] = $this->membersInBothDepartments();
+        $this->clearFlags($member);
+        $token = $this->loginToken($this->departmentAdmin());
+
+        $listed = $this->withToken($token)->getJson('/api/development/portal/manage/flagged-members')->assertOk();
+        $this->assertContains((string) $member->getKey(), array_column($listed->json('candidates'), 'employeeId'));
+        $this->assertNotContains((string) $member->getKey(), array_column($listed->json('data'), 'employeeId'));
+
+        $response = $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $member->getKey(),
+            'reason' => 'Reports need a second look this month.',
+        ])->assertCreated();
+
+        $flagged = collect($response->json('data'))->firstWhere('employeeId', (string) $member->getKey());
+        $this->assertIsArray($flagged);
+        $this->assertSame('Reports need a second look this month.', $flagged['reason']);
+        $this->assertSame($this->today(), $flagged['since']);
+        $this->assertNotContains((string) $member->getKey(), array_column($response->json('candidates'), 'employeeId'));
+
+        // The very record PortalSubmittedReports reads when it marks a filing for review.
+        $warning = DB::connection('portal')->table('employees_warnings')
+            ->join('warnings', 'warnings.id', '=', 'employees_warnings.warning_id')
+            ->where('employees_warnings.employee_id', $member->getKey())
+            ->where('warnings.status', 'Active')
+            ->first();
+        $this->assertNotNull($warning);
+        $this->assertSame('N/A', $warning->violation_type);
+
+        $this->assertFalse(PortalNotification::query()->where('employee_id', $member->getKey())->where('created_at', '>=', now()->subMinute())->exists());
+        $this->assertFalse(PortalLog::query()->where('employee_id', $member->getKey())->where('resource', 'manage.flagged-members')->exists());
+        $this->assertTrue(PortalLog::query()->where('resource', 'manage.flagged-members')->where('record_id', (string) $member->getKey())->exists());
+
+        $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $member->getKey(),
+            'reason' => 'Again.',
+        ])->assertStatus(422);
+    }
+
+    public function test_unflagging_takes_a_member_off_review_and_keeps_the_record(): void
+    {
+        [$member] = $this->membersInBothDepartments();
+        $this->clearFlags($member);
+        $token = $this->loginToken($this->departmentAdmin());
+        $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $member->getKey(),
+            'reason' => 'Review for a week.',
+        ])->assertCreated();
+
+        $response = $this->withToken($token)
+            ->deleteJson('/api/development/portal/manage/flagged-members/'.$member->getKey())
+            ->assertOk();
+
+        $this->assertNotContains((string) $member->getKey(), array_column($response->json('data'), 'employeeId'));
+        $this->assertContains((string) $member->getKey(), array_column($response->json('candidates'), 'employeeId'));
+        $statuses = DB::connection('portal')->table('employees_warnings')
+            ->join('warnings', 'warnings.id', '=', 'employees_warnings.warning_id')
+            ->where('employees_warnings.employee_id', $member->getKey())
+            ->where('warnings.description', 'Review for a week.')
+            ->pluck('warnings.status')
+            ->all();
+        $this->assertSame(['Inactive'], $statuses);
+
+        $this->withToken($token)
+            ->deleteJson('/api/development/portal/manage/flagged-members/'.$member->getKey())
+            ->assertNotFound();
+    }
+
+    // Flagging reaches only as far as Approve or reject on Flag Reports does: another department is not found.
+    public function test_a_department_admin_flags_only_their_own_department(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $this->clearFlags($inside, $outside);
+        $admin = $this->departmentAdmin();
+        $token = $this->loginToken($admin);
+
+        $candidates = array_column($this->withToken($token)->getJson('/api/development/portal/manage/flagged-members')->json('candidates'), 'employeeId');
+        $this->assertContains((string) $inside->getKey(), $candidates);
+        $this->assertNotContains((string) $outside->getKey(), $candidates);
+        $this->assertNotContains((string) $admin->getKey(), $candidates);
+
+        $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $outside->getKey(),
+            'reason' => 'Out of reach.',
+        ])->assertNotFound();
+        $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $admin->getKey(),
+            'reason' => 'Myself.',
+        ])->assertStatus(422)->assertJsonPath('message', 'You cannot flag yourself.');
+    }
+
+    public function test_flagging_needs_approve_or_reject_on_flag_reports(): void
+    {
+        $this->withToken($this->tokenForMember())
+            ->getJson('/api/development/portal/manage/flagged-members')
+            ->assertForbidden();
+        $this->withToken($this->tokenForMember())
+            ->postJson('/api/development/portal/manage/flagged-members', ['employeeId' => 1, 'reason' => 'x'])
+            ->assertForbidden();
+    }
+
     public function test_a_department_admin_sees_only_their_own_department_on_the_queue(): void
     {
         [$inside, $outside] = $this->membersInBothDepartments();
@@ -1035,6 +1138,16 @@ class PortalManageRequestsTest extends TestCase
     }
 
     // A developer sees every department, so tests about the queue itself do not depend on who is where.
+    // Live data carries real flags; a test starts its people off review, inside its own transaction.
+    private function clearFlags(Employee ...$members): void
+    {
+        $ids = DB::connection('portal')->table('employees_warnings')
+            ->whereIn('employee_id', array_map(static fn (Employee $member): int => (int) $member->getKey(), $members))
+            ->pluck('warning_id')
+            ->all();
+        DB::connection('portal')->table('warnings')->whereIn('id', $ids)->update(['status' => 'Inactive']);
+    }
+
     private function tokenForAdmin(): string
     {
         return $this->developerModeOn($this->loginToken($this->departmentAdmin(developer: true)));
