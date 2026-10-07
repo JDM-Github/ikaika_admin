@@ -689,8 +689,8 @@ Offset is an exchange, not extra hours on a reported day, so there is **no** "mu
 report" rule. Four rules decide the pair, and all four are enforced here as well as in the pickers:
 
 - **Two different dates.** Offsetting a day against itself is not an exchange. `422`.
-- **The day worked is today or the last seven days.** The day off may also sit in that window, or
-  be booked on any later working day — weekends and holidays are off the list.
+- **The day worked is within the last seven days or the week ahead.** The day off may also sit in
+  that recent window, or be booked on any later working day — weekends and holidays are off the list.
 - **Neither day already carries an offset or leave.** Both the work day and the day off occupy the
   calendar (`offsetDays`). A refused offset reopens both days, the same rule leave and overtime
   follow.

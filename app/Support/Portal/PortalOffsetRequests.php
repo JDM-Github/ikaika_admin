@@ -24,6 +24,8 @@ final class PortalOffsetRequests
 {
     public const WINDOW_DAYS = PortalSubmittedReports::MUTATION_WINDOW_DAYS;
 
+    public const WORK_LOOKAHEAD_DAYS = 7;
+
     public const TYPE = 'Offset';
 
     public const CACHE_TTL_SECONDS = 30;
@@ -675,8 +677,11 @@ final class PortalOffsetRequests
         }
         $day = $this->timezone->day($date);
         $today = $this->timezone->today();
-        if ($day->gt($today) || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
-            abort(422, 'The day to work must be today or one of the last seven days.');
+        // A week either side of today: the report forms' recent window, plus a week ahead so a rest
+        // day can be put on the calendar before it is worked.
+        if ($day->gt($today->copy()->addDays(self::WORK_LOOKAHEAD_DAYS))
+            || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
+            abort(422, 'The day to work must be within the last seven days or the week ahead.');
         }
     }
 

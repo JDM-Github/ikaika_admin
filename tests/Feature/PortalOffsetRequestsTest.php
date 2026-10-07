@@ -174,11 +174,14 @@ class PortalOffsetRequestsTest extends TestCase
             'requests' => [$this->group(Carbon::today()->subDays(8)->toDateString(), $dayOff, $project)],
         ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'The day to work must be today or one of the last seven days.');
+            ->assertJsonPath('message', 'The day to work must be within the last seven days or the week ahead.');
 
+        // A week ahead is allowed; the day past that is not.
         $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
-            'requests' => [$this->group(Carbon::tomorrow()->toDateString(), $dayOff, $project)],
-        ])->assertStatus(422);
+            'requests' => [$this->group(Carbon::today()->addDays(8)->toDateString(), $dayOff, $project)],
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'The day to work must be within the last seven days or the week ahead.');
 
         $work = $this->freeDate($actor, 1);
         $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
