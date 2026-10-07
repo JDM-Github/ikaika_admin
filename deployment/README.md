@@ -97,6 +97,19 @@ ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
 
 Settings still empty on the Test Server: `CLOUDINARY_*` (email image uploads), `AIRTABLE_*` and `BITBUCKET_*` (see below). Leave Airtable empty so test data is never synced into the real base.
 
+**Cloudinary** (email images and reimbursement receipts) works only once its three keys are in the server's `.env`: a deploy never copies your local `.env`, by design. Until then uploads answer "Image upload is not configured." / "Receipt upload is not configured.". Copy them from your local `.env` the same way as the mail lines (piped, never shown):
+
+```powershell
+Select-String -Path .env -Pattern '^CLOUDINARY_(CLOUD_NAME|API_KEY|API_SECRET)=' | ForEach-Object Line | ssh bluehost "cat >> ~/apps/test-server/.env"
+ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
+```
+
+To see which of these settings the server has (names only, no values):
+
+```powershell
+ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
+```
+
 ## Bitbucket code activity (MIS projects)
 
 MIS projects count commits and lines from the Bitbucket repositories linked on their Add/Edit Project form. Each commit counts on its own day in Manila time, so a Daily or Late Report for a date shows that date's work. Three things make it run on the Test Server.
