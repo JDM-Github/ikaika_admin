@@ -6,6 +6,7 @@ use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalOffsetRequests;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
@@ -176,8 +177,15 @@ class PortalOffsetRequestsTest extends TestCase
         $actor = $this->activeMember();
         $project = $this->firstOwnProject($actor);
         $token = $this->loginToken($actor);
-        $first = $this->freeDate($actor, 1);
-        $second = $this->freeDayOff($actor, $first, 1);
+        // Two distinct work days inside the window, so the pair reads as two offsets rather than one.
+        $days = [];
+        for ($offset = 0; count($days) < 2 && $offset >= -PortalOffsetRequests::WINDOW_DAYS; $offset--) {
+            $days[$this->freeDate($actor, $offset)] = true;
+        }
+        $days = array_keys($days);
+        $this->assertCount(2, $days, 'Two distinct work days were needed inside the offset window.');
+        $first = $days[0];
+        $second = $days[1];
         $farAhead = Carbon::today()->addMonths(3)->toDateString();
 
         $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
@@ -548,20 +556,28 @@ class PortalOffsetRequestsTest extends TestCase
     /**
      * A day inside the work window with no report and no request of any kind on it.
      */
-    // A free day from today on: an offset's day worked is booked ahead.
+    // A free day from today on: an offset's day worked is booked ahead. Searched outwards from the day
+    // asked for, but never past either end of the window the form accepts, so the fixture follows the
+    // window rather than the window having to follow the fixture.
     private function freeDate(Employee $actor, int $daysAhead): string
     {
         $name = $this->memberName($actor);
-        for ($offset = $daysAhead; $offset <= $daysAhead + 60; $offset++) {
-            $candidate = Carbon::today()->addDays($offset)->toDateString();
-            if ($this->isOccupied($actor, $name, $candidate)) {
-                continue;
-            }
+        $nearest = min($daysAhead, PortalOffsetRequests::WORK_LOOKAHEAD_DAYS);
+        for ($step = 0; $step <= PortalOffsetRequests::WORK_LOOKAHEAD_DAYS + PortalOffsetRequests::WINDOW_DAYS; $step++) {
+            foreach ([$nearest + $step, $nearest - $step] as $offset) {
+                if ($offset > PortalOffsetRequests::WORK_LOOKAHEAD_DAYS || $offset < -PortalOffsetRequests::WINDOW_DAYS) {
+                    continue;
+                }
+                $candidate = Carbon::today()->addDays($offset)->toDateString();
+                if ($this->isOccupied($actor, $name, $candidate)) {
+                    continue;
+                }
 
-            return $candidate;
+                return $candidate;
+            }
         }
 
-        $this->fail('No free day was available ahead for the offset.');
+        $this->fail('No free day was available inside the offset window.');
     }
 
     /**
