@@ -3,10 +3,13 @@
 namespace App\Support\Portal;
 
 use Composer\CaBundle\CaBundle;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Throwable;
 
 /**
  * The one door to the Bitbucket Cloud REST API: a repository's commits page by page (every branch, newest
@@ -94,7 +97,10 @@ final class PortalBitbucketClient
         return Http::withToken($token)
             ->withOptions(['verify' => CaBundle::getSystemCaRootBundlePath()])
             ->acceptJson()
-            ->timeout(30);
+            ->timeout(30)
+            // Bitbucket sometimes stalls or sheds load on one diffstat (2026-10-07): try twice more before failing the run.
+            ->retry([1000, 3000], when: static fn (Throwable $error): bool => $error instanceof ConnectionException
+                || ($error instanceof RequestException && ($error->response->status() === 429 || $error->response->serverError())), throw: false);
     }
 
     private function base(): string

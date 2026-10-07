@@ -4,6 +4,7 @@ namespace App\Support\Portal;
 
 use Carbon\Carbon;
 use Illuminate\Database\Connection;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -79,7 +80,12 @@ final class PortalBitbucketSync
             $counted = $this->count($repository, $countLimit);
         } catch (Throwable $error) {
             // A client failure says only Bitbucket's status and message; anything else stays generic.
-            $message = $error instanceof RuntimeException ? mb_substr($error->getMessage(), 0, 255) : 'The sync failed.';
+            $message = match (true) {
+                $error instanceof RuntimeException => mb_substr($error->getMessage(), 0, 255),
+                // Still timing out after the client's retries: say so, rather than a bare failure.
+                $error instanceof ConnectionException => 'Bitbucket did not answer in time; the next run picks up where this stopped.',
+                default => 'The sync failed.',
+            };
             $this->connection()->table('bitbucket_repositories')->where('id', $id)->update(['last_sync_error' => $message]);
 
             return $message;
