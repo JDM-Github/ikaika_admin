@@ -123,6 +123,19 @@ final class AirtableSyncMap
                 'Earn Code' => ['junction' => 'user_reports_earn_codes', 'local' => 'user_report_id', 'foreign' => 'earn_code_id', 'table' => 'earn_codes'],
             ],
         ],
+        // An admin's late-submission decision is not a filing: reports.submitted is what sends the
+        // report itself, so this resource carries only the two columns the decision changed, and only
+        // on the lines it decided. Unmapped before 2026-10-07, which left every decision skipped.
+        'reports.late' => [
+            'sql_table' => 'user_reports',
+            'airtable_table' => 'User Reports',
+            'rows' => ['lines' => 'userReportIds', 'removed' => 'removedAirtableIds', 'deleted' => 'lines'],
+            'changed_only' => ['fields', 'changes'],
+            'fields' => [
+                'late_submission_approval' => 'LateSubmission Approval',
+                'approver_remarks' => 'Approver Remarks',
+            ],
+        ],
         // The admin grid ledgers an edit under the bare table name. Only the columns it changed are
         // sent, and only to a record Airtable already has, since the grid edits rows in place.
         'requests' => [

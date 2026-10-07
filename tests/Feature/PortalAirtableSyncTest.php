@@ -708,6 +708,40 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertStringContainsString('retried with it next run', implode(' ', $later['problems']));
     }
 
+    // An admin's late-submission decision is its own resource: only the two columns it decided reach
+    // Airtable, and only on the lines it decided. It was unmapped, so every decision stayed skipped.
+    public function test_a_late_decision_sends_only_the_two_columns_it_changed(): void
+    {
+        $this->fakeAirtable();
+        $line = $this->reportLine('recLINE0000000001');
+        // decideLate() writes the column before the ledger entry, and the sync pushes the row's state.
+        DB::connection('portal')->table('user_reports')->where('id', $line)->update(['late_submission_approval' => 'Approved']);
+        $actionId = app(CoreLedger::class)->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            'portal.user_reports',
+            [
+                'id' => '2026-10-05-late',
+                'userReportIds' => [$line],
+                'reportedOn' => '2026-10-05',
+                'lateSubmissionApproval' => 'Approved',
+                'approverRemarks' => 'Late but explained.',
+                'fields' => ['late_submission_approval' => 'Approved', 'approver_remarks' => 'Late but explained.'],
+            ],
+            'reports.late',
+            '2026-10-05-late',
+            '1:2026-10-05-late',
+            1,
+            null,
+        );
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('update', $item['outcome']);
+        $this->assertSame(['LateSubmission Approval', 'Approver Remarks'], array_keys($item['fields']));
+        $this->assertSame('Approved', $item['fields']['LateSubmission Approval']);
+    }
+
     /**
      * @param  array<string, mixed>|null  $schema
      */

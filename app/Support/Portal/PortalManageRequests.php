@@ -289,6 +289,11 @@ final class PortalManageRequests
                 'reportedOn' => $decided['date'],
                 'lateSubmissionApproval' => $status,
                 'approverRemarks' => $remarks,
+                // The sync sends changed columns only, so it needs them as a column map, not as prose.
+                'fields' => [
+                    'late_submission_approval' => $status,
+                    'approver_remarks' => $remarks,
+                ],
             ]);
 
             return [
