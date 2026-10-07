@@ -40,6 +40,7 @@ final class PortalManageProjects
         private readonly PortalProjectTrail $trail,
         private readonly PortalProjectApproval $approval,
         private readonly PortalViewProjects $projects,
+        private readonly PortalProjectRepositories $repositories,
     ) {}
 
     /**
@@ -176,6 +177,114 @@ final class PortalManageProjects
             'section' => 'manage',
             'resource' => 'projects',
             'data' => $this->items($fresh === null ? [] : [$fresh])[0] ?? [],
+        ];
+    }
+
+    /**
+     * Everything the Add / Edit Project form carries, for one project the approver covers, so Manage /
+     * Projects can open it read-only before anyone edits it.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function show(Employee $actor, Request $request, int $projectId): array
+    {
+        $row = $this->connection()->table('projects')->where('id', $projectId)->whereNull('deleted_at')->first();
+        if ($row === null) {
+            abort(404, 'That project was not found.');
+        }
+        if (! $this->approval->covers($actor, $request, $row)) {
+            abort(403, 'Opening this project needs Project Approver over it.');
+        }
+
+        return [
+            'section' => 'manage',
+            'resource' => 'projects',
+            'data' => $this->detail($row),
+        ];
+    }
+
+    /**
+     * The project as that form would show it: every column the form writes, its client, its people
+     * split by the role on the junction, its scopes and its repositories.
+     *
+     * @return array<string, mixed>
+     */
+    private function detail(object $row): array
+    {
+        $projectId = (int) $row->id;
+        $levels = ['lod' => $this->text($row->lod ?? null)];
+        foreach (PortalProjectEditor::LEVEL_COLUMNS as $discipline => $column) {
+            $levels[$discipline] = $this->text($row->{$column} ?? null);
+        }
+        $links = [];
+        foreach (PortalProjectEditor::LINK_COLUMNS as $kind => $column) {
+            $links[$kind] = $this->text($row->{$column} ?? null);
+        }
+
+        // One junction, two roles: the form shows members and support members apart.
+        $memberNames = [];
+        $supportNames = [];
+        $people = $this->connection()->table('employees_projects')
+            ->join('employees', 'employees.id', '=', 'employees_projects.employee_id')
+            ->where('employees_projects.project_id', $projectId)
+            ->orderBy('employees.id')
+            ->get(['employees.first_name', 'employees.last_name', 'employees_projects.role_on_project']);
+        foreach ($people as $person) {
+            $name = $this->personName($person);
+            if (($person->role_on_project ?? null) === 'support') {
+                $supportNames[] = $name;
+            } else {
+                $memberNames[] = $name;
+            }
+        }
+
+        $client = $this->connection()->table('projects_clients')
+            ->join('clients', 'clients.id', '=', 'projects_clients.client_id')
+            ->where('projects_clients.project_id', $projectId)
+            ->orderBy('clients.id')
+            ->value('clients.name');
+        $scopes = [];
+        $scopeRows = $this->connection()->table('projects_project_scopes')
+            ->join('project_scopes', 'project_scopes.id', '=', 'projects_project_scopes.project_scope_id')
+            ->where('projects_project_scopes.project_id', $projectId)
+            ->orderBy('project_scopes.id')
+            ->get(['project_scopes.id_no']);
+        foreach ($scopeRows as $scope) {
+            // A scope is its WBS code; the table carries no name of its own.
+            $scopes[] = (string) ($scope->id_no ?? '');
+        }
+
+        $leadEmail = strtolower(trim((string) ($row->project_lead_email ?? '')));
+        $lead = $leadEmail === '' ? null : $this->connection()->table('employees')
+            ->where($this->connection()->raw('LOWER(email)'), $leadEmail)
+            ->first(['first_name', 'last_name']);
+        $requester = ($row->requested_by ?? null) === null
+            ? null
+            : $this->connection()->table('employees')->where('id', (int) $row->requested_by)->first(['first_name', 'last_name']);
+        $requestedAt = $row->requested_at ?? null;
+
+        return [
+            'id' => (string) $projectId,
+            'name' => $this->text($row->project_name ?? null) ?? 'Project',
+            'projectNumber' => $this->text($row->project_number ?? null),
+            'department' => $this->text($row->department ?? null),
+            'typeLabel' => $this->text($row->type_of_job ?? null),
+            'projectStatus' => PortalViewProjectPresenter::status($row->status ?? null),
+            'area' => ($row->area_sqft ?? null) === null ? null : (string) $row->area_sqft,
+            'leadName' => $lead === null ? null : $this->personName($lead),
+            'leadEmail' => $this->text($row->project_lead_email ?? null),
+            'clientName' => $this->text($client),
+            'memberNames' => $memberNames,
+            'supportMemberNames' => $supportNames,
+            'levels' => $levels,
+            'links' => $links,
+            'repositories' => $this->repositories->forProject($projectId),
+            'scopes' => $scopes,
+            'creationStatus' => PortalViewProjectPresenter::creationStatus($row->project_creation_status ?? null),
+            'requestedByName' => $requester === null ? null : $this->personName($requester),
+            'requestedAt' => $requestedAt === null ? null : PortalViewProjectPresenter::instant($requestedAt),
+            'approverName' => $this->text($row->project_creation_approver ?? null),
+            'remarks' => $this->text($row->project_creation_approver_remarks ?? null),
         ];
     }
 

@@ -64,7 +64,7 @@ final class PortalProjectEditor
         'cancelled' => 'Cancelled',
     ];
 
-    private const LEVEL_COLUMNS = [
+    public const LEVEL_COLUMNS = [
         'structural' => 'st_lod',
         'architectural' => 'ar_lod',
         'electrical' => 'el_lod',
@@ -73,7 +73,7 @@ final class PortalProjectEditor
         'fire-protection' => 'fp_lod',
     ];
 
-    private const LINK_COLUMNS = [
+    public const LINK_COLUMNS = [
         'forma' => 'forma_link',
         'ms-teams' => 'msteams_project_link',
         'ms-planner' => 'ms_planner_link',

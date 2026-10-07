@@ -17,6 +17,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // Manage / Projects follows Project Manager; which departments it covers is decided in PortalManageProjects.
     Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects'])
         ->get('manage/projects', [ProjectsController::class, 'index']);
+    // One project's full detail, read-only, for the details page its row opens.
+    Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects'])
+        ->get('manage/projects/{id}', [ProjectsController::class, 'show'])
+        ->whereNumber('id');
     Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects-write'])
         ->patch('manage/projects/{id}', [ProjectsController::class, 'update'])
         ->whereNumber('id');

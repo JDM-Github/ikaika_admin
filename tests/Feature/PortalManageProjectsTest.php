@@ -268,6 +268,61 @@ class PortalManageProjectsTest extends TestCase
         $this->assertSame('pending', $board->firstWhere('id', (string) $this->projectId)['creationStatus'] ?? null);
     }
 
+    // The details page opens one project with every field the Add / Edit Project form carries.
+    public function test_a_project_opens_with_every_field_the_form_carries(): void
+    {
+        $this->approverDefault('all');
+        $token = $this->token($this->member);
+        DB::connection('portal')->table('projects')->where('id', $this->projectId)->update([
+            'project_number' => '900001',
+            'type_of_job' => 'Scan-to-BIM',
+            'area_sqft' => 1200,
+            'project_lead_email' => strtolower((string) $this->admin->email),
+            'lod' => 'LOD 300',
+            'ar_lod' => 'LOD 350',
+            'forma_link' => 'https://forma.example/x',
+        ]);
+        DB::connection('portal')->table('employees_projects')->insert([
+            ['employee_id' => $this->admin->getKey(), 'project_id' => $this->projectId, 'role_on_project' => 'member'],
+            ['employee_id' => $this->member->getKey(), 'project_id' => $this->projectId, 'role_on_project' => 'support'],
+        ]);
+
+        $data = $this->withToken($token)
+            ->getJson('/api/development/portal/manage/projects/'.$this->projectId)
+            ->assertOk()
+            ->json('data');
+
+        $this->assertSame('Waiting Project 2020', $data['name']);
+        $this->assertSame('900001', $data['projectNumber']);
+        $this->assertSame('Engineering', $data['department']);
+        $this->assertSame('Scan-to-BIM', $data['typeLabel']);
+        // DECIMAL comes back with its scale, which the portal formats for display.
+        $this->assertSame('1200.00', $data['area']);
+        $this->assertSame('LOD 300', $data['levels']['lod']);
+        $this->assertSame('LOD 350', $data['levels']['architectural']);
+        $this->assertSame('https://forma.example/x', $data['links']['forma']);
+        $this->assertSame([$this->member->first_name.' '.$this->member->last_name], $data['supportMemberNames']);
+        $this->assertCount(1, $data['memberNames']);
+        $this->assertNotNull($data['requestedByName']);
+    }
+
+    // Only an approver who covers the project may open it; anybody else is refused at the rule.
+    public function test_a_project_outside_the_reach_is_refused(): void
+    {
+        $this->withToken($this->token($this->member))
+            ->getJson('/api/development/portal/manage/projects/'.$this->projectId)
+            ->assertForbidden();
+    }
+
+    public function test_a_project_that_is_not_there_is_not_found(): void
+    {
+        $this->approverDefault('all');
+
+        $this->withToken($this->token($this->member))
+            ->getJson('/api/development/portal/manage/projects/99999999')
+            ->assertNotFound();
+    }
+
     private function latestTrail(): ?string
     {
         return DB::connection('portal')->table('projects_action_history')
