@@ -24,8 +24,6 @@ final class PortalOffsetRequests
 {
     public const WINDOW_DAYS = PortalSubmittedReports::MUTATION_WINDOW_DAYS;
 
-    public const DAY_OFF_LOOKAHEAD_DAYS = 14;
-
     public const TYPE = 'Offset';
 
     public const CACHE_TTL_SECONDS = 30;
@@ -689,9 +687,10 @@ final class PortalOffsetRequests
         }
         $day = $this->timezone->day($date);
         $today = $this->timezone->today();
-        if ($day->gt($today->copy()->addDays(self::DAY_OFF_LOOKAHEAD_DAYS))
-            || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
-            abort(422, 'The day off must fall between seven days ago and two weeks ahead.');
+        // No far edge: the day off is the future half of the swap, so any later working day is fair
+        // game. The picker keeps weekends and holidays off the list; the recent window is the floor.
+        if ($day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
+            abort(422, 'The day off must be one of the last seven days or any later working day.');
         }
     }
 

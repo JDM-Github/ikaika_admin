@@ -182,10 +182,15 @@ class PortalOffsetRequestsTest extends TestCase
 
         $work = $this->freeDate($actor, 1);
         $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
-            'requests' => [$this->group($work, Carbon::today()->addDays(15)->toDateString(), $project)],
+            'requests' => [$this->group($work, Carbon::today()->subDays(8)->toDateString(), $project)],
         ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'The day off must fall between seven days ago and two weeks ahead.');
+            ->assertJsonPath('message', 'The day off must be one of the last seven days or any later working day.');
+
+        // No far edge: a working day past the old fortnight is a valid day off.
+        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
+            'requests' => [$this->group($work, Carbon::today()->addDays(30)->toDateString(), $project)],
+        ])->assertStatus(201);
     }
 
     public function test_offset_is_refused_when_the_two_dates_are_the_same(): void

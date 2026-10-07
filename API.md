@@ -690,7 +690,7 @@ report" rule. Four rules decide the pair, and all four are enforced here as well
 
 - **Two different dates.** Offsetting a day against itself is not an exchange. `422`.
 - **The day worked is today or the last seven days.** The day off may also sit in that window, or
-  be booked ahead up to a fortnight.
+  be booked on any later working day — weekends and holidays are off the list.
 - **Neither day already carries an offset or leave.** Both the work day and the day off occupy the
   calendar (`offsetDays`). A refused offset reopens both days, the same rule leave and overtime
   follow.
