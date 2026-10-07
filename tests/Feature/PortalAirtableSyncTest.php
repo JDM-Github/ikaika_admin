@@ -636,6 +636,78 @@ class PortalAirtableSyncTest extends TestCase
         Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET');
     }
 
+    // A report ledgered before line ids were recorded cannot be planned, so it is left, never failed.
+    public function test_a_report_action_carrying_no_line_ids_is_skipped(): void
+    {
+        $this->fakeAirtable();
+        $actionId = $this->reportAction([]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('skipped', $item['outcome']);
+        $this->assertStringContainsString('no line ids', implode(' ', $item['problems']));
+    }
+
+    // The grid only ever changes a record Airtable holds: a row it has never seen cannot be rebuilt
+    // from a changed column, so the action is blocked rather than creating a half-empty record.
+    public function test_a_changed_only_row_airtable_has_never_seen_is_blocked(): void
+    {
+        $this->fakeAirtable();
+        $employeeId = (int) DB::connection('portal')->table('employees')->insertGetId([
+            'id_no' => '900000-0001', 'first_name' => 'Never', 'last_name' => 'Synced', 'role' => 'User',
+        ]);
+        $actionId = app(CoreLedger::class)->recordEdit(
+            CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['fields' => ['role' => 'Admin']], 'employees', (string) $employeeId,
+        );
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('blocked', $item['outcome']);
+        $this->assertStringContainsString('Only changes to records Airtable already has', implode(' ', $item['problems']));
+        Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET');
+    }
+
+    // The grid ledgers an edit as a diff under `changes` as well as a flat `fields` map; either way
+    // it names the columns, and only those reach Airtable.
+    public function test_a_changes_diff_names_the_columns_to_send(): void
+    {
+        $this->fakeAirtable();
+        $employeeId = (int) DB::connection('portal')->table('employees')->whereNotNull('airtable_record_id')->orderBy('id')->value('id');
+        $actionId = app(CoreLedger::class)->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            'portal.employees',
+            ['changes' => ['email' => ['from' => 'old@ikaikabim.com', 'to' => 'new@ikaikabim.com']]],
+            'employees',
+            (string) $employeeId,
+        );
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('update', $item['outcome']);
+        $this->assertSame(['Email'], array_keys($item['fields']));
+    }
+
+    // Two actions on one row: when the first could not go through, the later one says so rather than
+    // planning a second push of the same row, and both retry together next run.
+    public function test_a_later_action_on_a_row_the_first_could_not_send_is_retried_with_it(): void
+    {
+        $this->fakeAirtable();
+        $requestId = $this->leaveRow('Nonsense', 'Vacation Leave');
+        $first = $this->ledgerAdd($requestId);
+        $second = $this->ledgerAdd($requestId, 'edit');
+
+        $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
+
+        $this->assertSame('blocked', $items->firstWhere('actionId', $first)['outcome'] ?? null);
+        $later = $items->firstWhere('actionId', $second);
+        $this->assertIsArray($later);
+        $this->assertSame('blocked', $later['outcome']);
+        $this->assertStringContainsString('retried with it next run', implode(' ', $later['problems']));
+    }
+
     /**
      * @param  array<string, mixed>|null  $schema
      */
