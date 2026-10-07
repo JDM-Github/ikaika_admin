@@ -222,6 +222,8 @@ class PortalProjectEditorTest extends TestCase
     {
         $member = $this->employee('user', 3);
         $admin = $this->employee('admin');
+        // An admin approves their own department's projects, so this one sits in the project's.
+        $admin->forceFill(['department' => 'Engineering'])->save();
         $this->grant($member, ['projects.create' => 'all']);
         $this->token($admin);
 
@@ -235,7 +237,7 @@ class PortalProjectEditorTest extends TestCase
         $this->assertNull($row->project_creation_approver);
         $this->assertSame((int) $member->getKey(), (int) $row->requested_by);
         $this->assertNotNull($row->requested_at);
-        // Admins hold Project Manager for every department, so they are told.
+        // An admin whose Project Approver covers the project's department is told.
         $this->assertTrue(DB::connection('portal')->table('notifications')
             ->where('employee_id', $admin->getKey())->where('type', 'projects.requested')->where('link_path', '/manage/manage-projects')->exists());
         $this->assertFalse(DB::connection('portal')->table('notifications')->where('employee_id', $member->getKey())->where('type', 'projects.requested')->exists());

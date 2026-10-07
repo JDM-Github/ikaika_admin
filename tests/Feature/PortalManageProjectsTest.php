@@ -44,6 +44,8 @@ class PortalManageProjectsTest extends TestCase
         }
         $this->member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
         $this->admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        // An admin approves their own department's projects by preset, so this one sits in the waiting project's.
+        $this->admin->forceFill(['department' => 'Engineering'])->save();
         $this->projectId = (int) DB::connection('portal')->table('projects')->insertGetId([
             'project_name' => 'Waiting Project 2020',
             'department' => 'Engineering',
@@ -156,18 +158,20 @@ class PortalManageProjectsTest extends TestCase
         $this->assertContains((string) $this->projectId, array_column($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'), 'id'));
     }
 
-    // An admin who narrows Project Manager to their department on Access loses other departments until they widen it back.
-    public function test_an_admin_narrowed_to_department_covers_only_it(): void
+    // An admin's Approver defaults to their own department (2026-10-07): another department's project is not theirs.
+    public function test_an_admin_approves_only_their_own_department_by_default(): void
     {
         $this->admin->forceFill(['department' => 'MIS'])->save();
+        Cache::flush();
         $token = $this->token($this->admin);
 
-        $this->withToken($token)->patchJson('/api/development/portal/access/reach', ['key' => 'projects.manager', 'reach' => 'department'])->assertOk();
         $this->assertNotContains((string) $this->projectId, array_column($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'), 'id'));
         $this->withToken($token)->patchJson(self::BASE.'/'.$this->projectId, ['decision' => 'approve'])->assertForbidden();
+        // Widening past the preset is not theirs to do on Access.
+        $this->withToken($token)->patchJson('/api/development/portal/access/reach', ['key' => 'projects.manager', 'reach' => 'all'])->assertStatus(422);
 
-        $this->withToken($token)->patchJson('/api/development/portal/access/reach', ['key' => 'projects.manager', 'reach' => 'all'])->assertOk();
-        $this->assertSame(0, DB::connection('portal')->table('access_self_reach')->where('employee_id', $this->admin->getKey())->count());
+        // Leading it brings it in, as department reach covers the projects led.
+        DB::connection('portal')->table('projects')->where('id', $this->projectId)->update(['project_lead_email' => $this->admin->email]);
         $this->assertContains((string) $this->projectId, array_column($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'), 'id'));
     }
 

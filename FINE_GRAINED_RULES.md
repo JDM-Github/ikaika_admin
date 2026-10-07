@@ -456,7 +456,7 @@ Descriptions (what the Access page shows on each row) live in the SQL.
       - `manage.users.access.limit` Limit powers — AED
       - `manage.users.access.peers` Manage other admins — ED (executives and MIS admins only)
     - `manage.users.information` Show employee information [R] — E (admin and above only)
-  - `projects.manager` Project Approver [R] — AED (Fin, Audie at lead; key kept from its Projects days)
+  - `projects.manager` Project Approver [R] — AED (admins department, executives all; Fin, Audie at lead; key kept from its Projects days)
 - `finance` Finance — AED (no reach: the tracker is the company's)
   - `finance.overview` Overview — AED
   - `finance.transactions` Transactions — AED

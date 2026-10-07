@@ -770,7 +770,8 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'admin', permission_key,
        CASE
            WHEN supports_reach = 0 THEN NULL
-           WHEN permission_key IN ('projects.view', 'projects.track', 'projects.manager', 'projects.edit', 'projects.scopes', 'projects.delete', 'projects.create', 'administration.actions') THEN 'all'
+           -- Project Approver stays at the admin's own department (plus the projects they lead), 2026-10-07.
+           WHEN permission_key IN ('projects.view', 'projects.track', 'projects.edit', 'projects.scopes', 'projects.delete', 'projects.create', 'administration.actions') THEN 'all'
            ELSE 'department'
        END,
        0

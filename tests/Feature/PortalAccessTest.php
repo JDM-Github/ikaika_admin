@@ -131,6 +131,8 @@ class PortalAccessTest extends TestCase
         unset($executive['projects.create.direct']);
         $admin = $executive;
         $admin['projects.lead'] = 'department';
+        // An admin approves their own department's projects (and the ones they lead); executives every one.
+        $admin['projects.manager'] = 'department';
         ksort($everything);
         ksort($developer);
         ksort($admin);
