@@ -5,9 +5,11 @@ namespace Tests\Feature;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -289,6 +291,31 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertSame('Seeded Client', $this->lastRowOf($account)->payor_payee);
     }
 
+    // The reported ask: a description reads as it was written, without the portal's own sentence on it.
+    public function test_a_description_is_the_note_alone_and_an_older_one_reads_without_the_portal_line(): void
+    {
+        $account = $this->account('Seeded Note Account', 'note.seeded@example.test', 0.00);
+        $envelope = $this->envelope('Seeded Note Envelope', 0.00);
+
+        $this->addTransaction(['type' => 'Income', 'name' => 'Client deposit', 'amount' => 50, 'envelopeId' => $envelope, 'accountId' => $account, 'notes' => 'dasdsad'])
+            ->assertCreated();
+        $row = $this->lastRowOf($account);
+        $this->assertSame('dasdsad', $row->description);
+        $this->assertNotEmpty($row->created_by);
+
+        $this->addTransaction(['type' => 'Income', 'name' => 'No note', 'amount' => 5, 'envelopeId' => $envelope, 'accountId' => $account])
+            ->assertCreated();
+        $this->assertNull($this->lastRowOf($account)->description);
+
+        // A row written before the change still carries the sentence; the list leaves it off.
+        DB::connection('tracker')->table('transactions')->where('id', $row->id)
+            ->update(['description' => 'dasdsad Recorded in the Ikaika portal by Jhon Noriel Malabanan.']);
+        Cache::flush();
+        $listed = collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->assertOk()->json('data'))
+            ->firstWhere('id', (string) $row->id);
+        $this->assertSame('dasdsad', $listed['description']);
+    }
+
     public function test_an_expense_on_the_payers_own_envelope_leaves_nothing_pending(): void
     {
         $nat = $this->account('Seeded Own Payer', 'own.payer@example.test', 500.00);
@@ -384,6 +411,88 @@ class PortalBudgetMovementsTest extends TestCase
         $this->postJson(self::BASE.'budget-accounts/transfers/1/complete', [], $headers)->assertForbidden();
         $this->postJson(self::BASE.'budget-envelopes/transfers', [], $headers)->assertForbidden();
         $this->postJson(self::BASE.'budget-transactions', [], $headers)->assertForbidden();
+        $this->postJson(self::BASE.'budget-transactions/receipts', [], $headers)->assertForbidden();
+        $this->postJson(self::BASE.'budget-accounts', [], $headers)->assertForbidden();
+    }
+
+    // The reported ask: Finance / Accounts opens a new account, held by a person and open at once.
+    public function test_an_account_is_added_open_and_held_by_one_person(): void
+    {
+        $holders = collect($this->getJson(self::BASE.'budget-accounts', $this->admin())->assertOk()->json('holders'));
+        $holder = $holders->first();
+        $this->assertNotNull($holder, 'Somebody without an open account was needed.');
+        $person = Employee::query()->findOrFail((int) $holder['employeeId']);
+
+        $id = (int) $this->postJson(self::BASE.'budget-accounts', [
+            'name' => 'Seeded New Account',
+            'holderId' => $holder['employeeId'],
+            'accountType' => 'Savings',
+            'institution' => 'BDO',
+        ], $this->admin())->assertCreated()->assertJsonPath('data.name', 'Seeded New Account')->json('data.id');
+
+        $row = DB::connection('tracker')->table('accounts')->where('id', $id)->first();
+        $this->assertSame(strtolower(trim((string) $person->email)), $row->email);
+        $this->assertSame(1, (int) $row->active);
+        $this->assertSame('Savings', $row->account_type);
+        $this->assertSame('BDO', $row->institution);
+        $this->assertTrue($this->logged('manage.budget-accounts', 'added the account Seeded New Account'));
+
+        $page = $this->getJson(self::BASE.'budget-accounts', $this->admin())->assertOk();
+        $listed = collect($page->json('data'))->firstWhere('id', (string) $id);
+        $this->assertSame($person->department, $listed['team']);
+        $this->assertNotContains($holder['employeeId'], array_column($page->json('holders'), 'employeeId'));
+
+        // One name is one account's, and a person holds one open account.
+        $this->postJson(self::BASE.'budget-accounts', ['name' => 'seeded new account'], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'An account named seeded new account already exists.');
+        $this->postJson(self::BASE.'budget-accounts', ['name' => 'Seeded Second Account', 'holderId' => $holder['employeeId']], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn (string $message): bool => str_ends_with($message, 'already holds the open account Seeded New Account.'));
+        $this->postJson(self::BASE.'budget-accounts', ['holderId' => $holder['employeeId']], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'An account needs a name.');
+    }
+
+    // The reported ask: a transaction takes an optional receipt photo, shown with it in the ledger.
+    public function test_a_receipt_photo_uploads_then_lands_on_the_added_transaction(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::response([
+                'secure_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/transactions/fare.jpg',
+                'original_filename' => 'fare',
+                'bytes' => 1200,
+            ], 200),
+        ]);
+        $account = $this->account('Seeded Receipt Account', 'receipt.seeded@example.test', 0.00);
+        $envelope = $this->envelope('Seeded Receipt Envelope', 0.00);
+
+        $uploaded = $this->post(self::BASE.'budget-transactions/receipts', ['file' => UploadedFile::fake()->create('fare.jpg', 12, 'image/jpeg')], $this->admin())
+            ->assertCreated();
+        $receiptId = $uploaded->json('data.receiptId');
+        $this->assertIsString($receiptId);
+        Http::assertSent(fn ($request): bool => str_contains((string) $request->body(), 'ikaika-portal/transactions'));
+
+        $this->addTransaction(['type' => 'Income', 'name' => 'Fare refund', 'amount' => 20, 'envelopeId' => $envelope, 'accountId' => $account, 'receiptId' => $receiptId])
+            ->assertCreated();
+        $row = $this->lastRowOf($account);
+        $stored = DB::connection('tracker')->table('attachments')->where(['table_name' => 'transactions', 'record_id' => $row->id, 'field_name' => 'receipt'])->first();
+        $this->assertNotNull($stored);
+        $this->assertSame('image/jpeg', $stored->mime_type);
+
+        Cache::flush();
+        $listed = collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->assertOk()->json('data'))->firstWhere('id', (string) $row->id);
+        $this->assertSame('https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/transactions/fare.jpg', $listed['receipts'][0]['fileUrl']);
+        $this->assertSame('https://res.cloudinary.com/test-cloud/image/upload/c_fill,h_96,w_96,f_auto,q_auto/v1/ikaika-portal/transactions/fare.jpg', $listed['receipts'][0]['thumbUrl']);
+
+        // An upload is named once; a second use, or a made-up id, finds nothing.
+        $this->addTransaction(['type' => 'Income', 'name' => 'Again', 'amount' => 5, 'accountId' => $account, 'receiptId' => $receiptId])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'That receipt upload has expired. Choose the photo again.');
+        $this->postJson(self::BASE.'budget-transactions/receipts', [], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Choose an image or PDF receipt.');
     }
 
     public function test_with_the_tracker_switched_off_nothing_moves(): void

@@ -179,7 +179,7 @@ class PortalOffsetRequestsTest extends TestCase
         $token = $this->loginToken($actor);
         // Two distinct work days inside the window, so the pair reads as two offsets rather than one.
         $days = [];
-        for ($offset = 0; count($days) < 2 && $offset >= -PortalOffsetRequests::WINDOW_DAYS; $offset--) {
+        for ($offset = 0; count($days) < 2 && $offset <= PortalOffsetRequests::WORK_LOOKAHEAD_DAYS; $offset++) {
             $days[$this->freeDate($actor, $offset)] = true;
         }
         $days = array_keys($days);
@@ -216,37 +216,37 @@ class PortalOffsetRequestsTest extends TestCase
             ->assertJsonPath('message', 'You have leave filed for '.$work.'.');
     }
 
-    public function test_offset_is_refused_outside_each_date_window(): void
+    // The reported ask (2026-10-07): the day worked is the last seven days, today or the next seven; the
+    // day off is any day at all.
+    public function test_the_day_worked_is_a_week_either_side_and_the_day_off_is_any_day(): void
     {
         $actor = $this->activeMember();
         $project = $this->firstOwnProject($actor);
         $token = $this->loginToken($actor);
         $dayOff = Carbon::today()->addDays(3)->toDateString();
 
-        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
-            'requests' => [$this->group(Carbon::today()->subDays(8)->toDateString(), $dayOff, $project)],
-        ])
-            ->assertStatus(422)
-            ->assertJsonPath('message', 'The day to work must be within the last seven days or the week ahead.');
+        foreach ([Carbon::today()->subDays(8), Carbon::today()->addDays(8)] as $day) {
+            $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
+                'requests' => [$this->group($day->toDateString(), $dayOff, $project)],
+            ])
+                ->assertStatus(422)
+                ->assertJsonPath('message', 'The day to work must be within seven days of today, before or after.');
+        }
 
-        // A week ahead is allowed; the day past that is not.
-        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
-            'requests' => [$this->group(Carbon::today()->addDays(8)->toDateString(), $dayOff, $project)],
-        ])
-            ->assertStatus(422)
-            ->assertJsonPath('message', 'The day to work must be within the last seven days or the week ahead.');
+        // Both ends of the window are open to the day worked.
+        foreach ([-7, 7] as $edge) {
+            $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
+                'requests' => [$this->group($this->freeDate($actor, $edge), Carbon::today()->addDays(30)->toDateString(), $project)],
+            ])->assertStatus(201);
+        }
 
-        $work = $this->freeDate($actor, 1);
-        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
-            'requests' => [$this->group($work, Carbon::today()->subDays(8)->toDateString(), $project)],
-        ])
-            ->assertStatus(422)
-            ->assertJsonPath('message', 'The day off must be one of the last seven days or any later working day.');
-
-        // No far edge: a working day past the old fortnight is a valid day off.
-        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
-            'requests' => [$this->group($work, Carbon::today()->addDays(30)->toDateString(), $project)],
-        ])->assertStatus(201);
+        // Long past, or a Saturday well ahead: the day off has no window and no weekend rule.
+        $saturday = Carbon::today()->addWeeks(5)->next(Carbon::SATURDAY)->toDateString();
+        foreach ([Carbon::today()->subDays(40)->toDateString(), $saturday] as $anyDay) {
+            $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
+                'requests' => [$this->group($this->freeDate($actor, 0), $anyDay, $project)],
+            ])->assertStatus(201);
+        }
     }
 
     public function test_offset_is_refused_when_the_two_dates_are_the_same(): void
@@ -562,10 +562,10 @@ class PortalOffsetRequestsTest extends TestCase
     private function freeDate(Employee $actor, int $daysAhead): string
     {
         $name = $this->memberName($actor);
-        $nearest = min($daysAhead, PortalOffsetRequests::WORK_LOOKAHEAD_DAYS);
-        for ($step = 0; $step <= PortalOffsetRequests::WORK_LOOKAHEAD_DAYS + PortalOffsetRequests::WINDOW_DAYS; $step++) {
+        $nearest = max(-PortalOffsetRequests::WORK_LOOKBACK_DAYS, min($daysAhead, PortalOffsetRequests::WORK_LOOKAHEAD_DAYS));
+        for ($step = 0; $step <= PortalOffsetRequests::WORK_LOOKAHEAD_DAYS + PortalOffsetRequests::WORK_LOOKBACK_DAYS; $step++) {
             foreach ([$nearest + $step, $nearest - $step] as $offset) {
-                if ($offset > PortalOffsetRequests::WORK_LOOKAHEAD_DAYS || $offset < -PortalOffsetRequests::WINDOW_DAYS) {
+                if ($offset > PortalOffsetRequests::WORK_LOOKAHEAD_DAYS || $offset < -PortalOffsetRequests::WORK_LOOKBACK_DAYS) {
                     continue;
                 }
                 $candidate = Carbon::today()->addDays($offset)->toDateString();

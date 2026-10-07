@@ -196,7 +196,19 @@ final class PortalBudgetLedger
     }
 
     /**
-     * Writes one ledger row and its links, described the way Record Funds describes its own.
+     * The note a row was written with, as the person wrote it. Rows the portal wrote before 2026-10-07
+     * also end with "Recorded in the Ikaika portal by ...", which created_by already says; it is left off.
+     */
+    public static function noteOf(mixed $description): ?string
+    {
+        $note = trim((string) preg_replace('/\s*Recorded in the Ikaika portal by .*\.$/su', '', (string) ($description ?? '')));
+
+        return $note === '' ? null : $note;
+    }
+
+    /**
+     * Writes one ledger row and its links, its description only the note it was given: who recorded it
+     * is created_by's to say.
      *
      * @param  array{envelopeId?: ?int, accountId?: ?int, budgetCodeId?: ?int, transferSourceId?: ?int, transferDestinationId?: ?int, payorPayee?: ?string}  $links
      */
@@ -210,7 +222,7 @@ final class PortalBudgetLedger
             'amount' => $this->input->decimal($cents),
             'type' => $type,
             'payor_payee' => $links['payorPayee'] ?? null,
-            'description' => ($notes === null ? '' : $notes.' ').'Recorded in the Ikaika portal by '.$actorName.'.',
+            'description' => $notes,
             'reviewed_by_email' => is_string($actor->email ?? null) ? $actor->email : null,
             'approval_date' => $now,
             'created_by' => $actorName,

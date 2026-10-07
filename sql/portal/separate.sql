@@ -675,6 +675,8 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('finance.accounts.funds', 'finance.accounts', 'Add and transfer funds', 'Add money to an account, move money between accounts, and complete or cancel a pending transfer.', 0, 1, 859),
 ('finance.envelopes.transfer', 'finance.envelopes', 'Transfer funds', 'Move money from one envelope to another, across their owners'' accounts when those differ.', 0, 1, 860),
 ('finance.transactions.add', 'finance.transactions', 'Add transactions', 'Add income or an expense. An expense on an envelope another account owns leaves a transfer pending to the account that paid.', 0, 1, 861),
+-- Existing databases: the Laravel migration add_portal_finance_accounts_add_rule.
+('finance.accounts.add', 'finance.accounts', 'Add accounts', 'Open a new account in the transaction tracker, held by a person.', 0, 1, 862),
 
 ('administration', NULL, 'Administration', 'Keep the portal in order: logs, trash, emails and backups.', 0, 1, 900),
 ('administration.recycle', 'administration', 'All Recycle', 'See what the people in {UserName|Your} reach deleted. View only: restoring someone else''s item could backfire on them.', 1, 1, 910),
@@ -747,11 +749,12 @@ UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key = 'project
 -- Leading, editing, scoping and deleting projects are powers an admin (or a lead) gives, not a
 -- member's own, so none of them is a member default -- that is what stops every member from being a lead.
 -- Adding is everyone's (2026-10-06): a member's project waits for a Project Manager who covers it.
+-- A member adds for their own department only (2026-10-07): add_portal_member_add_projects_department.
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'member', permission_key,
        CASE
            WHEN permission_key IN ('projects.view', 'projects.track') THEN 'own'
-           WHEN permission_key = 'projects.create' THEN 'all'
+           WHEN permission_key = 'projects.create' THEN 'department'
        END,
        0
 FROM access_permissions

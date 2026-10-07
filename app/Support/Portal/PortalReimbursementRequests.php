@@ -44,7 +44,7 @@ final class PortalReimbursementRequests
 
     private const MAX_QUANTITY = 9999;
 
-    private const MAX_RECEIPT_BYTES = 8388608;
+    public const MAX_RECEIPT_BYTES = 8388608;
 
     private const RECEIPT_FIELD = 'receipts';
 
@@ -55,7 +55,7 @@ final class PortalReimbursementRequests
     private const RECEIPT_CACHE_TTL_SECONDS = 3600;
 
     /** @var list<string> */
-    private const RECEIPT_MIMES = [
+    public const RECEIPT_MIMES = [
         'image/jpeg',
         'image/png',
         'image/webp',

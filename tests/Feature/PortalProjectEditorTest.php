@@ -540,6 +540,44 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame('Pending', DB::connection('portal')->table('projects')->where('id', $id)->value('project_creation_status'));
     }
 
+    // The reported ask: one name may be used once per department, so two departments can each have it.
+    public function test_a_name_is_taken_only_within_its_own_department(): void
+    {
+        $admin = $this->employee('admin');
+        $token = $this->token($admin);
+        $name = 'Shared Name '.Str::random(6);
+        $mis = fn (): array => $this->payload([
+            'name' => strtolower($name), 'department' => 'MIS', 'leadId' => $admin->id, 'scopeCodes' => [],
+        ]);
+
+        $this->create($token, $this->payload(['name' => $name]))->assertCreated();
+        $this->create($token, $mis())->assertCreated();
+
+        $this->create($token, $this->payload(['name' => '  '.$name.' ']))
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn (string $message): bool => str_starts_with($message, 'Engineering already has a project named "'.$name.'"'));
+        $this->create($token, $mis())
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn (string $message): bool => str_starts_with($message, 'MIS already has a project named'));
+    }
+
+    // The reported ask: a member adds for their own department only, unless someone widens it for them.
+    public function test_a_member_adds_projects_for_their_own_department_only(): void
+    {
+        $member = $this->employee('user', 3);
+        $member->forceFill(['department' => 'MIS'])->save();
+        foreach (['access_grants', 'access_personal', 'access_toggles', 'access_limits', 'access_self_reach'] as $table) {
+            DB::connection('portal')->table($table)->where('employee_id', $member->getKey())->where('permission_key', 'like', 'projects.create%')->delete();
+        }
+        Cache::flush();
+        $token = $this->token($member);
+
+        $this->assertSame(['MIS'], $this->withToken($token)->getJson(self::BASE.'/options')->assertOk()->json('data.addDepartments'));
+        $this->create($token, $this->payload())
+            ->assertForbidden()
+            ->assertJsonPath('message', 'Your Add projects power does not reach that department.');
+    }
+
     // Level of detail, area, Forma and panoramic are Engineering's: another department's project has them cleared.
     public function test_a_non_engineering_project_drops_the_engineering_fields(): void
     {

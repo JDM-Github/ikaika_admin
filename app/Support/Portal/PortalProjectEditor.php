@@ -33,8 +33,8 @@ use Illuminate\Validation\Rule;
  * edits the name without it.
  *
  * An Engineering project needs all six links, an area above 0 and a level of detail for each
- * discipline; any other department's links are optional, though a filled one is still checked. No two live projects share a
- * name, whatever its case, spacing or number.
+ * discipline; any other department's links are optional, though a filled one is still checked. No two live projects of one
+ * department share a name, whatever its case, spacing or number; two departments may each have one of the same name.
  */
 final class PortalProjectEditor
 {
@@ -240,7 +240,7 @@ final class PortalProjectEditor
             if ($client === null) {
                 abort(422, 'Choose a client from the list.');
             }
-            $this->assertNameFree($fields['name'], null);
+            $this->assertNameFree($fields['name'], $fields['columns']['department'], null);
             $number = $this->nextNumber($client);
             $numbered = $number.' '.$fields['name'];
             $projectId = (int) $this->connection()->table('projects')->insertGetId([
@@ -316,7 +316,7 @@ final class PortalProjectEditor
         ] : $fields['columns'];
 
         $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted): void {
-            $this->assertNameFree($fields['name'], $projectId);
+            $this->assertNameFree($fields['name'], $fields['columns']['department'], $projectId);
             $this->connection()->table('projects')->where('id', $projectId)->update($columns);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
@@ -918,13 +918,14 @@ final class PortalProjectEditor
         return [$number === '' ? null : $number, $name];
     }
 
-    // Names are compared without their number, case or extra spaces, among live projects.
-    private function assertNameFree(string $name, ?int $exceptId): void
+    // Names are compared without their number, case or extra spaces, among the department's live projects.
+    private function assertNameFree(string $name, string $department, ?int $exceptId): void
     {
         $key = self::nameKey($name);
         $rows = $this->connection()
             ->table('projects')
             ->whereNull('deleted_at')
+            ->whereRaw('LOWER(TRIM(COALESCE(department, \'\'))) = ?', [mb_strtolower(trim($department))])
             ->where('project_name', 'like', '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $name).'%')
             ->when($exceptId !== null, static fn ($query) => $query->where('id', '<>', $exceptId))
             ->lockForUpdate()
@@ -932,7 +933,7 @@ final class PortalProjectEditor
         foreach ($rows as $row) {
             [, $other] = self::split($row);
             if (self::nameKey($other) === $key) {
-                abort(422, 'A project named "'.$name.'" already exists ('.trim((string) $row->project_name).'). Choose another name.');
+                abort(422, $department.' already has a project named "'.$name.'" ('.trim((string) $row->project_name).'). Choose another name.');
             }
         }
     }

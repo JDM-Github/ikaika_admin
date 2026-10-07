@@ -402,7 +402,9 @@ class PortalBudgetSetupTest extends TestCase
         $this->assertSame('Credit', $transaction->type);
         $this->assertSame('2500.50', $transaction->amount);
         $this->assertSame('2031-02-01 00:00:00', (string) $transaction->transaction_date);
-        $this->assertStringStartsWith('First transfer Recorded in the Ikaika portal by ', (string) $transaction->description);
+        // Only the note: who recorded it is created_by's to say, not a sentence tacked onto the note.
+        $this->assertSame('First transfer', $transaction->description);
+        $this->assertNotEmpty($transaction->created_by);
         $this->assertSame(1, $tracker->table('transactions_budget_codes')->where(['transaction_id' => $transaction->id, 'budget_code_id' => $code])->count());
         $this->assertSame(1, $tracker->table('transactions_accounts')->where(['transaction_id' => $transaction->id, 'account_id' => $account])->count());
 

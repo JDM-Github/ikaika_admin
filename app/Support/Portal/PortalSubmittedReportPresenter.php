@@ -134,7 +134,13 @@ final class PortalSubmittedReportPresenter
 
     public static function projectLabel(mixed $number, mixed $name): string
     {
-        $label = trim(trim((string) $number).' '.trim((string) $name));
+        $number = trim((string) $number);
+        $name = trim((string) $name);
+        // A project added in the portal leads its stored name with its number already: say it once.
+        if ($number !== '' && ($name === $number || str_starts_with($name, $number.' '))) {
+            $number = '';
+        }
+        $label = trim($number.' '.$name);
 
         return $label !== '' ? $label : self::UNASSIGNED;
     }
@@ -205,7 +211,8 @@ final class PortalSubmittedReportPresenter
      *     kind: string,
      *     submittedOn: string,
      *     reason: ?string,
-     *     entries: list<array<string, mixed>>
+     *     entries: list<array<string, mixed>>,
+     *     reviewStatus: string
      * }
      */
     public static function report(
@@ -216,6 +223,7 @@ final class PortalSubmittedReportPresenter
         string $submittedOn,
         ?string $reason,
         array $entries,
+        string $reviewStatus = PortalReportReview::APPROVED,
     ): array {
         return [
             'id' => $id,
@@ -225,6 +233,8 @@ final class PortalSubmittedReportPresenter
             'submittedOn' => $submittedOn,
             'reason' => $reason,
             'entries' => $entries,
+            // Where its review stands (PortalReportReview): approved, pending or rejected.
+            'reviewStatus' => $reviewStatus,
         ];
     }
 

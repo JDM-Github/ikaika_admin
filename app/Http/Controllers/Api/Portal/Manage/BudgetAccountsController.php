@@ -22,6 +22,12 @@ class BudgetAccountsController extends Controller
         return response()->json($this->accounts->list($this->actor($request)));
     }
 
+    // A new account, held by a person, from Finance / Accounts.
+    public function store(Request $request): JsonResponse
+    {
+        return response()->json($this->accounts->create($this->actor($request), $request), 201);
+    }
+
     public function storeFunds(Request $request, int $id): JsonResponse
     {
         return response()->json($this->accounts->addFunds($this->actor($request), $id, $request), 201);

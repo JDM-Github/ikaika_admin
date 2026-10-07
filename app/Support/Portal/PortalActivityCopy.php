@@ -196,6 +196,11 @@ final class PortalActivityCopy
         return self::YOU.' recorded '.$amount.' received into '.$envelopeName;
     }
 
+    public static function addedAccount(string $accountName): string
+    {
+        return self::YOU.' added the account '.$accountName;
+    }
+
     public static function addedAccountFunds(string $accountName, string $amount): string
     {
         return self::YOU.' added '.$amount.' to the account '.$accountName;

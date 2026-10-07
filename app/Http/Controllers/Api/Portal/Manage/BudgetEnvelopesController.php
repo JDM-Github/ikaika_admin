@@ -37,6 +37,12 @@ class BudgetEnvelopesController extends Controller
         return response()->json($this->entries->add($this->actor($request), $request), 201);
     }
 
+    // The receipt photo an Add Transaction will name, uploaded ahead of it.
+    public function storeTransactionReceipt(Request $request): JsonResponse
+    {
+        return response()->json($this->entries->storeReceipt($this->actor($request), $request), 201);
+    }
+
     // Every envelope under its budget code, for the Budget Tracker's Envelopes tab.
     public function codes(): JsonResponse
     {

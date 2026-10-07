@@ -515,6 +515,8 @@ final class PortalOvertimeRequests
             ->where('employees_projects.employee_id', $employeeId)
             // A deleted project waits in the Recycle Bin: nothing new may be filed against it.
             ->whereNull('projects.deleted_at')
+            // Nor against one that is not approved yet.
+            ->tap(PortalProjectApproval::openForWork(...))
             ->select(['projects.id', 'projects.project_number', 'projects.project_name'])
             ->get();
 

@@ -54,6 +54,8 @@ final class PortalBudgetEnvelopes
      */
     private ?array $accounts = null;
 
+    public function __construct(private readonly PortalCloudinary $cloudinary) {}
+
     /** The tracker is switched on for this environment. Off, reimbursement approvals charge nothing. */
     public function isAvailable(): bool
     {
@@ -153,6 +155,14 @@ final class PortalBudgetEnvelopes
                 ->get(['transaction_id', 'account_id'])
                 ->groupBy('transaction_id');
             $accounts = collect($this->teamAccounts())->keyBy('id');
+            // Each transaction's receipts: the ones migrated from Airtable and the ones added here since.
+            $receipts = $this->connection()
+                ->table('attachments')
+                ->where('table_name', PortalBudgetTransactions::RECEIPT_TABLE)
+                ->where('field_name', PortalBudgetTransactions::RECEIPT_FIELD)
+                ->orderBy('id')
+                ->get(['record_id', 'file_url', 'file_name', 'mime_type'])
+                ->groupBy('record_id');
         } catch (QueryException) {
             abort(503, 'Budget transactions are unavailable right now.');
         }
@@ -179,11 +189,22 @@ final class PortalBudgetEnvelopes
                 'type' => (string) $row->type,
                 'amount' => $this->amount($this->cents($row->amount)),
                 'payorPayee' => $this->text($row->payor_payee),
-                'description' => $this->text($row->description),
+                // What the person wrote, without the line older portal rows carry (PortalBudgetLedger::noteOf).
+                'description' => PortalBudgetLedger::noteOf($row->description),
                 'envelopes' => $envelopes->get($row->id)?->map(fn (object $envelope): string => $this->text($envelope->envelope_name) ?? 'Envelope')->values()->all() ?? [],
                 'accountName' => $account['name'] ?? null,
                 'team' => $account['team'] ?? null,
                 'recordedBy' => $this->text($row->created_by),
+                'receipts' => ($receipts->get($row->id) ?? collect())
+                    ->filter(fn (object $receipt): bool => $this->text($receipt->file_url) !== null)
+                    ->map(fn (object $receipt): array => [
+                        'fileName' => $this->text($receipt->file_name) ?? 'Receipt',
+                        'fileUrl' => (string) $receipt->file_url,
+                        'mimeType' => $this->text($receipt->mime_type),
+                        'thumbUrl' => $this->cloudinary->thumbUrl((string) $receipt->file_url, (string) ($receipt->mime_type ?? '')),
+                    ])
+                    ->values()
+                    ->all(),
                 // Charged by an approval in the portal, rather than entered in the tracker itself.
                 'isPortalCharge' => str_starts_with((string) ($row->source_key ?? ''), self::SOURCE_PREFIX),
             ];
@@ -629,6 +650,12 @@ final class PortalBudgetEnvelopes
         }
 
         return $this->accounts = $accounts;
+    }
+
+    // Reads the accounts again on the next ask, so a list read after an account was added includes it.
+    public function forgetAccounts(): void
+    {
+        $this->accounts = null;
     }
 
     // Departments match loosely: "MIS" and "mis " are one team.

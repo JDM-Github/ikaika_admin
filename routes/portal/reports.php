@@ -22,7 +22,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         });
         // User Requests' Late tab: their own late reports, read by that page or the Late Report form.
         Route::get('reports/late', [SubmittedController::class, 'late'])->middleware('portal.rule:requests.own|reports.late');
-        // No member read of their own flagged reports: a flagged member must never learn they are flagged.
+        // User Requests' Daily Reports tab: their own daily reports that waited for review (2026-10-07).
+        // A member now sees where each stands, so a report held by a warning shows as waiting too.
+        Route::get('reports/reviews', [SubmittedController::class, 'reviews'])->middleware('portal.rule:requests.own');
     });
 
     Route::middleware('throttle:portal-reports-submitted-write')->group(function (): void {
