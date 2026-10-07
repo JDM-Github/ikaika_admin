@@ -24,7 +24,10 @@ final class PortalOffsetRequests
 {
     public const WINDOW_DAYS = PortalSubmittedReports::MUTATION_WINDOW_DAYS;
 
-    public const WORK_LOOKAHEAD_DAYS = 7;
+    // 0 on purpose while the supervisor tests the offset flow: the day worked is today or the last
+    // seven days only. The week-ahead rule's own tests and the refusal message still say "a week
+    // ahead", so they fail until this goes back to 7.
+    public const WORK_LOOKAHEAD_DAYS = 0;
 
     public const TYPE = 'Offset';
 
