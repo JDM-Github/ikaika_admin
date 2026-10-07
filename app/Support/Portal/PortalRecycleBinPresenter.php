@@ -16,6 +16,9 @@ final class PortalRecycleBinPresenter
     public const TYPE_REQUEST = 'request';
 
     public const TYPE_PROJECT = 'project';
+
+    public const TYPES = [self::TYPE_REPORT, self::TYPE_REQUEST, self::TYPE_PROJECT];
+
     /**
      * @return list<string>
      */
@@ -260,11 +263,12 @@ final class PortalRecycleBinPresenter
     }
 
     /**
-     * @return array{total: int}
+     * @param  array<string, int>  $types  all, report, request and project, for the type tabs
+     * @return array{total: int, types: array<string, int>}
      */
-    public static function counts(int $total): array
+    public static function counts(int $total, array $types = []): array
     {
-        return ['total' => $total];
+        return ['total' => $total, 'types' => $types];
     }
 
     private static function optionalDate(mixed $value): ?string

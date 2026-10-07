@@ -197,6 +197,10 @@ class PortalRecycleBinTest extends TestCase
         )->assertOk();
 
         $this->assertSame(2, $requests->json('counts.total'));
+        // The type tabs' counts ignore the open tab, and All is the three together.
+        $types = $requests->json('counts.types');
+        $this->assertSame(2, $types['request']);
+        $this->assertSame($types['report'] + $types['request'] + $types['project'], $types['all']);
         $this->assertSame(['request'], collect($requests->json('data'))->pluck('type')->unique()->values()->all());
         $this->assertNotContains('2026-08-20-daily', collect($requests->json('data'))->pluck('recordId')->all());
 

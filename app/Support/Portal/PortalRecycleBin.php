@@ -221,6 +221,11 @@ final class PortalRecycleBin
     ): array {
         $scoped = $this->scopedQuery($actor, $visible, $employeeId, $type);
         $totalInBin = (clone $scoped)->toBase()->count();
+        // Each type tab's count, before search and whatever tab is open (2026-10-07), so the tabs read as a legend.
+        $byType = ['all' => $this->scopedQuery($actor, $visible, $employeeId, null)->toBase()->count()];
+        foreach (PortalRecycleBinPresenter::TYPES as $each) {
+            $byType[$each] = $this->scopedQuery($actor, $visible, $employeeId, $each)->toBase()->count();
+        }
 
         $this->applySearch($scoped, $search, $canViewAll);
         $this->applyOrder($scoped, $sort, $dir);
@@ -269,7 +274,7 @@ final class PortalRecycleBin
             'canViewAll' => $canViewAll,
             'data' => $rows,
             'employees' => $employees,
-            'counts' => PortalRecycleBinPresenter::counts($totalInBin),
+            'counts' => PortalRecycleBinPresenter::counts($totalInBin, $byType),
             'meta' => [
                 'current_page' => $pageResult->currentPage(),
                 'per_page' => $pageResult->perPage(),
