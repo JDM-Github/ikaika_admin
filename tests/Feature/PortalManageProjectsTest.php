@@ -68,6 +68,15 @@ class PortalManageProjectsTest extends TestCase
         return $employee;
     }
 
+    // Project Approver sits under Manage, and a power counts only under a held parent, as Fin and Audie hold both.
+    private function approverDefault(string $reach): void
+    {
+        DB::connection('portal')->table('access_personal')->insert([
+            ['employee_id' => $this->member->getKey(), 'permission_key' => 'manage', 'reach' => null],
+            ['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.manager', 'reach' => $reach],
+        ]);
+    }
+
     private function token(Employee $employee): string
     {
         return (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
@@ -99,7 +108,7 @@ class PortalManageProjectsTest extends TestCase
     // Department reach covers only the manager's own department's projects.
     public function test_department_reach_covers_only_that_department(): void
     {
-        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.manager', 'reach' => 'department']);
+        $this->approverDefault('department');
         $this->member->forceFill(['department' => 'MIS'])->save();
         $token = $this->token($this->member);
 
@@ -116,7 +125,7 @@ class PortalManageProjectsTest extends TestCase
     // Lead reach (Fin and Audie's default): only the waiting projects the approver leads, whatever the department.
     public function test_lead_reach_covers_only_the_projects_led(): void
     {
-        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.manager', 'reach' => 'lead']);
+        $this->approverDefault('lead');
         $this->member->forceFill(['department' => 'Engineering'])->save();
         DB::connection('portal')->table('projects')->where('id', $this->projectId)->update(['requested_by' => $this->admin->getKey()]);
         $token = $this->token($this->member);

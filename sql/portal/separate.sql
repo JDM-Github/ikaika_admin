@@ -595,7 +595,6 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.lead', 'projects.view', 'Project Lead', 'Be chosen as the lead of {UserName|Your} department''s projects or of any project.', 1, 1, 214),
 ('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project, for {UserName|Your} department or every department.', 1, 1, 220),
 ('projects.create.direct', 'projects.create', 'Auto-approve projects', 'A project {UserName|You} add is approved at once, without waiting for a Project Approver.', 0, 1, 221),
-('projects.manager', 'projects', 'Project Approver', 'Approve or reject the projects waiting on Project Management: the ones {UserName|You} lead, the ones {UserName|You} are on or added, {UserName|Your} department''s, or every project. {UserName|Your} own new projects still wait unless {UserName|You} also auto-approve.', 1, 1, 225),
 ('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
 ('projects.settings', 'projects', 'Project Settings', 'Open Manage / Project Settings.', 0, 1, 240),
@@ -657,6 +656,8 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.users.access', 'manage.users', 'Access Rules', 'Open the Access Rules of the people in {UserName|Your} reach who sit below {UserName|Your} own role.', 1, 1, 843),
 ('manage.users.access.give', 'manage.users.access', 'Give powers', 'Switch a power on for someone: only one held here, never wider than {UserName|Your} own reach. It ends if that power is ever lost.', 0, 1, 844),
 ('manage.users.access.limit', 'manage.users.access', 'Limit powers', 'Switch a power off for someone, with everything under it, whoever gave it to them.', 0, 1, 845),
+-- Project Approver sits under Manage beside the page it opens, Project Management (2026-10-07).
+('projects.manager', 'manage', 'Project Approver', 'Approve or reject the projects waiting on Project Management: the ones {UserName|You} lead, the ones {UserName|You} are on or added, {UserName|Your} department''s, or every project. {UserName|Your} own new projects still wait unless {UserName|You} also auto-approve.', 1, 1, 850),
 
 -- Finance reads the transaction tracker, which is the company's and nobody's own, so it takes no reach.
 -- Existing databases: the Laravel migration add_portal_finance_rules.
@@ -843,6 +844,9 @@ SELECT id, 'projects.create.direct', NULL FROM employees WHERE id_no IN (
 -- lead (2026-10-07, supervisor). Their own defaults rather than Steven's gift, so it does not hang on his.
 INSERT INTO access_personal (employee_id, permission_key, reach)
 SELECT id, 'projects.manager', 'lead' FROM employees WHERE id_no IN ('220825-0004', '230103-0005');
+-- A power counts only under a held parent, so they hold the Manage group too; it opens nothing alone.
+INSERT INTO access_personal (employee_id, permission_key, reach)
+SELECT id, 'manage', NULL FROM employees WHERE id_no IN ('220825-0004', '230103-0005');
 
 -- Steven Gaurano (admin) gives Fin Donasco and Audie Gantuangko what a project lead needs, since none
 -- of it is a member default any more: Project Lead for Engineering, and Edit / Manage scopes / Delete

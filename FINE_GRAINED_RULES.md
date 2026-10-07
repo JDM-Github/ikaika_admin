@@ -110,6 +110,8 @@ Done so far (display only, nothing enforced):
     approves a new project (and keeps a Rejected one from resending). `projects.manager` is "Project
     Approver", reach lead | own (on or added) | department | all like the project powers; admins keep it
     at all, Fin and Audie hold it at lead (access_personal). Migration split_portal_project_auto_approval.
+    Moved under Manage the same day (parent manage, sort 850, after Users; key unchanged), so Fin and
+    Audie also hold the Manage group as a personal default. Migration move_portal_project_approver_to_manage.
   - Reports: Daily and Late filing check their rule by the kind sent; Submitted Reports, Edit
     (PATCH) and Delete (DELETE) follow theirs. The filing forms' shared reads (report projects,
     submitted list, filed days) accept any one of the rules that need them
@@ -399,7 +401,6 @@ Descriptions (what the Access page shows on each row) live in the SQL.
     - `projects.lead` Project Lead [R] — MAED (members department)
   - `projects.create` Add projects [R] — MAED
     - `projects.create.direct` Auto-approve projects — D (Nathaniel, Steven by personal default)
-  - `projects.manager` Project Approver [R] — AED (Fin, Audie at lead)
   - `projects.track` Track Projects — MAED
     - `projects.track.export` Export — MAED
 - `reports` Reports — MAED
@@ -455,6 +456,7 @@ Descriptions (what the Access page shows on each row) live in the SQL.
       - `manage.users.access.limit` Limit powers — AED
       - `manage.users.access.peers` Manage other admins — ED (executives and MIS admins only)
     - `manage.users.information` Show employee information [R] — E (admin and above only)
+  - `projects.manager` Project Approver [R] — AED (Fin, Audie at lead; key kept from its Projects days)
 - `finance` Finance — AED (no reach: the tracker is the company's)
   - `finance.overview` Overview — AED
   - `finance.transactions` Transactions — AED
