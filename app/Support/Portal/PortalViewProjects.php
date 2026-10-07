@@ -223,6 +223,71 @@ final class PortalViewProjects
     }
 
     /**
+     * One project as the Recycle Bin shows it. A deleted project is only stamped, so it still has its
+     * members, clients and reported work; null once the row itself is gone.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function binSummary(int $projectId): ?array
+    {
+        $row = $this->connection()
+            ->table('projects')
+            ->where('id', $projectId)
+            ->first([
+                'id',
+                'project_number',
+                'project_name',
+                'department',
+                'status',
+                'type_of_job',
+                'area_sqft',
+                'project_lead_email',
+                'project_creation_status',
+            ]);
+        if ($row === null) {
+            return null;
+        }
+
+        $members = $this->membersByProject([$projectId]);
+        $item = PortalViewProjectPresenter::item(
+            $row,
+            $this->namesByProject($members)[$projectId] ?? [],
+            $this->leadsByEmail([$row]),
+            $this->clientNamesByProject([$projectId])[$projectId] ?? [],
+            null,
+            [],
+        );
+        $work = (new PortalProjectWork)->byProject([$row], CarbonImmutable::today())[$projectId];
+
+        return [
+            'code' => $item['code'],
+            'name' => $item['name'],
+            'clientName' => $item['clientName'],
+            'leadName' => $item['leadName'],
+            'departmentName' => $item['departmentName'],
+            'typeLabel' => $item['typeLabel'],
+            'status' => $item['status'],
+            'areaSquareFeet' => $item['areaSquareFeet'],
+            'memberNames' => $item['memberNames'],
+            'hoursTotal' => $work['hoursTotal'],
+            'reporterCount' => $work['reporterCount'],
+            'firstReportOn' => $work['firstReportOn'],
+            'lastReportOn' => $work['lastReportOn'],
+            'activities' => array_map(
+                static fn (array $activity): array => [
+                    'code' => $activity['code'],
+                    'name' => $activity['name'],
+                    'hours' => $activity['hours'],
+                    'reports' => $activity['reports'],
+                    'people' => $activity['people'],
+                    'lastReportOn' => $activity['lastReportOn'],
+                ],
+                $work['activities'],
+            ),
+        ];
+    }
+
+    /**
      * One read with a LEFT JOIN so isAssigned costs nothing extra per row. A project's lead counts as on
      * it, member row or not: they may edit and delete it, so it has to be on their own board.
      *

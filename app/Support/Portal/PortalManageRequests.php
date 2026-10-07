@@ -1120,16 +1120,56 @@ final class PortalManageRequests
             $claimItems[$this->submissionKey($row)][] = (int) $row->id;
         }
 
+        $envelopes = $this->paidFromEnvelopes($rows->all(), $claimItems);
+
         $data = [];
         foreach ($groups as $group) {
             $itemIds = $claimItems[$this->submissionKey($group[0])] ?? [];
-            $claim = $this->presentClaim($group, $receiptFields, $payoutFields, $itemIds === [] ? null : min($itemIds));
+            $claim = $this->presentClaim($group, $receiptFields, $payoutFields, $envelopes, $itemIds === [] ? null : min($itemIds));
             if ($claim !== null) {
                 $data[] = $claim;
             }
         }
 
         return $data;
+    }
+
+    /**
+     * The envelope each approved item was paid from, so the queue shows where an approval drew its
+     * money. An item's own charge names it; an item covered by a whole-claim charge from before
+     * takes the envelope of the claim item carrying that charge.
+     *
+     * @param  list<object>  $rows
+     * @param  array<string, list<int>>  $claimItems
+     * @return array<int, string>
+     */
+    private function paidFromEnvelopes(array $rows, array $claimItems): array
+    {
+        if ($rows === [] || ! $this->budget->isAvailable()) {
+            return [];
+        }
+        $byId = [];
+        foreach ($rows as $row) {
+            $byId[(int) $row->id] = $row;
+        }
+        $charges = $this->budget->chargesFor(array_keys($byId));
+        $names = array_map(static fn (array $charge): string => $charge['envelopeName'], $charges);
+
+        foreach ($claimItems as $itemIds) {
+            foreach ($itemIds as $carrierId) {
+                $charge = $charges[$carrierId] ?? null;
+                if ($charge === null || (int) round($charge['amount'] * 100) <= $this->itemCents($byId[$carrierId])) {
+                    continue;
+                }
+                foreach ($itemIds as $itemId) {
+                    if (! isset($names[$itemId]) && $this->isApproved($byId[$itemId]->status ?? null)) {
+                        $names[$itemId] = $charge['envelopeName'];
+                    }
+                }
+            }
+        }
+
+        return $names;
     }
 
     // The claim an item was filed in, whatever its status: the rows decide() settles together.
@@ -1142,9 +1182,10 @@ final class PortalManageRequests
      * @param  list<object>  $rows
      * @param  array<int, array{receiptName: ?string, receiptUrl: ?string, receiptMime: ?string, receiptThumbUrl: ?string}>  $receiptFields
      * @param  array<int, array{payoutReceiptName: ?string, payoutReceiptUrl: ?string, payoutReceiptMime: ?string, payoutReceiptThumbUrl: ?string}>  $payoutFields
+     * @param  array<int, string>  $envelopes
      * @return array<string, mixed>|null
      */
-    private function presentClaim(array $rows, array $receiptFields, array $payoutFields, ?int $chargeKey): ?array
+    private function presentClaim(array $rows, array $receiptFields, array $payoutFields, array $envelopes, ?int $chargeKey): ?array
     {
         if ($rows === []) {
             return null;
@@ -1182,6 +1223,7 @@ final class PortalManageRequests
                 'payoutReceiptUrl' => $payoutField['payoutReceiptUrl'] ?? null,
                 'payoutReceiptMime' => $payoutField['payoutReceiptMime'] ?? null,
                 'payoutReceiptThumbUrl' => $payoutField['payoutReceiptThumbUrl'] ?? null,
+                'envelopeName' => $envelopes[$itemId] ?? null,
             ];
             if ($approverRemarks === null) {
                 $approverRemarks = $this->text($row->approver_remarks ?? null);

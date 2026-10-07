@@ -3,6 +3,11 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalProjectEditor;
+use App\Support\Portal\PortalProjectWork;
+use App\Support\Portal\PortalViewProjectPresenter;
+use App\Support\Portal\PortalViewProjects;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -124,6 +129,37 @@ class PortalProjectDeletionTest extends TestCase
             ->where('projects_action_history.project_id', $this->projectId)
             ->orderByDesc('project_action_history.id')
             ->value('project_action_history.action_name'));
+    }
+
+    // The reported ask: the bin's details window shows the project, not an empty report.
+    public function test_the_bin_shows_a_deleted_project_with_its_details_and_reported_work(): void
+    {
+        $token = $this->token($this->employee('admin'));
+        $project = DB::connection('portal')->table('projects')->where('id', $this->projectId)->first();
+        $this->deleteAs($token)->assertSuccessful();
+        $recycleId = (int) DB::connection('core')->table('recycle')->where('recycle_key', 'project-'.$this->projectId)->value('id');
+
+        $data = $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$recycleId)->assertOk()->json('data');
+
+        $this->assertSame('project', $data['type']);
+        $summary = $data['project'];
+        $this->assertNotNull($summary);
+        [$number, $name] = PortalProjectEditor::split($project);
+        $this->assertSame($number ?? (string) $this->projectId, $summary['code']);
+        $this->assertSame($name, $summary['name']);
+        $this->assertSame(PortalViewProjectPresenter::status($project->status), $summary['status']);
+        $this->assertIsArray($summary['memberNames']);
+        $this->assertIsArray($summary['activities']);
+        // The same figures the project's View Projects card reads, kept through the delete.
+        $work = (new PortalProjectWork)->byProject([$project], CarbonImmutable::today())[$this->projectId];
+        $this->assertEquals($work['hoursTotal'], $summary['hoursTotal']);
+        $this->assertSame($work['reporterCount'], $summary['reporterCount']);
+        $this->assertSame(count($work['activities']), count($summary['activities']));
+    }
+
+    public function test_a_project_row_that_is_gone_has_no_summary(): void
+    {
+        $this->assertNull((new PortalViewProjects)->binSummary(-1));
     }
 
     // Switched off, the power is gone even for an admin: the role alone no longer deletes.

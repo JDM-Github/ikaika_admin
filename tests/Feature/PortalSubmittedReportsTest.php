@@ -976,6 +976,56 @@ class PortalSubmittedReportsTest extends TestCase
             ->count());
     }
 
+    // The reported ask: User Requests' Late tab edits and withdraws a pending late report of any age.
+    public function test_a_pending_late_report_is_edited_and_withdrawn_whatever_its_day(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $day = $this->freeDate($actor, 40);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $entry = [
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name ?? null, $activity->id_no ?? null),
+            'hoursRendered' => 8,
+            'elementChange' => 0,
+        ];
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'late',
+            'reports' => [['reportDate' => $day, 'remarks' => 'Filed after a power outage', 'entries' => [$entry]]],
+        ], $headers)->assertCreated();
+
+        $this->patchJson('/api/development/portal/reports/submitted/'.$day.'-late', [
+            'remarks' => 'Filed after a long power outage',
+            'entries' => [[...$entry, 'hoursRendered' => 6]],
+        ], $headers)->assertOk();
+
+        $this->deleteJson('/api/development/portal/reports/submitted/'.$day.'-late', [], $headers)->assertNoContent();
+        $this->getJson('/api/development/portal/reports/submitted/days?from='.$day.'&to='.$day, $headers)
+            ->assertOk()->assertJsonCount(0, 'data');
+    }
+
+    // Once decided, a late report is a record like any other: past the window it stays as it is.
+    public function test_a_decided_late_report_past_the_window_cannot_be_changed(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $earn = $this->firstEarnCode();
+        $day = $this->freeDate($actor, 40);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $this->insertLine($actor, [
+            'report_date' => $day,
+            'hours_rendered' => 8,
+            'late_submission' => 'Yes',
+            'late_submission_approval' => 'Approved',
+        ], $project, $activity, $earn);
+
+        $this->deleteJson('/api/development/portal/reports/submitted/'.$day.'-late', [], $headers)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Reports can only be changed for today or the last seven days.');
+    }
+
     public function test_a_late_report_cannot_be_filed_for_today(): void
     {
         $actor = $this->activeMember();

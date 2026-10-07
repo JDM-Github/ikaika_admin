@@ -24,8 +24,6 @@ final class PortalOffsetRequests
 {
     public const WINDOW_DAYS = PortalSubmittedReports::MUTATION_WINDOW_DAYS;
 
-    public const DAY_OFF_LOOKAHEAD_DAYS = 14;
-
     public const TYPE = 'Offset';
 
     public const CACHE_TTL_SECONDS = 30;
@@ -559,8 +557,8 @@ final class PortalOffsetRequests
     }
 
     /**
-     * Either day of the pair occupies the calendar. Leave on either day is the same refusal the
-     * pickers already print: that day is not free to work or to take off.
+     * The day worked must be free: no leave on it and no other offset filed for it. The day off is the
+     * member's to choose, any day at all, so it is not checked here.
      *
      * @param  list<array{workDate: string, dayOffDate: string, reason: string, entries: list<array<string, mixed>>}>  $groups
      * @param  list<string>  $ignore  Dates this request already occupies, so an edit of the same pair is not a clash with itself.
@@ -570,7 +568,6 @@ final class PortalOffsetRequests
         $dates = [];
         foreach ($groups as $group) {
             $dates[] = $group['workDate'];
-            $dates[] = $group['dayOffDate'];
         }
         $dates = array_values(array_unique($dates));
         if ($dates === []) {
@@ -655,12 +652,10 @@ final class PortalOffsetRequests
         if ($workDate === $dayOffDate) {
             abort(422, 'The day off has to be a different day from the day worked.');
         }
-        foreach ([$workDate, $dayOffDate] as $date) {
-            if (in_array($date, $seen, true)) {
-                abort(422, 'That filing lists the same day twice.');
-            }
-            $seen[] = $date;
+        if (in_array($workDate, $seen, true)) {
+            abort(422, 'That filing lists the same day twice.');
         }
+        $seen[] = $workDate;
 
         return [
             'workDate' => $workDate,
@@ -670,28 +665,25 @@ final class PortalOffsetRequests
         ];
     }
 
+    // Offset is booked ahead: the day worked is today or any later day, never one already gone.
     private function assertWorkDate(string $date, ?string $current = null): void
     {
         if ($current !== null && $date === $current) {
             return;
         }
-        $day = $this->timezone->day($date);
-        $today = $this->timezone->today();
-        if ($day->gt($today) || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
-            abort(422, 'The day to work must be today or one of the last seven days.');
+        if ($this->timezone->day($date)->lt($this->timezone->today())) {
+            abort(422, 'The day to work must be today or a later day.');
         }
     }
 
+    // The day off likewise: any day from today on, with no far limit.
     private function assertDayOffDate(string $date, ?string $current = null): void
     {
         if ($current !== null && $date === $current) {
             return;
         }
-        $day = $this->timezone->day($date);
-        $today = $this->timezone->today();
-        if ($day->gt($today->copy()->addDays(self::DAY_OFF_LOOKAHEAD_DAYS))
-            || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
-            abort(422, 'The day off must fall between seven days ago and two weeks ahead.');
+        if ($this->timezone->day($date)->lt($this->timezone->today())) {
+            abort(422, 'The day off must be today or a later day.');
         }
     }
 
