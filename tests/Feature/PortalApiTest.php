@@ -46,7 +46,7 @@ class PortalApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('channel', 'development')
             ->assertJsonPath('convention', '/api/{channel}/{product}/{resource}')
-            ->assertJsonFragment(['key' => 'portal', 'database' => 'test_portal_database'])
+            ->assertJsonFragment(['key' => 'portal', 'database' => config('products.catalog.portal.database')])
             ->assertJsonFragment(['base_url' => '/api/development/portal']);
     }
 
@@ -97,7 +97,7 @@ class PortalApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('product', 'portal')
             ->assertJsonPath('health.ok', true)
-            ->assertJsonPath('health.database', 'test_portal_database');
+            ->assertJsonPath('health.database', config('products.catalog.portal.database'));
     }
 
     public function test_portal_employees_endpoint(): void

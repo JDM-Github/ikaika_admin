@@ -190,7 +190,8 @@ class PortalRulesTest extends TestCase
     {
         $admin = $this->admin();
         $token = $this->login($admin);
-        $total = DB::connection('portal')->table('projects')->count();
+        // The list never carries a soft-deleted project, so neither may the count it is compared with.
+        $total = DB::connection('portal')->table('projects')->whereNull('deleted_at')->count();
 
         $all = $this->tracked($token);
         $this->assertCount($total, $all);
