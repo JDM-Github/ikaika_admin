@@ -44,12 +44,12 @@ class PortalRulesTest extends TestCase
     }
 
     // Executives start with every department, less the developer tools, a member's own pages, the housekeeping
-    // pages and See developers' activity, which is given person by person.
+    // pages and See developers' activity and Auto-approve projects, which are given person by person.
     public function test_executives_start_with_everything_but_the_left_out_pages_at_every_department(): void
     {
         $catalog = DB::connection('portal')->table('access_permissions')->get()->keyBy('permission_key');
         $presets = DB::connection('portal')->table('access_presets')->where('role', 'executive')->get()->keyBy('permission_key');
-        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.settings'];
+        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.settings', 'projects.create.direct'];
 
         foreach ($catalog as $key => $rule) {
             $isLeftOut = collect($leftOut)->contains(static fn (string $root): bool => $key === $root || str_starts_with((string) $key, $root.'.'));

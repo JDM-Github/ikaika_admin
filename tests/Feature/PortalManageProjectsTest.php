@@ -113,6 +113,40 @@ class PortalManageProjectsTest extends TestCase
         $this->assertContains((string) $this->projectId, $ids);
     }
 
+    // Lead reach (Fin and Audie's default): only the waiting projects the approver leads, whatever the department.
+    public function test_lead_reach_covers_only_the_projects_led(): void
+    {
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.manager', 'reach' => 'lead']);
+        $this->member->forceFill(['department' => 'Engineering'])->save();
+        DB::connection('portal')->table('projects')->where('id', $this->projectId)->update(['requested_by' => $this->admin->getKey()]);
+        $token = $this->token($this->member);
+
+        $this->assertNotContains((string) $this->projectId, array_column($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'), 'id'));
+        $this->withToken($token)->patchJson(self::BASE.'/'.$this->projectId, ['decision' => 'approve'])->assertForbidden();
+
+        DB::connection('portal')->table('projects')->where('id', $this->projectId)->update(['project_lead_email' => strtoupper((string) $this->member->email)]);
+        $this->assertContains((string) $this->projectId, array_column($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'), 'id'));
+        $this->withToken($token)->patchJson(self::BASE.'/'.$this->projectId, ['decision' => 'approve'])->assertOk();
+    }
+
+    // Own reach: the waiting projects the approver is on or added, and no other.
+    public function test_own_reach_covers_the_projects_on_or_added(): void
+    {
+        $other = (int) DB::connection('portal')->table('projects')->insertGetId([
+            'project_name' => 'Added Project 2020', 'department' => 'MIS', 'status' => 'Started',
+            'project_creation_status' => 'Pending', 'requested_by' => $this->admin->getKey(), 'requested_at' => now(),
+        ]);
+        $token = $this->token($this->admin);
+        $this->withToken($token)->patchJson('/api/development/portal/access/reach', ['key' => 'projects.manager', 'reach' => 'own'])->assertOk();
+
+        $ids = array_column($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'), 'id');
+        $this->assertContains((string) $other, $ids);
+        $this->assertNotContains((string) $this->projectId, $ids);
+
+        DB::connection('portal')->table('employees_projects')->insert(['project_id' => $this->projectId, 'employee_id' => $this->admin->getKey(), 'role_on_project' => 'member']);
+        $this->assertContains((string) $this->projectId, array_column($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'), 'id'));
+    }
+
     // An admin who narrows Project Manager to their department on Access loses other departments until they widen it back.
     public function test_an_admin_narrowed_to_department_covers_only_it(): void
     {

@@ -126,17 +126,21 @@ class PortalAccessTest extends TestCase
         // Project Settings is Developer mode only, so only the developer preset names it. Admins lead
         // only their own department; Nathaniel and Steven are given lead at all as a personal default.
         $developer = [...$everything, 'projects.settings' => null];
-        $admin = $everything;
+        // Auto-approve is Nathaniel's and Steven's personal default (2026-10-07), so no preset but developer holds it.
+        $executive = $everything;
+        unset($executive['projects.create.direct']);
+        $admin = $executive;
         $admin['projects.lead'] = 'department';
         ksort($everything);
         ksort($developer);
         ksort($admin);
+        ksort($executive);
         foreach ($presets as &$rules) {
             ksort($rules);
         }
 
         $this->assertSame($admin, $presets['admin']);
-        $this->assertSame($everything, $presets['executive']);
+        $this->assertSame($executive, $presets['executive']);
         $this->assertSame($developer, $presets['developer']);
         // Anyone may add a project (2026-10-06); a member's waits for a Project Manager.
         $this->assertSame([

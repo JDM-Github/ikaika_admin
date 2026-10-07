@@ -46,7 +46,7 @@ final class PortalProjectActivity
             abort(403, 'View Projects does not reach this project.');
         }
         $seesEveryone = $isLead
-            || $this->approval->covers($actor, $request, $project->department)
+            || $this->approval->covers($actor, $request, $project)
             || PortalRole::isAdmin($actor->role, $actor->role_level)
             || PortalPreview::actsAsDeveloper($actor, $request);
 

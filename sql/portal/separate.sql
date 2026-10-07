@@ -594,8 +594,8 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.delete', 'projects.view', 'Delete projects', 'Move {UserName|Your} department''s projects or any project to the recycle bin. On Only your own, the projects {UserName|You} lead.', 1, 1, 213),
 ('projects.lead', 'projects.view', 'Project Lead', 'Be chosen as the lead of {UserName|Your} department''s projects or of any project.', 1, 1, 214),
 ('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project, for {UserName|Your} department or every department.', 1, 1, 220),
-('projects.create.direct', 'projects.create', 'Add without approval', 'A project {UserName|You} add is approved at once, without waiting for a Project Manager.', 0, 1, 221),
-('projects.manager', 'projects', 'Project Manager', 'Approve or reject the projects waiting on Manage / Projects for {UserName|Your} department or every department, and add projects there without waiting.', 1, 1, 225),
+('projects.create.direct', 'projects.create', 'Auto-approve projects', 'A project {UserName|You} add is approved at once, without waiting for a Project Approver.', 0, 1, 221),
+('projects.manager', 'projects', 'Project Approver', 'Approve or reject the projects waiting on Project Management: the ones {UserName|You} lead, the ones {UserName|You} are on or added, {UserName|Your} department''s, or every project. {UserName|Your} own new projects still wait unless {UserName|You} also auto-approve.', 1, 1, 225),
 ('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
 ('projects.settings', 'projects', 'Project Settings', 'Open Manage / Project Settings.', 0, 1, 240),
@@ -733,6 +733,9 @@ UPDATE access_permissions SET only_department = 'MIS', min_tier = 'admin' WHERE 
 UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key LIKE 'administration.backup%';
 -- Manage / Project Settings is a work in progress: Developer mode only for now, like Backup.
 UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key = 'projects.settings';
+-- Auto-approve is an admin's at most, and only a named one's (2026-10-07, supervisor): being an admin
+-- is not enough, so no role but developer starts with it. Existing databases: split_portal_project_auto_approval.
+UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key = 'projects.create.direct';
 
 -- Members: their own work only. View Projects and Track Projects show only the projects they are on.
 -- Leading, editing, scoping and deleting projects are powers an admin (or a lead) gives, not a
@@ -779,6 +782,7 @@ WHERE permission_key NOT LIKE 'developer%'
   AND permission_key <> 'administration.logs.developers'
   AND permission_key <> 'email.images.global'
   AND permission_key <> 'projects.settings'
+  AND permission_key <> 'projects.create.direct'
   AND permission_key NOT LIKE '%.unlisted';
 
 -- Executives: every department and executives' logs, without the developer tools and without the
@@ -790,7 +794,7 @@ SELECT 'executive', permission_key,
        permission_key = 'administration.logs'
 FROM access_permissions
 WHERE permission_key NOT LIKE 'developer%'
-  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.settings')
+  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.settings', 'projects.create.direct')
   AND permission_key NOT LIKE 'reports.%'
   AND permission_key NOT LIKE 'requests.%'
   AND permission_key NOT LIKE 'user.%'
@@ -826,6 +830,19 @@ SELECT id, 'projects.lead', 'all' FROM employees WHERE id_no IN (
     '220202-0002', -- Nathaniel Tanglao
     '220302-0003'  -- Steven Gaurano
 );
+
+-- Only Nathaniel and Steven auto-approve the projects they add (2026-10-07, supervisor); every other
+-- admin's new project waits for a Project Approver like anyone's.
+INSERT INTO access_personal (employee_id, permission_key, reach)
+SELECT id, 'projects.create.direct', NULL FROM employees WHERE id_no IN (
+    '220202-0002', -- Nathaniel Tanglao
+    '220302-0003'  -- Steven Gaurano
+);
+
+-- Project Approver: every admin by preset, and Fin Donasco and Audie Gantuangko over the projects they
+-- lead (2026-10-07, supervisor). Their own defaults rather than Steven's gift, so it does not hang on his.
+INSERT INTO access_personal (employee_id, permission_key, reach)
+SELECT id, 'projects.manager', 'lead' FROM employees WHERE id_no IN ('220825-0004', '230103-0005');
 
 -- Steven Gaurano (admin) gives Fin Donasco and Audie Gantuangko what a project lead needs, since none
 -- of it is a member default any more: Project Lead for Engineering, and Edit / Manage scopes / Delete

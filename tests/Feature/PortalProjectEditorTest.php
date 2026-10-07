@@ -145,9 +145,11 @@ class PortalProjectEditorTest extends TestCase
         return $id;
     }
 
-    public function test_an_admin_adds_an_approved_project_with_its_people_client_and_scopes(): void
+    public function test_an_admin_with_auto_approve_adds_an_approved_project_with_its_people_client_and_scopes(): void
     {
         $admin = $this->employee('admin');
+        // A personal default, as Nathaniel and Steven hold it: no preset gives it, so no gift can either.
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'projects.create.direct', 'reach' => null]);
         $payload = $this->payload();
 
         $response = $this->create($this->token($admin), $payload)->assertCreated();
@@ -512,8 +514,20 @@ class PortalProjectEditorTest extends TestCase
         $this->assertFalse($people[(string) $lead->id]['canLead']);
     }
 
-    // Add without approval: a project its holder adds is approved at once, even where no Project Manager covers them.
-    public function test_add_without_approval_skips_the_wait(): void
+    // Being an admin, or a Project Approver over every project, no longer passes your own project (2026-10-07).
+    public function test_an_admin_without_auto_approve_waits_like_anyone(): void
+    {
+        $admin = $this->employee('admin');
+
+        $id = (int) $this->create($this->token($admin), $this->payload())->assertCreated()->json('data.id');
+
+        $row = DB::connection('portal')->table('projects')->where('id', $id)->first();
+        $this->assertSame('Pending', $row->project_creation_status);
+        $this->assertNull($row->project_creation_approver);
+    }
+
+    // Auto-approve is an admin's at most: a member given it still waits.
+    public function test_auto_approve_never_reaches_a_member(): void
     {
         $member = $this->employee('user', 3);
         $member->forceFill(['department' => 'MIS'])->save();
@@ -521,7 +535,7 @@ class PortalProjectEditorTest extends TestCase
 
         $id = (int) $this->create($this->token($member), $this->payload())->assertCreated()->json('data.id');
 
-        $this->assertSame('Approved', DB::connection('portal')->table('projects')->where('id', $id)->value('project_creation_status'));
+        $this->assertSame('Pending', DB::connection('portal')->table('projects')->where('id', $id)->value('project_creation_status'));
     }
 
     // Level of detail, area, Forma and panoramic are Engineering's: another department's project has them cleared.

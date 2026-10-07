@@ -230,8 +230,8 @@ final class PortalProjectEditor
         }
         $scopeCodes = $this->validatedScopeCodes($request, $fields['columns']['department']);
         $employeeId = (int) $actor->getKey();
-        $isApproved = $this->approval->covers($actor, $request, $fields['columns']['department'])
-            || PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
+        // Only Auto-approve passes a new project; approving others' is not approving your own (2026-10-07).
+        $isApproved = PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
 
         $numbered = null;
         $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId, $request, $isApproved, &$numbered): int {
@@ -284,7 +284,7 @@ final class PortalProjectEditor
             ['projectName' => $numbered, 'department' => $fields['columns']['department']],
         );
         if (! $isApproved) {
-            $this->approval->notifyManagers($actor, $request, $projectId, (string) $numbered, $fields['columns']['department'], false);
+            $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), (string) $numbered, false);
         }
         $this->projects->bumpCache();
 
@@ -292,7 +292,7 @@ final class PortalProjectEditor
     }
 
     /**
-     * Saving a Rejected project sends it again for approval, unless Project Manager covers its adder.
+     * Saving a Rejected project sends it again for approval, unless its editor auto-approves.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
@@ -306,7 +306,7 @@ final class PortalProjectEditor
         $fields['columns']['project_name'] = $number === null ? $fields['name'] : $number.' '.$fields['name'];
         $changes = $this->changes($projectId, $fields);
         $isResubmitted = $row->project_creation_status === PortalProjectApproval::REJECTED
-            && ! $this->approval->covers($actor, $request, $fields['columns']['department']);
+            && ! PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
         $columns = $isResubmitted ? [
             ...$fields['columns'],
             'project_creation_status' => PortalProjectApproval::PENDING,
@@ -341,7 +341,7 @@ final class PortalProjectEditor
             }
         });
         if ($isResubmitted) {
-            $this->approval->notifyManagers($actor, $request, $projectId, $fields['name'], $fields['columns']['department'], true);
+            $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), $fields['name'], true);
         }
 
         $this->audit->record(

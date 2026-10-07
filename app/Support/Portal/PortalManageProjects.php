@@ -114,8 +114,8 @@ final class PortalManageProjects
         if ($row === null) {
             abort(404, 'That project was not found.');
         }
-        if (! $this->approval->covers($actor, $request, $row->department ?? null)) {
-            abort(403, 'Deciding on this project needs Project Manager for its department.');
+        if (! $this->approval->covers($actor, $request, $row)) {
+            abort(403, 'Deciding on this project needs Project Approver over it.');
         }
         if ($row->project_creation_status !== PortalProjectApproval::PENDING) {
             abort(422, 'This project is not waiting for approval.');
@@ -184,19 +184,10 @@ final class PortalManageProjects
         return is_string($tab) && array_key_exists($tab, self::STATUSES) ? $tab : 'pending';
     }
 
-    // The live projects whose department the reach covers: all, the person's own, or none.
+    // The live projects the Approver reach covers.
     private function covered(Employee $actor, ?string $reach): Builder
     {
-        $query = $this->connection()->table('projects')->whereNull('deleted_at');
-        if ($reach === 'all') {
-            return $query;
-        }
-        $department = $reach === 'department' ? PortalPreview::department($actor->department) : '';
-        if ($department === '') {
-            return $query->whereRaw('1 = 0');
-        }
-
-        return $query->whereRaw('LOWER(TRIM(department)) = ?', [$department]);
+        return PortalProjectApproval::scope($this->connection()->table('projects')->whereNull('deleted_at'), $actor, $reach);
     }
 
     /**

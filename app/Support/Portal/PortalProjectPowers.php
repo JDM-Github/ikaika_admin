@@ -29,16 +29,16 @@ final class PortalProjectPowers
 
     public const LEAD = 'projects.lead';
 
-    // Only these three reaches a project row, so only they offer the "the projects you lead" reach.
+    // Only these reach a project row, so only they offer the "the projects you lead" reach.
     public static function supportsLeadReach(string $key): bool
     {
-        return in_array($key, self::KEYS, true);
+        return in_array($key, [...self::KEYS, PortalProjectApproval::RULE], true);
     }
 
     // Whether the rule, at the reach the actor holds it now, covers this project row.
     public static function allows(Employee $actor, Request $request, string $key, object $project): bool
     {
-        return self::covers(PortalRules::reach($actor, $request, $key), $actor, $project)
+        return self::coversProject(PortalRules::reach($actor, $request, $key), $actor, $project)
             || ($key !== self::DELETE && self::isWaitingRequest($actor, $project));
     }
 
@@ -53,9 +53,9 @@ final class PortalProjectPowers
         $isRequest = self::isWaitingRequest($actor, $project);
 
         return [
-            'canEdit' => self::covers($reaches[self::EDIT] ?? null, $actor, $project) || $isRequest,
-            'canManageScopes' => self::covers($reaches[self::SCOPES] ?? null, $actor, $project) || $isRequest,
-            'canDelete' => self::covers($reaches[self::DELETE] ?? null, $actor, $project),
+            'canEdit' => self::coversProject($reaches[self::EDIT] ?? null, $actor, $project) || $isRequest,
+            'canManageScopes' => self::coversProject($reaches[self::SCOPES] ?? null, $actor, $project) || $isRequest,
+            'canDelete' => self::coversProject($reaches[self::DELETE] ?? null, $actor, $project),
         ];
     }
 
@@ -104,7 +104,8 @@ final class PortalProjectPowers
         return $reaches;
     }
 
-    private static function covers(?string $reach, Employee $actor, object $project): bool
+    // A project reach over one row: all, department (plus the ones led), own (on it), lead.
+    public static function coversProject(?string $reach, Employee $actor, object $project): bool
     {
         if ($reach === null) {
             return false;

@@ -105,6 +105,11 @@ Done so far (display only, nothing enforced):
     developers `all`), covers projects by the project's department. An add it covers is Approved at
     once; any other waits as Pending for a covering manager. The rest of the tree stays planned in
     `docs/power/view-projects-plan.md`.
+  - Auto-approve split (2026-10-07, supervisor): `projects.create.direct` is "Auto-approve projects",
+    min_tier admin, no preset but developer, personal default for Nathaniel and Steven only; it alone
+    approves a new project (and keeps a Rejected one from resending). `projects.manager` is "Project
+    Approver", reach lead | own (on or added) | department | all like the project powers; admins keep it
+    at all, Fin and Audie hold it at lead (access_personal). Migration split_portal_project_auto_approval.
   - Reports: Daily and Late filing check their rule by the kind sent; Submitted Reports, Edit
     (PATCH) and Delete (DELETE) follow theirs. The filing forms' shared reads (report projects,
     submitted list, filed days) accept any one of the rules that need them
@@ -393,8 +398,8 @@ Descriptions (what the Access page shows on each row) live in the SQL.
     - `projects.delete` Delete projects [R] — MAED (members own)
     - `projects.lead` Project Lead [R] — MAED (members department)
   - `projects.create` Add projects [R] — MAED
-    - `projects.create.direct` Add without approval — AED
-  - `projects.manager` Project Manager [R] — AED
+    - `projects.create.direct` Auto-approve projects — D (Nathaniel, Steven by personal default)
+  - `projects.manager` Project Approver [R] — AED (Fin, Audie at lead)
   - `projects.track` Track Projects — MAED
     - `projects.track.export` Export — MAED
 - `reports` Reports — MAED
