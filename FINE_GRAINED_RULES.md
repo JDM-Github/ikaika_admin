@@ -454,10 +454,14 @@ Descriptions (what the Access page shows on each row) live in the SQL.
   - `finance.overview` Overview — AED
   - `finance.transactions` Transactions — AED
     - `finance.transactions.export` Export — AED
+    - `finance.transactions.add` Add transactions (an expense on another account's envelope leaves a pending transfer) — AED
   - `finance.envelopes` Envelopes — AED
     - `finance.envelopes.export` Export — AED
     - `finance.envelopes.edit` Add and edit (budget codes and envelopes) — AED
     - `finance.envelopes.funds` Record funds — AED
+    - `finance.envelopes.transfer` Transfer funds (envelope to envelope, across owners' accounts) — AED
+  - `finance.accounts` Accounts — AED
+    - `finance.accounts.funds` Add and transfer funds (and complete or cancel pending transfers) — AED
 - `administration` Administration — AED
   - `administration.recycle` All Recycle [R] — AED
     - `administration.recycle.export` Export — AED

@@ -185,6 +185,34 @@ final class PortalActivityCopy
         return self::YOU.' recorded '.$amount.' received into '.$envelopeName;
     }
 
+    public static function addedAccountFunds(string $accountName, string $amount): string
+    {
+        return self::YOU.' added '.$amount.' to the account '.$accountName;
+    }
+
+    // Between two accounts or two envelopes: the names say which.
+    public static function transferredFunds(string $amount, string $from, string $to): string
+    {
+        return self::YOU.' transferred '.$amount.' from '.$from.' to '.$to;
+    }
+
+    public static function completedTransfer(string $amount, string $from, string $to): string
+    {
+        return self::YOU.' completed the pending transfer of '.$amount.' from '.$from.' to '.$to;
+    }
+
+    public static function cancelledTransfer(string $amount): string
+    {
+        return self::YOU.' cancelled a pending transfer of '.$amount;
+    }
+
+    public static function addedTransaction(string $kind, string $name, string $amount, ?string $envelopeName): string
+    {
+        $text = self::YOU.' added the '.strtolower($kind).' '.$name.' of '.$amount;
+
+        return $envelopeName === null ? $text : $text.' on '.$envelopeName;
+    }
+
     public static function restoredReport(string $kind, string $date): string
     {
         return self::YOU.' restored a '.self::reportKind($kind).' for '.self::date($date);

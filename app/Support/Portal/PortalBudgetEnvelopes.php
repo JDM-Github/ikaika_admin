@@ -128,7 +128,7 @@ final class PortalBudgetEnvelopes
      *
      * @return array{section: string, resource: string, available: bool, currency: string, teams: list<array<string, mixed>>, data: list<array<string, mixed>>}
      */
-    public function transactions(): array
+    public function transactions(?Employee $actor = null): array
     {
         $page = ['section' => 'manage', 'resource' => 'budget-transactions', 'currency' => 'PHP'];
         if (! $this->isAvailable()) {
@@ -189,6 +189,7 @@ final class PortalBudgetEnvelopes
             ];
         }
 
+        $ownEmail = strtolower(trim((string) ($actor->email ?? '')));
         $teams = [];
         foreach ($this->teamAccounts() as $account) {
             if (! $account['active']) {
@@ -203,6 +204,8 @@ final class PortalBudgetEnvelopes
                 'received' => $this->amount($in),
                 'spent' => $this->amount($out),
                 'remaining' => $this->amount($in - $out),
+                // The reader's own account, which a transaction they add is paid from by default.
+                'isOwn' => $ownEmail !== '' && $account['email'] === $ownEmail,
             ];
         }
 
@@ -229,6 +232,14 @@ final class PortalBudgetEnvelopes
         }
 
         try {
+            $owners = $this->connection()
+                ->table('envelopes_accounts as ea')
+                ->join('accounts as a', 'a.id', '=', 'ea.account_id')
+                ->where('a.active', true)
+                ->orderBy('a.id')
+                ->get(['ea.envelope_id', 'a.id', 'a.account_name'])
+                ->groupBy('envelope_id')
+                ->map(fn (Collection $rows): ?object => $rows->first());
             $envelopes = collect($this->connection()
                 ->table('envelopes_budget as e')
                 ->leftJoin('transactions_envelopes as te', 'te.envelope_id', '=', 'e.id')
@@ -241,7 +252,7 @@ final class PortalBudgetEnvelopes
                 ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS spent', [self::TYPE_EXPENSE])
                 ->get()
                 ->all())
-                ->mapWithKeys(fn (object $row): array => [(int) $row->id => $this->presentEnvelope($row)]);
+                ->mapWithKeys(fn (object $row): array => [(int) $row->id => $this->presentEnvelope($row, $owners->get($row->id))]);
             $codes = $this->connection()
                 ->table('budget_codes')
                 ->orderBy('name')
@@ -535,7 +546,7 @@ final class PortalBudgetEnvelopes
      *
      * @return array<string, mixed>
      */
-    private function presentEnvelope(object $row): array
+    private function presentEnvelope(object $row, ?object $owner = null): array
     {
         $funded = $this->cents($row->funded);
         $used = $this->cents($row->spent);
@@ -551,6 +562,9 @@ final class PortalBudgetEnvelopes
             'remaining' => $this->amount($funded - $used),
             'active' => (bool) $row->active,
             'notes' => $this->text($row->budget_notes ?? null),
+            // The open account whose money the envelope holds; null when nobody owns it.
+            'ownerAccountId' => $owner === null ? null : (string) $owner->id,
+            'ownerName' => $owner === null ? null : ($this->text($owner->account_name) ?? 'Account '.$owner->id),
         ];
     }
 
@@ -566,7 +580,7 @@ final class PortalBudgetEnvelopes
      * The account a claimant's department draws on: the first active account held by someone in
      * that department. Null when the department holds none.
      *
-     * @return array{id: int, name: string, team: ?string, active: bool}|null
+     * @return array{id: int, name: string, team: ?string, active: bool, email: string}|null
      */
     private function accountForTeam(?string $department): ?array
     {
@@ -585,9 +599,11 @@ final class PortalBudgetEnvelopes
     }
 
     /**
-     * @return list<array{id: int, name: string, team: ?string, active: bool}>
+     * Every account with its holder's department as its team, matched on the holder's email.
+     *
+     * @return list<array{id: int, name: string, team: ?string, active: bool, email: string}>
      */
-    private function teamAccounts(): array
+    public function teamAccounts(): array
     {
         if ($this->accounts !== null) {
             return $this->accounts;
@@ -608,6 +624,7 @@ final class PortalBudgetEnvelopes
                 'name' => $this->text($row->account_name) ?? 'Account '.$row->id,
                 'team' => $this->text($department),
                 'active' => (bool) $row->active,
+                'email' => $email,
             ];
         }
 
@@ -622,7 +639,7 @@ final class PortalBudgetEnvelopes
         return $key === '' ? null : $key;
     }
 
-    private function remainingCents(int $envelopeId): int
+    public function remainingCents(int $envelopeId): int
     {
         $row = $this->connection()
             ->table('transactions_envelopes as te')
