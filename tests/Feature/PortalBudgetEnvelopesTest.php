@@ -289,6 +289,40 @@ class PortalBudgetEnvelopesTest extends TestCase
         $this->assertSame((string) $loose, $holding($loose)['chargeKey']);
     }
 
+    // The reported ask: once approved, a line shows the envelope its money came from.
+    public function test_the_queue_names_the_envelope_each_approved_item_was_paid_from(): void
+    {
+        $envelope = $this->envelope('Seeded Paying Envelope', 1000.00);
+        [$waiting, $approved] = $this->claim([['Tape', 60.00, 1], ['Glue', 45.00, 2]]);
+        $this->decide([['id' => (string) $approved, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])
+            ->assertOk();
+
+        $items = $this->queuedItems();
+        $this->assertSame('Seeded Paying Envelope', $items[(string) $approved]['envelopeName']);
+        $this->assertNull($items[(string) $waiting]['envelopeName']);
+
+        // With the tracker off nothing was charged, so nothing is named.
+        config(['products.catalog.transaction-tracker.enabled' => false]);
+        Cache::flush();
+        $this->assertNull($this->queuedItems()[(string) $approved]['envelopeName']);
+    }
+
+    // A whole-claim charge from before paid for every approved item of the claim, not just its carrier.
+    public function test_the_queue_names_a_whole_claim_charges_envelope_on_each_approved_item(): void
+    {
+        $envelope = $this->envelope('Seeded Legacy Payer', 1000.00);
+        [$carrier, $covered, $refused] = $this->claim([['Chair', 400.00, 1], ['Mat', 100.00, 1], ['Lamp', 90.00, 1]]);
+        DB::connection('portal')->table('reimbursements')->whereIn('id', [$carrier, $covered])->update(['status' => 'Approved']);
+        DB::connection('portal')->table('reimbursements')->where('id', $refused)->update(['status' => 'Rejected']);
+        $this->unbookedCharge($carrier, $envelope, 500.00);
+
+        $items = $this->queuedItems();
+
+        $this->assertSame('Seeded Legacy Payer', $items[(string) $carrier]['envelopeName']);
+        $this->assertSame('Seeded Legacy Payer', $items[(string) $covered]['envelopeName']);
+        $this->assertNull($items[(string) $refused]['envelopeName']);
+    }
+
     public function test_an_approval_without_an_envelope_is_refused_and_changes_nothing(): void
     {
         [$item] = $this->claim([['Monthly grocery', 1644.25, 1]]);
@@ -798,6 +832,20 @@ class PortalBudgetEnvelopesTest extends TestCase
     }
 
     // A charge as the portal wrote it before charges carried a team account: envelope only.
+    /**
+     * Every reimbursement line in the queue on the seeded claims' day, keyed by its item id.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function queuedItems(): array
+    {
+        $claims = $this->getJson('/api/development/portal/manage/requests?from=2026-09-01&to=2026-09-01', $this->admin())
+            ->assertOk()
+            ->json('reimbursements');
+
+        return collect($claims)->flatMap(fn (array $claim): array => $claim['items'])->keyBy('id')->all();
+    }
+
     private function unbookedCharge(int $claimId, int $envelopeId, float $amount): int
     {
         $tracker = DB::connection('tracker');

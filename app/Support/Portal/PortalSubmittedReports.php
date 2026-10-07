@@ -425,13 +425,13 @@ final class PortalSubmittedReports
     public function replace(Employee $actor, string $id, Request $request): array
     {
         [$date, $kind] = $this->parseGroupId($id);
-        $this->assertMutableDate($date);
 
         $employeeId = (int) $actor->getKey();
         $existing = $this->ownedLines($employeeId, $date, $kind);
         if ($existing === []) {
             abort(404, 'That report was not found.');
         }
+        $this->assertChangeable($date, $kind, $existing);
 
         $this->assertSoleOwner($employeeId, $this->lineIds($existing));
 
@@ -750,13 +750,13 @@ final class PortalSubmittedReports
     public function destroy(Employee $actor, string $id, Request $request): void
     {
         [$date, $kind] = $this->parseGroupId($id);
-        $this->assertMutableDate($date);
 
         $employeeId = (int) $actor->getKey();
         $existing = $this->ownedLines($employeeId, $date, $kind);
         if ($existing === []) {
             abort(404, 'That report was not found.');
         }
+        $this->assertChangeable($date, $kind, $existing);
 
         $ids = $this->lineIds($existing);
         $this->assertSoleOwner($employeeId, $ids);
@@ -1649,6 +1649,21 @@ final class PortalSubmittedReports
         }
 
         return [$match[1], $match[2]];
+    }
+
+    /**
+     * A report changes within the recent window. A late report still waiting on its approver is the
+     * exception: it is past by nature, and it stays the member's to fix or withdraw until decided.
+     *
+     * @param  list<object>  $lines
+     */
+    private function assertChangeable(string $date, string $kind, array $lines): void
+    {
+        $approval = trim((string) ($lines[0]->late_submission_approval ?? ''));
+        if ($kind === PortalSubmittedReportPresenter::KIND_LATE && strcasecmp($approval, self::LATE_PENDING) === 0) {
+            return;
+        }
+        $this->assertMutableDate($date);
     }
 
     private function assertMutableDate(string $date): void

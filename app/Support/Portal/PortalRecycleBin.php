@@ -41,6 +41,10 @@ final class PortalRecycleBin
 
     private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
+    public function __construct(
+        private readonly PortalViewProjects $projects,
+    ) {}
+
     /**
      * Table column key => SQL columns. Unknown keys fall back to newest first.
      *
@@ -129,7 +133,11 @@ final class PortalRecycleBin
             return [
                 'section' => 'administration',
                 'resource' => 'recycle-bin',
-                'data' => PortalRecycleBinPresenter::detail($row, $names),
+                'data' => [
+                    ...PortalRecycleBinPresenter::detail($row, $names),
+                    // A deleted project is only stamped, so its details and reported work are still there to show.
+                    'project' => PortalProjectDeletion::owns($row) ? $this->projects->binSummary((int) $row->record_id) : null,
+                ],
             ];
         });
     }
