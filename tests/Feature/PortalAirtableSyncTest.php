@@ -742,6 +742,74 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertSame('Approved', $item['fields']['LateSubmission Approval']);
     }
 
+    // The portal's Add Project: a row Airtable has never seen is created whole, and the people arrive
+    // as links -- the lead matched by email, members and support told apart by the role on the junction.
+    public function test_a_project_the_portal_adds_is_created_whole_with_its_people_linked(): void
+    {
+        $this->fakeAirtable();
+        $lead = DB::connection('portal')->table('employees')->whereNotNull('airtable_record_id')->orderBy('id')->first();
+        $this->assertNotNull($lead);
+        $projectId = $this->projectRow(['project_lead_email' => $lead->email]);
+        $member = $this->linkPerson($projectId, 'member', 1);
+        $support = $this->linkPerson($projectId, 'support', 2);
+        $actionId = $this->ledgerProject($projectId, 'add', ['columns' => ['status' => 'Started']]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('create', $item['outcome']);
+        $this->assertSame('Started', $item['fields']['Status']);
+        $this->assertSame([$lead->airtable_record_id], $item['fields']['PM ID']);
+        $this->assertSame([$member], $item['fields']['Project Members']);
+        $this->assertSame([$support], $item['fields']['Support Members']);
+    }
+
+    // An edit sends only the columns the action changed, so a PM's own Airtable work is not re-sent over.
+    public function test_a_project_edit_sends_only_the_columns_the_action_changed(): void
+    {
+        $this->fakeAirtable();
+        $projectId = $this->projectRow(['airtable_record_id' => 'recPROJ000000001', 'status' => 'Done']);
+        $actionId = $this->ledgerProject($projectId, 'edit', ['columns' => ['status' => 'Done']]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('update', $item['outcome']);
+        $this->assertSame(['Status'], array_keys($item['fields']));
+    }
+
+    // The approval queue writes four columns; its ledger entry names them as a column map, and the
+    // column it also writes for its own bookkeeping (date_modified) is not mapped, so it never goes.
+    public function test_a_project_approval_sends_only_the_four_columns_it_decided(): void
+    {
+        $this->fakeAirtable();
+        $projectId = $this->projectRow([
+            'airtable_record_id' => 'recPROJ000000002',
+            'project_creation_status' => 'Approved',
+            'project_creation_approver' => 'Ada Admin',
+            'project_approver_email' => 'ada@ikaikabim.com',
+            'project_creation_approver_remarks' => 'Fine.',
+        ]);
+        $actionId = $this->ledgerProject($projectId, 'edit', ['fields' => [
+            'project_creation_status' => 'Approved',
+            'project_creation_approver' => 'Ada Admin',
+            'project_approver_email' => 'ada@ikaikabim.com',
+            'project_creation_approver_remarks' => 'Fine.',
+            'date_modified' => '2026-10-07 00:00:00',
+        ]]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('update', $item['outcome']);
+        $this->assertSame([
+            'ProjectCreationStatus',
+            'ProjectCreationApprover',
+            'Project Approver Email',
+            'ProjectCreationApproverRemarks',
+        ], array_keys($item['fields']));
+    }
+
     /**
      * @param  array<string, mixed>|null  $schema
      */
@@ -815,6 +883,37 @@ class PortalAirtableSyncTest extends TestCase
                 ['name' => 'Project', 'type' => 'multipleRecordLinks'],
                 ['name' => 'Activity', 'type' => 'multipleRecordLinks'],
                 ['name' => 'Earn Code', 'type' => 'multipleRecordLinks'],
+            ],
+        ], [
+            'name' => 'Project/s',
+            'fields' => [
+                ['name' => 'Project Name', 'type' => 'multilineText'],
+                ['name' => 'Department', 'type' => 'singleSelect', 'options' => $select(['Engineering', 'MIS', 'Admin', 'General'])],
+                ['name' => 'Type of Job', 'type' => 'singleSelect', 'options' => $select(['Scan-to-BIM', 'CAD-to-BIM'])],
+                ['name' => 'Area (in S.F.)', 'type' => 'number'],
+                ['name' => 'Status', 'type' => 'singleSelect', 'options' => $select(['Started', 'Done', 'Closed'])],
+                ['name' => 'Project Lead Email', 'type' => 'singleLineText'],
+                ['name' => 'LOD', 'type' => 'singleSelect', 'options' => $select(['N/A', 'LOD 300'])],
+                ['name' => 'AR LOD', 'type' => 'singleSelect', 'options' => $select(['N/A', 'LOD 300'])],
+                ['name' => 'ST LOD', 'type' => 'singleSelect', 'options' => $select(['N/A', 'LOD 300'])],
+                ['name' => 'MD LOD', 'type' => 'singleSelect', 'options' => $select(['N/A', 'LOD 300'])],
+                ['name' => 'EL LOD', 'type' => 'singleSelect', 'options' => $select(['N/A', 'LOD 300'])],
+                ['name' => 'PL LOD', 'type' => 'singleSelect', 'options' => $select(['N/A', 'LOD 300'])],
+                ['name' => 'FP LOD', 'type' => 'singleSelect', 'options' => $select(['N/A', 'LOD 300'])],
+                ['name' => 'Forma Link', 'type' => 'multilineText'],
+                ['name' => 'MSTeams Project Link', 'type' => 'url'],
+                ['name' => 'MS Planner Link', 'type' => 'url'],
+                ['name' => 'Panoramic Link', 'type' => 'url'],
+                ['name' => 'MS Loop Link', 'type' => 'url'],
+                ['name' => 'Google Drive Folder Path', 'type' => 'singleLineText'],
+                ['name' => 'ProjectCreationStatus', 'type' => 'singleSelect', 'options' => $select(['Approved', 'Rejected', 'Pending'])],
+                ['name' => 'ProjectCreationApprover', 'type' => 'singleLineText'],
+                ['name' => 'Project Approver Email', 'type' => 'singleLineText'],
+                ['name' => 'ProjectCreationApproverRemarks', 'type' => 'multilineText'],
+                ['name' => 'PM ID', 'type' => 'multipleRecordLinks'],
+                ['name' => 'Client', 'type' => 'multipleRecordLinks'],
+                ['name' => 'Project Members', 'type' => 'multipleRecordLinks'],
+                ['name' => 'Support Members', 'type' => 'multipleRecordLinks'],
             ],
         ]]];
     }
@@ -904,5 +1003,47 @@ class PortalAirtableSyncTest extends TestCase
         return $type === 'add'
             ? $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, '1:2026-10-05-leave', 'portal.requests', ['id' => (string) $requestId], $resource, (string) $requestId, 1, null)
             : $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.requests', ['id' => (string) $requestId], $resource, (string) $requestId, null, 1, null);
+    }
+
+    /**
+     * A project row, carrying only what the portal's own editor writes.
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    private function projectRow(array $overrides = []): int
+    {
+        return (int) DB::connection('portal')->table('projects')->insertGetId([
+            'project_number' => '900001',
+            'project_name' => '900001 Sync Test',
+            'department' => 'Engineering',
+            'type_of_job' => 'Scan-to-BIM',
+            'status' => 'Started',
+            'project_creation_status' => 'Pending',
+            ...$overrides,
+        ]);
+    }
+
+    // One person on the project's junction, by the role that tells Airtable's two people fields apart.
+    private function linkPerson(int $projectId, string $role, int $index): string
+    {
+        $employee = DB::connection('portal')->table('employees')->whereNotNull('airtable_record_id')->orderBy('id')->skip($index)->first();
+        DB::connection('portal')->table('employees_projects')->insert([
+            'employee_id' => $employee->id, 'project_id' => $projectId, 'role_on_project' => $role,
+        ]);
+
+        return (string) $employee->airtable_record_id;
+    }
+
+    /**
+     * @param  array<string, mixed>  $parameters
+     */
+    private function ledgerProject(int $projectId, string $type, array $parameters): int
+    {
+        $ledger = app(CoreLedger::class);
+        $parameters = ['id' => (string) $projectId, ...$parameters];
+
+        return $type === 'add'
+            ? $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, '1:900001', 'portal.projects', $parameters, 'projects', (string) $projectId, 1, null)
+            : $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.projects', $parameters, 'projects', (string) $projectId, '1:900001', 1, null);
     }
 }

@@ -123,17 +123,19 @@ final class PortalManageProjects
         $name = $this->text($row->project_name ?? null) ?? 'Project';
 
         $this->ledger->within($this->connection(), function () use ($actor, $request, $projectId, $isApproved, $remarks, $name): void {
-            $this->connection()->table('projects')->where('id', $projectId)->update([
+            $written = [
                 'project_creation_status' => $isApproved ? PortalProjectApproval::APPROVED : PortalProjectApproval::REJECTED,
                 'project_creation_approver' => $this->personName($actor),
                 'project_approver_email' => $this->text($actor->email ?? null),
                 'project_creation_approver_remarks' => $remarks,
                 'date_modified' => now(),
-            ]);
+            ];
+            $this->connection()->table('projects')->where('id', $projectId)->update($written);
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,
                 self::CORE_TARGET,
-                ['id' => (string) $projectId, 'projectName' => $name, 'decision' => $isApproved ? 'approved' : 'rejected', 'remarks' => $remarks],
+                // The sync sends changed columns only, so it needs them as a column map, not as prose.
+                ['id' => (string) $projectId, 'projectName' => $name, 'decision' => $isApproved ? 'approved' : 'rejected', 'remarks' => $remarks, 'fields' => $written],
                 self::CORE_RESOURCE,
                 (string) $projectId,
                 CoreRecycleKey::project($projectId),

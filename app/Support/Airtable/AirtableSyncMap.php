@@ -136,6 +136,50 @@ final class AirtableSyncMap
                 'approver_remarks' => 'Approver Remarks',
             ],
         ],
+        // The portal's own Add/Edit Project screens. A project the portal adds is created from every
+        // mapped column, since Airtable holds no earlier state to protect; an edit sends only the
+        // columns the action changed, so a PM's own Airtable work is never re-sent over. Deletes stay
+        // unsynced: the portal soft-deletes into the recycle bin, and the record is Airtable's.
+        'projects' => [
+            'sql_table' => 'projects',
+            'airtable_table' => 'Project/s',
+            'changed_only' => ['columns', 'fields', 'changes'],
+            'create_full' => true,
+            'fields' => [
+                'project_name' => 'Project Name',
+                'department' => 'Department',
+                'type_of_job' => 'Type of Job',
+                'area_sqft' => 'Area (in S.F.)',
+                'status' => 'Status',
+                'project_lead_email' => 'Project Lead Email',
+                'lod' => 'LOD',
+                'ar_lod' => 'AR LOD',
+                'st_lod' => 'ST LOD',
+                'md_lod' => 'MD LOD',
+                'el_lod' => 'EL LOD',
+                'pl_lod' => 'PL LOD',
+                'fp_lod' => 'FP LOD',
+                'forma_link' => 'Forma Link',
+                'msteams_project_link' => 'MSTeams Project Link',
+                'ms_planner_link' => 'MS Planner Link',
+                'panoramic_link' => 'Panoramic Link',
+                'ms_loop_link' => 'MS Loop Link',
+                'google_drive_folder_path' => 'Google Drive Folder Path',
+                'project_creation_status' => 'ProjectCreationStatus',
+                'project_creation_approver' => 'ProjectCreationApprover',
+                'project_approver_email' => 'Project Approver Email',
+                'project_creation_approver_remarks' => 'ProjectCreationApproverRemarks',
+            ],
+            'links' => [
+                // A project names its lead by email, and SQL keeps no lead row to walk: the match is
+                // that email against the employee's own.
+                'PM ID' => ['table' => 'employees', 'matches' => 'email', 'from' => 'project_lead_email'],
+                'Client' => ['junction' => 'projects_clients', 'local' => 'project_id', 'foreign' => 'client_id', 'table' => 'clients'],
+                // One junction, three fields: the role on it is what tells members from support.
+                'Project Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'member']],
+                'Support Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'support']],
+            ],
+        ],
         // The admin grid ledgers an edit under the bare table name. Only the columns it changed are
         // sent, and only to a record Airtable already has, since the grid edits rows in place.
         'requests' => [
