@@ -89,6 +89,10 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(60)->by('manage-access-write:'.$this->portalLimiterKey($request));
         });
 
+        RateLimiter::for('bitbucket-webhook', function (Request $request) {
+            return Limit::perMinute(60)->by('bitbucket-webhook:'.$request->ip());
+        });
+
         RateLimiter::for('portal-projects', function (Request $request) {
             return Limit::perMinute(60)->by('projects:'.$this->portalLimiterKey($request));
         });

@@ -80,6 +80,8 @@ final class PortalProjectWork
         $recent = 0.0;
         $lines = 0.0;
         $people = [];
+        // Items (change in elements) and hours per person, for the project's top member.
+        $byPerson = [];
         $days = [];
         $activities = [];
         foreach ($reports as $report) {
@@ -94,6 +96,11 @@ final class PortalProjectWork
             }
             if ($report->employee_id !== null) {
                 $people[(int) $report->employee_id] = true;
+                $byPerson[(int) $report->employee_id] ??= ['items' => 0.0, 'hours' => 0.0];
+                $byPerson[(int) $report->employee_id]['hours'] += $reportHours;
+                if ($hasLines && is_numeric($report->change_in_elements)) {
+                    $byPerson[(int) $report->employee_id]['items'] += (float) $report->change_in_elements;
+                }
             }
             $days[$day] = true;
 
@@ -139,7 +146,26 @@ final class PortalProjectWork
             'linesTotal' => $hasLines ? (int) round($lines) : null,
             'rhythmDays' => $rhythm,
             'activities' => $rows,
+            'topItems' => $hasLines ? self::topItems($byPerson) : null,
         ];
+    }
+
+    /**
+     * Who reported the most items on an Engineering project, or null before anyone reported one.
+     *
+     * @param  array<int, array{items: float, hours: float}>  $byPerson
+     * @return array{employeeId: int, items: int, hours: float}|null
+     */
+    private static function topItems(array $byPerson): ?array
+    {
+        $top = null;
+        foreach ($byPerson as $employeeId => $work) {
+            if ($work['items'] > 0 && ($top === null || $work['items'] > $top['items'])) {
+                $top = ['employeeId' => $employeeId, 'items' => (int) round($work['items']), 'hours' => round($work['hours'], 2)];
+            }
+        }
+
+        return $top;
     }
 
     // Engineering's projects carry lines (change in elements) and the Engineering-only form fields; no other department's do.
@@ -214,5 +240,4 @@ final class PortalProjectWork
             ])
             ->selectRaw('DATE(COALESCE(report.actual_work_date, report.report_date)) as work_day');
     }
-
 }

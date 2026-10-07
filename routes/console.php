@@ -3,6 +3,8 @@
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailMessage;
 use App\Support\Airtable\PortalAirtableSync;
+use App\Support\Portal\PortalBitbucketPreview;
+use App\Support\Portal\PortalBitbucketSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
 use App\Support\Portal\PortalEmailAttachments;
 use App\Support\Portal\PortalEmailMarkup;
@@ -12,6 +14,7 @@ use App\Support\Portal\PortalManageRequests;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -187,3 +190,77 @@ Artisan::command('portal:prune-email-attachments', function (PortalEmailAttachme
 
     return 0;
 })->purpose('Delete Send Email attachments staged more than a day ago and never sent');
+
+Artisan::command('portal:bitbucket-sync
+    {--recount : Count the lines of every commit again, after the counting rules change}', function (PortalBitbucketSync $sync): int {
+    if ($this->option('recount')) {
+        $this->info($sync->recount().' commits will be counted again.');
+    }
+    $outcomes = $sync->syncLinked();
+    if ($outcomes === []) {
+        $this->info('No project links a Bitbucket repository yet.');
+
+        return 0;
+    }
+    foreach ($outcomes as $repository => $outcome) {
+        is_string($outcome)
+            ? $this->error($repository.': '.$outcome)
+            : $this->info($repository.': '.$outcome['listed'].' new commits, '.$outcome['counted'].' counted');
+    }
+
+    return in_array(true, array_map('is_string', $outcomes), true) ? 1 : 0;
+})->purpose('Read new commits and their lines from every Bitbucket repository a project links');
+
+Artisan::command('portal:bitbucket-preview
+    {repository : A bitbucket.org link, SSH address or workspace/repository}
+    {--day= : The day to show, YYYY-MM-DD in company time; today when left out}
+    {--author= : Only this author email}', function (PortalBitbucketPreview $preview): int {
+    $day = (string) ($this->option('day') ?? PortalBitbucketSync::companyToday());
+    $author = $this->option('author');
+    try {
+        $result = $preview->day((string) $this->argument('repository'), $day, is_string($author) ? $author : null);
+    } catch (RuntimeException $error) {
+        $this->error($error->getMessage());
+
+        return 1;
+    }
+
+    $this->info($result['repository'].' on '.$result['day'].' ('.PortalBitbucketSync::COMPANY_ZONE.' time)');
+    if ($result['commits'] === []) {
+        $this->line('No commits that day.');
+    }
+    foreach ($result['commits'] as $commit) {
+        $this->newLine();
+        $this->line(sprintf(
+            '<comment>%s</comment>  %s  %s  %s',
+            substr($commit['hash'], 0, 7),
+            $commit['time'],
+            $commit['authorName'] ?? $commit['authorEmail'] ?? 'Unknown',
+            $commit['message'],
+        ));
+        if ($commit['isMerge']) {
+            $this->line('    merge commit: never counted, its lines stay with whoever wrote them');
+
+            continue;
+        }
+        foreach ($commit['files'] as $file) {
+            $this->line(sprintf('    +%d -%d  %s%s', $file['added'], $file['removed'], $file['path'], $file['generated'] ? '  (generated, not counted)' : ''));
+        }
+        $this->line(sprintf('    counted: +%d -%d in %d files', $commit['lines']['added'], $commit['lines']['removed'], $commit['lines']['files']));
+    }
+
+    $this->newLine();
+    $this->table(
+        ['Author', 'Employee', 'Commits', 'Merges', 'Lines +', 'Lines -', 'Files'],
+        array_map(static fn (array $row): array => array_values($row), $result['authors']),
+    );
+    if (! $result['complete']) {
+        $this->warn('Stopped after '.$result['pagesRead'].' pages of history; an older day may be missing commits.');
+    }
+    $this->line('Dry run: nothing was saved.');
+
+    return 0;
+})->purpose('Show what the Bitbucket sync would read for one repository and one day, without saving anything');
+
+// The backstop for a missed push webhook, and what finishes counting a long history; needs the server's schedule:run cron.
+Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();

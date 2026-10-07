@@ -122,46 +122,14 @@ final class PortalSubmittedReports
     }
 
     /**
-     * Reports / Flagged: the signed-in member's own reports that were flagged at filing time.
-     * Same cache version as list()/bumpCache() -- a decided flag or an edited report must
-     * invalidate both.
-     *
-     * @return array{
-     *     section: string,
-     *     resource: string,
-     *     data: list<array<string, mixed>>,
-     *     range: array{from: string, to: string}
-     * }
-     */
-    public function listFlagged(Employee $actor, Request $request): array
-    {
-        [$from, $to] = $this->dateRange($request);
-        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:reports:flagged:'.$version.':'.$actor->getKey().':'.$from.':'.$to;
-
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor, $from, $to): array {
-            return [
-                'section' => 'reports',
-                'resource' => 'flagged',
-                'data' => $this->flaggedReports($from, $to, (int) $actor->getKey()),
-                'range' => ['from' => $from, 'to' => $to],
-            ];
-        });
-    }
-
-    /**
      * Every report flagged at filing time (employees_user_reports.is_flag), for the given window.
      * Grouped by (employee, date, kind) -- the exact unit create() flagged together and the unit a
-     * decision must land on as one, the same way build() groups one member's own lines.
-     *
-     * $onlyEmployeeId scopes to one member and nulls memberName in the output -- the same
-     * "null means the signed-in member filed it" convention LeaveRequestModel uses on the portal.
-     * Left null, every flagged report in range comes back with its real name, for the approver
-     * queue PortalManageRequests bundles this into.
+     * decision must land on as one, the same way build() groups one member's own lines. Only the
+     * approver queue PortalManageRequests bundles reads this; a member never sees their own.
      *
      * @return list<array<string, mixed>>
      */
-    public function flaggedReports(string $from, string $to, ?int $onlyEmployeeId = null): array
+    public function flaggedReports(string $from, string $to): array
     {
         $query = $this->connection()
             ->table('user_reports')
@@ -184,9 +152,6 @@ final class PortalSubmittedReports
                 'employees.last_name',
                 'employees.id_no',
             ]);
-        if ($onlyEmployeeId !== null) {
-            $query->where('employees_user_reports.employee_id', $onlyEmployeeId);
-        }
         $rows = $query
             ->orderBy('user_reports.report_date', 'desc')
             ->orderBy('user_reports.id')
@@ -222,8 +187,7 @@ final class PortalSubmittedReports
                         $row->id_no ?? null,
                         $employeeId,
                     ),
-                    // Own view names nobody; the approver bundle names everybody.
-                    'memberName' => $onlyEmployeeId !== null ? null : PortalSubmittedReportPresenter::memberName(
+                    'memberName' => PortalSubmittedReportPresenter::memberName(
                         is_string($row->first_name ?? null) ? $row->first_name : null,
                         is_string($row->last_name ?? null) ? $row->last_name : null,
                     ),
@@ -963,7 +927,8 @@ final class PortalSubmittedReports
             $ids[] = (int) $line->id;
         }
 
-        $projects = $this->projectLabels($ids);
+        $projectRefs = [];
+        $projects = $this->projectLabels($ids, $projectRefs);
         $activities = $this->activityLabels($ids);
         $earnCodes = $this->earnCodeLabels($ids);
 
@@ -1001,6 +966,7 @@ final class PortalSubmittedReports
                 $earnCodes[$id] ?? [],
                 $line->hours_rendered ?? 0,
                 $line->change_in_elements ?? 0,
+                $projectRefs[$id] ?? null,
             );
         }
 
@@ -1204,10 +1170,13 @@ final class PortalSubmittedReports
     }
 
     /**
+     * Fills $refs with each line's project id and department in the same read, for the person's own list.
+     *
      * @param  list<int>  $reportIds
+     * @param  array<int, array{id: int, department: ?string}>  $refs
      * @return array<int, list<string>>
      */
-    private function projectLabels(array $reportIds): array
+    private function projectLabels(array $reportIds, array &$refs = []): array
     {
         $labels = [];
         foreach ($this->chunks($reportIds) as $chunk) {
@@ -1217,12 +1186,15 @@ final class PortalSubmittedReports
                 ->whereIn('pivot.user_report_id', $chunk)
                 ->select([
                     'pivot.user_report_id',
+                    'projects.id',
+                    'projects.department',
                     'projects.project_number',
                     'projects.project_name',
                 ])
                 ->get();
 
             foreach ($rows as $row) {
+                $refs[(int) $row->user_report_id] ??= ['id' => (int) $row->id, 'department' => $this->text($row->department ?? null)];
                 $labels[(int) $row->user_report_id][] = PortalSubmittedReportPresenter::projectLabel(
                     $row->project_number ?? null,
                     $row->project_name ?? null,

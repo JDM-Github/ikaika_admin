@@ -177,8 +177,9 @@ final class PortalSubmittedReportPresenter
         array $earnCodeLabels,
         mixed $hoursRendered,
         mixed $elementChange,
+        ?array $project = null,
     ): array {
-        return [
+        $entry = [
             'id' => $id,
             'projectLabel' => self::joined($projectLabels),
             'activityLabel' => self::joined($activityLabels),
@@ -186,6 +187,13 @@ final class PortalSubmittedReportPresenter
             'hoursRendered' => round((float) $hoursRendered, 2),
             'elementChange' => round((float) $elementChange, 2),
         ];
+        // The person's own list names the project too, so an MIS line can show its code instead of items.
+        if ($project !== null) {
+            $entry['projectId'] = (string) $project['id'];
+            $entry['projectDepartment'] = $project['department'];
+        }
+
+        return $entry;
     }
 
     /**

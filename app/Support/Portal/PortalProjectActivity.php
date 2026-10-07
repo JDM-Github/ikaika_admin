@@ -18,7 +18,10 @@ final class PortalProjectActivity
 {
     public const PER_PAGE = 25;
 
-    public function __construct(private readonly PortalProjectApproval $approval) {}
+    public function __construct(
+        private readonly PortalProjectApproval $approval,
+        private readonly PortalProjectCodeActivity $code,
+    ) {}
 
     /**
      * @return array{section: string, resource: string, data: array<string, mixed>}
@@ -56,6 +59,8 @@ final class PortalProjectActivity
             ->all();
         $hasLines = PortalProjectWork::isEngineering($project->department);
         $visible = static fn (object $row): bool => $seesEveryone || (int) $row->employee_id === $actorId;
+        // Code from linked Bitbucket repositories (MIS), under the same who-sees-whom rule as the reports.
+        $code = $this->code->byPersonForProject($projectId);
 
         $authorIds = [];
         foreach ($rows as $row) {
@@ -77,10 +82,13 @@ final class PortalProjectActivity
             'resource' => 'activity',
             'data' => [
                 'seesEveryone' => $seesEveryone,
-                'people' => $this->people($rows, $memberIds, $project, $visible),
+                'people' => $this->people($rows, $memberIds, $project, $visible, $code['people']),
                 'activities' => $this->activities(array_filter($rows, $visible)),
                 'reports' => array_map(
-                    fn (object $row): array => $this->report($row, $hasLines, $authorPhotos),
+                    fn (object $row): array => [
+                        ...$this->report($row, $hasLines, $authorPhotos),
+                        'code' => $code['days'][(int) $row->employee_id.'|'.$row->work_day] ?? null,
+                    ],
                     array_slice($feed, ($page - 1) * self::PER_PAGE, self::PER_PAGE),
                 ),
                 'page' => $page,
@@ -106,15 +114,16 @@ final class PortalProjectActivity
     }
 
     /**
-     * Everyone who reported, then members who never did; hours, report count and last report only
-     * where the viewer may see that person's work.
+     * Everyone who reported, then members and committers who never did; hours, report count, last report
+     * and code only where the viewer may see that person's work.
      *
      * @param  list<object>  $rows
      * @param  list<int>  $memberIds
      * @param  callable(object): bool  $visible
+     * @param  array<int, array{commits: int, linesAdded: int, linesRemoved: int, lastCommitOn: string}>  $code
      * @return list<array<string, mixed>>
      */
-    private function people(array $rows, array $memberIds, object $project, callable $visible): array
+    private function people(array $rows, array $memberIds, object $project, callable $visible, array $code): array
     {
         $people = [];
         foreach ($rows as $row) {
@@ -127,7 +136,7 @@ final class PortalProjectActivity
             $people[$id]['reports']++;
         }
 
-        $ids = array_values(array_unique([...array_keys($people), ...$memberIds]));
+        $ids = array_values(array_unique([...array_keys($people), ...$memberIds, ...array_keys($code)]));
         $names = $this->connection()->table('employees')->whereIn('id', $ids)
             ->get(['id', 'first_name', 'last_name', 'email'])->keyBy('id');
         $photos = PortalEmployeePresenter::photoUrls($ids);
@@ -146,6 +155,7 @@ final class PortalProjectActivity
                 'hours' => $shown ? round($work['hours'], 2) : null,
                 'reports' => $shown ? $work['reports'] : null,
                 'lastReportOn' => $shown ? $work['lastReportOn'] : null,
+                'code' => isset($code[$id]) && $visible((object) ['employee_id' => $id]) ? $code[$id] : null,
             ];
         }
         usort($list, static fn (array $a, array $b): int => [$b['hasReported'], $b['hours'] ?? -1, $a['name']] <=> [$a['hasReported'], $a['hours'] ?? -1, $b['name']]);

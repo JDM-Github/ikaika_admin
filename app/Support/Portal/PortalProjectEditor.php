@@ -126,6 +126,7 @@ final class PortalProjectEditor
         private readonly PortalAudit $audit,
         private readonly PortalProjectTrail $trail,
         private readonly PortalProjectApproval $approval,
+        private readonly PortalProjectRepositories $repositories,
     ) {}
 
     /**
@@ -256,6 +257,7 @@ final class PortalProjectEditor
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
             $this->replaceClient($projectId, $fields['clientId']);
             $this->writeScopes($projectId, $scopeCodes);
+            $this->repositories->replace($projectId, $fields['repositories']);
 
             $this->ledger->recordAdd(
                 CoreLedger::PRODUCT_PORTAL,
@@ -319,6 +321,7 @@ final class PortalProjectEditor
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
             $this->replaceClient($projectId, $fields['clientId']);
+            $this->repositories->replace($projectId, $fields['repositories']);
 
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,
@@ -408,6 +411,7 @@ final class PortalProjectEditor
      *     clientId: int,
      *     memberIds: list<int>,
      *     supportMemberIds: list<int>,
+     *     repositories: list<string>,
      *     columns: array<string, mixed>,
      *     ledger: array<string, mixed>
      * }
@@ -430,6 +434,8 @@ final class PortalProjectEditor
             'levels.*' => ['nullable', 'string', Rule::in(self::LEVELS)],
             'links' => ['nullable', 'array'],
             'links.*' => ['nullable', 'string', 'max:1000'],
+            'repositories' => ['nullable', 'array', 'max:'.PortalProjectRepositories::MAX_PER_PROJECT],
+            'repositories.*' => ['nullable', 'string', 'max:300'],
         ], [], [
             'leadId' => 'project lead',
             'clientId' => 'client',
@@ -440,6 +446,7 @@ final class PortalProjectEditor
             'supportMemberIds.*' => 'support member',
             'levels.*' => 'level of detail',
             'links.*' => 'link',
+            'repositories.*' => 'repository',
         ]);
 
         $name = $this->text(preg_replace('/\s+/u', ' ', (string) $data['name']));
@@ -507,6 +514,10 @@ final class PortalProjectEditor
             $level = $this->text($levels[$discipline] ?? null);
             $columns[$column] = $level === null ? null : ($level === 'N/A' ? $level : 'LOD '.$level);
         }
+        // Only MIS tracks code from Bitbucket; any other department's project keeps none.
+        $repositories = PortalProjectRepositories::appliesTo($department) && is_array($data['repositories'] ?? null)
+            ? PortalProjectRepositories::parse($data['repositories'])
+            : [];
         $links = is_array($data['links'] ?? null) ? $data['links'] : [];
         foreach (self::LINK_COLUMNS as $kind => $column) {
             $columns[$column] = $isEngineering || ! in_array($kind, self::ENGINEERING_LINKS, true)
@@ -519,6 +530,7 @@ final class PortalProjectEditor
             'clientId' => $clientId,
             'memberIds' => $memberIds,
             'supportMemberIds' => $supportMemberIds,
+            'repositories' => $repositories,
             'columns' => $columns,
             'ledger' => [
                 'projectName' => $name,
@@ -530,6 +542,7 @@ final class PortalProjectEditor
                 'clientId' => (string) $clientId,
                 'memberIds' => array_map('strval', $memberIds),
                 'supportMemberIds' => array_map('strval', $supportMemberIds),
+                'repositories' => $repositories,
             ],
         ];
     }
@@ -538,7 +551,7 @@ final class PortalProjectEditor
      * What an edit changes, read before the write, as the Trail history row's remarks; null when
      * nothing changed. Plain values show old to new; people, levels and links only say they changed.
      *
-     * @param  array{clientId: int, memberIds: list<int>, supportMemberIds: list<int>, columns: array<string, mixed>}  $fields
+     * @param  array{clientId: int, memberIds: list<int>, supportMemberIds: list<int>, repositories: list<string>, columns: array<string, mixed>}  $fields
      */
     private function changes(int $projectId, array $fields): ?string
     {
@@ -582,6 +595,13 @@ final class PortalProjectEditor
             if ($old !== $new) {
                 $parts[] = $message;
             }
+        }
+        $oldRepositories = $this->repositories->forProject($projectId);
+        $newRepositories = $fields['repositories'];
+        sort($oldRepositories);
+        sort($newRepositories);
+        if ($oldRepositories !== $newRepositories) {
+            $parts[] = 'Repositories changed';
         }
         foreach (['Levels of detail changed' => self::LEVEL_COLUMNS, 'Links changed' => self::LINK_COLUMNS] as $message => $columns) {
             foreach ($columns as $column) {
@@ -828,6 +848,7 @@ final class PortalProjectEditor
                 'supportMembers' => $people[self::SUPPORT_ROLE],
                 'levels' => $levels,
                 'links' => $links,
+                'repositories' => $this->repositories->forProject($projectId),
                 'scopeCodes' => $this->projects->scopeCodesForProject($projectId),
             ],
         ];

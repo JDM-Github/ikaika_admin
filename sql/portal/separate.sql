@@ -388,6 +388,64 @@ CREATE TABLE IF NOT EXISTS projects_wbs_scopes (
 
 
 -- ============================================================================
+-- BITBUCKET — an MIS project's code activity (docs/power/view-projects-dashboard-plan.md, step 7)
+-- bitbucket_repositories: one row per repository, holding its sync state, so a repository linked
+-- to two projects is read once. projects_bitbucket_repositories: which projects a repository
+-- belongs to (many per project, and a repository may serve several). bitbucket_commits: one row
+-- per commit per repository, whichever branches carry it; author_email is matched to
+-- employees.email (employee_id NULL = "Unknown author", never dropped); is_merge rows are kept but
+-- never counted, so lines stay with whoever wrote them. Only linked repositories are ever synced.
+-- committed_at is UTC; committed_on is that moment's calendar day in company time (Asia/Manila), the
+-- day a Daily or Late Report for that date reads, so work counts on the day it was written, not
+-- pushed. counted_at NULL means its line counts are not fetched yet (a big history fills over several
+-- runs); history_complete says one listing reached the first commit, so later runs may stop early.
+-- message is internal (lead, managers, Admin+ only). Portal-only: never synced.
+-- Existing databases: the Laravel migrations create_portal_bitbucket_tables, add_portal_bitbucket_commit_day.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS bitbucket_repositories (
+    id              INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    workspace       VARCHAR(64)  NOT NULL,
+    repo_slug       VARCHAR(128) NOT NULL,
+    last_synced_at  TIMESTAMP    NULL,
+    last_sync_error VARCHAR(255) NULL,
+    history_complete TINYINT(1)  NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_bitbucket_repositories (workspace, repo_slug)
+);
+
+CREATE TABLE IF NOT EXISTS projects_bitbucket_repositories (
+    project_id    INT NOT NULL,
+    repository_id INT NOT NULL,
+    PRIMARY KEY (project_id, repository_id),
+    CONSTRAINT fk_projects_bitbucket_repositories_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+    CONSTRAINT fk_projects_bitbucket_repositories_repository FOREIGN KEY (repository_id) REFERENCES bitbucket_repositories (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS bitbucket_commits (
+    repository_id INT              NOT NULL,
+    hash          CHAR(40)         NOT NULL,
+    author_name   VARCHAR(255)     NULL,
+    author_email  VARCHAR(255)     NULL,
+    employee_id   INT              NULL,
+    committed_at  DATETIME         NOT NULL,
+    committed_on  DATE             NOT NULL,
+    message       TEXT             NULL,
+    lines_added   INT UNSIGNED     NOT NULL DEFAULT 0,
+    lines_removed INT UNSIGNED     NOT NULL DEFAULT 0,
+    files_changed INT UNSIGNED     NOT NULL DEFAULT 0,
+    is_merge      TINYINT(1)       NOT NULL DEFAULT 0,
+    counted_at    TIMESTAMP        NULL,
+    PRIMARY KEY (repository_id, hash),
+    KEY ix_bitbucket_commits_repository_day (repository_id, committed_at),
+    KEY ix_bitbucket_commits_employee_day (employee_id, committed_on),
+    CONSTRAINT fk_bitbucket_commits_repository FOREIGN KEY (repository_id) REFERENCES bitbucket_repositories (id) ON DELETE CASCADE,
+    CONSTRAINT fk_bitbucket_commits_employee FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE SET NULL
+);
+
+
+
+-- ============================================================================
 -- FINE-GRAINED RULES — the Access page (FINE_GRAINED_RULES.md)
 -- access_permissions: the rule catalog, one row per page, tab or action. parent_key
 -- builds the tree; supports_reach marks a rule that shows other people's records

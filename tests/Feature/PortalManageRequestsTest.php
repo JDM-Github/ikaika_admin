@@ -163,7 +163,7 @@ class PortalManageRequestsTest extends TestCase
      * together, and is_flag itself -- the permanent "this was filed on a warning" fact -- must
      * survive the decision untouched.
      */
-    public function test_an_admin_approves_a_flagged_report_with_remarks_and_the_employee_is_notified(): void
+    public function test_an_admin_approves_a_flagged_report_with_remarks_and_the_employee_is_never_told(): void
     {
         $member = $this->activeMember();
         $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
@@ -202,23 +202,15 @@ class PortalManageRequestsTest extends TestCase
         $this->assertContains($firstId, $parameters['userReportIds']);
         $this->assertContains($secondId, $parameters['userReportIds']);
 
-        $notification = PortalNotification::query()
+        // A flagged member must never learn they are flagged: no notice and no line in their own log.
+        $this->assertFalse(PortalNotification::query()
             ->where('employee_id', $member->getKey())
-            ->where('type', 'reports.flagged.approved')
-            ->orderByDesc('id')
-            ->first();
-        $this->assertNotNull($notification);
-        $this->assertStringContainsString('flagged report', (string) $notification->message);
-
-        $log = PortalLog::query()
+            ->where('type', 'like', 'reports.flagged.%')
+            ->exists());
+        $this->assertFalse(PortalLog::query()
             ->where('employee_id', $member->getKey())
             ->where('resource', 'reports.flagged')
-            ->orderByDesc('id')
-            ->first();
-        $this->assertNotNull($log);
-        $this->assertIsArray($log->payload);
-        $this->assertSame('flag', $log->payload['kind']);
-        $this->assertSame('approved', $log->payload['status']);
+            ->exists());
     }
 
     // Rejecting keeps it on the list -- only approving is supposed to clear a flagged report.
