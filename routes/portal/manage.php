@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Portal\Manage\AccessController;
+use App\Http\Controllers\Api\Portal\Manage\BudgetAccountsController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
 use App\Http\Controllers\Api\Portal\Manage\FlaggedMembersController;
 use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
@@ -89,6 +90,22 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:finance.envelopes.funds', 'throttle:portal-manage-budget-write'])
         ->post('manage/budget-envelopes/{id}/funds', [BudgetEnvelopesController::class, 'storeFunds'])
         ->whereNumber('id');
+    Route::middleware(['portal.rule:finance.envelopes.transfer', 'throttle:portal-manage-budget-write'])
+        ->post('manage/budget-envelopes/transfers', [BudgetEnvelopesController::class, 'storeTransfer']);
+    Route::middleware(['portal.rule:finance.transactions.add', 'throttle:portal-manage-budget-write'])
+        ->post('manage/budget-transactions', [BudgetEnvelopesController::class, 'storeTransaction']);
+    // Finance / Accounts: reading them is one power; adding, moving and settling money between them another.
+    Route::middleware(['portal.rule:finance.accounts', 'throttle:portal-manage-requests'])
+        ->get('manage/budget-accounts', [BudgetAccountsController::class, 'index']);
+    Route::middleware(['portal.rule:finance.accounts.funds', 'throttle:portal-manage-budget-write'])->group(function (): void {
+        Route::post('manage/budget-accounts/{id}/funds', [BudgetAccountsController::class, 'storeFunds'])
+            ->whereNumber('id');
+        Route::post('manage/budget-accounts/transfers', [BudgetAccountsController::class, 'storeTransfer']);
+        Route::post('manage/budget-accounts/transfers/{id}/complete', [BudgetAccountsController::class, 'completeTransfer'])
+            ->whereNumber('id');
+        Route::post('manage/budget-accounts/transfers/{id}/cancel', [BudgetAccountsController::class, 'cancelTransfer'])
+            ->whereNumber('id');
+    });
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
     // Flagged users: whoever may approve or reject flagged reports puts people on review and takes them off.

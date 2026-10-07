@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalBudgetEnvelopes;
 use App\Support\Portal\PortalBudgetSetup;
+use App\Support\Portal\PortalBudgetTransactions;
+use App\Support\Portal\PortalBudgetTransfers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -14,6 +16,8 @@ class BudgetEnvelopesController extends Controller
     public function __construct(
         private readonly PortalBudgetEnvelopes $envelopes,
         private readonly PortalBudgetSetup $setup,
+        private readonly PortalBudgetTransfers $transfers,
+        private readonly PortalBudgetTransactions $entries,
     ) {}
 
     public function index(): JsonResponse
@@ -22,9 +26,15 @@ class BudgetEnvelopesController extends Controller
     }
 
     // The whole tracker ledger and the team balances, for the Budget Tracker page.
-    public function transactions(): JsonResponse
+    public function transactions(Request $request): JsonResponse
     {
-        return response()->json($this->envelopes->transactions());
+        return response()->json($this->envelopes->transactions($this->actor($request)));
+    }
+
+    // Income or an expense added from Finance / Transactions.
+    public function storeTransaction(Request $request): JsonResponse
+    {
+        return response()->json($this->entries->add($this->actor($request), $request), 201);
     }
 
     // Every envelope under its budget code, for the Budget Tracker's Envelopes tab.
@@ -59,6 +69,12 @@ class BudgetEnvelopesController extends Controller
     public function storeFunds(Request $request, int $id): JsonResponse
     {
         return response()->json($this->setup->recordFunds($this->actor($request), $id, $request), 201);
+    }
+
+    // Money moved from one envelope to another, across their owners' accounts when those differ.
+    public function storeTransfer(Request $request): JsonResponse
+    {
+        return response()->json($this->transfers->betweenEnvelopes($this->actor($request), $request), 201);
     }
 
     private function actor(Request $request): Employee
