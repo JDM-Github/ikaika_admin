@@ -25,7 +25,7 @@
 
 .PARAMETER Target
   users-projects-prod | users-projects-test | project-estimator |
-  transaction-tracker | custom. Prompted for when omitted.
+  transaction-tracker-prod | transaction-tracker-test | custom. Prompted for when omitted.
 
 .PARAMETER Produce
   both | data | schema. Prompted for when omitted.
@@ -49,6 +49,7 @@
   .\migrate.ps1
   .\migrate.ps1 -Target users-projects-prod -Produce both
   .\migrate.ps1 -Target users-projects-test -Produce data -Step generate
+  .\migrate.ps1 -Target transaction-tracker-test -Produce both
 #>
 
 [CmdletBinding()]
@@ -109,10 +110,22 @@ $targets = @(
         AfterData    = @()
     },
     @{
-        Key          = 'transaction-tracker'
-        Label        = 'Transaction Tracker'
-        Folder       = 'transaction_tracker'
+        Key          = 'transaction-tracker-prod'
+        Label        = 'Transaction Tracker -- PRODUCTION (real live data)'
+        Folder       = 'transaction_tracker_prod'
         BaseId       = 'appp5MogesHN2eVvG'
+        Database     = 'test_tracker_database'
+        SchemaFiles  = @('sql/transaction_tracker/schema.sql')
+        Generator    = 'generate/generate_sql_transaction_tracker.py'
+        DataSnapshot = $null
+        AfterData    = @()
+    },
+    # The test app: a sandbox copy to try Finance against without touching the live books.
+    @{
+        Key          = 'transaction-tracker-test'
+        Label        = 'Transaction Tracker -- TEST (sandbox app)'
+        Folder       = 'transaction_tracker_test'
+        BaseId       = 'appYwnzEVZVXwH1hB'
         Database     = 'test_tracker_database'
         SchemaFiles  = @('sql/transaction_tracker/schema.sql')
         Generator    = 'generate/generate_sql_transaction_tracker.py'

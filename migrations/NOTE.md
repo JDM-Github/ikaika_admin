@@ -11,7 +11,8 @@ first (e.g. "read MIGRATION_NOTES.md before we continue").
 | Users & Projects (TEST) | `app8DvnFZErPZT5Az` | Snapshot/sandbox version, migrated first |
 | Users & Projects (PRODUCTION) | `app8jGTzRDQt4yPIa` | Same schema/field IDs as TEST (verified identical), real live data, ahead in record counts |
 | Project Estimator | `appgh0Mki2uHDLAQY` | Completely different schema — a separate tool, not a copy of Users & Projects |
-| Transaction Tracker | `appp5MogesHN2eVvG` | Migrated — `sql/transaction_tracker/schema.sql` + `migrations/generate/generate_sql_transaction_tracker.py`. See dedicated section below. |
+| Transaction Tracker (PROD) | `appp5MogesHN2eVvG` | Migrated — `sql/transaction_tracker/schema.sql` + `migrations/generate/generate_sql_transaction_tracker.py`. See dedicated section below. |
+| Transaction Tracker (TEST) | `appYwnzEVZVXwH1hB` | Sandbox app for trying Finance; same schema and generator as PROD (`-Target transaction-tracker-test`). |
 
 **Users & Projects TEST vs PRODUCTION share identical table/field IDs** — same
 schema works for both. Project Estimator and Transaction Tracker don't share
@@ -223,7 +224,9 @@ links to Accounts through three distinct fields (Account, Transfer Source
 Account, Transfer Destination Account), so there are three junction tables;
 source and destination were both empty at export time.
 
-Run it with `.\migrate.ps1 -Target transaction-tracker -Produce both`.
+Run it with `.\migrate.ps1 -Target transaction-tracker-prod -Produce both`, or
+`-Target transaction-tracker-test` for the sandbox app `appYwnzEVZVXwH1hB`
+(same schema and generator; writes to `outputs/transaction_tracker_test/`).
 
 ## Airtable ↔ SQL sync — design discussion (not yet built)
 
