@@ -110,6 +110,12 @@ To see which of these settings the server has (names only, no values):
 ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
 ```
 
+**Finance / Accounts** needs the `account_fund_transfers` table in the tracker database; a deploy never creates tracker tables. Until it exists the page says "We could not load the accounts.". Run once (from this repo; the server's `db.env` supplies the database, user and password, so nothing secret is typed):
+
+```powershell
+Get-Content sql	ransaction_trackerccount_fund_transfers.sql | Where-Object { $_ -notmatch '^USE ' } | ssh bluehost 'source ~/apps/test-server/db.env && MYSQL_PWD=$DB_PASSWORD mysql -u "$DB_USERNAME" "$TRACKER_DB_DATABASE"'
+```
+
 ## Bitbucket code activity (MIS projects)
 
 MIS projects count commits and lines from the Bitbucket repositories linked on their Add/Edit Project form. Each commit counts on its own day in Manila time, so a Daily or Late Report for a date shows that date's work. Three things make it run on the Test Server.
