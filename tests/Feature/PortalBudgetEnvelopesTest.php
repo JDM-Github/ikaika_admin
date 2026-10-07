@@ -134,6 +134,28 @@ class PortalBudgetEnvelopesTest extends TestCase
         $this->assertEqualsWithDelta(700.00, $this->remaining($pantry), 0.001);
     }
 
+    // The queue says which envelope funded each approved item; a pending one names none (supervisor, 2026-10-07).
+    public function test_the_queue_names_the_envelope_each_approved_item_was_funded_from(): void
+    {
+        $supplies = $this->envelope('Seeded Team Supplies', 2000.00);
+        [$first, $second, $third] = $this->claim([['Paper towel', 300.00, 1], ['Air freshener', 150.00, 2], ['Coffee', 90.00, 1]]);
+        $pantry = $this->envelope('Seeded Pantry Corner', 1000.00);
+        $this->decide([
+            ['id' => (string) $first, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $supplies],
+            ['id' => (string) $second, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $pantry],
+        ])->assertOk();
+
+        $items = collect($this->getJson('/api/development/portal/manage/requests?from=2026-09-01&to=2026-09-01', $this->admin())
+            ->assertOk()
+            ->json('reimbursements'))
+            ->flatMap(static fn (array $claim): array => $claim['items'])
+            ->keyBy('id');
+
+        $this->assertSame('Seeded Team Supplies', $items[(string) $first]['envelopeName']);
+        $this->assertSame('Seeded Pantry Corner', $items[(string) $second]['envelopeName']);
+        $this->assertNull($items[(string) $third]['envelopeName']);
+    }
+
     public function test_setting_one_approved_item_back_returns_only_its_own_charge(): void
     {
         $envelope = $this->envelope('Seeded Pantry Shelf', 1000.00);
