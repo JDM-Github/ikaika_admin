@@ -810,6 +810,62 @@ class PortalAirtableSyncTest extends TestCase
         ], array_keys($item['fields']));
     }
 
+    // A project with no lead named sends no PM link at all: an empty value must never be matched against
+    // a blank email, and an empty link list is no evidence the link should go.
+    public function test_a_project_without_a_lead_sends_no_pm_link(): void
+    {
+        $this->fakeAirtable();
+        $projectId = $this->projectRow(['project_lead_email' => null]);
+        $actionId = $this->ledgerProject($projectId, 'add', ['columns' => ['status' => 'Started']]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('create', $item['outcome']);
+        $this->assertArrayNotHasKey('PM ID', $item['fields']);
+    }
+
+    // A lead Airtable has never seen blocks the project: pushing without the link would drop it silently.
+    public function test_a_project_whose_lead_airtable_has_not_seen_is_blocked(): void
+    {
+        $this->fakeAirtable();
+        DB::connection('portal')->table('employees')->insert([
+            'id_no' => '900000-0002', 'first_name' => 'Never', 'last_name' => 'Linked', 'email' => 'never.linked@ikaikabim.com',
+        ]);
+        $projectId = $this->projectRow(['project_lead_email' => 'never.linked@ikaikabim.com']);
+        $actionId = $this->ledgerProject($projectId, 'add', ['columns' => ['status' => 'Started']]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('blocked', $item['outcome']);
+        $this->assertStringContainsString('which Airtable does not have yet', implode(' ', $item['problems']));
+    }
+
+    // The portal soft-deletes a project into the recycle bin, so its delete never reaches Airtable: the
+    // record is Airtable's to keep, and the action stays quietly unsynced rather than failing forever.
+    public function test_a_project_delete_is_left_unsynced(): void
+    {
+        $this->fakeAirtable();
+        $projectId = $this->projectRow(['airtable_record_id' => 'recPROJ000000003']);
+        $written = app(CoreLedger::class)->recycleDeleted(
+            CoreLedger::PRODUCT_PORTAL,
+            '1:900001',
+            'portal.projects',
+            (string) $projectId,
+            ['title' => '900001 Sync Test', 'kind' => 'project'],
+            'projects',
+            1,
+            null,
+        );
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $written['action_id']);
+
+        $this->assertIsArray($item);
+        $this->assertSame('skipped', $item['outcome']);
+        $this->assertStringContainsString('predates Airtable ids', implode(' ', $item['problems']));
+    }
+
     /**
      * @param  array<string, mixed>|null  $schema
      */
