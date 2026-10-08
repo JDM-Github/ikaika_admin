@@ -52,6 +52,11 @@ class ReferencesController extends Controller
         return response()->json($this->settings->addDepartment($this->editor($request), $request));
     }
 
+    public function updateDepartment(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->updateDepartment($this->editor($request), $request, $id));
+    }
+
     public function destroyDepartment(Request $request, int $id): JsonResponse
     {
         return response()->json($this->settings->removeDepartment($this->editor($request), $request, $id));

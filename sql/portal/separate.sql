@@ -906,6 +906,24 @@ SELECT DISTINCT department, type_of_job FROM projects
 WHERE department IS NOT NULL AND TRIM(department) <> ''
   AND type_of_job IS NOT NULL AND TRIM(type_of_job) <> '';
 
+-- A sentence on what a department does, shown and edited on Manage / References.
+-- Portal-only: Airtable's Employees table has no such field, and the sync never sends it.
+-- Existing databases: run the ALTER below.
+ALTER TABLE departments
+    ADD COLUMN description VARCHAR(255) NULL AFTER name;
+
+-- A first sentence for the departments the company runs today; a blank one is filled in on the
+-- page. Only rows with nothing in them are touched, so an edited description survives a re-run.
+UPDATE departments
+SET description = CASE LOWER(TRIM(name))
+    WHEN 'engineering' THEN 'Structural and civil engineering work; its projects pick scopes from the WBS tree.'
+    WHEN 'mis'         THEN 'Management information systems: software, data and code-tracked projects.'
+    WHEN 'admin'       THEN 'Company administration and support staff.'
+    WHEN 'general'     THEN 'Shared activity codes every department may report on.'
+    ELSE description
+END
+WHERE description IS NULL OR TRIM(description) = '';
+
 -- ============================================================================
 -- EMPLOYEE SIGNATURES - Manage / Users, the portal's own editable copy
 -- Airtable syncs into the portal one way and overwrites the mapped employees columns on every run,

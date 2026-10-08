@@ -155,18 +155,40 @@ class PortalReferencesTest extends TestCase
             ->assertJsonPath('data.jobTypes', fn (array $types): bool => collect($types)->doesntContain(fn (array $type): bool => $type['id'] === $row['id']));
     }
 
-    public function test_a_department_is_added_and_removed(): void
+    public function test_a_department_is_added_described_and_removed(): void
     {
         $token = $this->developerToken();
 
-        $added = $this->withToken($token)->postJson(self::BASE.'/departments', ['name' => 'Test Dept'])->assertOk();
+        $added = $this->withToken($token)->postJson(self::BASE.'/departments', ['name' => 'Test Dept', 'description' => '  Drafts the test work.  '])->assertOk();
         $row = collect($added->json('data.departments'))->firstWhere('name', 'Test Dept');
         $this->assertNotNull($row);
+        $this->assertSame('Drafts the test work.', $row['description']);
+        $this->assertSame([], $row['members']);
 
         $this->withToken($token)->postJson(self::BASE.'/departments', ['name' => 'test dept'])->assertStatus(422);
 
+        // Only the description is editable: the name is how projects, people, types and scopes are filed.
+        $this->withToken($token)->patchJson(self::BASE.'/departments/'.$row['id'], ['description' => '   '])
+            ->assertOk()
+            ->assertJsonPath('data.departments', fn (array $departments): bool => collect($departments)->contains(fn (array $department): bool => $department['id'] === $row['id'] && $department['description'] === null));
+        $this->withToken($token)->patchJson(self::BASE.'/departments/'.$row['id'], ['description' => 'Kept.'])->assertOk();
+        $this->withToken($token)->patchJson(self::BASE.'/departments/99999999', ['description' => 'Gone'])->assertNotFound();
+
         $this->withToken($token)->deleteJson(self::BASE.'/departments/'.$row['id'])->assertOk();
         $this->withToken($token)->deleteJson(self::BASE.'/departments/'.$row['id'])->assertNotFound();
+    }
+
+    public function test_a_department_carries_its_active_members(): void
+    {
+        $departments = $this->withToken($this->developerToken())->getJson(self::BASE)->assertOk()->json('data.departments');
+        $staffed = collect($departments)->first(fn (array $department): bool => count($department['members']) > 0);
+        $this->assertNotNull($staffed, 'No department with active members to check against.');
+
+        $count = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ?", [mb_strtolower(trim($staffed['name']))])
+            ->count();
+        $this->assertCount($count, $staffed['members']);
     }
 
     // The reported ask: a new client, with the two-digit code its project numbers carry.

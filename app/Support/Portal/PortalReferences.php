@@ -47,9 +47,31 @@ final class PortalReferences
             ];
         }
 
+        // Who staffs each department, for the Members column and its filter: active employees only,
+        // matched the way every other department filter matches (case-insensitive, trimmed).
+        $membersByDepartment = [];
+        foreach ($this->connection()->table('employees')
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereNotNull('department')
+            ->orderBy('last_name')->orderBy('first_name')
+            ->get(['department', 'first_name', 'last_name']) as $row) {
+            $key = self::departmentKey((string) $row->department);
+            $name = trim((string) $row->first_name.' '.(string) $row->last_name);
+            if ($key === '' || $name === '') {
+                continue;
+            }
+            $membersByDepartment[$key][] = $name;
+        }
+
         $departments = [];
-        foreach ($this->connection()->table('departments')->orderBy('name')->get(['id', 'name']) as $row) {
-            $departments[] = ['id' => (string) (int) $row->id, 'name' => trim((string) $row->name)];
+        foreach ($this->connection()->table('departments')->orderBy('name')->get(['id', 'name', 'description']) as $row) {
+            $description = trim((string) $row->description);
+            $departments[] = [
+                'id' => (string) (int) $row->id,
+                'name' => trim((string) $row->name),
+                'description' => $description === '' ? null : $description,
+                'members' => $membersByDepartment[self::departmentKey((string) $row->name)] ?? [],
+            ];
         }
 
         $projectCounts = $this->connection()->table('projects_clients')
@@ -295,7 +317,10 @@ final class PortalReferences
      */
     public function addDepartment(Employee $actor, Request $request): array
     {
-        $data = $request->validate(['name' => ['required', 'string', 'max:100']]);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'description' => ['nullable', 'string', 'max:255'],
+        ]);
         $name = trim($data['name']);
         if ($name === '') {
             abort(422, 'Give the department a name.');
@@ -304,9 +329,35 @@ final class PortalReferences
             abort(422, 'That department is already on the list.');
         }
 
-        $id = (int) $this->connection()->table('departments')->insertGetId(['name' => $name]);
+        $id = (int) $this->connection()->table('departments')->insertGetId([
+            'name' => $name,
+            'description' => self::cleanDescription($data['description'] ?? null),
+        ]);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.department', '{UserName|You} added the department '.$name, (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * A department is renamed nowhere: projects, people, types and scopes are filed under its name,
+     * so only the description changes here.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function updateDepartment(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('departments')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That department was not found.');
+        }
+        $data = $request->validate(['description' => ['nullable', 'string', 'max:255']]);
+
+        $this->connection()->table('departments')->where('id', $id)->update([
+            'description' => self::cleanDescription($data['description'] ?? null),
+        ]);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.department', '{UserName|You} changed the department '.trim((string) $row->name), (string) $id, $request);
 
         return $this->index();
     }
@@ -409,6 +460,19 @@ final class PortalReferences
     private function departmentTaken(string $name, ?int $exceptId = null): bool
     {
         return $this->taken('departments', 'name', $name, $exceptId);
+    }
+
+    // An empty description is stored as NULL, so "has a description" is one check everywhere.
+    private static function cleanDescription(mixed $value): ?string
+    {
+        $description = trim((string) $value);
+
+        return $description === '' ? null : $description;
+    }
+
+    private static function departmentKey(string $name): string
+    {
+        return mb_strtolower(trim($name));
     }
 
     private function taken(string $table, string $column, string $value, ?int $exceptId): bool
