@@ -2,7 +2,7 @@
   "version": "0.0.0+1",
   "name": "Ikaika Portal",
   "title": "Ikaika Portal",
-  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.32.0",
+  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.33.1",
   "rules": {
     "global": [
       "flag",
@@ -917,6 +917,70 @@
         ],
         "command-after-success": [
           "pwsh -NoProfile -File ${root}/script.ps1 server/deploy-release -ArchivePath ${deploy-release.args.ArchivePath} -ScriptsDir ${deploy-release.args.ScriptsDir} -Script ${deploy-release.args.Script} -DryRun ${deploy-release.args.DryRun} -Force ${deploy-release.args.Force}"
+        ]
+      }
+    },
+    "signing": {
+      "certificates": {
+        "description": "Every certificate and key this project signs or deploys with, in one place: what there is, what is wrong with it, and what can be done about it - the Android keystores, the Windows code-signing certificates, the SSH deploy key and Expo's...",
+        "args": [
+          {
+            "flag": "Check",
+            "label": "-Check   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Exit 1 when a build or deploy would be refused for one - missing, expired, or not the file the repo trusts.",
+            "default": ""
+          },
+          {
+            "flag": "Lint",
+            "label": "-Lint   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Every finding, by item: what a build refuses, and what to look at before it does.",
+            "default": ""
+          },
+          {
+            "flag": "Fix",
+            "label": "-Fix   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Mend what -Lint marks (-Fix): fetch a missing file from its share.* link, record a checksum never recorded.",
+            "default": ""
+          },
+          {
+            "flag": "New",
+            "label": "-New   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Make one that is missing, with the password signing.env holds: a keystore, or a self-signed code-signing certificate.",
+            "default": "",
+            "allowed_values": [
+              "android-release",
+              "android-debug",
+              "windows-release",
+              "windows-debug"
+            ]
+          },
+          {
+            "flag": "Replace",
+            "label": "-Replace   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "With -New, replace one that exists; the old file is kept beside it, since installed copies only update from it.",
+            "default": ""
+          },
+          {
+            "flag": "Eas",
+            "label": "-Eas   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Open eas credentials, which manages the keys Expo holds for cloud builds.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 signing/certificates -Check ${certificates.args.Check} -Lint ${certificates.args.Lint} -Fix ${certificates.args.Fix} -New ${certificates.args.New} -Replace ${certificates.args.Replace} -Eas ${certificates.args.Eas}"
         ]
       }
     },
