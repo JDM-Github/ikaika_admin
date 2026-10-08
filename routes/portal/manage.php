@@ -25,11 +25,11 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects-write'])
         ->patch('manage/projects/{id}', [ProjectsController::class, 'update'])
         ->whereNumber('id');
-    // Manage / Project Settings is a work in progress, so Developer mode only for now: its rule is
-    // held only while a developer is in Developer mode.
+    // Manage / References: an administrator's power. Opening and reading follows the base rule;
+    // adding, changing and removing the four tabs' rows follows Edit references.
     Route::middleware(['portal.rule:projects.references', 'throttle:portal-projects'])
         ->get('manage/references', [ReferencesController::class, 'index']);
-    Route::middleware(['portal.rule:projects.references', 'throttle:portal-projects-write'])->group(function (): void {
+    Route::middleware(['portal.rule:projects.references.edit', 'throttle:portal-projects-write'])->group(function (): void {
         Route::post('manage/references/scopes', [ReferencesController::class, 'storeScope']);
         Route::patch('manage/references/scopes/{id}', [ReferencesController::class, 'updateScope'])
             ->whereNumber('id');
@@ -51,21 +51,23 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::delete('manage/references/clients/{id}', [ReferencesController::class, 'destroyClient'])
             ->whereNumber('id');
     });
-    // Manage / Shared Pages: the guest read-only links. Developers only, in Developer mode.
+    // Manage / Shared Pages: reading a share (link, QR, kept password) follows the base rule;
+    // creating, changing and revoking follows Create and revoke; a new password follows New passwords.
     Route::middleware(['portal.rule:manage.shares', 'throttle:portal-projects'])
         ->get('manage/shared-pages', [SharedPagesController::class, 'index']);
     Route::middleware(['portal.rule:manage.shares', 'throttle:portal-projects'])
         ->get('manage/shared-pages/{id}/qr', [SharedPagesController::class, 'qr'])
         ->whereNumber('id');
-    Route::middleware(['portal.rule:manage.shares', 'throttle:portal-projects-write'])->group(function (): void {
+    Route::middleware(['portal.rule:manage.shares.manage', 'throttle:portal-projects-write'])->group(function (): void {
         Route::post('manage/shared-pages', [SharedPagesController::class, 'store']);
         Route::patch('manage/shared-pages/{id}', [SharedPagesController::class, 'update'])
             ->whereNumber('id');
         Route::delete('manage/shared-pages/{id}', [SharedPagesController::class, 'destroy'])
             ->whereNumber('id');
-        Route::post('manage/shared-pages/{id}/regenerate', [SharedPagesController::class, 'regenerate'])
-            ->whereNumber('id');
     });
+    Route::middleware(['portal.rule:manage.shares.password', 'throttle:portal-projects-write'])
+        ->post('manage/shared-pages/{id}/regenerate', [SharedPagesController::class, 'regenerate'])
+        ->whereNumber('id');
     // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.
     Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
         ->get('manage/users', [UsersController::class, 'index']);

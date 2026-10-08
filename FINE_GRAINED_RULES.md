@@ -80,7 +80,7 @@ Done so far (display only, nothing enforced):
     enforcement and the session both see the narrowed reach. `PATCH /portal/access/reach`.
   - Your own switches and self reach are not logged (2026-09-27): your own choice about powers you
     already hold, which can never gain you a new one.
-  - **Enforced so far: Home, View Projects, Track Projects, Reports, Requests, User, Event Calendar, Manage / Requests, Manage / Reports, Manage / Users, Administration / All Recycle, Administration / All Logs, Administration / All Actions.** The Access page and Access Rule sheet banners
+  - **Enforced so far: Home, View Projects, Track Projects, Reports, Requests, User, Event Calendar, Finance, Manage / Requests, Manage / Reports, Manage / Users, Manage / References, Manage / Shared Pages, Administration / All Recycle, Administration / All Logs, Administration / All Actions.** Manage / References and Manage / Shared Pages are administrator-tier, split into a read key and their write keys (2026-10-09). The Access page and Access Rule sheet banners
     name the enforced pages; the banner goes when every page is done.
   - Track Projects: `projects.track` now has a reach (member preset `own`, everyone else
     `all`, exactly today's lists). Its own read, `GET /portal/projects/track`

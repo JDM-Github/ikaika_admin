@@ -13,7 +13,7 @@ the user's answer or direction of 2026-10-08.
 
 ## 1. What this is
 
-A new page under **Manage** — **Manage / Shared Pages** — where a **developer** creates a *share*:
+A new page under **Manage** — **Manage / Shared Pages** — where an **administrator** creates a *share*:
 a guest link (QR + code) that opens chosen portal pages **read-only** for someone with no portal
 account. The guest signs in with a generated password, plus a one-time code emailed to a bound
 address when one is set. The portal opens in **guest mode**: only the granted pages in the nav, no
@@ -23,10 +23,10 @@ Nothing here is an employee. A guest holds no role, no department and no persona
 
 ## 2. The experience
 
-### 2.1 Developer creates a share (Manage / Shared Pages, Developer mode only)
+### 2.1 An administrator creates a share (Manage / Shared Pages)
 
 1. **New shared page** sheet:
-   - **Label** — what the developer calls it ("Truebeck walkthrough").
+   - **Label** — what the administrator calls it ("Truebeck walkthrough").
    - **Email** — optional; binding it adds the one-time code at every guest sign-in.
    - **Expiry** — a preset (1 day / 7 days / 30 days) or a custom date, or cleared to never
      expire. Default **7 days**.
@@ -68,7 +68,7 @@ Actions. No tabs, so no `stateKey`.
 | 2 | The **password is auto-generated**, kept readable in the record so a forgotten one is sent again rather than regenerated (user, 2026-10-08; reversed the earlier show-once rule), and **emailed** to the bound email when one is set. |
 | 3 | The guest sees the **normal portal shell**, only the granted pages. A Guest chip replaces the profile; notifications, Settings and the personal Access page are gone; every write control hides. |
 | 4 | **Email binding is optional per share; when bound, every sign-in needs a mailed OTP.** |
-| 5 | The page lives at **Manage / Shared Pages**, rule `manage.shares`, `min_tier = developer` (Developer mode only for now, like References and Backup before it). |
+| 5 | The page lives at **Manage / Shared Pages**, an administrator-tier fine-grained power since 2026-10-09: `manage.shares` opens and reads (link, QR, kept password), `manage.shares.manage` creates, changes and revokes, `manage.shares.password` regenerates; admins hold all three by preset. |
 | 6 | The guest session **persists until the share expires** — the guest token is stored on the device (localStorage on web). This is the one deliberate exception to "a token never goes in PreferencesStorage". |
 | 7 | **Expiry** is chosen per share, default **7 days**, revocable immediately. |
 | 8 | **Rate cap**: requests per minute per share, default **60**; plus a sign-in attempt cap and OTP limits regardless. |
@@ -178,14 +178,16 @@ INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('email.library', 0),
     ('administration.backup', 0);
 
--- The page's own power: developers only, in Developer mode. Existing databases:
--- add the row (nothing else to move).
+-- The page's powers: an administrator's, split into read, manage and password.
+-- Existing databases: open_portal_references_and_shared_pages_rules.
 INSERT INTO access_permissions
     (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
 VALUES
     ('manage.shares', 'manage', 'Shared pages',
      'Create read-only guest links to portal pages: pick the pages, hand out the link and its password.',
-     0, 1, 'developer', 860);
+     0, 1, 'admin', 860),
+    ('manage.shares.manage', 'manage.shares', 'Create and revoke', 'Create a guest link, change it, and revoke it.', 0, 1, 'admin', 861),
+    ('manage.shares.password', 'manage.shares', 'New passwords', 'Give a guest link a new password, whose old one stops working at once.', 0, 1, 'admin', 862);
 ```
 
 Notes:
@@ -443,8 +445,9 @@ rule), `reports.daily` and `reports.late` (the report entry form), and the edit 
   refusal.
 - Every guest request re-checks `revoked_at` and `expires_at`, so revoke and expiry are instant
   even for a stored session.
-- `manage.shares` has `min_tier = developer`, so only Developer mode holds it, and no gift or
-  limit can reach it (the developer-tools rule).
+- `manage.shares` is an administrator-tier power (2026-10-09): admins hold it and its two write
+  keys (`manage.shares.manage`, `manage.shares.password`) by preset; members can never hold any of
+  them, and executives hold none by default.
 - Emails carry the label, the link, the password/OTP — never employee data.
 - The public endpoints are throttled, and the share's own request cap is enforced on its token.
 - Visits are logged (share, time, IP) so the developer can see use; there is no per-page audit of
@@ -457,7 +460,8 @@ rule), `reports.daily` and `reports.late` (the report entry form), and the edit 
 **Admin (`php artisan test`)**
 
 - `tests/Feature/PortalSharedPagesTest.php`
-  - the page is developer-only: a member/admin token gets 403.
+  - the page follows its rule: a member token gets 403, an admin opens it in Default; without
+    `manage.shares.manage`/`.password` the matching writes are refused.
   - create returns a password once and stores only the hash; the email goes out when bound.
   - edit changes label/email/expiry/rate/rules; a rule not in `shared_page_shareable` (or not
     ready) is refused.

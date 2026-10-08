@@ -14,9 +14,9 @@ use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
- * Manage / Shared Pages: a developer makes guest read-only links. The page is a work in progress, so
- * its `manage.shares` rule is Developer-mode-only: a developer in Developer mode opens it, an admin
- * in Default does not.
+ * Manage / Shared Pages: guest read-only links, an administrator-tier fine-grained power since
+ * 2026-10-09: `manage.shares` opens and reads (the link, its QR and the kept password),
+ * `manage.shares.manage` creates, changes and revokes, and `manage.shares.password` regenerates.
  */
 class PortalSharedPagesTest extends TestCase
 {
@@ -56,7 +56,7 @@ class PortalSharedPagesTest extends TestCase
         return (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
     }
 
-    // The page's rule is Developer mode only, so every working call signs in a developer and turns it on.
+    // The working calls sign in a developer in Developer mode, which holds every key of the page.
     private function developerToken(): string
     {
         $developer = Employee::query()
@@ -88,13 +88,35 @@ class PortalSharedPagesTest extends TestCase
         return $this->withToken($token)->postJson(self::BASE, $this->payload($overrides))->assertOk();
     }
 
-    public function test_the_page_is_developer_mode_only(): void
+    // The page is an administrator's now: an admin opens it in Default; a member never can.
+    public function test_the_page_follows_its_rule(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
         $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
 
         $this->withToken($this->token($member))->getJson(self::BASE)->assertForbidden();
-        $this->withToken($this->token($admin))->getJson(self::BASE)->assertForbidden();
+        $this->withToken($this->token($admin))->getJson(self::BASE)->assertOk();
+    }
+
+    // The write keys split from the read: an admin limited out of either keeps exactly what is left.
+    public function test_the_manage_and_password_keys_gate_their_own_actions(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $token = $this->token($admin);
+        DB::connection('portal')->table('access_presets')->where('role', 'admin')
+            ->whereIn('permission_key', ['manage.shares.manage', 'manage.shares.password'])->delete();
+
+        $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $this->withToken($token)->postJson(self::BASE, $this->payload())->assertForbidden();
+        $this->withToken($token)->postJson(self::BASE.'/1/regenerate')->assertForbidden();
+
+        // With Create and revoke back, creating works in Default; New passwords still needs its own key.
+        DB::connection('portal')->table('access_presets')->insert([
+            'role' => 'admin', 'permission_key' => 'manage.shares.manage', 'reach' => null, 'include_executives' => 0,
+        ]);
+        $share = $this->createShare($token)->json('data.share');
+        $this->withToken($token)->postJson(self::BASE.'/'.$share['id'].'/regenerate')->assertForbidden();
+        $this->withToken($token)->deleteJson(self::BASE.'/'.$share['id'])->assertOk();
     }
 
     public function test_a_share_is_created_with_its_password_kept_in_the_record(): void

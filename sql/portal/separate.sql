@@ -598,6 +598,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
 ('projects.references', 'projects', 'References', 'Open Manage / References.', 0, 1, 240),
+('projects.references.edit', 'projects.references', 'Edit references', 'Add, change and remove the scopes, project types, departments and clients.', 0, 1, 241),
 
 ('reports', NULL, 'Reports', 'Open the Reports section of the sidebar.', 0, 1, 300),
 ('reports.daily', 'reports', 'Daily Report', 'File {UserName|Your} timesheet for today.', 0, 1, 310),
@@ -737,8 +738,9 @@ UPDATE access_permissions SET only_department = 'MIS', min_tier = 'admin' WHERE 
 -- All Backups is parked until Airtable is retired (docs/power/backups-plan.md): developers only, in
 -- Developer mode, and no gift reaches it. Existing databases: make_portal_backup_rules_developer_only.
 UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key LIKE 'administration.backup%';
--- Manage / Project Settings is a work in progress: Developer mode only for now, like Backup.
-UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key = 'projects.references';
+-- References is an administrator's tool, like the other Manage pages: admins hold it by preset.
+-- Existing databases: open_portal_references_and_shared_pages_rules.
+UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key LIKE 'projects.references%';
 -- Auto-approve is an admin's at most, and only a named one's (2026-10-07, supervisor): being an admin
 -- is not enough, so no role but developer starts with it. Existing databases: split_portal_project_auto_approval.
 UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key = 'projects.create.direct';
@@ -788,7 +790,6 @@ WHERE permission_key NOT LIKE 'developer%'
   AND permission_key <> 'manage.users.information'
   AND permission_key <> 'administration.logs.developers'
   AND permission_key <> 'email.images.global'
-  AND permission_key <> 'projects.references'
   AND permission_key <> 'projects.create.direct'
   AND permission_key NOT LIKE '%.unlisted';
 
@@ -801,7 +802,8 @@ SELECT 'executive', permission_key,
        permission_key = 'administration.logs'
 FROM access_permissions
 WHERE permission_key NOT LIKE 'developer%'
-  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.references', 'projects.create.direct')
+  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.create.direct')
+  AND permission_key NOT LIKE 'projects.references%'
   AND permission_key NOT LIKE 'reports.%'
   AND permission_key NOT LIKE 'requests.%'
   AND permission_key NOT LIKE 'user.%'
@@ -1053,11 +1055,26 @@ INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('email.library', 1),
     ('administration.backup', 0);
 
--- The page's own power: developers only, held in Developer mode alone, so nobody can give it.
--- Existing databases: add the row.
+-- Manage / Shared Pages: a fine-grained, administrator-tier power. The page opens and reads with
+-- manage.shares (which shows the link, its QR and the kept password); creating, editing and revoking
+-- follow manage.shares.manage, and giving a share a new password follows manage.shares.password.
+-- Existing databases: open_portal_references_and_shared_pages_rules.
 INSERT INTO access_permissions
     (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
 VALUES
     ('manage.shares', 'manage', 'Shared pages',
      'Create read-only guest links to portal pages: pick the pages, hand out the link and its password.',
-     0, 1, 'developer', 860);
+     0, 1, 'admin', 860),
+    ('manage.shares.manage', 'manage.shares', 'Create and revoke',
+     'Create a guest link, change it, and revoke it.',
+     0, 1, 'admin', 861),
+    ('manage.shares.password', 'manage.shares', 'New passwords',
+     'Give a guest link a new password, whose old one stops working at once.',
+     0, 1, 'admin', 862);
+
+-- The rows are written after the preset SELECTs above, so their holders are seeded here: admins and
+-- developers hold all three, executives none.
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT 'admin', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.shares%';
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT 'developer', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.shares%';
