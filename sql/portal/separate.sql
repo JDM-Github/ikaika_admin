@@ -1078,3 +1078,79 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'admin', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.shares%';
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'developer', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.shares%';
+
+
+-- ============================================================================
+-- ONBOARDING - candidate registration with bound links (docs/power/onboarding-plan.md)
+-- An administrator creates a candidate entry: a link (typed slug or a generated code), a
+-- kept-readable password, and the bound email the OTP is mailed to. The candidate signs in with
+-- password + OTP and fills their details, government numbers and documents; the administrator
+-- promotes a submitted entry into an employees row. The submitted data lands in new_employee_data.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS registrations (
+    id                   INT AUTO_INCREMENT PRIMARY KEY,
+    candidate_name       VARCHAR(150) NOT NULL,
+    email                VARCHAR(255) NOT NULL,     -- the bound address; link, OTP, and the email draft go here
+    code                 VARCHAR(64)  NOT NULL,     -- a typed slug, or a generated 24-hex code
+    password_hash        VARCHAR(255) NOT NULL,
+    password_value       VARCHAR(32)  NULL,         -- readable, so the administrator can send it again
+    expires_at           TIMESTAMP    NULL,
+    revoked_at           TIMESTAMP    NULL,
+    created_by           INT          NOT NULL,     -- employees.id, the administrator
+    created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sent_at              TIMESTAMP    NULL,         -- stamped when Send opens the composer
+    opened_at            TIMESTAMP    NULL,         -- first verified sign-in
+    submitted_at         TIMESTAMP    NULL,
+    promoted_at          TIMESTAMP    NULL,
+    promoted_employee_id INT          NULL,         -- employees.id after promotion
+    employee_data_id     INT          NULL,         -- new_employee_data.id after submit
+    UNIQUE KEY registrations_code (code),
+    INDEX idx_registrations_email (email),
+    FOREIGN KEY (created_by) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS register_otps (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    registration_id INT          NOT NULL,
+    code_hash       VARCHAR(255) NOT NULL,
+    expires_at      TIMESTAMP    NOT NULL,
+    attempts        TINYINT      NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (registration_id) REFERENCES registrations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS register_documents (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    registration_id INT          NOT NULL,
+    kind            VARCHAR(24)  NOT NULL,          -- photo|tin|sss|philhealth|hdmf|bank
+    name            VARCHAR(191) NOT NULL,          -- the candidate's file name
+    mime            VARCHAR(127) NOT NULL,
+    size_bytes      INT          NOT NULL,
+    path            VARCHAR(255) NOT NULL,          -- the private disk, registrations/{id}/
+    uploaded_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_register_documents_registration (registration_id, kind),
+    FOREIGN KEY (registration_id) REFERENCES registrations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The page's powers: an administrator's, split into read, manage and password.
+-- Existing databases: create_portal_onboarding_tables (tables, rows and presets together).
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.onboarding', 'manage', 'Onboarding',
+     'Guest-free candidate registration: send a bound link, collect details and requirements.',
+     0, 1, 'admin', 870),
+    ('manage.onboarding.manage', 'manage.onboarding', 'Create and revoke',
+     'Create a candidate entry, change it, revoke it, and promote a submitted one.',
+     0, 1, 'admin', 871),
+    ('manage.onboarding.password', 'manage.onboarding', 'New passwords',
+     'Give a candidate link a new password, whose old one stops working at once.',
+     0, 1, 'admin', 872);
+
+-- Seeded here because the rows are written after the preset SELECTs above: admins and developers
+-- hold all three, executives none.
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT 'admin', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT 'developer', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';

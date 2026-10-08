@@ -86,6 +86,10 @@ class PortalAccessTest extends TestCase
         $this->assertContains('manage.shares', $keys);
         $this->assertContains('manage.shares.manage', $keys);
         $this->assertContains('manage.shares.password', $keys);
+        // Onboarding is the same shape (2026-10-09): admins hold its three keys by preset.
+        $this->assertContains('manage.onboarding', $keys);
+        $this->assertContains('manage.onboarding.manage', $keys);
+        $this->assertContains('manage.onboarding.password', $keys);
         $this->assertNotContains('developer', $keys);
         $this->assertNotContains('administration.backup', $keys);
         $this->assertNotContains('administration.actions.sync', $keys);
