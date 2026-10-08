@@ -64,6 +64,14 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(5)->by('share-auth:'.(is_scalar($code) ? (string) $code : '').':'.(string) $request->ip());
         });
 
+        // Signing into a registration link: the same door, and the session's own cap sits on the
+        // middleware (a candidate uploads a document per request, so the sign-in cap would be wrong).
+        RateLimiter::for('portal-register-auth', function (Request $request) {
+            $code = $request->route('code');
+
+            return Limit::perMinute(5)->by('register-auth:'.(is_scalar($code) ? (string) $code : '').':'.(string) $request->ip());
+        });
+
         RateLimiter::for('portal-home', function (Request $request) {
             return Limit::perMinute(60)->by('home:'.$this->portalLimiterKey($request));
         });

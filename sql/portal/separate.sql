@@ -1105,6 +1105,7 @@ CREATE TABLE IF NOT EXISTS registrations (
     promoted_at          TIMESTAMP    NULL,
     promoted_employee_id INT          NULL,         -- employees.id after promotion
     employee_data_id     INT          NULL,         -- new_employee_data.id after submit
+    details              JSON         NULL,         -- the step-by-step draft; kept after submit
     UNIQUE KEY registrations_code (code),
     INDEX idx_registrations_email (email),
     FOREIGN KEY (created_by) REFERENCES employees(id) ON DELETE CASCADE

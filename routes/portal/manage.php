@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Portal\Manage\AccessController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetAccountsController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
 use App\Http\Controllers\Api\Portal\Manage\FlaggedMembersController;
+use App\Http\Controllers\Api\Portal\Manage\OnboardingController;
 use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
 use App\Http\Controllers\Api\Portal\Manage\ReferencesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
@@ -67,6 +68,35 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     });
     Route::middleware(['portal.rule:manage.shares.password', 'throttle:portal-projects-write'])
         ->post('manage/shared-pages/{id}/regenerate', [SharedPagesController::class, 'regenerate'])
+        ->whereNumber('id');
+    // Manage / Onboarding: candidate registration links. Reading (list, one entry, QR, a document)
+    // follows the base rule; creating, changing, revoking, marking sent and promoting follow
+    // Create and revoke; a new password follows New passwords.
+    Route::middleware(['portal.rule:manage.onboarding', 'throttle:portal-projects'])
+        ->get('manage/registrations', [OnboardingController::class, 'index']);
+    Route::middleware(['portal.rule:manage.onboarding', 'throttle:portal-projects'])
+        ->get('manage/registrations/{id}', [OnboardingController::class, 'show'])
+        ->whereNumber('id');
+    Route::middleware(['portal.rule:manage.onboarding', 'throttle:portal-projects'])
+        ->get('manage/registrations/{id}/qr', [OnboardingController::class, 'qr'])
+        ->whereNumber('id');
+    Route::middleware(['portal.rule:manage.onboarding', 'throttle:portal-projects'])
+        ->get('manage/registrations/{id}/documents/{document}', [OnboardingController::class, 'document'])
+        ->whereNumber('id')
+        ->whereNumber('document');
+    Route::middleware(['portal.rule:manage.onboarding.manage', 'throttle:portal-projects-write'])->group(function (): void {
+        Route::post('manage/registrations', [OnboardingController::class, 'store']);
+        Route::patch('manage/registrations/{id}', [OnboardingController::class, 'update'])
+            ->whereNumber('id');
+        Route::delete('manage/registrations/{id}', [OnboardingController::class, 'destroy'])
+            ->whereNumber('id');
+        Route::post('manage/registrations/{id}/sent', [OnboardingController::class, 'sent'])
+            ->whereNumber('id');
+        Route::post('manage/registrations/{id}/promote', [OnboardingController::class, 'promote'])
+            ->whereNumber('id');
+    });
+    Route::middleware(['portal.rule:manage.onboarding.password', 'throttle:portal-projects-write'])
+        ->post('manage/registrations/{id}/password', [OnboardingController::class, 'regenerate'])
         ->whereNumber('id');
     // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.
     Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])

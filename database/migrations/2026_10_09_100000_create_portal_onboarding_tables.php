@@ -113,6 +113,8 @@ return new class extends Migration
                 $table->timestamp('promoted_at')->nullable();
                 $table->integer('promoted_employee_id')->nullable();
                 $table->integer('employee_data_id')->nullable();
+                // The step-by-step draft the candidate is filling; kept after submit for reference.
+                $table->json('details')->nullable();
                 $table->index('email', 'idx_registrations_email');
                 $table->foreign('created_by')->references('id')->on('employees')->cascadeOnDelete();
             });

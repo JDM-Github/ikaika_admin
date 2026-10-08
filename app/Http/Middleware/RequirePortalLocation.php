@@ -21,6 +21,8 @@ class RequirePortalLocation
         '*/portal/auth/*',
         // A guest signing into a shared page is not an employee act, and nothing is written.
         '*/portal/share/*',
+        // A candidate on a registration link is not an employee either.
+        '*/portal/register/*',
         '*/portal/developer/mode',
         '*/portal/developer/password',
         '*/portal/user/notifications/*',

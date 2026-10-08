@@ -33,4 +33,5 @@ Route::prefix('portal')->middleware(RequirePortalLocation::class)->group(functio
     require __DIR__.'/developer.php';
     require __DIR__.'/administration.php';
     require __DIR__.'/share.php';
+    require __DIR__.'/register.php';
 });

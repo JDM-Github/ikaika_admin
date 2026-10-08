@@ -7,7 +7,6 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -30,8 +29,6 @@ final class PortalEmailAttachments
 
     public const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 
-    public const DISK = 'local';
-
     private const DIRECTORY = 'email-attachments';
 
     // A staged file older than this belongs to a draft that was never sent.
@@ -40,34 +37,7 @@ final class PortalEmailAttachments
     // What one person may hold staged at once, across every draft they have open.
     private const MAX_STAGED = 30;
 
-    private const MAX_NAME = 191;
-
     private const TOKEN = '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/';
-
-    /**
-     * Extension => [the type it is mailed as, the types its content may be detected as]. Office Open XML
-     * files are zips underneath, and older Office files are compound documents, so each also passes as
-     * its container; anything else -- a program, a script, a web page -- is refused whatever it is named.
-     *
-     * @var array<string, array{0: string, 1: list<string>}>
-     */
-    private const TYPES = [
-        'pdf' => ['application/pdf', ['application/pdf']],
-        'doc' => ['application/msword', ['application/msword', 'application/x-ole-storage', 'application/cdfv2', 'application/vnd.ms-office']],
-        'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip']],
-        'xls' => ['application/vnd.ms-excel', ['application/vnd.ms-excel', 'application/x-ole-storage', 'application/cdfv2', 'application/vnd.ms-office']],
-        'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip']],
-        'ppt' => ['application/vnd.ms-powerpoint', ['application/vnd.ms-powerpoint', 'application/x-ole-storage', 'application/cdfv2', 'application/vnd.ms-office']],
-        'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation', ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/zip']],
-        'csv' => ['text/csv', ['text/csv', 'text/plain', 'application/csv']],
-        'txt' => ['text/plain', ['text/plain']],
-        'jpg' => ['image/jpeg', ['image/jpeg']],
-        'jpeg' => ['image/jpeg', ['image/jpeg']],
-        'png' => ['image/png', ['image/png']],
-        'gif' => ['image/gif', ['image/gif']],
-        'webp' => ['image/webp', ['image/webp']],
-        'zip' => ['application/zip', ['application/zip', 'application/x-zip-compressed']],
-    ];
 
     public function __construct(
         private readonly PortalTimezone $timezone,
@@ -81,12 +51,7 @@ final class PortalEmailAttachments
     public function stage(Employee $actor, Request $request): array
     {
         $file = $this->validatedFile($request);
-        [$name, $extension] = $this->validatedName($file);
-        [$mime, $accepted] = self::TYPES[$extension];
-        $detected = strtolower(trim((string) $file->getMimeType()));
-        if (! in_array($detected, $accepted, true)) {
-            abort(422, $name.' does not look like the '.strtoupper($extension).' file its name says it is.');
-        }
+        $valid = PortalPrivateFiles::validated($file);
 
         $this->prune();
         $actorId = (int) $actor->getKey();
@@ -95,18 +60,14 @@ final class PortalEmailAttachments
         }
 
         $token = (string) Str::uuid();
-        $path = Storage::disk(self::DISK)->putFileAs(self::DIRECTORY, $file, $token);
-        if (! is_string($path) || $path === '') {
-            abort(500, 'The attachment could not be stored. Try again.');
-        }
+        $path = PortalPrivateFiles::store(self::DIRECTORY, $file, $token);
 
-        $size = (int) $file->getSize();
         $this->table()->insert([
             'token' => $token,
             'message_id' => null,
-            'name' => $name,
-            'mime' => $mime,
-            'size_bytes' => $size,
+            'name' => $valid['name'],
+            'mime' => $valid['mime'],
+            'size_bytes' => $valid['size'],
             'path' => $path,
             'uploaded_by' => $actorId,
             'date_created' => $this->timezone->now()->toDateTimeString(),
@@ -115,7 +76,7 @@ final class PortalEmailAttachments
         return [
             'section' => 'administration',
             'resource' => 'email-attachments',
-            'data' => $this->present($token, $name, $mime, $size),
+            'data' => $this->present($token, $valid['name'], $valid['mime'], $valid['size']),
         ];
     }
 
@@ -131,7 +92,7 @@ final class PortalEmailAttachments
         }
 
         $this->table()->where('id', $row->id)->delete();
-        Storage::disk(self::DISK)->delete((string) $row->path);
+        PortalPrivateFiles::delete((string) $row->path);
     }
 
     /**
@@ -173,7 +134,7 @@ final class PortalEmailAttachments
             abort(422, 'An attachment is no longer available. Remove it and attach it again.');
         }
         if (array_sum(array_map(static fn (object $row): int => (int) $row->size_bytes, $rows)) > self::MAX_TOTAL_BYTES) {
-            abort(422, 'The attachments come to more than '.self::megabytes(self::MAX_TOTAL_BYTES).'. Remove some to send.');
+            abort(422, 'The attachments come to more than '.PortalPrivateFiles::megabytes(self::MAX_TOTAL_BYTES).'. Remove some to send.');
         }
 
         return $rows;
@@ -252,17 +213,12 @@ final class PortalEmailAttachments
         if ($row === null) {
             abort(404, 'That attachment was not found on this email.');
         }
-        if (! Storage::disk(self::DISK)->exists((string) $row->path)) {
+        if (! PortalPrivateFiles::exists((string) $row->path)) {
             abort(404, 'That attachment is no longer kept on the server.');
         }
 
         return [
-            'response' => Storage::disk(self::DISK)->download((string) $row->path, (string) $row->name, [
-                'Content-Type' => (string) $row->mime,
-                // The browser must save it, never open a file mailed in as something it can run.
-                'X-Content-Type-Options' => 'nosniff',
-                'Cache-Control' => 'private, no-store',
-            ]),
+            'response' => PortalPrivateFiles::download((string) $row->path, (string) $row->name, (string) $row->mime),
             'name' => (string) $row->name,
         ];
     }
@@ -277,18 +233,11 @@ final class PortalEmailAttachments
         }
 
         foreach ($rows as $row) {
-            Storage::disk(self::DISK)->delete((string) $row->path);
+            PortalPrivateFiles::delete((string) $row->path);
         }
         $this->table()->whereIn('id', $rows->pluck('id')->all())->delete();
 
         return $rows->count();
-    }
-
-    public static function megabytes(int $bytes): string
-    {
-        $value = number_format($bytes / (1024 * 1024), 1, '.', '');
-
-        return (str_ends_with($value, '.0') ? substr($value, 0, -2) : $value).' MB';
     }
 
     /**
@@ -301,8 +250,8 @@ final class PortalEmailAttachments
         $file = $request->file('file');
         if ($file === null) {
             $length = (int) $request->server('CONTENT_LENGTH', 0);
-            if ($length > 0 && $length > self::iniBytes((string) ini_get('post_max_size'))) {
-                abort(413, self::serverLimitMessage());
+            if ($length > 0 && $length > PortalPrivateFiles::iniBytes((string) ini_get('post_max_size'))) {
+                abort(413, PortalPrivateFiles::serverLimitMessage());
             }
             abort(422, 'Choose a file to attach.');
         }
@@ -311,7 +260,7 @@ final class PortalEmailAttachments
         }
         if (! $file->isValid()) {
             if (in_array($file->getError(), [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
-                abort(422, self::serverLimitMessage());
+                abort(422, PortalPrivateFiles::serverLimitMessage());
             }
             abort(422, 'The file did not finish uploading. Try again.');
         }
@@ -321,37 +270,10 @@ final class PortalEmailAttachments
             abort(422, 'That file is empty.');
         }
         if ($size > self::MAX_TOTAL_BYTES) {
-            abort(422, 'A file can be up to '.self::megabytes(self::MAX_TOTAL_BYTES).': every recipient gets a copy, so the whole email is held to that.');
+            abort(422, 'A file can be up to '.PortalPrivateFiles::megabytes(self::MAX_TOTAL_BYTES).': every recipient gets a copy, so the whole email is held to that.');
         }
 
         return $file;
-    }
-
-    /**
-     * The name it goes out under: the file's own, without folders, control characters or the few
-     * characters a mail client or a disk refuses, kept to the column with its extension intact.
-     *
-     * @return array{0: string, 1: string}
-     */
-    private function validatedName(UploadedFile $file): array
-    {
-        $base = basename(str_replace('\\', '/', (string) $file->getClientOriginalName()));
-        $clean = trim((string) preg_replace('/\s+/u', ' ', (string) preg_replace('/[\x00-\x1F\x7F\/\\\\:*?"<>|]+/u', ' ', $base)));
-        $extension = strtolower(pathinfo($clean, PATHINFO_EXTENSION));
-        if (! array_key_exists($extension, self::TYPES)) {
-            abort(422, ($clean === '' ? 'That file' : $clean).' is not a type the portal sends. Attach a PDF, Word, Excel, PowerPoint, CSV, text, image or ZIP file.');
-        }
-
-        $stem = trim(pathinfo($clean, PATHINFO_FILENAME), " .\t");
-        if ($stem === '') {
-            $stem = 'attachment';
-        }
-        $room = self::MAX_NAME - strlen($extension) - 1;
-        if (mb_strlen($stem) > $room) {
-            $stem = rtrim(mb_substr($stem, 0, $room));
-        }
-
-        return [$stem.'.'.$extension, $extension];
     }
 
     /**
@@ -360,28 +282,6 @@ final class PortalEmailAttachments
     private function present(string $token, string $name, string $mime, int $size): array
     {
         return ['id' => $token, 'name' => $name, 'mimeType' => $mime, 'sizeBytes' => $size];
-    }
-
-    private static function serverLimitMessage(): string
-    {
-        return 'That file is larger than this server accepts: up to '.self::megabytes((int) UploadedFile::getMaxFilesize()).' a file.';
-    }
-
-    // php.ini sizes as written there: "8M", "512K", "1G" or plain bytes.
-    private static function iniBytes(string $value): int
-    {
-        $value = trim($value);
-        if ($value === '' || $value === '-1') {
-            return PHP_INT_MAX;
-        }
-        $number = (int) $value;
-
-        return match (strtolower(substr($value, -1))) {
-            'g' => $number * 1024 * 1024 * 1024,
-            'm' => $number * 1024 * 1024,
-            'k' => $number * 1024,
-            default => $number,
-        };
     }
 
     private function table(): Builder

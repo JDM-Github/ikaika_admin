@@ -33,11 +33,6 @@ final class PortalSharedPages
 
     private const MAX_RATE_PER_MINUTE = 600;
 
-    private const PASSWORD_LENGTH = 12;
-
-    // No 0/O/1/l/I, so a password can be read out loud without a second attempt.
-    private const PASSWORD_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-
     private const OTP_TTL_MINUTES = 10;
 
     private const OTP_MAX_ATTEMPTS = 5;
@@ -268,16 +263,7 @@ final class PortalSharedPages
         }
         $email = isset($data['email']) && trim((string) $data['email']) !== '' ? trim((string) $data['email']) : null;
         $guestName = isset($data['guestName']) && trim((string) $data['guestName']) !== '' ? trim((string) $data['guestName']) : null;
-        $slug = isset($data['slug']) && trim((string) $data['slug']) !== '' ? strtolower(trim((string) $data['slug'])) : null;
-        if ($slug !== null) {
-            if (preg_match('/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/', $slug) !== 1) {
-                abort(422, 'A link slug is 3-64 characters: lowercase letters, numbers and dashes.');
-            }
-            // share/session is the guest session route, so a share can never answer there.
-            if ($slug === 'session') {
-                abort(422, 'That link slug is reserved.');
-            }
-        }
+        $slug = PortalCredentials::slug($data['slug'] ?? null);
 
         // Only pages that have been verified guest-safe can be granted.
         $ready = $this->readyRules();
@@ -508,7 +494,7 @@ final class PortalSharedPages
     private function newCode(): string
     {
         for ($attempt = 0; $attempt < 5; $attempt++) {
-            $code = bin2hex(random_bytes(12));
+            $code = PortalCredentials::code();
             if (! $this->connection()->table('shared_pages')->where('code', $code)->exists()) {
                 return $code;
             }
@@ -572,13 +558,7 @@ final class PortalSharedPages
 
     private static function password(): string
     {
-        $characters = str_split(self::PASSWORD_ALPHABET);
-        $password = '';
-        for ($index = 0; $index < self::PASSWORD_LENGTH; $index++) {
-            $password .= $characters[random_int(0, count($characters) - 1)];
-        }
-
-        return $password;
+        return PortalCredentials::password();
     }
 
     private function connection(): Connection
