@@ -23,6 +23,8 @@ try {
         Copy-Item -Recurse (Join-Path $root $item) (Join-Path $stage $item)
     }
     Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $stage 'public/hot'), (Join-Path $stage 'public/fonts-manifest.dev.json')
+    # The release carries its own version, so the server can say which one it is running.
+    if (Test-Path (Join-Path $root 'VERSION')) { Copy-Item (Join-Path $root 'VERSION') (Join-Path $stage 'VERSION') }
     Copy-Item (Join-Path $PSScriptRoot 'server/.htaccess') (Join-Path $stage 'public/.htaccess')
 
     # Tracker table patches ride along; deploy-admin.sh runs each one (no migration reaches the tracker database).

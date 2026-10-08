@@ -76,3 +76,6 @@ migrations/*.sql
 email-test/
 
 /deployment/out/
+
+# The Build release workflow's secrets, for ci-local when GitHub Actions is down; the .template beside it is committed.
+.local.actions-secret.env

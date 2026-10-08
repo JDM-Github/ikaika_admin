@@ -4,7 +4,8 @@
 set -euo pipefail
 
 HOME_DIR=${HOME_DIR:-/home2/eoxvhumy}
-ROOT=${ROOT:-$HOME_DIR/apps/test-server}
+# server/deploy-release exports DEPLOY_DIR, the folder it uploaded to, so the two can never name different places.
+ROOT=${ROOT:-${DEPLOY_DIR:-$HOME_DIR/apps/test-server}}
 SITE_DIR=${SITE_DIR:-website_a85fbf18}
 SITE_URL=${SITE_URL:-https://eox.vhu.mybluehost.me/website_a85fbf18}
 API_CHANNEL=${API_CHANNEL:-staging}

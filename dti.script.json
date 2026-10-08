@@ -2,7 +2,7 @@
   "version": "0.0.0+1",
   "name": "Ikaika Portal",
   "title": "Ikaika Portal",
-  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.25.1",
+  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.32.0",
   "rules": {
     "global": [
       "flag",
@@ -34,6 +34,99 @@
   },
   "config": {
     "commands": {
+      "build-release": {
+        "description": "Builds the API's release archive, deployment/out/central-platform.zip, for staging or production: deployment/build.ps1 with the public folder the target serves it from, which Vite bakes into every font URL",
+        "args": [],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release"
+        ]
+      },
+      "ci-check": {
+        "description": "Plays the Build release workflow through this checkout, so a change to the workflow, a ci-* script, secrets.json or the toolkit pin fails here and not on a GitHub runner",
+        "args": [
+          {
+            "flag": "Online",
+            "label": "-Online   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Also ask GitHub whether every secret the workflow reads exists, with git's stored github.com credential; no value is ever read.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/ci-check -Online ${ci-check.args.Online}"
+        ]
+      },
+      "ci-local": {
+        "description": "Plays the Build release workflow on this PC, for when GitHub Actions cannot: the same choices, planned by the same ci-release-plan.ps1, then each step's work run here",
+        "args": [
+          {
+            "flag": "Target",
+            "label": "-Target   [String]",
+            "type": "string",
+            "required": false,
+            "description": "staging is the Bluehost Test Server; production is refused until ikaika_scripts.env names one.",
+            "default": "staging",
+            "allowed_values": [
+              "staging",
+              "production"
+            ]
+          },
+          {
+            "flag": "ConfirmProduction",
+            "label": "-ConfirmProduction   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Yes, upload to PRODUCTION - a production upload needs it, as the form's box does.",
+            "default": ""
+          },
+          {
+            "flag": "Version",
+            "label": "-Version   [String]",
+            "type": "string",
+            "required": false,
+            "description": "same rebuilds as is, keep takes the next build number, patch/minor/major bump and tag; an explicit x.y.z is a custom version.",
+            "default": "same",
+            "allowed_values": [
+              "same",
+              "keep",
+              "patch",
+              "minor",
+              "major"
+            ]
+          },
+          {
+            "flag": "Upload",
+            "label": "-Upload   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Upload to the server after packaging: composer, the swap, migrations, then the health check.",
+            "default": ""
+          },
+          {
+            "flag": "NoGitHub",
+            "label": "-NoGitHub   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Leave GitHub alone: no version commit or tag pushed there.",
+            "default": ""
+          },
+          {
+            "flag": "PlanOnly",
+            "label": "-PlanOnly   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Plan, and print what each phase would run; nothing is run, and no secret is read.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/ci-local -Target ${ci-local.args.Target} -ConfirmProduction ${ci-local.args.ConfirmProduction} -Version ${ci-local.args.Version} -Upload ${ci-local.args.Upload} -NoGitHub ${ci-local.args.NoGitHub} -PlanOnly ${ci-local.args.PlanOnly}"
+        ],
+        "skipped": [
+          "SecretsPath"
+        ]
+      },
       "development-setup": {
         "description": "Prepares a freshly installed Windows machine to develop the Ikaika portal API: WampServer with PHP 8.4 and MySQL 8.0, Composer, the PHP extensions Laravel needs, and this repository's own dependencies",
         "args": [
@@ -237,6 +330,55 @@
           "pwsh -NoProfile -File ${root}/script.ps1 commands/run-servers -WampServer ${run-servers.args.WampServer} -Apache ${run-servers.args.Apache} -MySQL ${run-servers.args.MySQL} -MariaDB ${run-servers.args.MariaDB} -PhpMyAdmin ${run-servers.args.PhpMyAdmin} -Api ${run-servers.args.Api} -Vite ${run-servers.args.Vite} -All ${run-servers.args.All} -Stop ${run-servers.args.Stop} -Status ${run-servers.args.Status} -ApiPort ${run-servers.args.ApiPort} -VitePort ${run-servers.args.VitePort}"
         ]
       },
+      "secrets": {
+        "description": "Checks and sets up the secrets this repo's commands and GitHub workflows need, as listed in ../secrets.json",
+        "args": [
+          {
+            "flag": "For",
+            "label": "-For   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Which job to prepare, from secrets.json; omitted lists every secret and changes nothing.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/secrets For"
+          },
+          {
+            "flag": "Ci",
+            "label": "-Ci   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Never ask: open the sealed archive and fail by name when anything is missing; automatic in GitHub Actions.",
+            "default": ""
+          },
+          {
+            "flag": "Seal",
+            "label": "-Seal   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Pack every file and value secrets.json lists into this repo's encrypted archive, ready to upload to the shared folder.",
+            "default": ""
+          },
+          {
+            "flag": "OutDir",
+            "label": "-OutDir   [String]",
+            "type": "path",
+            "required": false,
+            "description": "Where -Seal writes the archive; omitted, a folder in Downloads that every repo in the same group seals into.",
+            "default": ""
+          },
+          {
+            "flag": "Export",
+            "label": "-Export   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Copy each GitHub secret this machine keeps to the clipboard in turn, ready to paste into the repository's settings.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/secrets -For ${secrets.args.For} -Ci ${secrets.args.Ci} -Seal ${secrets.args.Seal} -OutDir ${secrets.args.OutDir} -Export ${secrets.args.Export}"
+        ]
+      },
       "update-database": {
         "description": "Applies this repository's sql/ folder to the local databases, and runs Laravel's migrations",
         "args": [
@@ -335,6 +477,63 @@
       }
     },
     "git": {
+      "changelog": {
+        "description": "Release notes by hand, in CHANGELOG.md: under \"## Unreleased\" for the next release, or under a planned one, \"## x.y.z\", for a version decided in advance",
+        "args": [
+          {
+            "flag": "Add",
+            "label": "-Add   [String[]]",
+            "type": "array",
+            "required": false,
+            "description": "Commits to file under Unreleased, e.g. 'fix: a crash', each in the section its type names; with -Future, its x.y.z, e.g. 1.5.0.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices git/changelog Add"
+          },
+          {
+            "flag": "Future",
+            "label": "-Future   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Notes for a planned release, e.g. -Future -Add 1.5.0: made when missing, then opened in your editor.",
+            "default": ""
+          },
+          {
+            "flag": "Edit",
+            "label": "-Edit   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Open CHANGELOG.md in your editor; every save updates CHANGELOG.json until you close it.",
+            "default": ""
+          },
+          {
+            "flag": "Check",
+            "label": "-Check   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Only check CHANGELOG.md the way a build does, exiting 1 on a problem; nothing is changed.",
+            "default": ""
+          },
+          {
+            "flag": "Lint",
+            "label": "-Lint   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "List everything that reads badly, by line - empty sections, notes worded like commits, a json behind the file; nothing is changed.",
+            "default": ""
+          },
+          {
+            "flag": "Fix",
+            "label": "-Fix   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Mend what -Lint marks (-Fix) and write CHANGELOG.json; what a note says is never changed.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 git/changelog -Add ${changelog.args.Add} -Future ${changelog.args.Future} -Edit ${changelog.args.Edit} -Check ${changelog.args.Check} -Lint ${changelog.args.Lint} -Fix ${changelog.args.Fix}"
+        ]
+      },
       "check-all": {
         "description": "Runs every check that would otherwise be a CI job, and can install itself as a pre-push hook so nothing lands unchecked",
         "args": [
@@ -626,6 +825,98 @@
         ],
         "command-after-success": [
           "pwsh -NoProfile -File ${root}/script.ps1 git/run-at-tag -Tag ${run-at-tag.args.Tag} -Command ${run-at-tag.args.Command} -Arguments ${run-at-tag.args.Arguments} -ArtifactDir ${run-at-tag.args.ArtifactDir} -Keep ${run-at-tag.args.Keep} -List ${run-at-tag.args.List}"
+        ]
+      },
+      "tag-version": {
+        "description": "Records a build's version in git: files the changelog under it, commits that with the version file, tags it and pushes both - the step build-release's -TagDeploy takes after a build, on its own, so a pipeline can show it as one",
+        "args": [
+          {
+            "flag": "ManifestPath",
+            "label": "-ManifestPath   [String]",
+            "type": "file",
+            "required": false,
+            "description": "The file holding the version; version.manifest, else pubspec.yaml, else VERSION, when left out.",
+            "default": ""
+          },
+          {
+            "flag": "Remote",
+            "label": "-Remote   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Where the commit and the tag are pushed.",
+            "default": "origin",
+            "allowed_values": [
+              "origin"
+            ]
+          },
+          {
+            "flag": "Bump",
+            "label": "-Bump   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Bump the version file first: patch, minor, major, keep (the next build number only) or an explicit x.y.z.",
+            "default": "",
+            "allowed_values": [
+              "patch",
+              "minor",
+              "major",
+              "keep"
+            ]
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 git/tag-version -ManifestPath ${tag-version.args.ManifestPath} -Remote ${tag-version.args.Remote} -Bump ${tag-version.args.Bump}"
+        ]
+      }
+    },
+    "server": {
+      "deploy-release": {
+        "description": "Deploys a built release archive by running the project's own server script on it: the archive and every server script go up together, then the named script runs on the archive in the deploy directory, over SSH",
+        "args": [
+          {
+            "flag": "ArchivePath",
+            "label": "-ArchivePath   [String]",
+            "type": "file",
+            "required": false,
+            "description": "The built archive to upload; deploy.archive in ikaika_scripts.env when left out.",
+            "default": ""
+          },
+          {
+            "flag": "ScriptsDir",
+            "label": "-ScriptsDir   [String]",
+            "type": "path",
+            "required": false,
+            "description": "The folder of server scripts that go up with every deploy; deploy.scriptsDir when left out.",
+            "default": ""
+          },
+          {
+            "flag": "Script",
+            "label": "-Script   [String]",
+            "type": "string",
+            "required": false,
+            "description": "The server script to run on the archive, from ScriptsDir; deploy.script when left out.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices server/deploy-release Script"
+          },
+          {
+            "flag": "DryRun",
+            "label": "-DryRun   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Print what would be uploaded and run, and send nothing.",
+            "default": ""
+          },
+          {
+            "flag": "Force",
+            "label": "-Force   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the confirmation a production deploy asks for.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 server/deploy-release -ArchivePath ${deploy-release.args.ArchivePath} -ScriptsDir ${deploy-release.args.ScriptsDir} -Script ${deploy-release.args.Script} -DryRun ${deploy-release.args.DryRun} -Force ${deploy-release.args.Force}"
         ]
       }
     },
