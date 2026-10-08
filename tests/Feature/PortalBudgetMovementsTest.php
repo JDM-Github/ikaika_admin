@@ -59,6 +59,41 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertFalse($listed[(string) $other]['isOwn']);
     }
 
+    // The reported ask (2026-10-08): a new envelope's money given from its owner's unallocated funds.
+    public function test_a_new_envelope_can_be_given_its_owners_unallocated_funds_keeping_the_balance(): void
+    {
+        $owner = $this->account('Seeded Allocating Account', 'allocating.seeded@example.test', 900.00);
+        $add = fn (array $body): TestResponse => $this->postJson(self::BASE.'budget-envelopes', $body + [
+            'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'planAmount' => 5000, 'ownerAccountId' => $owner,
+            'fundsReceivedOn' => '2026-10-08',
+        ], $this->admin());
+        $listed = fn (): array => collect($this->getJson(self::BASE.'budget-accounts', $this->admin())->assertOk()->json('data'))
+            ->keyBy('id')->get((string) $owner);
+
+        $first = $listed();
+        $this->assertEqualsWithDelta(900.00, $first['unallocated'], 0.001);
+        $this->assertEqualsWithDelta(0.00, $first['allocated'], 0.001);
+
+        $id = (int) $add(['name' => 'Seeded Allocated Envelope', 'fundsAmount' => 300])->assertCreated()->assertJsonPath('data.funded', 300)->json('data.id');
+        $after = $listed();
+        $this->assertEqualsWithDelta(900.00, $after['remaining'], 0.001);
+        $this->assertEqualsWithDelta(600.00, $after['unallocated'], 0.001);
+        $this->assertEqualsWithDelta(300.00, $after['allocated'], 0.001);
+        $this->assertEqualsWithDelta(300.00, $this->envelopeRemaining($id), 0.001);
+
+        // More than is unallocated is asked about first, and nothing is added.
+        $add(['name' => 'Seeded Allocated Too Far', 'fundsAmount' => 700])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Seeded Allocating Account has only ₱600.00 unallocated. Confirm to go past it.');
+        $this->assertNull(DB::connection('tracker')->table('envelopes_budget')->where('envelope_name', 'Seeded Allocated Too Far')->value('id'));
+        $add(['name' => 'Seeded Allocated Too Far', 'fundsAmount' => 700, 'allowOverspend' => true])->assertCreated();
+        $this->assertEqualsWithDelta(-100.00, $listed()['unallocated'], 0.001);
+        $this->assertEqualsWithDelta(900.00, $listed()['remaining'], 0.001);
+        // Moved inside the account, it is neither received nor spent.
+        $this->assertEqualsWithDelta(900.00, $listed()['received'], 0.001);
+        $this->assertEqualsWithDelta(0.00, $listed()['spent'], 0.001);
+    }
+
     public function test_adding_funds_credits_the_account_and_logs_it(): void
     {
         $account = $this->account('Seeded Funded Account', 'funded.seeded@example.test', 0.00);
@@ -156,7 +191,7 @@ class PortalBudgetMovementsTest extends TestCase
         $owner = $this->account('Seeded Owner Account', 'owner.seeded@example.test', 0.00);
 
         $id = (int) $this->postJson(self::BASE.'budget-envelopes', [
-            'name' => 'Seeded Owned Envelope', 'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'ownerAccountId' => $owner,
+            'name' => 'Seeded Owned Envelope', 'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'planAmount' => 1000, 'ownerAccountId' => $owner,
         ], $this->admin())->assertCreated()->assertJsonPath('data.ownerAccountId', (string) $owner)->json('data.id');
 
         $this->assertSame('Seeded Owner Account', $this->listedEnvelope($id)['ownerName']);
@@ -170,14 +205,14 @@ class PortalBudgetMovementsTest extends TestCase
         $closed = $this->account('Seeded Closed Owner', 'closed.owner@example.test', 0.00, active: false);
 
         $this->postJson(self::BASE.'budget-envelopes', [
-            'name' => 'Seeded Unowned Envelope', 'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'ownerAccountId' => $closed,
+            'name' => 'Seeded Unowned Envelope', 'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'planAmount' => 1000, 'ownerAccountId' => $closed,
         ], $this->admin())->assertStatus(422)->assertJsonPath('message', 'Seeded Closed Owner is closed, so it takes no new money.');
     }
 
     // The reported gap: funds recorded into an owned envelope land in its owner's account, never another's.
     public function test_funds_recorded_into_an_owned_envelope_are_held_in_its_owners_account(): void
     {
-        $nat = $this->account('Seeded Funds Owner', 'funds.owner@example.test', 0.00);
+        $nat = $this->account('Seeded Funds Owner', 'funds.owner@example.test', 2000.00);
         $steven = $this->account('Seeded Funds Other', 'funds.other@example.test', 0.00);
         $envelope = $this->envelope('Seeded Owned Testing', 0.00, $nat);
         $fund = fn (array $body): TestResponse => $this->postJson(self::BASE.'budget-envelopes/'.$envelope.'/funds', $body + [
@@ -189,7 +224,7 @@ class PortalBudgetMovementsTest extends TestCase
             ->assertJsonPath('message', 'Seeded Owned Testing belongs to Seeded Funds Owner, so its funds are held in that account.');
         $this->assertEqualsWithDelta(0.00, $this->accountRemaining($steven), 0.001);
 
-        // Sent with no account, or with the owner's, it is held in the owner's.
+        // Sent with no account, or with the owner's, it is allocated from the owner's, whose balance stays.
         $fund([])->assertCreated();
         $fund(['accountId' => $nat])->assertCreated();
         $this->assertEqualsWithDelta(2000.00, $this->accountRemaining($nat), 0.001);

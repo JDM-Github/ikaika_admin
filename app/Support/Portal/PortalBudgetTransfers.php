@@ -89,7 +89,45 @@ final class PortalBudgetTransfers
         $chosenSource = $this->input->validatedId($request, 'sourceAccountId', 'That account does not exist.');
         $chosenDestination = $this->input->validatedId($request, 'destinationAccountId', 'That account does not exist.');
 
-        [$ids, $sourceName, $destinationName, $crosses] = $this->ledger->transaction(function () use ($actor, $sourceId, $destinationId, $cents, $transferredOn, $reason, $isConfirmed, $chosenSource, $chosenDestination): array {
+        [$ids, $sourceName, $destinationName, $crosses] = $this->moveBetweenEnvelopes(
+            $actor, $sourceId, $destinationId, $cents, $transferredOn, $reason, $isConfirmed, $chosenSource, $chosenDestination,
+        );
+
+        $this->audit->record(
+            $actor,
+            PortalLogAction::POST,
+            'manage.budget-envelopes',
+            PortalActivityCopy::transferredFunds($this->input->peso($cents), $sourceName, $destinationName),
+            (string) $sourceId,
+            $request,
+            ['transactionIds' => $ids, 'amount' => $this->input->amount($cents), 'destinationEnvelopeId' => $destinationId, 'crossesAccounts' => $crosses],
+        );
+
+        $moved = $this->moved('budget-envelopes', $ids, $cents);
+        $moved['data']['crossesAccounts'] = $crosses;
+
+        return $moved;
+    }
+
+    /**
+     * The envelope transfer itself, its own transaction (or a savepoint inside the caller's): the pair of
+     * rows, crossing the two owners' accounts when those differ. Adding an envelope funded from another
+     * moves its opening money through here too.
+     *
+     * @return array{0: list<int>, 1: string, 2: string, 3: bool}
+     */
+    public function moveBetweenEnvelopes(
+        Employee $actor,
+        int $sourceId,
+        int $destinationId,
+        int $cents,
+        string $transferredOn,
+        ?string $reason,
+        bool $isConfirmed,
+        ?int $chosenSource = null,
+        ?int $chosenDestination = null,
+    ): array {
+        return $this->ledger->transaction(function () use ($actor, $sourceId, $destinationId, $cents, $transferredOn, $reason, $isConfirmed, $chosenSource, $chosenDestination): array {
             [$source, $destination] = $this->ledger->lockPair('envelope', $sourceId, $destinationId);
             // A closed envelope can still be emptied; only an open one takes money in.
             $this->ledger->assertOpenEnvelope($destination, 'moving money into it');
@@ -115,21 +153,6 @@ final class PortalBudgetTransfers
 
             return [$ids, $this->ledger->envelopeName($source), $this->ledger->envelopeName($destination), $crosses];
         });
-
-        $this->audit->record(
-            $actor,
-            PortalLogAction::POST,
-            'manage.budget-envelopes',
-            PortalActivityCopy::transferredFunds($this->input->peso($cents), $sourceName, $destinationName),
-            (string) $sourceId,
-            $request,
-            ['transactionIds' => $ids, 'amount' => $this->input->amount($cents), 'destinationEnvelopeId' => $destinationId, 'crossesAccounts' => $crosses],
-        );
-
-        $moved = $this->moved('budget-envelopes', $ids, $cents);
-        $moved['data']['crossesAccounts'] = $crosses;
-
-        return $moved;
     }
 
     /**

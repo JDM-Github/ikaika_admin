@@ -16,6 +16,8 @@ use Illuminate\Http\Request;
  * from its Expense, as completed. A settled owed transfer wrote such rows too, so those are skipped.
  *
  * An account's balance is computed like an envelope's: every Credit linked to it less every Expense.
+ * The part of it on rows tied to no envelope is unallocated; the rest is allocated (2026-10-08). An
+ * allocation moves money inside the account, so neither of its rows is received or spent.
  * Its team is its holder's department, found through the holder's email the way the reimbursement
  * charges find it.
  */
@@ -49,8 +51,13 @@ final class PortalBudgetAccounts
                 ->join('transactions as t', 't.id', '=', 'ta.transaction_id')
                 ->groupBy('ta.account_id')
                 ->select('ta.account_id')
-                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS received', [PortalBudgetLedger::TYPE_CREDIT])
-                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS spent', [PortalBudgetLedger::TYPE_EXPENSE])
+                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? AND t.transaction_name NOT IN (?, ?) THEN t.amount END), 0) AS received', [PortalBudgetLedger::TYPE_CREDIT, ...PortalBudgetLedger::ALLOCATIONS])
+                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? AND t.transaction_name NOT IN (?, ?) THEN t.amount END), 0) AS spent', [PortalBudgetLedger::TYPE_EXPENSE, ...PortalBudgetLedger::ALLOCATIONS])
+                ->selectRaw(
+                    'COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM transactions_envelopes te WHERE te.transaction_id = t.id) '
+                    .'THEN (CASE WHEN t.type = ? THEN t.amount WHEN t.type = ? THEN -t.amount ELSE 0 END) END), 0) AS unallocated',
+                    [PortalBudgetLedger::TYPE_CREDIT, PortalBudgetLedger::TYPE_EXPENSE],
+                )
                 ->get()
                 ->keyBy('account_id');
             $details = $this->ledger->connection()->table('accounts')->get(['id', 'account_type', 'institution'])->keyBy('id');
@@ -80,6 +87,7 @@ final class PortalBudgetAccounts
             $balance = $balances->get($account['id']);
             $received = $this->input->cents($balance->received ?? 0);
             $spent = $this->input->cents($balance->spent ?? 0);
+            $unallocated = $this->input->cents($balance->unallocated ?? 0);
             $detail = $details->get($account['id']);
             $data[] = [
                 'id' => (string) $account['id'],
@@ -91,6 +99,8 @@ final class PortalBudgetAccounts
                 'received' => $this->input->amount($received),
                 'spent' => $this->input->amount($spent),
                 'remaining' => $this->input->amount($received - $spent),
+                'allocated' => $this->input->amount($received - $spent - $unallocated),
+                'unallocated' => $this->input->amount($unallocated),
                 'isOwn' => $ownEmail !== '' && $account['email'] === $ownEmail,
             ];
         }

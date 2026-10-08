@@ -66,18 +66,27 @@ class PortalBudgetSetupTest extends TestCase
         $this->assertStringEndsWith('added the budget code SEED-SETUP-001-20310301', (string) $log->message);
     }
 
-    // Only the name is needed: a transfer can be coded before its money or its quotation arrives.
-    public function test_a_budget_code_needs_only_a_name(): void
+    // The reported ask (2026-10-08): a name and a quotation are needed; the rest can follow later.
+    public function test_a_budget_code_needs_a_name_and_a_quotation(): void
     {
-        $id = (int) $this->addCode(['name' => 'SEED-SETUP-002-2031ADV', 'description' => '  ', 'receivedOn' => '', 'expectedAmount' => ''])
+        $before = $this->codeCount();
+        $this->addCode(['name' => 'SEED-SETUP-002-2031ADV', 'expectedAmount' => ''])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Enter the quotation.');
+        $this->addCode(['name' => 'SEED-SETUP-002-2031ADV', 'expectedAmount' => '0'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'The quotation must be more than zero.');
+        $this->assertSame($before, $this->codeCount());
+
+        $id = (int) $this->addCode(['name' => 'SEED-SETUP-002-2031ADV', 'description' => '  ', 'receivedOn' => '', 'expectedAmount' => '900'])
             ->assertCreated()
-            ->assertJsonPath('data.expectedAmount', null)
+            ->assertJsonPath('data.expectedAmount', 900)
             ->json('data.id');
 
         $row = DB::connection('tracker')->table('budget_codes')->where('id', $id)->first();
         $this->assertNull($row->description);
         $this->assertNull($row->transfer_date_received);
-        $this->assertNull($row->expected_amount_quotation);
+        $this->assertSame('900.00', $row->expected_amount_quotation);
     }
 
     public function test_a_budget_code_is_refused_without_a_name_or_with_one_already_taken(): void
@@ -164,7 +173,6 @@ class PortalBudgetSetupTest extends TestCase
         $id = (string) $this->addEnvelope(['name' => 'Seeded Setup Loose', 'budgetCodeId' => null])
             ->assertCreated()
             ->assertJsonPath('data.group', null)
-            ->assertJsonPath('data.planAmount', null)
             ->json('data.id');
 
         $unassigned = collect($this->getJson('/api/development/portal/manage/budget-codes', $this->admin())->json('unassigned'))
@@ -210,6 +218,17 @@ class PortalBudgetSetupTest extends TestCase
         $this->addEnvelope(['name' => 'SEEDED SETUP TAKEN'])
             ->assertStatus(422)
             ->assertJsonPath('message', 'An envelope named SEEDED SETUP TAKEN already exists.');
+        // The reported ask: no new envelope without an owner.
+        $this->addEnvelope(['name' => 'Seeded Setup Unowned', 'ownerAccountId' => null])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Choose the account that owns this envelope.');
+        // The reported ask (2026-10-08): nor without a plan, of more than nothing.
+        $this->addEnvelope(['name' => 'Seeded Setup Unplanned', 'planAmount' => null])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Enter the plan amount.');
+        $this->addEnvelope(['name' => 'Seeded Setup Unplanned', 'planAmount' => '0'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'The plan amount must be more than zero.');
 
         $this->assertSame($before, $this->envelopeCount());
     }
@@ -275,11 +294,14 @@ class PortalBudgetSetupTest extends TestCase
         $this->assertSame('Before', $row->description);
         $this->assertSame('5000.00', $row->expected_amount_quotation);
 
-        // A field sent blank is cleared.
-        $this->editCode($id, ['description' => '', 'expectedAmount' => null])->assertOk();
+        // A field sent blank is cleared, but a quotation cannot be taken away.
+        $this->editCode($id, ['expectedAmount' => null])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Enter the quotation.');
+        $this->editCode($id, ['description' => '', 'expectedAmount' => '6000'])->assertOk();
         $row = $this->codeRow($id);
         $this->assertNull($row->description);
-        $this->assertNull($row->expected_amount_quotation);
+        $this->assertSame('6000.00', $row->expected_amount_quotation);
 
         $log = PortalLog::query()->where('resource', 'manage.budget-codes')->where('record_id', (string) $id)->latest('id')->first();
         $this->assertSame('PATCH', $log?->action);
@@ -348,6 +370,10 @@ class PortalBudgetSetupTest extends TestCase
         $envelope = $this->seedEnvelope('Seeded Setup Edited', notes: 'Before');
         $this->seedEnvelope('Seeded Setup Other');
 
+        // A plan cannot be taken away.
+        $this->editEnvelope($envelope, ['planAmount' => null])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Enter the plan amount.');
         $this->editEnvelope($envelope, ['name' => 'Seeded Setup Renamed', 'planAmount' => '2500', 'group' => 'Capital Expenditure'])
             ->assertOk()
             ->assertJsonPath('data.name', 'Seeded Setup Renamed');
@@ -380,13 +406,15 @@ class PortalBudgetSetupTest extends TestCase
         $this->assertSame('The older one', $this->envelopeRow($first)->budget_notes);
     }
 
-    // The reported case: a new envelope opens with nothing left, so its money has to be recorded.
-    public function test_recording_funds_credits_the_envelope_its_code_and_its_account(): void
+    // The reported asks (2026-10-08): funds are allocated from the account's unallocated money, so the
+    // account's balance stays and nothing new is received.
+    public function test_recording_funds_allocates_the_accounts_unallocated_money_to_the_envelope(): void
     {
         $tracker = DB::connection('tracker');
         $code = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-SETUP-017']);
         $envelope = $this->seedEnvelope('Seeded Setup Funded');
-        $account = (int) $tracker->table('accounts')->insertGetId(['account_name' => 'Seeded Setup Holder', 'email' => 'seeded-setup-holder@example.test', 'active' => true]);
+        $tracker->table('envelopes_budget_codes')->insert(['envelope_id' => $envelope, 'budget_code_id' => $code]);
+        $account = $this->fundedAccount('Seeded Setup Holder', 'seeded-setup-holder@example.test', 3000);
 
         $response = $this->fund($envelope, [
             'amount' => '2500.50',
@@ -398,7 +426,7 @@ class PortalBudgetSetupTest extends TestCase
             ->assertJsonPath('data.name', 'Seeded Setup Funded');
 
         $transaction = $tracker->table('transactions')->where('id', (int) $response->json('data.id'))->first();
-        $this->assertSame('Funds Received', $transaction->transaction_name);
+        $this->assertSame('Credit - Allocation', $transaction->transaction_name);
         $this->assertSame('Credit', $transaction->type);
         $this->assertSame('2500.50', $transaction->amount);
         $this->assertSame('2031-02-01 00:00:00', (string) $transaction->transaction_date);
@@ -408,13 +436,36 @@ class PortalBudgetSetupTest extends TestCase
         $this->assertSame(1, $tracker->table('transactions_budget_codes')->where(['transaction_id' => $transaction->id, 'budget_code_id' => $code])->count());
         $this->assertSame(1, $tracker->table('transactions_accounts')->where(['transaction_id' => $transaction->id, 'account_id' => $account])->count());
 
-        // The envelope has it to spend, the code has received it, and the account holds it.
+        // Out of the account's unallocated money, in the same account.
+        $out = $tracker->table('transactions')->where('id', '<', $transaction->id)->where('transaction_name', 'Expense - Allocation')->orderByDesc('id')->first();
+        $this->assertNotNull($out);
+        $this->assertSame(1, $tracker->table('transactions_accounts')->where(['transaction_id' => $out->id, 'account_id' => $account])->count());
+        $this->assertSame(0, $tracker->table('transactions_envelopes')->where('transaction_id', $out->id)->count());
+
+        // The envelope has it to spend, the code has received it, and the account still holds the same.
         $codes = $this->getJson('/api/development/portal/manage/budget-codes', $this->admin())->json();
         $this->assertEqualsWithDelta(2500.50, collect($codes['data'])->firstWhere('id', (string) $code)['received'], 0.001);
-        $this->assertEqualsWithDelta(2500.50, collect($codes['unassigned'])->firstWhere('id', (string) $envelope)['remaining'], 0.001);
-        $teams = $this->getJson('/api/development/portal/manage/budget-transactions', $this->admin())->json('teams');
-        $this->assertEqualsWithDelta(2500.50, collect($teams)->firstWhere('accountId', (string) $account)['received'], 0.001);
-        $this->assertStringEndsWith('recorded ₱2,500.50 received into Seeded Setup Funded', $this->lastEnvelopeLog($envelope));
+        // Linked to the code, it is listed under it rather than among the envelopes under none.
+        $this->assertEqualsWithDelta(2500.50, collect(collect($codes['data'])->firstWhere('id', (string) $code)['envelopes'])->firstWhere('id', (string) $envelope)['remaining'], 0.001);
+        $ledger = $this->getJson('/api/development/portal/manage/budget-transactions', $this->admin())->json();
+        $team = collect($ledger['teams'])->firstWhere('accountId', (string) $account);
+        $this->assertEqualsWithDelta(3000.00, $team['received'], 0.001);
+        $this->assertEqualsWithDelta(0.00, $team['spent'], 0.001);
+        $this->assertEqualsWithDelta(3000.00, $team['remaining'], 0.001);
+        $this->assertEqualsWithDelta(499.50, $team['unallocated'], 0.001);
+        // Listed once, as the money given to the envelope, under a name of its own; its mirror is not listed.
+        $listed = collect($ledger['data'])->firstWhere('id', (string) $transaction->id);
+        $this->assertTrue($listed['isAllocation']);
+        $this->assertSame('Funds Allocated', $listed['name']);
+        $this->assertSame([(string) $code], $listed['budgetCodeIds']);
+        $this->assertNull(collect($ledger['data'])->firstWhere('id', (string) $out->id));
+        $this->assertStringEndsWith("allocated ₱2,500.50 to Seeded Setup Funded from Seeded Setup Holder's unallocated funds", $this->lastEnvelopeLog($envelope));
+
+        // More than is unallocated is asked about first.
+        $this->fund($envelope, ['amount' => '500', 'receivedOn' => '2031-02-01', 'accountId' => (string) $account])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Seeded Setup Holder has only ₱499.50 unallocated. Confirm to go past it.');
+        $this->fund($envelope, ['amount' => '500', 'receivedOn' => '2031-02-01', 'accountId' => (string) $account, 'allowOverspend' => true])->assertCreated();
     }
 
     public function test_funds_are_refused_without_an_amount_or_day_or_on_anything_closed(): void
@@ -423,6 +474,8 @@ class PortalBudgetSetupTest extends TestCase
         $envelope = $this->seedEnvelope('Seeded Setup Refused');
         $closed = $this->seedEnvelope('Seeded Setup Shut', active: false);
         $shutAccount = (int) $tracker->table('accounts')->insertGetId(['account_name' => 'Seeded Setup Shut Account', 'active' => false]);
+        // The account the money would come from, seeded before the count.
+        $this->fundedAccount('Seeded Setup Funder', 'seeded-setup-funder@example.test');
         $before = $tracker->table('transactions')->count();
         $day = '2031-02-01';
 
@@ -438,11 +491,120 @@ class PortalBudgetSetupTest extends TestCase
         $this->fund($envelope, ['amount' => '10', 'receivedOn' => $day, 'accountId' => '999999999'])
             ->assertStatus(422)
             ->assertJsonPath('message', 'That account does not exist.');
+        // An envelope nobody owns needs the account its money comes from.
+        $this->fund($envelope, ['amount' => '10', 'receivedOn' => $day, 'accountId' => null])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Choose the account the money comes from.');
         $this->fund($envelope, ['amount' => '10', 'receivedOn' => $day, 'budgetCodeId' => '999999999'])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'That budget code does not exist.');
+            ->assertJsonPath('message', 'Seeded Setup Refused is under no budget code, so its funds are recorded against none.');
 
         $this->assertSame($before, $tracker->table('transactions')->count());
+    }
+
+    // The reported ask (2026-10-08): funds past the envelope's plan or its code's quotation are warned
+    // about first, and recorded once the warning is confirmed.
+    public function test_funds_past_the_plan_or_the_quotation_need_confirming(): void
+    {
+        $tracker = DB::connection('tracker');
+        $code = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-SETUP-CAP', 'expected_amount_quotation' => 150]);
+        $envelope = $this->seedEnvelope('Seeded Setup Capped');
+        $tracker->table('envelopes_budget')->where('id', $envelope)->update(['budget_amount' => 100]);
+        $tracker->table('envelopes_budget_codes')->insert(['envelope_id' => $envelope, 'budget_code_id' => $code]);
+        $day = '2031-02-01';
+
+        $this->fund($envelope, ['amount' => '60', 'receivedOn' => $day])->assertCreated();
+        $this->fund($envelope, ['amount' => '50', 'receivedOn' => $day])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Recording ₱50.00 would credit Seeded Setup Capped ₱110.00, past its ₱100.00 plan.');
+
+        // Raised, the plan lets it through; the quotation is next.
+        $tracker->table('envelopes_budget')->where('id', $envelope)->update(['budget_amount' => 1000]);
+        $this->fund($envelope, ['amount' => '50', 'receivedOn' => $day])->assertCreated();
+        $this->fund($envelope, ['amount' => '50', 'receivedOn' => $day])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Recording ₱50.00 would bring SEED-SETUP-CAP to ₱160.00 received, past its ₱150.00 quotation.');
+
+        // Confirmed, it is recorded past both.
+        $this->fund($envelope, ['amount' => '500', 'receivedOn' => $day, 'allowOverPlan' => true])->assertCreated();
+    }
+
+    // The reported ask (2026-10-08): a new envelope can open with money in it, recorded with it.
+    public function test_a_new_envelope_can_open_with_funds_recorded_into_it(): void
+    {
+        $tracker = DB::connection('tracker');
+        $code = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-SETUP-OPEN', 'expected_amount_quotation' => 1000]);
+        $owner = $this->ownerAccount();
+
+        $this->addEnvelope(['name' => 'Seeded Setup No Day', 'fundsAmount' => 100])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Choose the day the money was received.');
+        $this->addEnvelope(['name' => 'Seeded Setup Too Much', 'budgetCodeId' => (string) $code, 'planAmount' => 200, 'fundsAmount' => 300, 'fundsReceivedOn' => '2031-02-01'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Recording ₱300.00 would credit Seeded Setup Too Much ₱300.00, past its ₱200.00 plan.');
+        $this->assertNull($tracker->table('envelopes_budget')->where('envelope_name', 'Seeded Setup Too Much')->value('id'));
+
+        $id = (int) $this->addEnvelope([
+            'name' => 'Seeded Setup Opened', 'budgetCodeId' => (string) $code, 'planAmount' => 500, 'fundsAmount' => 400, 'fundsReceivedOn' => '2031-02-01',
+        ])->assertCreated()
+            ->assertJsonPath('data.funded', 400)
+            ->assertJsonPath('data.remaining', 400)
+            ->json('data.id');
+        $credit = $tracker->table('transactions_envelopes as te')->join('transactions as t', 't.id', '=', 'te.transaction_id')
+            ->where('te.envelope_id', $id)->first(['t.id', 't.type', 't.amount', 't.transaction_name']);
+        $this->assertNotNull($credit);
+        $this->assertSame(['Credit', '400.00', 'Credit - Allocation'], [$credit->type, $credit->amount, $credit->transaction_name]);
+        $this->assertSame(1, $tracker->table('transactions_accounts')->where(['transaction_id' => $credit->id, 'account_id' => $owner])->count());
+        $this->assertSame(1, $tracker->table('transactions_budget_codes')->where(['transaction_id' => $credit->id, 'budget_code_id' => $code])->count());
+
+        // Past the plan, it is recorded once confirmed.
+        $this->addEnvelope(['name' => 'Seeded Setup Confirmed', 'planAmount' => 10, 'fundsAmount' => 50, 'fundsReceivedOn' => '2031-02-01', 'allowOverPlan' => true])
+            ->assertCreated()
+            ->assertJsonPath('data.funded', 50);
+    }
+
+    // The reported ask (2026-10-08): a new envelope can take its opening money from another envelope.
+    public function test_a_new_envelope_can_take_its_opening_funds_from_another_envelope(): void
+    {
+        $tracker = DB::connection('tracker');
+        $source = $this->seedEnvelope('Seeded Setup Source');
+        $credit = (int) $tracker->table('transactions')->insertGetId(['transaction_name' => 'Credit', 'transaction_date' => '2031-01-01 00:00:00', 'amount' => 300, 'type' => 'Credit']);
+        $tracker->table('transactions_envelopes')->insert(['transaction_id' => $credit, 'envelope_id' => $source]);
+        $remaining = fn (int $envelope): float => (float) $tracker->table('transactions_envelopes as te')->join('transactions as t', 't.id', '=', 'te.transaction_id')
+            ->where('te.envelope_id', $envelope)->selectRaw("COALESCE(SUM(CASE WHEN t.type = 'Credit' THEN t.amount ELSE -t.amount END), 0) AS left_over")->value('left_over');
+
+        // More than the source has left is asked about first, and nothing is added.
+        $this->addEnvelope(['name' => 'Seeded Setup Too Far', 'fundsAmount' => 500, 'fundsReceivedOn' => '2031-02-01', 'fundsSourceEnvelopeId' => (string) $source])
+            ->assertStatus(422);
+        $this->assertNull($tracker->table('envelopes_budget')->where('envelope_name', 'Seeded Setup Too Far')->value('id'));
+
+        $id = (int) $this->addEnvelope([
+            'name' => 'Seeded Setup Taken', 'fundsAmount' => 120, 'fundsReceivedOn' => '2031-02-01', 'fundsSourceEnvelopeId' => (string) $source,
+        ])->assertCreated()->assertJsonPath('data.funded', 120)->json('data.id');
+
+        $this->assertEqualsWithDelta(180.0, $remaining($source), 0.001);
+        $this->assertEqualsWithDelta(120.0, $remaining($id), 0.001);
+        $names = $tracker->table('transactions_envelopes as te')->join('transactions as t', 't.id', '=', 'te.transaction_id')
+            ->whereIn('te.envelope_id', [$source, $id])->where('t.id', '!=', $credit)->pluck('t.transaction_name')->sort()->values()->all();
+        $this->assertSame(['Credit - Envelope Transfer', 'Expense - Envelope Transfer'], $names);
+    }
+
+    // The reported ask (2026-10-08): the code is the one the envelope sits under, found for it.
+    public function test_funds_are_recorded_against_the_code_the_envelope_sits_under(): void
+    {
+        $tracker = DB::connection('tracker');
+        $own = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-SETUP-OWN']);
+        $other = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-SETUP-OTHER']);
+        $envelope = $this->seedEnvelope('Seeded Setup Coded');
+        $tracker->table('envelopes_budget_codes')->insert(['envelope_id' => $envelope, 'budget_code_id' => $own]);
+        $day = '2031-02-01';
+
+        $this->fund($envelope, ['amount' => '10', 'receivedOn' => $day, 'budgetCodeId' => (string) $other])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Seeded Setup Coded sits under SEED-SETUP-OWN, so its funds are recorded against that code.');
+
+        $id = (int) $this->fund($envelope, ['amount' => '10', 'receivedOn' => $day])->assertCreated()->json('data.id');
+        $this->assertSame(1, $tracker->table('transactions_budget_codes')->where(['transaction_id' => $id, 'budget_code_id' => $own])->count());
     }
 
     public function test_only_an_admin_edits_or_records_funds(): void
@@ -491,7 +653,27 @@ class PortalBudgetSetupTest extends TestCase
      */
     private function fund(int $envelopeId, array $body): TestResponse
     {
+        // Funds are allocated from an account's unallocated money; the tests about something else use one with plenty.
+        $body += ['accountId' => $this->fundedAccount('Seeded Setup Funder', 'seeded-setup-funder@example.test')];
+
         return $this->postJson('/api/development/portal/manage/budget-envelopes/'.$envelopeId.'/funds', $body, $this->admin());
+    }
+
+    // An account holding unallocated money: a Credit tied to it and to no envelope.
+    private function fundedAccount(string $name, string $email, float $unallocated = 1000000): int
+    {
+        $tracker = DB::connection('tracker');
+        $id = $tracker->table('accounts')->where('account_name', $name)->value('id');
+        if ($id !== null) {
+            return (int) $id;
+        }
+        $id = (int) $tracker->table('accounts')->insertGetId(['account_name' => $name, 'email' => $email, 'active' => true]);
+        $credit = (int) $tracker->table('transactions')->insertGetId([
+            'transaction_name' => 'Funds Received', 'transaction_date' => '2031-01-01 00:00:00', 'amount' => $unallocated, 'type' => 'Credit',
+        ]);
+        $tracker->table('transactions_accounts')->insert(['transaction_id' => $credit, 'account_id' => $id]);
+
+        return $id;
     }
 
     private function codeRow(int $id): object
@@ -524,6 +706,9 @@ class PortalBudgetSetupTest extends TestCase
      */
     private function addCode(array $body): TestResponse
     {
+        // A new code needs a quotation; the tests that are about something else are given one.
+        $body += ['expectedAmount' => 100000];
+
         return $this->postJson('/api/development/portal/manage/budget-codes', $body, $this->admin());
     }
 
@@ -532,7 +717,15 @@ class PortalBudgetSetupTest extends TestCase
      */
     private function addEnvelope(array $body): TestResponse
     {
+        // A new envelope needs an owner and a plan; the tests that are about something else are given them.
+        $body += ['ownerAccountId' => $this->ownerAccount(), 'planAmount' => 100000];
+
         return $this->postJson('/api/development/portal/manage/budget-envelopes', $body, $this->admin());
+    }
+
+    private function ownerAccount(): int
+    {
+        return $this->fundedAccount('Seeded Setup Owner', 'seeded-setup-owner@example.test');
     }
 
     private function codeCount(): int

@@ -36,6 +36,14 @@ final class PortalBudgetLedger
 
     public const ENVELOPE_TRANSFER_IN = 'Credit - Envelope Transfer';
 
+    // Money in an account given to one of its envelopes: out of what is unallocated, into the envelope.
+    public const ALLOCATION_OUT = 'Expense - Allocation';
+
+    public const ALLOCATION_IN = 'Credit - Allocation';
+
+    // Both rows of an allocation: money moving inside one account, so neither is received or spent.
+    public const ALLOCATIONS = [self::ALLOCATION_OUT, self::ALLOCATION_IN];
+
     private const CONNECTION = 'tracker';
 
     public function __construct(
@@ -166,6 +174,52 @@ final class PortalBudgetLedger
             ->first();
 
         return $this->input->cents($row->received ?? 0) - $this->input->cents($row->spent ?? 0);
+    }
+
+    /**
+     * What an account holds that no envelope has been given (2026-10-08): its rows tied to no envelope.
+     * The rest of its balance is allocated, in the envelopes its rows name.
+     */
+    public function accountUnallocatedCents(int $accountId): int
+    {
+        $row = $this->connection()
+            ->table('transactions_accounts as ta')
+            ->join('transactions as t', 't.id', '=', 'ta.transaction_id')
+            ->where('ta.account_id', $accountId)
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('transactions_envelopes as te')->whereColumn('te.transaction_id', 't.id'))
+            ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS received', [self::TYPE_CREDIT])
+            ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS spent', [self::TYPE_EXPENSE])
+            ->first();
+
+        return $this->input->cents($row->received ?? 0) - $this->input->cents($row->spent ?? 0);
+    }
+
+    /**
+     * Gives an envelope money its account already holds (2026-10-08): an Expense out of the account's
+     * unallocated money and a Credit into the envelope, both in the same account, so its balance stays.
+     * More than is unallocated only once that is confirmed.
+     *
+     * @return list<int>
+     */
+    public function allocate(Employee $actor, int $accountId, int $envelopeId, ?int $codeId, int $cents, string $date, ?string $notes, bool $isConfirmed): array
+    {
+        return $this->transaction(function () use ($actor, $accountId, $envelopeId, $codeId, $cents, $date, $notes, $isConfirmed): array {
+            $account = $this->lockAccount($accountId);
+            $this->assertOpenAccount($account);
+            $unallocated = $this->accountUnallocatedCents($accountId);
+            if ($cents > $unallocated && ! $isConfirmed) {
+                abort(422, $this->accountName($account).' has only '.$this->input->peso($unallocated).' unallocated. Confirm to go past it.');
+            }
+
+            return [
+                $this->record($actor, self::ALLOCATION_OUT, self::TYPE_EXPENSE, $cents, $date, $notes, ['accountId' => $accountId]),
+                $this->record($actor, self::ALLOCATION_IN, self::TYPE_CREDIT, $cents, $date, $notes, [
+                    'envelopeId' => $envelopeId,
+                    'budgetCodeId' => $codeId,
+                    'accountId' => $accountId,
+                ]),
+            ];
+        });
     }
 
     /**
