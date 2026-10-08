@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 /**
  * Manage / Shared Pages: a developer makes, changes and revokes guest read-only links. The process
  * itself (and the public sign-in) lives in PortalSharedPages; the public side is ShareController.
+ * Every answer rides in `data`, the portal's envelope.
  */
 class SharedPagesController extends Controller
 {
@@ -18,32 +19,32 @@ class SharedPagesController extends Controller
 
     public function index(): JsonResponse
     {
-        return response()->json($this->shares->index());
+        return response()->json(['data' => $this->shares->index()]);
     }
 
     public function store(Request $request): JsonResponse
     {
-        return response()->json($this->shares->create($this->editor($request), $request));
+        return response()->json(['data' => $this->shares->create($this->editor($request), $request)]);
     }
 
     public function update(Request $request, int $id): JsonResponse
     {
-        return response()->json($this->shares->update($this->editor($request), $request, $id));
+        return response()->json(['data' => $this->shares->update($this->editor($request), $request, $id)]);
     }
 
     public function destroy(Request $request, int $id): JsonResponse
     {
-        return response()->json($this->shares->revoke($this->editor($request), $request, $id));
+        return response()->json(['data' => $this->shares->revoke($this->editor($request), $request, $id)]);
     }
 
     public function regenerate(Request $request, int $id): JsonResponse
     {
-        return response()->json($this->shares->regenerate($this->editor($request), $request, $id));
+        return response()->json(['data' => $this->shares->regenerate($this->editor($request), $request, $id)]);
     }
 
     public function qr(int $id): JsonResponse
     {
-        return response()->json(['svg' => $this->shares->qr($id)]);
+        return response()->json(['data' => ['svg' => $this->shares->qr($id)]]);
     }
 
     private function editor(Request $request): Employee

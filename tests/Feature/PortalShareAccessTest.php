@@ -65,14 +65,14 @@ class PortalShareAccessTest extends TestCase
     {
         return (string) $this->postJson(self::BASE.'/'.$code.'/access', ['password' => $password])
             ->assertOk()
-            ->json('token');
+            ->json('data.token');
     }
 
     public function test_info_names_a_live_share_and_hides_a_dead_one(): void
     {
         $live = $this->share();
 
-        $this->getJson(self::BASE.'/'.$live['code'])->assertOk()->assertJsonPath('label', 'Test share')->assertJsonPath('hasEmail', false);
+        $this->getJson(self::BASE.'/'.$live['code'])->assertOk()->assertJsonPath('data.label', 'Test share')->assertJsonPath('data.hasEmail', false);
         $this->getJson(self::BASE.'/not-a-code')->assertNotFound();
 
         $revoked = $this->share(overrides: ['revokedAt' => now()]);
@@ -91,8 +91,8 @@ class PortalShareAccessTest extends TestCase
 
         $this->withToken($token)->getJson(self::BASE.'/session')
             ->assertOk()
-            ->assertJsonPath('label', 'Test share')
-            ->assertJsonPath('rules', ['projects.view']);
+            ->assertJsonPath('data.label', 'Test share')
+            ->assertJsonPath('data.rules', ['projects.view']);
     }
 
     public function test_a_guest_reads_granted_pages_and_never_writes(): void
@@ -119,7 +119,7 @@ class PortalShareAccessTest extends TestCase
 
         $this->postJson(self::BASE.'/'.$share['code'].'/access', ['password' => $share['password']])
             ->assertOk()
-            ->assertJsonPath('otpRequired', true);
+            ->assertJsonPath('data.otpRequired', true);
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com'));
 
         // The mailed code is hashed; a known one stands in so the checks can be read.
@@ -135,7 +135,7 @@ class PortalShareAccessTest extends TestCase
         $this->assertSame(1, (int) DB::connection('portal')->table('shared_page_otps')->where('share_id', $share['id'])->value('attempts'));
         $this->postJson(self::BASE.'/'.$share['code'].'/verify', ['password' => $share['password'], 'otp' => '123456'])
             ->assertOk()
-            ->assertJsonPath('label', 'Test share');
+            ->assertJsonPath('data.label', 'Test share');
 
         // The code is spent, and a share that ran out of tries refuses even the right one.
         $this->assertNull(DB::connection('portal')->table('shared_page_otps')->where('share_id', $share['id'])->first());

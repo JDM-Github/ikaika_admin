@@ -109,7 +109,7 @@ class PortalShareReadinessTest extends TestCase
             $share = $this->share([$rule]);
             $token = (string) $this->postJson('/api/development/portal/share/'.$share['code'].'/access', ['password' => $share['password']])
                 ->assertOk()
-                ->json('token');
+                ->json('data.token');
             foreach ($paths as $path) {
                 $response = $this->withToken($token)->getJson($path);
                 if ($response->status() !== 200) {

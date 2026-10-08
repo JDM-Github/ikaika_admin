@@ -11,7 +11,8 @@ use Illuminate\Http\Request;
 /**
  * The public side of a shared page. No auth middleware: the code in the path names the share, and
  * the password (plus the mailed code when an email is bound) is what signs the guest in. A signed-in
- * guest comes back through session to confirm the link is still live.
+ * guest comes back through session to confirm the link is still live. Every answer rides in `data`,
+ * the portal's envelope.
  */
 class ShareController extends Controller
 {
@@ -19,22 +20,22 @@ class ShareController extends Controller
 
     public function info(string $code): JsonResponse
     {
-        return response()->json($this->shares->info($code));
+        return response()->json(['data' => $this->shares->info($code)]);
     }
 
     public function access(Request $request, string $code): JsonResponse
     {
-        return response()->json($this->shares->access($request, $code));
+        return response()->json(['data' => $this->shares->access($request, $code)]);
     }
 
     public function verify(Request $request, string $code): JsonResponse
     {
-        return response()->json($this->shares->verify($request, $code));
+        return response()->json(['data' => $this->shares->verify($request, $code)]);
     }
 
     public function resend(Request $request, string $code): JsonResponse
     {
-        return response()->json($this->shares->resend($request, $code));
+        return response()->json(['data' => $this->shares->resend($request, $code)]);
     }
 
     public function session(Request $request): JsonResponse
@@ -44,6 +45,6 @@ class ShareController extends Controller
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->shares->session($guest));
+        return response()->json(['data' => $this->shares->session($guest)]);
     }
 }

@@ -101,9 +101,9 @@ class PortalSharedPagesTest extends TestCase
     {
         $token = $this->developerToken();
 
-        $created = $this->createShare($token)->assertJsonPath('share.label', 'Truebeck walkthrough');
-        $share = $created->json('share');
-        $password = $created->json('password');
+        $created = $this->createShare($token)->assertJsonPath('data.share.label', 'Truebeck walkthrough');
+        $share = $created->json('data.share');
+        $password = $created->json('data.password');
 
         $this->assertMatchesRegularExpression('/^[0-9a-f]{24}$/', $share['code']);
         $this->assertStringEndsWith('/share/'.$share['code'], $share['link']);
@@ -124,9 +124,9 @@ class PortalSharedPagesTest extends TestCase
 
         // The list carries it back, and the page list carries every shareable page.
         $listed = $this->withToken($token)->getJson(self::BASE)->assertOk();
-        $this->assertSame($share['code'], collect($listed->json('shares'))->firstWhere('id', $share['id'])['code']);
-        $this->assertContains('projects.view', array_column($listed->json('pages'), 'key'));
-        $this->assertTrue(collect($listed->json('pages'))->firstWhere('key', 'projects.view')['isReady']);
+        $this->assertSame($share['code'], collect($listed->json('data.shares'))->firstWhere('id', $share['id'])['code']);
+        $this->assertContains('projects.view', array_column($listed->json('data.pages'), 'key'));
+        $this->assertTrue(collect($listed->json('data.pages'))->firstWhere('key', 'projects.view')['isReady']);
     }
 
     public function test_a_password_is_mailed_when_an_email_is_bound(): void
@@ -136,11 +136,11 @@ class PortalSharedPagesTest extends TestCase
         $created = $this->withToken($token)
             ->postJson(self::BASE, $this->payload(['email' => 'guest@example.com']))
             ->assertOk();
-        $password = (string) $created->json('password');
+        $password = (string) $created->json('data.password');
 
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com')
             && str_contains($mail->body, $password)
-            && str_contains($mail->body, '/share/'.$created->json('share.code')));
+            && str_contains($mail->body, '/share/'.$created->json('data.share.code')));
     }
 
     public function test_a_page_that_is_not_ready_is_refused(): void
@@ -156,7 +156,7 @@ class PortalSharedPagesTest extends TestCase
     public function test_a_share_is_edited_and_revoked(): void
     {
         $token = $this->developerToken();
-        $share = $this->createShare($token)->json('share');
+        $share = $this->createShare($token)->json('data.share');
 
         $this->withToken($token)
             ->patchJson(self::BASE.'/'.$share['id'], $this->payload([
@@ -165,12 +165,12 @@ class PortalSharedPagesTest extends TestCase
                 'rules' => ['projects.track'],
             ]))
             ->assertOk()
-            ->assertJsonPath('share.label', 'Truebeck, second look');
-        $this->assertSame(['projects.track'], collect($this->withToken($token)->getJson(self::BASE)->json('shares'))->firstWhere('id', $share['id'])['rules']);
+            ->assertJsonPath('data.share.label', 'Truebeck, second look');
+        $this->assertSame(['projects.track'], collect($this->withToken($token)->getJson(self::BASE)->json('data.shares'))->firstWhere('id', $share['id'])['rules']);
 
         $this->withToken($token)->deleteJson(self::BASE.'/'.$share['id'])
             ->assertOk()
-            ->assertJsonPath('share.isRevoked', true);
+            ->assertJsonPath('data.share.isRevoked', true);
         $this->withToken($token)->patchJson(self::BASE.'/99999999', $this->payload())->assertNotFound();
         $this->withToken($token)->deleteJson(self::BASE.'/99999999')->assertNotFound();
     }
@@ -179,10 +179,10 @@ class PortalSharedPagesTest extends TestCase
     {
         $token = $this->developerToken();
         $created = $this->createShare($token);
-        $share = $created->json('share');
-        $oldPassword = (string) $created->json('password');
+        $share = $created->json('data.share');
+        $oldPassword = (string) $created->json('data.password');
 
-        $regenerated = $this->withToken($token)->postJson(self::BASE.'/'.$share['id'].'/regenerate')->assertOk()->json('password');
+        $regenerated = $this->withToken($token)->postJson(self::BASE.'/'.$share['id'].'/regenerate')->assertOk()->json('data.password');
         $this->assertIsString($regenerated);
         $this->assertNotSame($oldPassword, $regenerated);
 
@@ -194,9 +194,9 @@ class PortalSharedPagesTest extends TestCase
     public function test_the_qr_is_an_svg_of_the_link(): void
     {
         $token = $this->developerToken();
-        $share = $this->createShare($token)->json('share');
+        $share = $this->createShare($token)->json('data.share');
 
-        $svg = $this->withToken($token)->getJson(self::BASE.'/'.$share['id'].'/qr')->assertOk()->json('svg');
+        $svg = $this->withToken($token)->getJson(self::BASE.'/'.$share['id'].'/qr')->assertOk()->json('data.svg');
         $this->assertIsString($svg);
         $this->assertStringContainsString('<svg', $svg);
     }
