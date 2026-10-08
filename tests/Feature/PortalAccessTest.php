@@ -125,7 +125,7 @@ class PortalAccessTest extends TestCase
         ];
         // Project Settings is Developer mode only, so only the developer preset names it. Admins lead
         // only their own department; Nathaniel and Steven are given lead at all as a personal default.
-        $developer = [...$everything, 'projects.settings' => null];
+        $developer = [...$everything, 'projects.references' => null];
         // Auto-approve is Nathaniel's and Steven's personal default (2026-10-07), so no preset but developer holds it.
         $executive = $everything;
         unset($executive['projects.create.direct']);

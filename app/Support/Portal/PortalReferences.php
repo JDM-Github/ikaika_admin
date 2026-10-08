@@ -19,7 +19,7 @@ use Illuminate\Http\Request;
  * (260202: 2026, client 02). The code is fixed once a project has used it, and a client with
  * projects is not removed, since its numbers would then point at nobody.
  */
-final class PortalProjectSettings
+final class PortalReferences
 {
     public function __construct(private readonly PortalAudit $audit) {}
 
@@ -69,7 +69,7 @@ final class PortalProjectSettings
 
         return [
             'section' => 'manage',
-            'resource' => 'project-settings',
+            'resource' => 'references',
             'data' => [
                 'scopes' => $scopes,
                 'jobTypes' => $jobTypes,
@@ -89,7 +89,7 @@ final class PortalProjectSettings
 
         $id = (int) $this->connection()->table('clients')->insertGetId(['name' => $name, 'client_id' => $code]);
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.settings.client', '{UserName|You} added the client '.$name.' ('.$code.')', (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.client', '{UserName|You} added the client '.$name.' ('.$code.')', (string) $id, $request);
 
         return $this->index();
     }
@@ -110,7 +110,7 @@ final class PortalProjectSettings
 
         $this->connection()->table('clients')->where('id', $id)->update(['name' => $name, 'client_id' => $code]);
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.settings.client', '{UserName|You} changed the client '.$name.' ('.$code.')', (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.client', '{UserName|You} changed the client '.$name.' ('.$code.')', (string) $id, $request);
 
         return $this->index();
     }
@@ -130,7 +130,7 @@ final class PortalProjectSettings
 
         $this->connection()->table('clients')->where('id', $id)->delete();
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.settings.client', '{UserName|You} removed the client '.trim((string) $row->name), (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.client', '{UserName|You} removed the client '.trim((string) $row->name), (string) $id, $request);
 
         return $this->index();
     }
@@ -159,7 +159,7 @@ final class PortalProjectSettings
             'department' => trim($data['department']),
         ]);
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.settings.scope', '{UserName|You} added the scope '.$code, (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.scope', '{UserName|You} added the scope '.$code, (string) $id, $request);
 
         return $this->index();
     }
@@ -192,7 +192,7 @@ final class PortalProjectSettings
             'department' => trim($data['department']),
         ]);
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.settings.scope', '{UserName|You} changed the scope '.$code, (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.scope', '{UserName|You} changed the scope '.$code, (string) $id, $request);
 
         return $this->index();
     }
@@ -209,7 +209,7 @@ final class PortalProjectSettings
 
         $this->connection()->table('activity_codes')->where('id', $id)->delete();
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.settings.scope', '{UserName|You} removed the scope '.trim((string) $row->id_no), (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.scope', '{UserName|You} removed the scope '.trim((string) $row->id_no), (string) $id, $request);
 
         return $this->index();
     }
@@ -234,7 +234,7 @@ final class PortalProjectSettings
 
         $id = (int) $this->connection()->table('job_types')->insertGetId(['department' => $department, 'name' => $name]);
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.settings.type', '{UserName|You} added the project type '.$name, (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.type', '{UserName|You} added the project type '.$name, (string) $id, $request);
 
         return $this->index();
     }
@@ -268,7 +268,7 @@ final class PortalProjectSettings
             $this->connection()->table('job_type_allowed_activities')->where('job_type', $oldName)->update(['job_type' => $name]);
         }
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.settings.type', '{UserName|You} changed the project type '.$name, (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.type', '{UserName|You} changed the project type '.$name, (string) $id, $request);
 
         return $this->index();
     }
@@ -285,7 +285,7 @@ final class PortalProjectSettings
 
         $this->connection()->table('job_types')->where('id', $id)->delete();
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.settings.type', '{UserName|You} removed the project type '.trim((string) $row->name), (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.type', '{UserName|You} removed the project type '.trim((string) $row->name), (string) $id, $request);
 
         return $this->index();
     }
@@ -306,7 +306,7 @@ final class PortalProjectSettings
 
         $id = (int) $this->connection()->table('departments')->insertGetId(['name' => $name]);
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.settings.department', '{UserName|You} added the department '.$name, (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.department', '{UserName|You} added the department '.$name, (string) $id, $request);
 
         return $this->index();
     }
@@ -323,7 +323,7 @@ final class PortalProjectSettings
 
         $this->connection()->table('departments')->where('id', $id)->delete();
         $this->bump();
-        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.settings.department', '{UserName|You} removed the department '.trim((string) $row->name), (string) $id, $request);
+        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.department', '{UserName|You} removed the department '.trim((string) $row->name), (string) $id, $request);
 
         return $this->index();
     }

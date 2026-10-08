@@ -597,7 +597,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.create.direct', 'projects.create', 'Auto-approve projects', 'A project {UserName|You} add is approved at once, without waiting for a Project Approver.', 0, 1, 221),
 ('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
-('projects.settings', 'projects', 'Project Settings', 'Open Manage / Project Settings.', 0, 1, 240),
+('projects.references', 'projects', 'References', 'Open Manage / References.', 0, 1, 240),
 
 ('reports', NULL, 'Reports', 'Open the Reports section of the sidebar.', 0, 1, 300),
 ('reports.daily', 'reports', 'Daily Report', 'File {UserName|Your} timesheet for today.', 0, 1, 310),
@@ -738,7 +738,7 @@ UPDATE access_permissions SET only_department = 'MIS', min_tier = 'admin' WHERE 
 -- Developer mode, and no gift reaches it. Existing databases: make_portal_backup_rules_developer_only.
 UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key LIKE 'administration.backup%';
 -- Manage / Project Settings is a work in progress: Developer mode only for now, like Backup.
-UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key = 'projects.settings';
+UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key = 'projects.references';
 -- Auto-approve is an admin's at most, and only a named one's (2026-10-07, supervisor): being an admin
 -- is not enough, so no role but developer starts with it. Existing databases: split_portal_project_auto_approval.
 UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key = 'projects.create.direct';
@@ -788,7 +788,7 @@ WHERE permission_key NOT LIKE 'developer%'
   AND permission_key <> 'manage.users.information'
   AND permission_key <> 'administration.logs.developers'
   AND permission_key <> 'email.images.global'
-  AND permission_key <> 'projects.settings'
+  AND permission_key <> 'projects.references'
   AND permission_key <> 'projects.create.direct'
   AND permission_key NOT LIKE '%.unlisted';
 
@@ -801,7 +801,7 @@ SELECT 'executive', permission_key,
        permission_key = 'administration.logs'
 FROM access_permissions
 WHERE permission_key NOT LIKE 'developer%'
-  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.settings', 'projects.create.direct')
+  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.references', 'projects.create.direct')
   AND permission_key NOT LIKE 'reports.%'
   AND permission_key NOT LIKE 'requests.%'
   AND permission_key NOT LIKE 'user.%'

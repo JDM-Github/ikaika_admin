@@ -11,10 +11,10 @@ use Tests\TestCase;
 
 /**
  * Manage / Project Settings: the reference data a project is filed under. The page is a work in
- * progress, so its `projects.settings` rule is Developer-mode-only for now: a developer in Developer
+ * progress, so its `projects.references` rule is Developer-mode-only for now: a developer in Developer
  * mode opens it, an admin in Default does not.
  */
-class PortalProjectSettingsTest extends TestCase
+class PortalReferencesTest extends TestCase
 {
     use DatabaseTransactions;
 
@@ -23,7 +23,7 @@ class PortalProjectSettingsTest extends TestCase
      */
     protected array $connectionsToTransact = ['portal', 'core'];
 
-    private const BASE = '/api/development/portal/manage/project-settings';
+    private const BASE = '/api/development/portal/manage/references';
 
     protected function setUp(): void
     {

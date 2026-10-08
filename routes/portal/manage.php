@@ -5,7 +5,7 @@ use App\Http\Controllers\Api\Portal\Manage\BudgetAccountsController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
 use App\Http\Controllers\Api\Portal\Manage\FlaggedMembersController;
 use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
-use App\Http\Controllers\Api\Portal\Manage\ProjectSettingsController;
+use App\Http\Controllers\Api\Portal\Manage\ReferencesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
@@ -26,26 +26,26 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->whereNumber('id');
     // Manage / Project Settings is a work in progress, so Developer mode only for now: its rule is
     // held only while a developer is in Developer mode.
-    Route::middleware(['portal.rule:projects.settings', 'throttle:portal-projects'])
-        ->get('manage/project-settings', [ProjectSettingsController::class, 'index']);
-    Route::middleware(['portal.rule:projects.settings', 'throttle:portal-projects-write'])->group(function (): void {
-        Route::post('manage/project-settings/scopes', [ProjectSettingsController::class, 'storeScope']);
-        Route::patch('manage/project-settings/scopes/{id}', [ProjectSettingsController::class, 'updateScope'])
+    Route::middleware(['portal.rule:projects.references', 'throttle:portal-projects'])
+        ->get('manage/references', [ReferencesController::class, 'index']);
+    Route::middleware(['portal.rule:projects.references', 'throttle:portal-projects-write'])->group(function (): void {
+        Route::post('manage/references/scopes', [ReferencesController::class, 'storeScope']);
+        Route::patch('manage/references/scopes/{id}', [ReferencesController::class, 'updateScope'])
             ->whereNumber('id');
-        Route::delete('manage/project-settings/scopes/{id}', [ProjectSettingsController::class, 'destroyScope'])
+        Route::delete('manage/references/scopes/{id}', [ReferencesController::class, 'destroyScope'])
             ->whereNumber('id');
-        Route::post('manage/project-settings/job-types', [ProjectSettingsController::class, 'storeJobType']);
-        Route::patch('manage/project-settings/job-types/{id}', [ProjectSettingsController::class, 'updateJobType'])
+        Route::post('manage/references/job-types', [ReferencesController::class, 'storeJobType']);
+        Route::patch('manage/references/job-types/{id}', [ReferencesController::class, 'updateJobType'])
             ->whereNumber('id');
-        Route::delete('manage/project-settings/job-types/{id}', [ProjectSettingsController::class, 'destroyJobType'])
+        Route::delete('manage/references/job-types/{id}', [ReferencesController::class, 'destroyJobType'])
             ->whereNumber('id');
-        Route::post('manage/project-settings/departments', [ProjectSettingsController::class, 'storeDepartment']);
-        Route::delete('manage/project-settings/departments/{id}', [ProjectSettingsController::class, 'destroyDepartment'])
+        Route::post('manage/references/departments', [ReferencesController::class, 'storeDepartment']);
+        Route::delete('manage/references/departments/{id}', [ReferencesController::class, 'destroyDepartment'])
             ->whereNumber('id');
-        Route::post('manage/project-settings/clients', [ProjectSettingsController::class, 'storeClient']);
-        Route::patch('manage/project-settings/clients/{id}', [ProjectSettingsController::class, 'updateClient'])
+        Route::post('manage/references/clients', [ReferencesController::class, 'storeClient']);
+        Route::patch('manage/references/clients/{id}', [ReferencesController::class, 'updateClient'])
             ->whereNumber('id');
-        Route::delete('manage/project-settings/clients/{id}', [ProjectSettingsController::class, 'destroyClient'])
+        Route::delete('manage/references/clients/{id}', [ReferencesController::class, 'destroyClient'])
             ->whereNumber('id');
     });
     // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.
