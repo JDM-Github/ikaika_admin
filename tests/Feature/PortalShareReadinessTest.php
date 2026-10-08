@@ -12,9 +12,9 @@ use Tests\TestCase;
 /**
  * The per-page readiness pass (docs/power/shared-pages-plan.md, Step 4): a page joins PAGE_READS the
  * day a guest token reads it cleanly, in the same change that seeds is_ready 1 for it. Held back so
- * far: pages whose own rule is also their write power (projects.references, email, email.library,
- * reports.daily, reports.late), the edit and form pages, and administration.backup, which has no
- * route yet. The two tests keep the map, the seed and the server from drifting apart.
+ * far: the forms (email, reports.daily, reports.late, the request and edit pages) and
+ * administration.backup, which has no route yet; the portal hides a guest's write controls on the
+ * pages it has cleared. The two tests keep the map, the seed and the server from drifting apart.
  */
 class PortalShareReadinessTest extends TestCase
 {
@@ -32,6 +32,7 @@ class PortalShareReadinessTest extends TestCase
         'projects.track' => ['/api/development/portal/projects/track'],
         'projects.create' => ['/api/development/portal/projects/mine'],
         'projects.manager' => ['/api/development/portal/manage/projects'],
+        'projects.references' => ['/api/development/portal/manage/references'],
         'reports.submitted' => ['/api/development/portal/reports/submitted'],
         'calendar' => ['/api/development/portal/calendar/events'],
         'manage.requests' => ['/api/development/portal/manage/requests'],
@@ -46,6 +47,7 @@ class PortalShareReadinessTest extends TestCase
         'administration.actions' => ['/api/development/portal/administration/all-actions'],
         'administration.missing' => ['/api/development/portal/administration/missing-reports'],
         'administration.emails' => ['/api/development/portal/administration/emails'],
+        'email.library' => ['/api/development/portal/administration/email-blocks', '/api/development/portal/signature/default'],
         'user.logs' => ['/api/development/portal/user/logs'],
         'user.recycle' => ['/api/development/portal/administration/recycle-bin'],
         'requests.own' => ['/api/development/portal/requests/leave'],

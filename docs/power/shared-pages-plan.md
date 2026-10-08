@@ -1,6 +1,6 @@
 # Shared Pages — guest read-only links (plan)
 
-Status: **Steps 1-3 built (2026-10-08); Step 4 (the per-page readiness pass) is under way: 22 of
+Status: **Steps 1-3 built (2026-10-08); Step 4 (the per-page readiness pass) is under way: 24 of
 the 34 catalog pages are cleared and seeded `is_ready` 1, guarded by
 `tests/Feature/PortalShareReadinessTest.php`.**
 Step 1: the SQL, `PortalSharedPages`, the guest branch of `AuthenticatePortalJwt`, the `PortalRules`
@@ -411,20 +411,22 @@ First set to verify (seeded 1 in section 4; lower any that fail): `projects.view
 `projects.track`, `finance.overview`, `finance.transactions`, `finance.envelopes`,
 `finance.accounts`, `calendar`. Then the reach-based admin pages, then the rest.
 
-Cleared 2026-10-08 (checklist 1 and 2 proven by `PortalShareReadinessTest`; checklist 3 by reading
-each screen's write gates): `home`, `projects.view`, `projects.track`, `projects.create`,
-`projects.manager`, `reports.submitted`, `calendar`, `manage.requests`, `manage.reports`,
-`manage.users`, all four `finance.*`, `administration.recycle` (view-only by design),
-`administration.logs`, `administration.actions`, `administration.missing`,
-`administration.emails`, `user.logs`, `user.recycle`, `requests.own`.
+Cleared 2026-10-08 (checklist 1 and 2 proven by `PortalShareReadinessTest`; checklist 3 by the
+portal's guest read-only pass, portal 414370b, and by reading each screen's write gates): `home`,
+`projects.view`, `projects.track`, `projects.create`, `projects.manager`, `projects.references`,
+`reports.submitted`, `calendar`, `manage.requests`, `manage.reports`, `manage.users`, all four
+`finance.*`, `administration.recycle` (view-only by design), `administration.logs`,
+`administration.actions`, `administration.missing`, `administration.emails`, `email.library`,
+`user.logs`, `user.recycle`, `requests.own`.
 
-Held back because the page rule is also its write power, so its controls would show to a guest:
-`projects.references` (unconditional Add pills), `email` (the composer form and its own-scope
-image controls), `email.library` (the library editor itself), `reports.daily` and `reports.late`
-(the report entry form). Held back as forms: `reports.submitted.edit`, `requests.leave`,
-`requests.overtime`, `requests.offset`, `requests.reimbursement`, `requests.own.edit`.
-`administration.backup` has no server route. The portal needs a guest read-only rule before the
-held-back pages can be flipped.
+A guest's write controls are dropped by the portal (references Add/Edit pills and the actions
+column, the signature library's Add and row menu, the allowed-activities commit and toggles);
+`GET administration/email-blocks` follows `email|email.library`, since both pages list the blocks.
+
+Held back: `email` (the composer is a form, and its own-scope image controls follow the same
+rule), `reports.daily` and `reports.late` (the report entry form), and the edit and form pages
+(`reports.submitted.edit`, `requests.leave`, `requests.overtime`, `requests.offset`,
+`requests.reimbursement`, `requests.own.edit`). `administration.backup` has no server route.
 
 ## 8. Security
 

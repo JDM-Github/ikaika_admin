@@ -1010,8 +1010,7 @@ INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('projects.track', 1),
     ('projects.create', 1),
     ('projects.manager', 1),
-    -- Held back: its page rule is also its write power, so its Add and Edit pills would show.
-    ('projects.references', 0),
+    ('projects.references', 1),
     ('reports.daily', 0),
     ('reports.late', 0),
     ('reports.submitted', 1),
@@ -1039,8 +1038,7 @@ INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('administration.emails', 1),
     -- Held back: the composer is a form, and its own-scope image controls follow the same rule.
     ('email', 0),
-    -- Held back: the page is the library editor itself.
-    ('email.library', 0),
+    ('email.library', 1),
     ('administration.backup', 0);
 
 -- The page's own power: developers only, held in Developer mode alone, so nobody can give it.

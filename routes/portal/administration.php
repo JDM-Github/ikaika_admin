@@ -44,6 +44,11 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->post('administration/recycle-bin/{id}/restore', [RecycleBinController::class, 'restore'])
         ->whereNumber('id');
 
+    // The block library's read follows either page that lists it: the composer (email) and the
+    // signature library (email.library), so a developer granting one page still gets the blocks.
+    Route::middleware(['portal.rule:email|email.library', 'throttle:portal-administration-email'])
+        ->get('administration/email-blocks', [EmailBlocksController::class, 'index']);
+
     // Email (the composer) follows its rule: whoever opens it reads the audiences, templates, footers and
     // images, builds previews and keeps their own images. Sending and the library are powers of their own.
     Route::middleware(['portal.rule:email', 'throttle:portal-administration-email'])->group(function (): void {
@@ -51,7 +56,6 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::get('administration/emails/audiences', [EmailMessagesController::class, 'audiences']);
         // Read-only despite the POST: the draft rides in the body, too long for a query string.
         Route::post('administration/emails/preview', [EmailMessagesController::class, 'preview']);
-        Route::get('administration/email-blocks', [EmailBlocksController::class, 'index']);
         Route::get('administration/email-images', [EmailImagesController::class, 'index']);
     });
 
