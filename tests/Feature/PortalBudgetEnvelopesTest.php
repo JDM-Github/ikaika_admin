@@ -609,6 +609,24 @@ class PortalBudgetEnvelopesTest extends TestCase
         $this->assertNull($data[1]['accountName']);
     }
 
+    // A tracker row with no type is not a money movement: it never reaches the ledger, where the
+    // portal's strict parser would refuse it and lose every other row with it.
+    public function test_the_ledger_leaves_out_a_transaction_with_no_type(): void
+    {
+        $blank = $this->ledgerTransaction([
+            'transaction_name' => 'Untyped',
+            'transaction_date' => '2031-02-01 09:00:00',
+            'amount' => 0,
+            'type' => '',
+        ]);
+
+        $data = $this->getJson('/api/development/portal/manage/budget-transactions', $this->admin())
+            ->assertOk()
+            ->json('data');
+
+        $this->assertNotContains((string) $blank, array_column($data, 'id'));
+    }
+
     public function test_the_ledger_is_empty_with_the_tracker_switched_off(): void
     {
         config(['products.catalog.transaction-tracker.enabled' => false]);
