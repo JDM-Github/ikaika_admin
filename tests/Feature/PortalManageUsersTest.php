@@ -11,8 +11,10 @@ use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalAccessDenied;
 use App\Support\Portal\PortalManageUserPresenter;
 use App\Support\Portal\PortalRole;
+use App\Support\Portal\PortalRules;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
@@ -30,6 +32,9 @@ class PortalManageUsersTest extends TestCase
         parent::setUp();
         Cache::flush();
         Mail::fake();
+        foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'access_self_reach', 'access_lists', 'developer_modes'] as $table) {
+            DB::connection('portal')->table($table)->delete();
+        }
     }
 
     public function test_catalog_lists_manage_users_under_portal_sections(): void
@@ -78,7 +83,7 @@ class PortalManageUsersTest extends TestCase
     {
         $member = $this->promotableMember();
         $member->forceFill(['department' => ' mis '])->save();
-        $token = $this->tokenForAdmin();
+        $token = $this->loginToken($this->executive());
 
         $response = $this->withToken($token)
             ->getJson('/api/development/portal/manage/users?per_page=100&department=MIS')
@@ -118,7 +123,7 @@ class PortalManageUsersTest extends TestCase
 
     public function test_search_requires_every_word_and_sorts_when_asked(): void
     {
-        $token = $this->tokenForAdmin();
+        $token = $this->loginToken($this->executive());
         $headers = ['Authorization' => "Bearer {$token}"];
         $employee = Employee::query()
             ->whereNotNull('id_no')
@@ -148,6 +153,7 @@ class PortalManageUsersTest extends TestCase
     public function test_executives_are_locked_on_the_roster(): void
     {
         $executive = $this->executive();
+        $executive->forceFill(['department' => 'MIS'])->save();
         $token = $this->tokenForAdmin();
 
         $this->getJson('/api/development/portal/manage/users?per_page=100', [
@@ -169,11 +175,10 @@ class PortalManageUsersTest extends TestCase
         $this->getJson('/api/development/portal/manage/users', [
             'Authorization' => "Bearer {$token}",
         ])->assertForbidden()
-            ->assertJsonPath('message', 'Administrator access is required.')
-            ->assertJsonPath('warning', PortalAccessDenied::WARNING_NOTIFIED)
-            ->assertJsonPath('notified', true);
+            ->assertJsonPath('message', PortalRules::REFUSAL)
+            ->assertJsonMissingPath('warning');
 
-        Mail::assertSent(PortalAccessAlertMail::class);
+        Mail::assertNothingSent();
     }
 
     public function test_the_roster_requires_a_token(): void
@@ -295,6 +300,7 @@ class PortalManageUsersTest extends TestCase
     public function test_an_executive_role_cannot_be_changed(): void
     {
         $executive = $this->executive();
+        $executive->forceFill(['department' => 'MIS'])->save();
         $actor = $this->adminWhoIsNotExecutive();
         $this->giveAlertMailbox($this->otherAdmin($actor));
         $token = $this->loginToken($actor);
@@ -351,24 +357,24 @@ class PortalManageUsersTest extends TestCase
         ], [
             'Authorization' => "Bearer {$token}",
         ])->assertForbidden()
-            ->assertJsonPath('message', 'Administrator access is required.')
-            ->assertJsonPath('warning', PortalAccessDenied::WARNING_NOTIFIED);
+            ->assertJsonPath('message', PortalRules::REFUSAL)
+            ->assertJsonMissingPath('warning');
 
-        Mail::assertSent(PortalAccessAlertMail::class);
+        Mail::assertNothingSent();
     }
 
+    // Every admin-only page now follows a rule (a plain 403), so the alerting refusal probed twice is an executive's role.
     public function test_a_repeat_probe_is_logged_without_a_second_mail(): void
     {
-        $this->giveAlertMailbox($this->adminWhoIsNotExecutive());
-        $token = $this->tokenForMember();
-        $headers = ['Authorization' => "Bearer {$token}"];
+        $executive = $this->executive();
+        $executive->forceFill(['department' => 'MIS'])->save();
+        $actor = $this->adminWhoIsNotExecutive();
+        $this->giveAlertMailbox($this->otherAdmin($actor));
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $probe = fn () => $this->patchJson("/api/development/portal/manage/users/{$executive->id}/role", ['role' => PortalRole::USER], $headers);
 
-        $this->getJson('/api/development/portal/manage/users', $headers)
-            ->assertForbidden()
-            ->assertJsonPath('notified', true);
-
-        $this->getJson('/api/development/portal/manage/users', $headers)
-            ->assertForbidden()
+        $probe()->assertForbidden()->assertJsonPath('notified', true);
+        $probe()->assertForbidden()
             ->assertJsonPath('notified', false)
             ->assertJsonPath('warning', PortalAccessDenied::WARNING_RECORDED);
 
@@ -426,6 +432,7 @@ class PortalManageUsersTest extends TestCase
             ->where('id_no', '!=', '')
             ->first();
         $this->assertNotNull($employee);
+        $employee->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
 
         return $employee;
     }
@@ -438,6 +445,7 @@ class PortalManageUsersTest extends TestCase
             ->where('id', '!=', $actor->id)
             ->first();
         $this->assertNotNull($employee);
+        $employee->forceFill(['department' => 'MIS'])->save();
 
         return $employee;
     }
@@ -449,8 +457,26 @@ class PortalManageUsersTest extends TestCase
             ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
             ->first();
         $this->assertNotNull($employee);
+        $employee->forceFill(['department' => 'MIS'])->save();
 
         return $employee;
+    }
+
+    // Access alerts is a power: switched off, that admin is left off the mail; the other holders still get it.
+    public function test_the_access_alert_goes_only_to_holders_of_access_alerts(): void
+    {
+        $executive = $this->executive();
+        $executive->forceFill(['department' => 'MIS'])->save();
+        $actor = $this->adminWhoIsNotExecutive();
+        $quiet = $this->otherAdmin($actor);
+        $this->giveAlertMailbox($quiet, 'quiet-admin@example.test');
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $quiet->getKey(), 'permission_key' => 'administration.alerts']);
+
+        $this->patchJson("/api/development/portal/manage/users/{$executive->id}/role", ['role' => PortalRole::USER], [
+            'Authorization' => 'Bearer '.$this->loginToken($actor),
+        ])->assertForbidden()->assertJsonPath('notified', true);
+
+        Mail::assertSent(PortalAccessAlertMail::class, fn (PortalAccessAlertMail $mail): bool => ! $mail->hasTo('quiet-admin@example.test'));
     }
 
     private function giveAlertMailbox(Employee $employee, string $email = 'alerts@example.test'): void

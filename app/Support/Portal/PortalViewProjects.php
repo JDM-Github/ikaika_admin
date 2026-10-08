@@ -3,21 +3,28 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * View Projects: the board behind the Projects screen.
+ * The project board behind View Projects and Track Projects.
  *
- * Admin and Executive get every project, each tagged with whether they are assigned.
- * Everybody else gets only their own board — the same membership cut as report pickers.
+ * View Projects and Track Projects each follow their rule's reach: own = the projects they are on, department = those
+ * plus their department's, all = every project. Membership is never lost at any reach.
+ * Each project also says whether this person may edit it, manage its scopes or delete it, and
+ * carries its work from reports (PortalProjectWork).
  */
 final class PortalViewProjects
 {
     public const CACHE_TTL_SECONDS = 30;
 
     public const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
+
+    // Rows Airtable wrote about reports, not changes: the Activity tab and the dashboard show those dates.
+    private const REPORT_TRAIL_PREFIXES = ['initial report was on', 'last report was on'];
 
     /**
      * @return array{
@@ -26,16 +33,88 @@ final class PortalViewProjects
      *     data: list<array<string, mixed>>
      * }
      */
-    public function list(Employee $actor): array
+    // View Projects follows its rule's reach (2026-10-01): members own, admins and executives all by preset.
+    public function list(Employee $actor, Request $request): array
+    {
+        return $this->board($actor, PortalRules::active($actor, $request)['projects.view'] ?? 'own', PortalProjectPowers::reaches($actor, $request));
+    }
+
+    /**
+     * Track Projects, cut to how far the person's Track Projects rule reaches.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>}
+     */
+    public function track(Employee $actor, Request $request): array
+    {
+        return $this->board($actor, PortalRules::active($actor, $request)['projects.track'] ?? 'own', PortalProjectPowers::reaches($actor, $request));
+    }
+
+    /**
+     * Cached per person and per reach, Edit, Manage scopes and Delete included, so each project says
+     * what this person may do with it.
+     *
+     * @param  array<string, ?string>  $powers
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>}
+     */
+    private function board(Employee $actor, string $reach, array $powers): array
     {
         $employeeId = (int) $actor->getKey();
-        $seesAll = PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null);
+        $department = $reach === 'department' ? PortalPreview::department($actor->department) : '';
+        $leadEmail = strtolower(trim((string) ($actor->email ?? '')));
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:projects:'.$version.':'.$employeeId.':'.($seesAll ? 'all' : 'own');
+        $actorDepartment = PortalPreview::department($actor->department);
+        $key = 'portal:projects:'.$version.':'.$employeeId.':'.$reach.':'.md5($department.'|'.$leadEmail.'|'.$actorDepartment.'|'.json_encode($powers));
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($employeeId, $seesAll): array {
-            return $this->build($employeeId, $seesAll);
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor, $employeeId, $reach, $department, $leadEmail, $powers): array {
+            return $this->build($actor, $employeeId, $reach, $department, $leadEmail, $powers);
         });
+    }
+
+    /**
+     * Each Engineering and MIS project's top member, named and pictured, for everyone who can open it.
+     *
+     * @param  list<object>  $rows
+     * @param  array<int, array<string, mixed>>  $work
+     * @param  array<int, array{employeeId: int, linesChanged: int, commits: int}>  $code
+     * @return array<int, array{id: string, name: string, photoUrl: ?string, measure: string, value: int, hours: ?float, commits: ?int}>
+     */
+    private function topMembers(array $rows, array $work, array $code): array
+    {
+        $picked = [];
+        foreach ($rows as $row) {
+            $id = (int) $row->id;
+            $items = $work[$id]['topItems'] ?? null;
+            if (PortalProjectWork::isEngineering($row->department ?? null) && is_array($items)) {
+                $picked[$id] = ['employeeId' => $items['employeeId'], 'measure' => 'items', 'value' => $items['items'], 'hours' => $items['hours'], 'commits' => null];
+            } elseif (PortalProjectRepositories::appliesTo($row->department ?? null) && isset($code[$id])) {
+                $picked[$id] = ['employeeId' => $code[$id]['employeeId'], 'measure' => 'linesChanged', 'value' => $code[$id]['linesChanged'], 'hours' => null, 'commits' => $code[$id]['commits']];
+            }
+        }
+        if ($picked === []) {
+            return [];
+        }
+        $ids = array_values(array_unique(array_column($picked, 'employeeId')));
+        $names = $this->connection()->table('employees')->whereIn('id', $ids)->get(['id', 'first_name', 'last_name'])->keyBy('id');
+        $photos = PortalEmployeePresenter::photoUrls($ids);
+
+        $members = [];
+        foreach ($picked as $projectId => $top) {
+            $person = $names[$top['employeeId']] ?? null;
+            if ($person === null) {
+                continue;
+            }
+            $members[$projectId] = [
+                'id' => (string) $top['employeeId'],
+                'name' => trim($person->first_name.' '.$person->last_name),
+                'photoUrl' => $photos[$top['employeeId']] ?? null,
+                'measure' => $top['measure'],
+                'value' => $top['value'],
+                'hours' => $top['hours'],
+                'commits' => $top['commits'],
+            ];
+        }
+
+        return $members;
     }
 
     public function bumpCache(): void
@@ -45,24 +124,46 @@ final class PortalViewProjects
     }
 
     /**
+     * One project's effective scope codes: the WBS codes saved from Manage Scopes, else the codes its
+     * pivots or reports name. The editor shows the same list the board does.
+     *
+     * @return list<string>
+     */
+    public function scopeCodesForProject(int $projectId): array
+    {
+        $summaries = $this->scopeSummariesByProject([$projectId]);
+
+        return $summaries[$projectId]['scopeCodes'] ?? [];
+    }
+
+    /**
+     * @param  array<string, ?string>  $powers
      * @return array{
      *     section: string,
      *     resource: string,
      *     data: list<array<string, mixed>>
      * }
      */
-    private function build(int $employeeId, bool $seesAll): array
+    private function build(Employee $actor, int $employeeId, string $reach, string $department, string $leadEmail, array $powers): array
     {
-        $rows = $this->projectRows($employeeId, $seesAll);
+        $rows = $this->projectRows($employeeId, $reach, $department, $leadEmail);
         $projectIds = array_map(
             static fn (object $row): int => (int) $row->id,
             $rows,
         );
-        $memberNames = $this->memberNamesByProject($projectIds);
+        $members = $this->membersByProject($projectIds);
+        $memberNames = $this->namesByProject($members);
+        $memberPhotos = $this->photosByProject($members);
         $clientNames = $this->clientNamesByProject($projectIds);
         $scopeSummaries = $this->scopeSummariesByProject($projectIds);
         $trails = $this->trailsByProject($projectIds);
+        $trailPhotos = $this->actorPhotos($trails);
         $leadsByEmail = $this->leadsByEmail($rows);
+        $work = (new PortalProjectWork)->byProject($rows, CarbonImmutable::today());
+        $code = (new PortalProjectCodeActivity)->summariesByProject($projectIds);
+        $repositoryLinks = (new PortalProjectRepositories)->linksByProject($projectIds);
+        $topMembers = $this->topMembers($rows, $work, (new PortalProjectCodeActivity)->topByProject($projectIds));
+        $activityCodes = PortalActivityScopes::all();
 
         $projects = [];
         foreach ($rows as $row) {
@@ -72,15 +173,37 @@ final class PortalViewProjects
             if ($scopeSummary !== null) {
                 unset($scopeSummary['scopeCodes']);
             }
-            $projects[] = PortalViewProjectPresenter::item(
+            // Each trail row carries its actor's photo, so the Contributors list shows a face.
+            $trail = array_map(
+                static fn (array $entry): array => [...$entry, 'actorPhotoUrl' => $trailPhotos[$entry['actorName']] ?? null],
+                $trails[$id] ?? [],
+            );
+            $item = PortalViewProjectPresenter::item(
                 $row,
                 $memberNames[$id] ?? [],
                 $leadsByEmail,
                 $clientNames[$id] ?? [],
                 $scopeSummary,
-                $trails[$id] ?? [],
+                $trail,
                 $scopeCodes,
+                $memberPhotos[$id] ?? [],
             );
+            // An MIS project's Bitbucket repositories join its links on the Details tab.
+            $item['links'] = [...$item['links'], ...($repositoryLinks[$id] ?? [])];
+            $projects[] = [
+                ...$item,
+                ...PortalProjectPowers::flags($powers, $actor, $row),
+                'team' => PortalViewProjectPresenter::team(
+                    $leadsByEmail[strtolower(trim((string) ($row->project_lead_email ?? '')))] ?? null,
+                    $members[$id] ?? [],
+                ),
+                'work' => array_diff_key($work[$id], ['topItems' => true]),
+                // Who did the most: items on Engineering, lines changed on MIS; null for any other project.
+                'topMember' => $topMembers[$id] ?? null,
+                // Commits from linked Bitbucket repositories (MIS); null when the project links none.
+                'codeActivity' => $code[$id] ?? null,
+                'scopeOptions' => PortalActivityScopes::forDepartment($activityCodes, $row->department ?? null),
+            ];
         }
 
         usort($projects, static function (array $first, array $second): int {
@@ -100,14 +223,88 @@ final class PortalViewProjects
     }
 
     /**
-     * One read with a LEFT JOIN so isAssigned costs nothing extra per row.
+     * One project as the Recycle Bin shows it. A deleted project is only stamped, so it still has its
+     * members, clients and reported work; null once the row itself is gone.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function binSummary(int $projectId): ?array
+    {
+        $row = $this->connection()
+            ->table('projects')
+            ->where('id', $projectId)
+            ->first([
+                'id',
+                'project_number',
+                'project_name',
+                'department',
+                'status',
+                'type_of_job',
+                'area_sqft',
+                'project_lead_email',
+                'project_creation_status',
+            ]);
+        if ($row === null) {
+            return null;
+        }
+
+        $members = $this->membersByProject([$projectId]);
+        $item = PortalViewProjectPresenter::item(
+            $row,
+            $this->namesByProject($members)[$projectId] ?? [],
+            $this->leadsByEmail([$row]),
+            $this->clientNamesByProject([$projectId])[$projectId] ?? [],
+            null,
+            [],
+        );
+        $work = (new PortalProjectWork)->byProject([$row], CarbonImmutable::today())[$projectId];
+
+        return [
+            'code' => $item['code'],
+            'name' => $item['name'],
+            'clientName' => $item['clientName'],
+            'leadName' => $item['leadName'],
+            'departmentName' => $item['departmentName'],
+            'typeLabel' => $item['typeLabel'],
+            'status' => $item['status'],
+            'areaSquareFeet' => $item['areaSquareFeet'],
+            'memberNames' => $item['memberNames'],
+            'hoursTotal' => $work['hoursTotal'],
+            'reporterCount' => $work['reporterCount'],
+            'firstReportOn' => $work['firstReportOn'],
+            'lastReportOn' => $work['lastReportOn'],
+            'activities' => array_map(
+                static fn (array $activity): array => [
+                    'code' => $activity['code'],
+                    'name' => $activity['name'],
+                    'hours' => $activity['hours'],
+                    'reports' => $activity['reports'],
+                    'people' => $activity['people'],
+                    'lastReportOn' => $activity['lastReportOn'],
+                ],
+                $work['activities'],
+            ),
+        ];
+    }
+
+    /**
+     * One read with a LEFT JOIN so isAssigned costs nothing extra per row. A project's lead counts as on
+     * it, member row or not: they may edit and delete it, so it has to be on their own board.
      *
      * @return list<object>
      */
-    private function projectRows(int $employeeId, bool $seesAll): array
+    private function projectRows(int $employeeId, string $reach, string $department, string $leadEmail): array
     {
+        $leads = $leadEmail !== '' ? 'LOWER(TRIM(COALESCE(projects.project_lead_email, \'\'))) = ?' : '1 = 0';
+        $leadBindings = $leadEmail !== '' ? [$leadEmail] : [];
+        $isOwn = static function ($own) use ($leads, $leadBindings): void {
+            $own->whereNotNull('membership.employee_id')->orWhereRaw($leads, $leadBindings);
+        };
+
         $query = $this->connection()
             ->table('projects')
+            // A deleted project is in the Recycle Bin until somebody restores or purges it.
+            ->whereNull('projects.deleted_at')
             ->leftJoin('employees_projects as membership', function ($join) use ($employeeId): void {
                 $join->on('membership.project_id', '=', 'projects.id')
                     ->where('membership.employee_id', '=', $employeeId);
@@ -118,32 +315,43 @@ final class PortalViewProjects
                 'projects.project_name',
                 'projects.department',
                 'projects.status',
-                'projects.progress_pct',
                 'projects.type_of_job',
                 'projects.area_sqft',
                 'projects.project_lead_email',
+                'projects.project_creation_status',
+                'projects.requested_by',
                 'projects.forma_link',
                 'projects.msteams_project_link',
                 'projects.ms_planner_link',
                 'projects.panoramic_link',
                 'projects.ms_loop_link',
                 'projects.google_drive_folder_path',
-                $this->connection()->raw('CASE WHEN membership.employee_id IS NULL THEN 0 ELSE 1 END as is_assigned'),
             ])
+            ->selectRaw('CASE WHEN membership.employee_id IS NOT NULL OR '.$leads.' THEN 1 ELSE 0 END as is_assigned', $leadBindings)
+            ->selectRaw('CASE WHEN membership.employee_id IS NOT NULL THEN 1 ELSE 0 END as is_member')
+            ->selectRaw('CASE WHEN '.$leads.' THEN 1 ELSE 0 END as is_lead', $leadBindings)
             ->distinct();
 
-        if (! $seesAll) {
-            $query->whereNotNull('membership.employee_id');
+        // Their own projects at every reach; a department with no name adds nothing.
+        if ($reach === 'department' && $department !== '') {
+            $query->where(function ($visible) use ($department, $isOwn): void {
+                $visible->where($isOwn)
+                    ->orWhereRaw('LOWER(TRIM(projects.department)) = ?', [$department]);
+            });
+        } elseif ($reach !== 'all') {
+            $query->where($isOwn);
         }
 
         return $query->get()->all();
     }
 
     /**
+     * Each project's members as {id, name}, so the board can carry their names and their photos.
+     *
      * @param  list<int>  $projectIds
-     * @return array<int, list<string>>
+     * @return array<int, list<array{id: int, name: string}>>
      */
-    private function memberNamesByProject(array $projectIds): array
+    private function membersByProject(array $projectIds): array
     {
         if ($projectIds === []) {
             return [];
@@ -155,14 +363,18 @@ final class PortalViewProjects
             ->whereIn('employees_projects.project_id', $projectIds)
             ->select([
                 'employees_projects.project_id',
+                'employees_projects.role_on_project',
+                'employees.id',
                 'employees.first_name',
                 'employees.last_name',
             ])
             ->orderBy('employees.first_name')
             ->orderBy('employees.last_name')
+            // A person's member row before their support row, so someone on both reads as a member.
+            ->orderBy('employees_projects.role_on_project')
             ->get();
 
-        $names = [];
+        $members = [];
         foreach ($rows as $row) {
             $projectId = (int) $row->project_id;
             $name = PortalSubmittedReportPresenter::memberName(
@@ -172,13 +384,114 @@ final class PortalViewProjects
             if ($name === 'Member') {
                 continue;
             }
-            $names[$projectId] ??= [];
-            if (! in_array($name, $names[$projectId], true)) {
-                $names[$projectId][] = $name;
+            // Support only when that is all they are on it; any other row makes them a member.
+            $role = strtolower(trim((string) $row->role_on_project)) === 'support' ? 'support' : 'member';
+            $members[$projectId] ??= [];
+            $seen = false;
+            foreach ($members[$projectId] as $existing) {
+                if ($existing['name'] === $name) {
+                    $seen = true;
+                    break;
+                }
+            }
+            if (! $seen) {
+                $members[$projectId][] = ['id' => (int) $row->id, 'name' => $name, 'role' => $role];
             }
         }
 
+        return $members;
+    }
+
+    /**
+     * @param  array<int, list<array{id: int, name: string}>>  $members
+     * @return array<int, list<string>>
+     */
+    /**
+     * Member names per project, members before support people, for a list that only needs names.
+     *
+     * @param  list<int>  $projectIds
+     * @return array<int, list<string>>
+     */
+    public function memberNamesByProject(array $projectIds): array
+    {
+        return $this->namesByProject($this->membersByProject($projectIds));
+    }
+
+    private function namesByProject(array $members): array
+    {
+        $names = [];
+        foreach ($members as $projectId => $list) {
+            $names[$projectId] = array_map(static fn (array $member): string => $member['name'], $list);
+        }
+
         return $names;
+    }
+
+    /**
+     * @param  array<int, list<array{id: int, name: string}>>  $members
+     * @return array<int, array<string, string>>
+     */
+    private function photosByProject(array $members): array
+    {
+        $ids = [];
+        foreach ($members as $list) {
+            foreach ($list as $member) {
+                $ids[] = $member['id'];
+            }
+        }
+        $photos = PortalEmployeePresenter::photoUrls($ids);
+
+        $byProject = [];
+        foreach ($members as $projectId => $list) {
+            $byProject[$projectId] = [];
+            foreach ($list as $member) {
+                if (isset($photos[$member['id']])) {
+                    $byProject[$projectId][$member['name']] = $photos[$member['id']];
+                }
+            }
+        }
+
+        return $byProject;
+    }
+
+    /**
+     * Trail actors are stored as a name, so match them to employees by full name for their photo.
+     *
+     * @param  array<int, list<array{actorName: string}>>  $trails
+     * @return array<string, string>
+     */
+    private function actorPhotos(array $trails): array
+    {
+        $names = [];
+        foreach ($trails as $entries) {
+            foreach ($entries as $entry) {
+                $name = trim($entry['actorName']);
+                if ($name !== '' && $name !== 'System') {
+                    $names[$name] = true;
+                }
+            }
+        }
+        if ($names === []) {
+            return [];
+        }
+
+        $idsByName = PortalEmployeePresenter::idsByFullName();
+        $wanted = [];
+        foreach (array_keys($names) as $name) {
+            if (isset($idsByName[$name])) {
+                $wanted[$name] = $idsByName[$name];
+            }
+        }
+        $photos = PortalEmployeePresenter::photoUrls(array_values($wanted));
+
+        $byName = [];
+        foreach ($wanted as $name => $id) {
+            if (isset($photos[$id])) {
+                $byName[$name] = $photos[$id];
+            }
+        }
+
+        return $byName;
     }
 
     /**
@@ -216,13 +529,14 @@ final class PortalViewProjects
     }
 
     /**
+     * The scopes attached to each project, by WBS code where Manage Scopes saved them, else by the
+     * activity codes its reports name. Counts and codes only: a project's real work comes from its
+     * reports (PortalProjectWork), so no completion figure is invented here.
+     *
      * @param  list<int>  $projectIds
      * @return array<int, array{
      *     tierLabel: string,
      *     total: int,
-     *     completed: int,
-     *     inProgress: int,
-     *     overallCompletion: float
      *     scopeCodes: list<string>
      * }>
      */
@@ -230,6 +544,17 @@ final class PortalViewProjects
     {
         if ($projectIds === []) {
             return [];
+        }
+
+        // Scopes saved from Manage Scopes win: a project with rows here reads only these, by WBS code.
+        $wbsRows = $this->connection()
+            ->table('projects_wbs_scopes')
+            ->whereIn('project_id', $projectIds)
+            ->orderBy('wbs_code')
+            ->get(['project_id', 'wbs_code']);
+        $projectsWithWbsScopes = [];
+        foreach ($wbsRows as $row) {
+            $projectsWithWbsScopes[(int) $row->project_id] = true;
         }
 
         // A scope may be attached directly to a project, or indirectly through one of its
@@ -242,7 +567,6 @@ final class PortalViewProjects
             ->select([
                 'projects_project_scopes.project_id',
                 'projects_project_scopes.project_scope_id',
-                'project_scopes.progress_pct',
                 'project_scopes.id_no',
             ])
             ->get();
@@ -260,7 +584,6 @@ final class PortalViewProjects
             ->select([
                 'project_activity.project_id',
                 'scope_activity.project_scope_id',
-                'scope.progress_pct',
                 'scope.id_no',
             ])
             ->distinct()
@@ -290,11 +613,20 @@ final class PortalViewProjects
 
         // De-duplicate a scope reached by both pivots or by multiple activities.
         $scopes = [];
+        foreach ($wbsRows as $row) {
+            $code = (string) $row->wbs_code;
+            $scopes[(int) $row->project_id.':wbs:'.$code] = [
+                'projectId' => (int) $row->project_id,
+                'code' => $code,
+            ];
+        }
         foreach ($directRows->concat($activityRows) as $row) {
+            if (isset($projectsWithWbsScopes[(int) $row->project_id])) {
+                continue;
+            }
             $key = (int) $row->project_id.':'.(int) $row->project_scope_id;
             $scopes[$key] = [
                 'projectId' => (int) $row->project_id,
-                'progress' => $row->progress_pct,
                 'code' => $row->id_no,
             ];
         }
@@ -311,7 +643,6 @@ final class PortalViewProjects
             $key = $projectId.':activity:'.(int) $row->activity_code_id;
             $scopes[$key] = [
                 'projectId' => $projectId,
-                'progress' => 0.0,
                 'code' => $row->id_no,
             ];
         }
@@ -319,38 +650,16 @@ final class PortalViewProjects
         $summaries = [];
         foreach ($scopes as $scope) {
             $projectId = $scope['projectId'];
-            $progress = $scope['progress'];
-            $ratio = $progress === null || $progress === '' ? 0.0 : (float) $progress;
-            if ($ratio > 1) {
-                $ratio /= 100;
-            }
-            $ratio = max(0.0, min(1.0, $ratio));
             $summaries[$projectId] ??= [
                 'tierLabel' => '',
                 'total' => 0,
-                'completed' => 0,
-                'inProgress' => 0,
-                'overallCompletion' => 0.0,
                 'scopeCodes' => [],
             ];
             $summaries[$projectId]['total']++;
-            if ($ratio >= 1) {
-                $summaries[$projectId]['completed']++;
-            } elseif ($ratio > 0) {
-                $summaries[$projectId]['inProgress']++;
-            }
-            $summaries[$projectId]['overallCompletion'] += $ratio;
             $code = trim((string) ($scope['code'] ?? ''));
             if ($code !== '' && ! in_array($code, $summaries[$projectId]['scopeCodes'], true)) {
                 $summaries[$projectId]['scopeCodes'][] = $code;
             }
-        }
-
-        foreach ($summaries as $projectId => $summary) {
-            $summaries[$projectId]['overallCompletion'] = round(
-                $summary['overallCompletion'] / max($summary['total'], 1),
-                4,
-            );
         }
 
         return $summaries;
@@ -380,6 +689,11 @@ final class PortalViewProjects
                 'projects_action_history.project_action_id',
             )
             ->whereIn('projects_action_history.project_id', $projectIds)
+            ->where(function ($changes): void {
+                foreach (self::REPORT_TRAIL_PREFIXES as $prefix) {
+                    $changes->whereRaw("LOWER(TRIM(COALESCE(project_action_history.action_name, ''))) NOT LIKE ?", [$prefix.'%']);
+                }
+            })
             ->select([
                 'projects_action_history.project_id',
                 'project_action_history.id',

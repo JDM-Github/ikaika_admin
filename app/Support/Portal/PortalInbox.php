@@ -16,6 +16,9 @@ final class PortalInbox
 
     public const DEFAULT_PAGE_SIZE = 5;
 
+    // The unread notices the navigation marks read at once. Past this many, the newest are enough.
+    public const UNREAD_LIMIT = 200;
+
     /**
      * @var list<int>
      */
@@ -85,6 +88,39 @@ final class PortalInbox
                     'total' => $total,
                     'last_page' => $lastPage,
                 ],
+            ];
+        });
+    }
+
+    /**
+     * Every unread notice the member still has, newest first: what the shell's navigation and the
+     * request tables mark as new until it is read.
+     *
+     * @return array{section: string, resource: string, data: list<array{id: string, type: string, recordId: ?string, linkPath: ?string}>}
+     */
+    public function unread(Employee $actor): array
+    {
+        $version = (int) Cache::get(PortalAudit::NOTIFICATION_CACHE_VERSION_KEY, 1);
+        $key = 'portal:user:notifications:unread:'.$version.':'.$actor->getKey();
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor): array {
+            $rows = PortalNotification::query()
+                ->where('employee_id', (int) $actor->getKey())
+                ->whereNull('read_at')
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
+                ->limit(self::UNREAD_LIMIT)
+                ->get(['id', 'type', 'link_path', 'payload']);
+
+            $data = [];
+            foreach ($rows as $row) {
+                $data[] = PortalInboxPresenter::unread($row);
+            }
+
+            return [
+                'section' => 'user',
+                'resource' => 'notifications',
+                'data' => $data,
             ];
         });
     }

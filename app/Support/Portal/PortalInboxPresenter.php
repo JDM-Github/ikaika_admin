@@ -23,8 +23,27 @@ final class PortalInboxPresenter
             'message',
             'link_path',
             'link_label',
+            'payload',
             'read_at',
             'created_at',
+        ];
+    }
+
+    /**
+     * An unread notice as the shell's navigation marks read it: what kind, which record, and where
+     * it links. Nothing a mark does not need.
+     *
+     * @return array{id: string, type: string, recordId: ?string, linkPath: ?string}
+     */
+    public static function unread(PortalNotification $row): array
+    {
+        $linkPath = trim((string) $row->link_path);
+
+        return [
+            'id' => (string) $row->getKey(),
+            'type' => trim((string) $row->type),
+            'recordId' => self::recordId($row->payload),
+            'linkPath' => $linkPath !== '' ? $linkPath : null,
         ];
     }
 
@@ -55,10 +74,27 @@ final class PortalInboxPresenter
             'message' => trim((string) $row->message),
             'linkPath' => $linkPath !== '' ? $linkPath : null,
             'linkLabel' => $linkLabel !== '' ? $linkLabel : null,
+            // Which record the notice is about, so opening it can land on that row. The rest of the
+            // payload stays on the server.
+            'recordId' => self::recordId($row->payload),
             'isRead' => $row->read_at !== null,
             'createdAt' => $createdAt->copy()->utc()->toIso8601String(),
             'createdAtLabel' => $local->format('l, F j, Y \a\t g:i A'),
         ];
+    }
+
+    private static function recordId(mixed $payload): ?string
+    {
+        if (! is_array($payload)) {
+            return null;
+        }
+        $value = $payload['recordId'] ?? null;
+        if (! is_string($value) && ! is_int($value)) {
+            return null;
+        }
+        $text = trim((string) $value);
+
+        return $text === '' ? null : $text;
     }
 
     private static function instant(mixed $value): Carbon

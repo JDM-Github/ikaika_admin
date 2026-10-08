@@ -6,6 +6,7 @@ use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalOffsetRequests;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
@@ -140,6 +141,58 @@ class PortalOffsetRequestsTest extends TestCase
         ])->assertCreated();
     }
 
+    // The reported ask: the day off has no restriction, so leave already on it does not refuse the offset.
+    public function test_the_day_off_may_fall_on_a_leave_day_but_the_day_worked_may_not(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $work = $this->freeDate($actor, 2);
+        $dayOff = $this->freeDayOff($actor, $work, 1);
+        $token = $this->loginToken($actor);
+
+        DB::connection('portal')->table('requests')->insert([
+            'request_date' => $work,
+            'name' => $this->memberName($actor),
+            'status' => 'Pending',
+            'type' => 'Leave',
+        ]);
+        Cache::flush();
+        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
+            'requests' => [$this->group($work, $dayOff, $project)],
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'You have leave filed for '.$work.'.');
+
+        DB::connection('portal')->table('requests')->where('request_date', $work)->where('type', 'Leave')
+            ->where('name', $this->memberName($actor))->update(['request_date' => $dayOff]);
+        Cache::flush();
+        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
+            'requests' => [$this->group($work, $dayOff, $project)],
+        ])->assertCreated();
+    }
+
+    // The reported ask: two offsets may take the same day off, however far ahead.
+    public function test_two_offsets_may_share_a_day_off_far_ahead(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $token = $this->loginToken($actor);
+        // Two distinct work days inside the window, so the pair reads as two offsets rather than one.
+        $days = [];
+        for ($offset = 0; count($days) < 2 && $offset >= -PortalOffsetRequests::WINDOW_DAYS; $offset--) {
+            $days[$this->freeDate($actor, $offset)] = true;
+        }
+        $days = array_keys($days);
+        $this->assertCount(2, $days, 'Two distinct work days were needed inside the offset window.');
+        $first = $days[0];
+        $second = $days[1];
+        $farAhead = Carbon::today()->addMonths(3)->toDateString();
+
+        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
+            'requests' => [$this->group($first, $farAhead, $project), $this->group($second, $farAhead, $project)],
+        ])->assertCreated();
+    }
+
     public function test_offset_is_refused_on_a_leave_day(): void
     {
         $actor = $this->activeMember();
@@ -149,7 +202,7 @@ class PortalOffsetRequestsTest extends TestCase
         $token = $this->loginToken($actor);
 
         DB::connection('portal')->table('requests')->insert([
-            'request_date' => $dayOff,
+            'request_date' => $work,
             'name' => $this->memberName($actor),
             'status' => 'Pending',
             'type' => 'Leave',
@@ -160,7 +213,7 @@ class PortalOffsetRequestsTest extends TestCase
             'requests' => [$this->group($work, $dayOff, $project)],
         ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'You have leave filed for '.$dayOff.'.');
+            ->assertJsonPath('message', 'You have leave filed for '.$work.'.');
     }
 
     public function test_offset_is_refused_outside_each_date_window(): void
@@ -174,18 +227,26 @@ class PortalOffsetRequestsTest extends TestCase
             'requests' => [$this->group(Carbon::today()->subDays(8)->toDateString(), $dayOff, $project)],
         ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'The day to work must be today or one of the last seven days.');
+            ->assertJsonPath('message', 'The day to work must be within the last seven days or the week ahead.');
 
+        // A week ahead is allowed; the day past that is not.
         $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
-            'requests' => [$this->group(Carbon::tomorrow()->toDateString(), $dayOff, $project)],
-        ])->assertStatus(422);
+            'requests' => [$this->group(Carbon::today()->addDays(8)->toDateString(), $dayOff, $project)],
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'The day to work must be within the last seven days or the week ahead.');
 
         $work = $this->freeDate($actor, 1);
         $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
-            'requests' => [$this->group($work, Carbon::today()->addDays(15)->toDateString(), $project)],
+            'requests' => [$this->group($work, Carbon::today()->subDays(8)->toDateString(), $project)],
         ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'The day off must fall between seven days ago and two weeks ahead.');
+            ->assertJsonPath('message', 'The day off must be one of the last seven days or any later working day.');
+
+        // No far edge: a working day past the old fortnight is a valid day off.
+        $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
+            'requests' => [$this->group($work, Carbon::today()->addDays(30)->toDateString(), $project)],
+        ])->assertStatus(201);
     }
 
     public function test_offset_is_refused_when_the_two_dates_are_the_same(): void
@@ -495,11 +556,39 @@ class PortalOffsetRequestsTest extends TestCase
     /**
      * A day inside the work window with no report and no request of any kind on it.
      */
-    private function freeDate(Employee $actor, int $daysAgo): string
+    // A free day from today on: an offset's day worked is booked ahead. Searched outwards from the day
+    // asked for, but never past either end of the window the form accepts, so the fixture follows the
+    // window rather than the window having to follow the fixture.
+    private function freeDate(Employee $actor, int $daysAhead): string
     {
         $name = $this->memberName($actor);
-        for ($offset = $daysAgo; $offset <= 7; $offset++) {
-            $candidate = Carbon::today()->subDays($offset)->toDateString();
+        $nearest = min($daysAhead, PortalOffsetRequests::WORK_LOOKAHEAD_DAYS);
+        for ($step = 0; $step <= PortalOffsetRequests::WORK_LOOKAHEAD_DAYS + PortalOffsetRequests::WINDOW_DAYS; $step++) {
+            foreach ([$nearest + $step, $nearest - $step] as $offset) {
+                if ($offset > PortalOffsetRequests::WORK_LOOKAHEAD_DAYS || $offset < -PortalOffsetRequests::WINDOW_DAYS) {
+                    continue;
+                }
+                $candidate = Carbon::today()->addDays($offset)->toDateString();
+                if ($this->isOccupied($actor, $name, $candidate)) {
+                    continue;
+                }
+
+                return $candidate;
+            }
+        }
+
+        $this->fail('No free day was available inside the offset window.');
+    }
+
+    /**
+     * A day off inside the booking window that is not the work day and is otherwise free.
+     */
+    // A free day off after the day worked, so a from/to read across the pair runs forwards.
+    private function freeDayOff(Employee $actor, string $work, int $daysAhead): string
+    {
+        $name = $this->memberName($actor);
+        for ($offset = $daysAhead; $offset <= $daysAhead + 60; $offset++) {
+            $candidate = Carbon::parse($work)->addDays($offset)->toDateString();
             if ($this->isOccupied($actor, $name, $candidate)) {
                 continue;
             }
@@ -507,33 +596,7 @@ class PortalOffsetRequestsTest extends TestCase
             return $candidate;
         }
 
-        $this->fail('No free day was available inside the offset work window.');
-    }
-
-    /**
-     * A day off inside the booking window that is not the work day and is otherwise free.
-     */
-    private function freeDayOff(Employee $actor, string $work, int $daysAhead): string
-    {
-        $name = $this->memberName($actor);
-        for ($offset = $daysAhead; $offset <= 14; $offset++) {
-            $candidate = Carbon::today()->addDays($offset)->toDateString();
-            if ($candidate === $work || $this->isOccupied($actor, $name, $candidate)) {
-                continue;
-            }
-
-            return $candidate;
-        }
-        for ($offset = 0; $offset <= 7; $offset++) {
-            $candidate = Carbon::today()->subDays($offset)->toDateString();
-            if ($candidate === $work || $this->isOccupied($actor, $name, $candidate)) {
-                continue;
-            }
-
-            return $candidate;
-        }
-
-        $this->fail('No free day off was available inside the offset window.');
+        $this->fail('No free day off was available after '.$work.'.');
     }
 
     private function isOccupied(Employee $actor, string $name, string $date): bool

@@ -12,8 +12,9 @@ What do you want to migrate?
   1. Users & Projects -- PRODUCTION (real live data)
   2. Users & Projects -- TEST (sandbox snapshot)
   3. Project Estimator
-  4. Transaction Tracker
-  5. Custom -- another base ID
+  4. Transaction Tracker -- PRODUCTION (real live data)
+  5. Transaction Tracker -- TEST (sandbox app)
+  6. Custom -- another base ID
 
 What do you want out of it?
   1. Schema and data
@@ -26,7 +27,13 @@ Skip the prompts by passing the answers:
 ```powershell
 .\migrate.ps1 -Target users-projects-prod -Produce both
 .\migrate.ps1 -Target users-projects-test -Produce data -Step generate
+.\migrate.ps1 -Target transaction-tracker-test -Produce both
 ```
+
+Like Users & Projects, the Transaction Tracker has two bases: PRODUCTION
+(`appp5MogesHN2eVvG`, the live books) and TEST (`appYwnzEVZVXwH1hB`, a sandbox
+app to try Finance against). Both generate into the same `test_tracker_database`
+with the same schema and generator; only the base and the output folder differ.
 
 ## What you get
 
@@ -41,6 +48,10 @@ outputs/
   users_projects_test/
     ...
   project_estimator/
+    ...
+  transaction_tracker_prod/
+    ...
+  transaction_tracker_test/
     ...
 ```
 
@@ -64,7 +75,7 @@ concatenated into a single `schema.sql` so one file does the whole job:
 | --- | --- |
 | Users & Projects (both) | `sql/portal/schema.sql` + `sql/portal/separate.sql` |
 | Project Estimator | `sql/project_estimator/schema.sql` |
-| Transaction Tracker | `sql/transaction_tracker/schema.sql` |
+| Transaction Tracker (both) | `sql/transaction_tracker/schema.sql` |
 
 `sql/*/indexes.sql` is deliberately left out. It only retrofits an index onto
 databases that predate it, and the schema already creates that index on a fresh

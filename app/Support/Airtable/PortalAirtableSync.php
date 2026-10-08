@@ -259,8 +259,11 @@ final class PortalAirtableSync
         }
 
         $creating = $airtableId === null;
+        // A changed-only table is Airtable's own, except where the map says the portal creates rows in
+        // it too: a row Airtable has never seen has no earlier state to protect, so it goes whole.
+        $createsWhole = $creating && ($map['create_full'] ?? false) === true;
         $columns = $map['fields'];
-        if (isset($map['changed_only']) && ! $probe) {
+        if (isset($map['changed_only']) && ! $probe && ! $createsWhole) {
             // Airtable-maintained records: only what this action changed, so HR's edits there survive.
             if ($creating) {
                 return $this->unit($action, $map['airtable_table'], $key, 'blocked', ['Only changes to records Airtable already has are synced for this table.']);
@@ -470,7 +473,11 @@ final class PortalAirtableSync
      * A link carries the linked rows' own Airtable ids, never SQL ids. A linked row Airtable has
      * never seen blocks the action, since pushing without it would silently drop the link.
      *
-     * @param  array{links?: array<string, array{junction: string, local: string, foreign: string, table: string}>}  $map
+     * A link is either a junction walk (SQL keeps the pair in its own table, optionally narrowed by a
+     * column on it, such as a member role) or, when the link names `from`, one row the row itself
+     * names -- a project's lead is an email on the project, with no junction to walk.
+     *
+     * @param  array{links?: array<string, array{junction?: string, local?: string, foreign?: string, table: string, where?: array<string, string>, matches?: string, from?: string}>}  $map
      * @return array{0: array<string, list<string>>, 1: list<string>}
      */
     private function links(array $map, object $row): array
@@ -478,12 +485,26 @@ final class PortalAirtableSync
         $fields = [];
         $problems = [];
         foreach ($map['links'] ?? [] as $field => $link) {
-            $linked = DB::connection('portal')
-                ->table($link['junction'])
-                ->join($link['table'], $link['table'].'.id', '=', $link['junction'].'.'.$link['foreign'])
-                ->where($link['junction'].'.'.$link['local'], $row->id)
-                ->orderBy($link['table'].'.id')
-                ->get([$link['table'].'.id', $link['table'].'.airtable_record_id']);
+            $from = $link['from'] ?? null;
+            if ($from !== null) {
+                $source = $row->{$from} ?? null;
+                // Nothing named, nothing to link; an empty value must never match a blank column.
+                if (! is_string($source) || trim($source) === '') {
+                    continue;
+                }
+                $linked = DB::connection('portal')
+                    ->table($link['table'])
+                    ->where((string) $link['matches'], $source)
+                    ->get([$link['table'].'.id', $link['table'].'.airtable_record_id']);
+            } else {
+                $linked = DB::connection('portal')
+                    ->table((string) $link['junction'])
+                    ->join($link['table'], $link['table'].'.id', '=', (string) $link['junction'].'.'.$link['foreign'])
+                    ->where((string) $link['junction'].'.'.$link['local'], $row->id)
+                    ->when(isset($link['where']), fn ($query) => $query->where($link['where']))
+                    ->orderBy($link['table'].'.id')
+                    ->get([$link['table'].'.id', $link['table'].'.airtable_record_id']);
+            }
 
             $ids = [];
             foreach ($linked as $target) {

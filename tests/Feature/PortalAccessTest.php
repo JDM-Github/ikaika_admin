@@ -27,7 +27,7 @@ class PortalAccessTest extends TestCase
         Mail::fake();
 
         // Presets alone: grants made while testing by hand must not change what a role starts with.
-        foreach (['access_grants', 'access_limits', 'access_toggles'] as $table) {
+        foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
     }
@@ -83,7 +83,7 @@ class PortalAccessTest extends TestCase
         $this->assertNotContains('developer', $keys);
         $this->assertNotContains('administration.backup', $keys);
         $this->assertNotContains('administration.actions.sync', $keys);
-        $this->assertSame('department', $this->rule($response, 'manage.requests')['reach']);
+        $this->assertSame('department', $this->rule($response, 'manage.requests.leave')['reach']);
         $this->assertSame('all', $this->rule($response, 'projects.view')['reach']);
         $this->assertFalse($this->rule($response, 'administration.logs')['includeExecutives']);
     }
@@ -93,7 +93,7 @@ class PortalAccessTest extends TestCase
         $response = $this->powersOf($this->executive())->assertOk()->assertJsonPath('tier', 'executive');
 
         $this->assertTrue($this->rule($response, 'administration.logs')['includeExecutives']);
-        $this->assertSame('department', $this->rule($response, 'manage.requests')['reach']);
+        $this->assertSame('all', $this->rule($response, 'manage.requests.leave')['reach']);
     }
 
     // is_developer alone grants nothing: in Default a developer holds their role's preset.
@@ -107,8 +107,47 @@ class PortalAccessTest extends TestCase
             ->assertOk()->assertJsonPath('tier', 'developer');
 
         $this->assertCount(DB::connection('portal')->table('access_permissions')->count(), $response->json('data'));
-        $this->assertSame('all', $this->rule($response, 'manage.requests')['reach']);
+        $this->assertSame('all', $this->rule($response, 'manage.requests.leave')['reach']);
         $this->assertNull($this->rule($response, 'developer.flag')['reach']);
+    }
+
+    // View Projects parity (2026-10-01): each role's project powers and reaches, so a preset change is a decision, not an accident.
+    public function test_project_presets_keep_what_each_role_could_do(): void
+    {
+        $presets = [];
+        foreach (DB::connection('portal')->table('access_presets')->where('permission_key', 'like', 'projects%')->get() as $row) {
+            $presets[$row->role][$row->permission_key] = $row->reach;
+        }
+        $everything = [
+            'projects' => null, 'projects.view' => 'all', 'projects.edit' => 'all', 'projects.scopes' => 'all',
+            'projects.delete' => 'all', 'projects.lead' => 'all', 'projects.create' => 'all', 'projects.create.direct' => null,
+            'projects.manager' => 'all', 'projects.track' => 'all', 'projects.track.export' => null,
+        ];
+        // Project Settings is Developer mode only, so only the developer preset names it. Admins lead
+        // only their own department; Nathaniel and Steven are given lead at all as a personal default.
+        $developer = [...$everything, 'projects.references' => null];
+        // Auto-approve is Nathaniel's and Steven's personal default (2026-10-07), so no preset but developer holds it.
+        $executive = $everything;
+        unset($executive['projects.create.direct']);
+        $admin = $executive;
+        $admin['projects.lead'] = 'department';
+        // An admin approves their own department's projects (and the ones they lead); executives every one.
+        $admin['projects.manager'] = 'department';
+        ksort($everything);
+        ksort($developer);
+        ksort($admin);
+        ksort($executive);
+        foreach ($presets as &$rules) {
+            ksort($rules);
+        }
+
+        $this->assertSame($admin, $presets['admin']);
+        $this->assertSame($executive, $presets['executive']);
+        $this->assertSame($developer, $presets['developer']);
+        // Anyone may add a project (2026-10-06); a member's waits for a Project Manager.
+        $this->assertSame([
+            'projects' => null, 'projects.create' => 'all', 'projects.track' => 'own', 'projects.track.export' => null, 'projects.view' => 'own',
+        ], $presets['member']);
     }
 
     // A preset that held a child without its parent would leave that child with nowhere to hang.
@@ -128,10 +167,12 @@ class PortalAccessTest extends TestCase
         $this->assertSame([], $orphans);
     }
 
-    public function test_switching_a_parent_off_turns_its_children_off_and_is_logged_once(): void
+    // Their own choice about powers they already hold, so it is never logged.
+    public function test_switching_a_parent_off_turns_its_children_off_and_is_not_logged(): void
     {
         $member = $this->member();
         $token = $this->loginToken($member);
+        $startedAt = now()->subSecond();
 
         $off = $this->withToken($token)
             ->patchJson('/api/development/portal/access/switches', ['key' => 'reports', 'on' => false])
@@ -142,37 +183,12 @@ class PortalAccessTest extends TestCase
         $this->assertTrue($this->rule($off, 'reports.submitted.edit')['isSwitchedOn']);
         $this->assertFalse($this->rule($off, 'reports.submitted.edit')['isActive']);
         $this->assertTrue($this->rule($off, 'requests')['isActive']);
-        $log = PortalLog::query()->where('employee_id', $member->getKey())->where('resource', 'access.switches')->sole();
-        $this->assertSame('{UserName|You} switched off Reports', $log->message);
-
-        $this->withToken($token)
-            ->patchJson('/api/development/portal/access/switches', ['key' => 'reports', 'on' => false])
-            ->assertOk();
-        $this->assertSame(1, PortalLog::query()->where('employee_id', $member->getKey())->where('resource', 'access.switches')->count());
 
         $on = $this->withToken($token)
             ->patchJson('/api/development/portal/access/switches', ['key' => 'reports', 'on' => true])
             ->assertOk();
         $this->assertTrue($this->rule($on, 'reports.submitted.edit')['isActive']);
-        $this->assertSame(
-            '{UserName|You} switched on Reports',
-            PortalLog::query()->where('employee_id', $member->getKey())->where('resource', 'access.switches')->latest('id')->value('message'),
-        );
-    }
-
-    // Labels repeat across branches, so the log names the whole path to the switch.
-    public function test_a_nested_switch_is_logged_with_its_full_path(): void
-    {
-        $admin = $this->admin();
-
-        $this->withToken($this->loginToken($admin))
-            ->patchJson('/api/development/portal/access/switches', ['key' => 'manage.requests.leave.decide', 'on' => false])
-            ->assertOk();
-
-        $this->assertSame(
-            '{UserName|You} switched off Manage / Requests / Leave Requests / Approve or reject',
-            PortalLog::query()->where('employee_id', $admin->getKey())->where('resource', 'access.switches')->value('message'),
-        );
+        $this->assertSame(0, PortalLog::query()->where('employee_id', $member->getKey())->where('created_at', '>=', $startedAt)->where('resource', 'like', 'access.%')->count());
     }
 
     public function test_a_switch_is_refused_for_a_power_not_held_or_always_on(): void

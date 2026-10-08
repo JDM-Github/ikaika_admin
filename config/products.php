@@ -80,17 +80,23 @@ return [
             'module' => ProjectEstimatorModule::class,
         ],
 
+        /*
+         * Finance tracking: budget envelopes, the transactions that fund and spend them, accounts and
+         * budget codes. Enabling this is also what switches on budget charging for reimbursement
+         * approvals in the portal: with it off, an approval needs no envelope and behaves exactly as
+         * it did before the tracker existed.
+         */
         'transaction-tracker' => [
             'name' => 'Transaction Tracker',
             'description' => 'Finance tracking: transactions, accounts, budget envelopes, and budget codes.',
-            'connection' => 'transaction_tracker',
+            'connection' => 'tracker',
             'driver' => env('TRACKER_DB_DRIVER', 'mysql'),
             'host' => env('TRACKER_DB_HOST', env('DB_HOST', '127.0.0.1')),
             'port' => env('TRACKER_DB_PORT', env('DB_PORT', '3306')),
             'database' => env('TRACKER_DB_DATABASE', 'test_tracker_database'),
             'username' => env('TRACKER_DB_USERNAME', env('DB_USERNAME', 'root')),
             'password' => env('TRACKER_DB_PASSWORD', env('DB_PASSWORD', '')),
-            'enabled' => filter_var(env('TRACKER_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+            'enabled' => filter_var(env('TRACKER_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
             'module' => TransactionTrackerModule::class,
         ],
 

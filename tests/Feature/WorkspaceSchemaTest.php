@@ -31,7 +31,7 @@ class WorkspaceSchemaTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('product', 'portal')
-            ->assertJsonPath('database', 'test_portal_database');
+            ->assertJsonPath('database', config('products.catalog.portal.database'));
 
         $names = array_column($response->json('tables'), 'name');
         $this->assertContains('employees', $names);

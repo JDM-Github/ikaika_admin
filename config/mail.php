@@ -49,6 +49,14 @@ return [
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         ],
 
+        // The WordPress mail bridge on the company site (App\Support\Portal\PortalMailRelayTransport).
+        'wprelay' => [
+            'transport' => 'wprelay',
+            // Not "url": Laravel reads a mailer's url as a connection string for another transport.
+            'endpoint' => env('MAIL_RELAY_URL'),
+            'key' => env('MAIL_RELAY_KEY'),
+        ],
+
         'ses' => [
             'transport' => 'ses',
         ],

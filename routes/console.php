@@ -1,8 +1,20 @@
 <?php
 
+use App\Mail\PortalEmailMail;
+use App\Modules\Portal\Models\EmailMessage;
 use App\Support\Airtable\PortalAirtableSync;
+use App\Support\Portal\PortalBitbucketPreview;
+use App\Support\Portal\PortalBitbucketSync;
+use App\Support\Portal\PortalBudgetEnvelopes;
+use App\Support\Portal\PortalEmailAttachments;
+use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalEmailMessages;
+use App\Support\Portal\PortalMailDiagnostics;
+use App\Support\Portal\PortalManageRequests;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -63,3 +75,192 @@ Artisan::command('portal:airtable-sync
 
     return $counts['failed'] > 0 ? 1 : 0;
 })->purpose('Replay unsynced portal ledger rows into Airtable (dry run unless --send)');
+/*
+ * Books the reimbursement charges the portal recorded before a charge carried the claimant's team
+ * account, so they come off that team's balance too. Safe to run again: a booked charge is skipped.
+ */
+Artisan::command('portal:book-team-charges', function (PortalBudgetEnvelopes $budget, PortalManageRequests $requests): int {
+    if (! $budget->isAvailable()) {
+        $this->warn('The transaction tracker is switched off here, so there is nothing to book.');
+
+        return 0;
+    }
+
+    $charges = $budget->withinLedger(fn (): array => $budget->bookUnlinkedCharges(
+        fn (int $claimId): ?string => $requests->claimantDepartment($claimId),
+    ));
+    if ($charges === []) {
+        $this->info('Every reimbursement charge is already booked to a team account.');
+
+        return 0;
+    }
+
+    foreach ($charges as $charge) {
+        $this->line($charge['accountName'] === null
+            ? sprintf('Charge %d (claim %d): no team account for %s, left as it was.', $charge['transactionId'], $charge['claimId'], $charge['team'] ?? 'an unknown team')
+            : sprintf('Charge %d (claim %d): booked to %s (%s).', $charge['transactionId'], $charge['claimId'], $charge['accountName'], $charge['team']));
+    }
+
+    return 0;
+})->purpose('Book the portal\'s reimbursement charges to the claimant team\'s account');
+
+/*
+ * One test email through the same mailable Send Email uses, to check the .env mail settings. It
+ * names the mailer, host, port and sender it used, never the username or password.
+ *
+ * --message resends one stored portal email exactly as it was built (body, footer, formats, sender
+ * name, Reply-To) to the test address only, so a send that never arrived can be tried again alone.
+ * The server's own acceptance line is printed so a host can trace it; the rest of the transcript is
+ * not, because it carries the login.
+ */
+Artisan::command('portal:mail-test
+    {to=jdmpega@ikaikabim.com : Who receives the test}
+    {--message= : Resend this outbox row exactly as it was built}', function (): int {
+    $to = trim((string) $this->argument('to'));
+    if (filter_var($to, FILTER_VALIDATE_EMAIL) === false) {
+        $this->error('That is not an email address: '.$to);
+
+        return 1;
+    }
+
+    $mailer = (string) config('mail.default');
+    $this->line(sprintf(
+        'Mailer %s, host %s, port %s, from %s',
+        $mailer,
+        (string) config("mail.mailers.{$mailer}.host", '-'),
+        (string) config("mail.mailers.{$mailer}.port", '-'),
+        (string) config('mail.from.address'),
+    ));
+    if ($mailer === 'log') {
+        $this->warn('MAIL_MAILER is log: the email is written to storage/logs, not sent.');
+    }
+
+    $messageId = $this->option('message');
+    if ($messageId !== null) {
+        $row = EmailMessage::query()->find((int) $messageId);
+        if (! $row instanceof EmailMessage) {
+            $this->error('There is no outbox row #'.$messageId.'.');
+
+            return 1;
+        }
+        $mail = new PortalEmailMail(
+            (string) $row->subject,
+            (string) $row->body,
+            is_string($row->footer_body) ? $row->footer_body : null,
+            PortalEmailMarkup::format($row->format) ?? PortalEmailMarkup::FORMAT_MARKUP,
+            PortalEmailMarkup::format($row->footer_format) ?? PortalEmailMarkup::FORMAT_MARKUP,
+            is_string($row->from_name) ? $row->from_name : null,
+            is_string($row->reply_to) ? $row->reply_to : null,
+        );
+        $this->line(sprintf(
+            'Resending #%d "%s" (%s, %s, %s)',
+            (int) $row->getKey(),
+            (string) $row->subject,
+            (string) ($row->format ?? 'markup'),
+            $row->from_name === null ? 'as the portal' : 'sent as a person',
+            $row->footer_body === null ? 'no footer' : 'with footer',
+        ));
+    } else {
+        $mail = PortalEmailMessages::testMail();
+    }
+
+    $origin = 'console'.($messageId === null ? '' : ' --message='.$messageId);
+    try {
+        $sent = Mail::to($to)->send($mail);
+    } catch (Throwable $error) {
+        PortalMailDiagnostics::record($origin, $to, null, $error);
+        $this->error('Not sent: '.$error->getMessage());
+        $this->line('Full report: storage/'.PortalMailDiagnostics::LOG_PATH);
+
+        return 1;
+    }
+    PortalMailDiagnostics::record($origin, $to, $sent, null);
+    $this->line('Full report: storage/'.PortalMailDiagnostics::LOG_PATH);
+
+    $this->info('Sent to '.$to.'. Check the inbox, Junk and Other.');
+    $this->line('Server reply: '.(PortalEmailMessages::acceptance($sent) ?? 'not reported').'  Message-ID: '.($sent?->getMessageId() ?? '-'));
+
+    return 0;
+})->purpose('Send one test email with the current mail settings');
+
+// Each attach clears what was abandoned too; this is for a scheduler, or after a quiet stretch.
+Artisan::command('portal:prune-email-attachments', function (PortalEmailAttachments $attachments): int {
+    $pruned = $attachments->prune();
+    $this->info($pruned === 1 ? 'Cleared 1 attachment that was never sent.' : 'Cleared '.$pruned.' attachments that were never sent.');
+
+    return 0;
+})->purpose('Delete Send Email attachments staged more than a day ago and never sent');
+
+Artisan::command('portal:bitbucket-sync
+    {--recount : Count the lines of every commit again, after the counting rules change}', function (PortalBitbucketSync $sync): int {
+    if ($this->option('recount')) {
+        $this->info($sync->recount().' commits will be counted again.');
+    }
+    $outcomes = $sync->syncLinked();
+    if ($outcomes === []) {
+        $this->info('No project links a Bitbucket repository yet.');
+
+        return 0;
+    }
+    foreach ($outcomes as $repository => $outcome) {
+        is_string($outcome)
+            ? $this->error($repository.': '.$outcome)
+            : $this->info($repository.': '.$outcome['listed'].' new commits, '.$outcome['counted'].' counted');
+    }
+
+    return in_array(true, array_map('is_string', $outcomes), true) ? 1 : 0;
+})->purpose('Read new commits and their lines from every Bitbucket repository a project links');
+
+Artisan::command('portal:bitbucket-preview
+    {repository : A bitbucket.org link, SSH address or workspace/repository}
+    {--day= : The day to show, YYYY-MM-DD in company time; today when left out}
+    {--author= : Only this author email}', function (PortalBitbucketPreview $preview): int {
+    $day = (string) ($this->option('day') ?? PortalBitbucketSync::companyToday());
+    $author = $this->option('author');
+    try {
+        $result = $preview->day((string) $this->argument('repository'), $day, is_string($author) ? $author : null);
+    } catch (RuntimeException $error) {
+        $this->error($error->getMessage());
+
+        return 1;
+    }
+
+    $this->info($result['repository'].' on '.$result['day'].' ('.PortalBitbucketSync::COMPANY_ZONE.' time)');
+    if ($result['commits'] === []) {
+        $this->line('No commits that day.');
+    }
+    foreach ($result['commits'] as $commit) {
+        $this->newLine();
+        $this->line(sprintf(
+            '<comment>%s</comment>  %s  %s  %s',
+            substr($commit['hash'], 0, 7),
+            $commit['time'],
+            $commit['authorName'] ?? $commit['authorEmail'] ?? 'Unknown',
+            $commit['message'],
+        ));
+        if ($commit['isMerge']) {
+            $this->line('    merge commit: never counted, its lines stay with whoever wrote them');
+
+            continue;
+        }
+        foreach ($commit['files'] as $file) {
+            $this->line(sprintf('    +%d -%d  %s%s', $file['added'], $file['removed'], $file['path'], $file['generated'] ? '  (generated, not counted)' : ''));
+        }
+        $this->line(sprintf('    counted: +%d -%d in %d files', $commit['lines']['added'], $commit['lines']['removed'], $commit['lines']['files']));
+    }
+
+    $this->newLine();
+    $this->table(
+        ['Author', 'Employee', 'Commits', 'Merges', 'Lines +', 'Lines -', 'Files'],
+        array_map(static fn (array $row): array => array_values($row), $result['authors']),
+    );
+    if (! $result['complete']) {
+        $this->warn('Stopped after '.$result['pagesRead'].' pages of history; an older day may be missing commits.');
+    }
+    $this->line('Dry run: nothing was saved.');
+
+    return 0;
+})->purpose('Show what the Bitbucket sync would read for one repository and one day, without saving anything');
+
+// The backstop for a missed push webhook, and what finishes counting a long history; needs the server's schedule:run cron.
+Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();

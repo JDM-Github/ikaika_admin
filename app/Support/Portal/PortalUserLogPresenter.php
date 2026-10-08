@@ -30,8 +30,23 @@ final class PortalUserLogPresenter
             'location_source',
             'location_lat',
             'location_lng',
+            'as_developer',
             'created_at',
         ];
+    }
+
+    /**
+     * A row written in Developer mode names its actor only to a viewer in Developer mode, with the
+     * mode; to everyone else it is "A developer", with nothing that points back at them. Null
+     * viewer means the actor's own stream, which always names them.
+     */
+    private static function maskedAs(PortalLog $row, ?bool $viewerIsDeveloper): ?string
+    {
+        if (! (bool) $row->as_developer || $viewerIsDeveloper === null) {
+            return null;
+        }
+
+        return $viewerIsDeveloper ? 'mode' : 'hidden';
     }
 
     /**
@@ -55,8 +70,9 @@ final class PortalUserLogPresenter
      *     createdAtLabel: string
      * }
      */
-    public static function item(PortalLog $row, DateTimeZone $timezone): array
+    public static function item(PortalLog $row, DateTimeZone $timezone, ?bool $viewerIsDeveloper = null): array
     {
+        $masked = self::maskedAs($row, $viewerIsDeveloper);
         $createdAt = self::instant($row->created_at);
         $local = $createdAt->copy()->setTimezone($timezone);
         $recordId = trim((string) $row->record_id);
@@ -69,11 +85,24 @@ final class PortalUserLogPresenter
         $firstName = is_string($row->first_name ?? null) ? $row->first_name : null;
         $lastName = is_string($row->last_name ?? null) ? $row->last_name : null;
         $hasName = trim((string) $firstName) !== '' || trim((string) $lastName) !== '';
+        $name = $hasName ? PortalSubmittedReportPresenter::memberName($firstName, $lastName) : null;
+        if ($masked === 'hidden') {
+            return [
+                ...self::item($row, $timezone),
+                'employeeId' => null,
+                'employeeName' => PortalAccessGraph::DEVELOPER_NAME_CAPITAL,
+                'ipAddress' => null,
+                'locationLabel' => null,
+                'locationSource' => null,
+                'locationLat' => null,
+                'locationLng' => null,
+            ];
+        }
 
         return [
             'id' => (string) $row->getKey(),
             'employeeId' => (string) $employeeId,
-            'employeeName' => $hasName ? PortalSubmittedReportPresenter::memberName($firstName, $lastName) : null,
+            'employeeName' => $masked === 'mode' && $name !== null ? $name.PortalAccessGraph::DEVELOPER_MODE_SUFFIX : $name,
             'action' => strtoupper(trim((string) $row->action)),
             'resource' => trim((string) $row->resource),
             'recordId' => $recordId !== '' ? $recordId : null,
@@ -103,10 +132,10 @@ final class PortalUserLogPresenter
      *
      * @return array<string, mixed>
      */
-    public static function detail(PortalLog $row, DateTimeZone $timezone): array
+    public static function detail(PortalLog $row, DateTimeZone $timezone, ?bool $viewerIsDeveloper = null): array
     {
         return [
-            ...self::item($row, $timezone),
+            ...self::item($row, $timezone, $viewerIsDeveloper),
             'payload' => is_array($row->payload) ? $row->payload : [],
         ];
     }
@@ -123,7 +152,7 @@ final class PortalUserLogPresenter
     public static function withObjectPayload(array $result): array
     {
         if (($result['data']['payload'] ?? null) === []) {
-            $result['data']['payload'] = new stdClass();
+            $result['data']['payload'] = new stdClass;
         }
 
         return $result;

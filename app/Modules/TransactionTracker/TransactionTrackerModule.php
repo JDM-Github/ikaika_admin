@@ -10,9 +10,10 @@ use App\Modules\TransactionTracker\Models\PayorPayee;
 use App\Modules\TransactionTracker\Models\Transaction;
 
 /**
- * Finance tracking migrated from Airtable base appp5MogesHN2eVvG. Read-only for
- * now: generic resource reads plus the workspace grid, no product-specific
- * routes or auth of its own.
+ * Finance tracking migrated from Airtable base appp5MogesHN2eVvG: budget envelopes and the
+ * transactions that fund and spend them, plus accounts, budget codes and payors. The workspace grid
+ * reads these tables as resources; the portal reads envelopes and writes reimbursement charges
+ * through the `tracker` connection this product's catalog entry registers.
  */
 class TransactionTrackerModule implements ProductModule
 {

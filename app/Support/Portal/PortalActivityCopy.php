@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
 /**
@@ -14,6 +15,20 @@ final class PortalActivityCopy
     public const YOU = '{UserName|You}';
 
     public const YOUR = '{UserName|Your}';
+
+    /**
+     * The actor's name as other people read it in an alert or in their own log: a developer's act in
+     * Developer mode (past their Default powers, or done to someone else) reads "a developer", like
+     * the log it goes with. Capitalised when the name opens the sentence.
+     */
+    public static function actorName(Employee $actor, ?Request $request, bool $capitalised = false): string
+    {
+        if ($request !== null && PortalDeveloperMode::isOn($actor, $request) && PortalRules::isDevelopersAct($request)) {
+            return $capitalised ? PortalAccessGraph::DEVELOPER_NAME_CAPITAL : PortalAccessGraph::DEVELOPER_NAME;
+        }
+
+        return self::displayName($actor);
+    }
 
     public static function displayName(Employee $employee): string
     {
@@ -67,6 +82,146 @@ final class PortalActivityCopy
     public static function deletedReport(string $kind, string $date): string
     {
         return self::YOU.' deleted a '.self::reportKind($kind).' for '.self::date($date);
+    }
+
+    public static function previewedAirtableSync(int $count): string
+    {
+        return self::YOU.' previewed the Airtable sync: '.$count.' '.($count === 1 ? 'change' : 'changes').' waiting';
+    }
+
+    public static function notifyProjectRequested(string $who, string $name, bool $isResubmitted): string
+    {
+        return $isResubmitted
+            ? $who.' sent the project '.$name.' again for approval.'
+            : $who.' added the project '.$name.' and it waits for approval.';
+    }
+
+    public static function notifyProjectDecided(string $who, string $name, bool $isApproved, ?string $remarks): string
+    {
+        return $isApproved
+            ? $who.' approved the project '.$name.'.'
+            : $who.' rejected the project '.$name.($remarks === null ? '.' : ': '.$remarks);
+    }
+
+    // Logged under the approver only: the person flagged never sees it.
+    public static function flaggedMember(string $memberName): string
+    {
+        return self::YOU.' flagged '.$memberName.' for report review';
+    }
+
+    public static function unflaggedMember(string $memberName): string
+    {
+        return self::YOU.' took '.$memberName.' off report review';
+    }
+
+    public static function decidedProject(string $name, bool $isApproved): string
+    {
+        return self::YOU.($isApproved ? ' approved' : ' rejected').' the project '.$name;
+    }
+
+    public static function addedProject(string $name): string
+    {
+        return self::YOU.' added the project '.$name;
+    }
+
+    public static function editedProject(string $name): string
+    {
+        return self::YOU.' edited the project '.$name;
+    }
+
+    public static function changedProjectScopes(string $name, int $count): string
+    {
+        return self::YOU.' set '.$count.' '.($count === 1 ? 'scope' : 'scopes').' on the project '.$name;
+    }
+
+    public static function deletedProject(string $name): string
+    {
+        return self::YOU.' deleted the project '.$name;
+    }
+
+    public static function restoredProject(string $name): string
+    {
+        return self::YOU.' restored the project '.$name;
+    }
+
+    public static function chargedReimbursement(string $memberName, string $envelopeName, string $amount): string
+    {
+        return self::YOU.' charged '.$amount.' to '.$envelopeName.' for '.$memberName."'s reimbursement";
+    }
+
+    public static function adjustedReimbursementCharge(string $memberName, string $envelopeName, string $from, string $to): string
+    {
+        return self::YOU.' moved '.$memberName."'s reimbursement charge on ".$envelopeName.' from '.$from.' to '.$to;
+    }
+
+    public static function releasedReimbursementCharge(string $envelopeName, string $amount): string
+    {
+        return self::YOU.' returned '.$amount.' to '.$envelopeName.' when a reimbursement stopped being approved';
+    }
+
+    public static function addedBudgetCode(string $name): string
+    {
+        return self::YOU.' added the budget code '.$name;
+    }
+
+    public static function addedBudgetEnvelope(string $name, ?string $codeName): string
+    {
+        return $codeName === null
+            ? self::YOU.' added the envelope '.$name.' with no budget code'
+            : self::YOU.' added the envelope '.$name.' under '.$codeName;
+    }
+
+    public static function updatedBudgetCode(string $name): string
+    {
+        return self::YOU.' updated the budget code '.$name;
+    }
+
+    public static function updatedBudgetEnvelope(string $name): string
+    {
+        return self::YOU.' updated the envelope '.$name;
+    }
+
+    public static function closedBudgetEnvelope(string $name): string
+    {
+        return self::YOU.' closed the envelope '.$name;
+    }
+
+    public static function reopenedBudgetEnvelope(string $name): string
+    {
+        return self::YOU.' reopened the envelope '.$name;
+    }
+
+    public static function recordedEnvelopeFunds(string $envelopeName, string $amount): string
+    {
+        return self::YOU.' recorded '.$amount.' received into '.$envelopeName;
+    }
+
+    public static function addedAccountFunds(string $accountName, string $amount): string
+    {
+        return self::YOU.' added '.$amount.' to the account '.$accountName;
+    }
+
+    // Between two accounts or two envelopes: the names say which.
+    public static function transferredFunds(string $amount, string $from, string $to): string
+    {
+        return self::YOU.' transferred '.$amount.' from '.$from.' to '.$to;
+    }
+
+    public static function completedTransfer(string $amount, string $from, string $to): string
+    {
+        return self::YOU.' completed the pending transfer of '.$amount.' from '.$from.' to '.$to;
+    }
+
+    public static function cancelledTransfer(string $amount): string
+    {
+        return self::YOU.' cancelled a pending transfer of '.$amount;
+    }
+
+    public static function addedTransaction(string $kind, string $name, string $amount, ?string $envelopeName): string
+    {
+        $text = self::YOU.' added the '.strtolower($kind).' '.$name.' of '.$amount;
+
+        return $envelopeName === null ? $text : $text.' on '.$envelopeName;
     }
 
     public static function restoredReport(string $kind, string $date): string
@@ -148,9 +303,24 @@ final class PortalActivityCopy
         return self::YOU.' changed '.self::displayName($target)."'s role to ".$role;
     }
 
-    public static function ownRoleChanged(Employee $actor, string $role): string
+    public static function addedUser(Employee $employee): string
     {
-        return self::YOUR.' role was changed to '.$role.' by '.self::displayName($actor);
+        return self::YOU.' added '.self::displayName($employee).' as a user';
+    }
+
+    public static function changedSomeoneDepartment(Employee $target, string $department): string
+    {
+        return self::YOU.' moved '.self::displayName($target).' to the '.$department.' department';
+    }
+
+    public static function notifyDepartmentChanged(string $department, string $by): string
+    {
+        return 'You were moved to the '.$department.' department by '.$by.'.';
+    }
+
+    public static function ownRoleChanged(Employee $actor, string $role, ?Request $request = null): string
+    {
+        return self::YOUR.' role was changed to '.$role.' by '.self::actorName($actor, $request);
     }
 
     public static function signedIn(): string
@@ -204,6 +374,31 @@ final class PortalActivityCopy
     public static function deletedEmailBlock(string $name, string $kind): string
     {
         return self::YOU.' deleted the '.self::emailBlockKind($kind).' '.$name;
+    }
+
+    public static function madeDefaultSignature(string $name): string
+    {
+        return self::YOU.' made the footer '.$name.' the default signature';
+    }
+
+    public static function uploadedEmailImage(bool $global = false): string
+    {
+        return self::YOU.' uploaded '.($global ? 'a global' : 'an').' email image';
+    }
+
+    public static function deletedEmailImage(bool $global = false): string
+    {
+        return self::YOU.' deleted '.($global ? 'a global' : 'an').' email image';
+    }
+
+    public static function downloadedEmailAttachment(string $name, string $subject): string
+    {
+        return self::YOU.' downloaded '.$name.' from the email "'.$subject.'"';
+    }
+
+    public static function editedSignatureProfile(Employee $target): string
+    {
+        return self::YOU.' edited the signature profile of '.self::displayName($target);
     }
 
     public static function sentEmail(string $subject, int $count): string

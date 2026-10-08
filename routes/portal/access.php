@@ -10,4 +10,6 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->get('access', [AccessController::class, 'index']);
     Route::middleware('throttle:portal-access-write')
         ->patch('access/switches', [AccessController::class, 'updateSwitch']);
+    Route::middleware('throttle:portal-access-write')
+        ->patch('access/reach', [AccessController::class, 'updateReach']);
 });

@@ -6,12 +6,14 @@ use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
-    Route::middleware('throttle:portal-user-logs')->group(function (): void {
+    Route::middleware(['throttle:portal-user-logs', 'portal.rule:user.logs'])->group(function (): void {
         Route::get('user/logs', [LogsController::class, 'index']);
         Route::get('user/logs/{id}', [LogsController::class, 'show'])->whereNumber('id');
     });
-    Route::middleware('throttle:portal-user-notifications')
-        ->get('user/notifications', [NotificationsController::class, 'index']);
+    Route::middleware('throttle:portal-user-notifications')->group(function (): void {
+        Route::get('user/notifications', [NotificationsController::class, 'index']);
+        Route::get('user/notifications/unread', [NotificationsController::class, 'unread']);
+    });
     Route::middleware('throttle:portal-user-notifications-write')->group(function (): void {
         Route::patch('user/notifications/{id}/read', [NotificationsController::class, 'markRead'])
             ->whereNumber('id');

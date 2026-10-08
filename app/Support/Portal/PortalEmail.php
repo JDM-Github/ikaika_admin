@@ -46,8 +46,6 @@ final class PortalEmail
 
     private const MAX_SUBJECT = 255;
 
-    private const MAX_BODY = 20000;
-
     /**
      * Table column key => SQL columns. Unknown keys fall back to newest first.
      *
@@ -110,7 +108,12 @@ final class PortalEmail
         $name = $this->validatedName($request);
         $category = $kind === self::KIND_TEMPLATE ? $this->validatedCategory($request, true) : null;
         $subject = $kind === self::KIND_TEMPLATE ? $this->validatedSubject($request, true) : null;
-        $body = $this->validatedBody($request);
+        $format = PortalEmailMarkup::validated($request->input('format'));
+        $body = $this->validatedBody($request, $format);
+        // A footer edited from Manage / Signatures must carry a signature token to be usable there.
+        if ($kind === self::KIND_FOOTER && $request->boolean('signature') && ! PortalSignature::carriesSignature($body)) {
+            abort(422, 'A signature footer needs a placeholder like {name} or $SIGNATURE.');
+        }
         $createdAt = $this->timezone->now();
 
         $id = (int) $this->connection()->table('email_blocks')->insertGetId([
@@ -119,6 +122,7 @@ final class PortalEmail
             'category' => $category,
             'subject' => $subject,
             'body' => $body,
+            'format' => $format,
             'created_by' => (int) $actor->getKey(),
             'date_created' => $createdAt->toDateTimeString(),
             'date_updated' => null,
@@ -131,7 +135,7 @@ final class PortalEmail
             PortalActivityCopy::createdEmailBlock($name, $kind),
             (string) $id,
             $request,
-            ['kind' => $kind, 'name' => $name, 'category' => $category, 'subject' => $subject],
+            ['kind' => $kind, 'name' => $name, 'category' => $category, 'subject' => $subject, 'format' => $format],
         );
         $this->bumpCache();
 
@@ -154,13 +158,19 @@ final class PortalEmail
         $name = $this->validatedName($request);
         $category = $kind === self::KIND_TEMPLATE ? $this->validatedCategory($request, true) : null;
         $subject = $kind === self::KIND_TEMPLATE ? $this->validatedSubject($request, true) : null;
-        $body = $this->validatedBody($request);
+        $format = PortalEmailMarkup::validated($request->input('format'));
+        $body = $this->validatedBody($request, $format);
+        // A footer edited from Manage / Signatures must carry a signature token to be usable there.
+        if ($kind === self::KIND_FOOTER && $request->boolean('signature') && ! PortalSignature::carriesSignature($body)) {
+            abort(422, 'A signature footer needs a placeholder like {name} or $SIGNATURE.');
+        }
 
         $this->connection()->table('email_blocks')->where('id', $id)->update([
             'name' => $name,
             'category' => $category,
             'subject' => $subject,
             'body' => $body,
+            'format' => $format,
             'date_updated' => $this->timezone->now()->toDateTimeString(),
         ]);
 
@@ -171,7 +181,7 @@ final class PortalEmail
             PortalActivityCopy::updatedEmailBlock($name, $kind),
             (string) $id,
             $request,
-            ['kind' => $kind, 'name' => $name, 'category' => $category, 'subject' => $subject],
+            ['kind' => $kind, 'name' => $name, 'category' => $category, 'subject' => $subject, 'format' => $format],
         );
         $this->bumpCache();
 
@@ -362,15 +372,13 @@ final class PortalEmail
         return $subject;
     }
 
-    private function validatedBody(Request $request): string
+    private function validatedBody(Request $request, string $format): string
     {
         $body = trim((string) $request->input('body', ''));
         if ($body === '') {
             abort(422, 'The email needs a body.');
         }
-        if (strlen($body) > self::MAX_BODY) {
-            abort(422, 'The body cannot exceed 20000 characters.');
-        }
+        PortalEmailMarkup::holdToLimit($body, $format);
 
         return $body;
     }

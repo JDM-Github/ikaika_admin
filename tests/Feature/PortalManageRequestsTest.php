@@ -7,8 +7,10 @@ use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Core\CoreActionType;
-use App\Support\Portal\PortalAccessDenied;
+use App\Support\Portal\PortalAudit;
 use App\Support\Portal\PortalLeaveRequests;
+use App\Support\Portal\PortalRules;
+use App\Support\Portal\PortalShellPath;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
@@ -33,6 +35,11 @@ class PortalManageRequestsTest extends TestCase
         parent::setUp();
         Cache::flush();
         Mail::fake();
+        foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'access_self_reach', 'developer_modes'] as $table) {
+            DB::connection('portal')->table($table)->delete();
+        }
+        // Envelope charging is PortalBudgetEnvelopesTest's; with the tracker off an approval needs no envelope.
+        config(['products.catalog.transaction-tracker.enabled' => false]);
     }
 
     public function test_catalog_lists_manage_requests_under_portal_sections(): void
@@ -156,7 +163,7 @@ class PortalManageRequestsTest extends TestCase
      * together, and is_flag itself -- the permanent "this was filed on a warning" fact -- must
      * survive the decision untouched.
      */
-    public function test_an_admin_approves_a_flagged_report_with_remarks_and_the_employee_is_notified(): void
+    public function test_an_admin_approves_a_flagged_report_with_remarks_and_the_employee_is_never_told(): void
     {
         $member = $this->activeMember();
         $date = Carbon::now($this->app['config']->get('app.timezone'))->toDateString();
@@ -195,23 +202,15 @@ class PortalManageRequestsTest extends TestCase
         $this->assertContains($firstId, $parameters['userReportIds']);
         $this->assertContains($secondId, $parameters['userReportIds']);
 
-        $notification = PortalNotification::query()
+        // A flagged member must never learn they are flagged: no notice and no line in their own log.
+        $this->assertFalse(PortalNotification::query()
             ->where('employee_id', $member->getKey())
-            ->where('type', 'reports.flagged.approved')
-            ->orderByDesc('id')
-            ->first();
-        $this->assertNotNull($notification);
-        $this->assertStringContainsString('flagged report', (string) $notification->message);
-
-        $log = PortalLog::query()
+            ->where('type', 'like', 'reports.flagged.%')
+            ->exists());
+        $this->assertFalse(PortalLog::query()
             ->where('employee_id', $member->getKey())
             ->where('resource', 'reports.flagged')
-            ->orderByDesc('id')
-            ->first();
-        $this->assertNotNull($log);
-        $this->assertIsArray($log->payload);
-        $this->assertSame('flag', $log->payload['kind']);
-        $this->assertSame('approved', $log->payload['status']);
+            ->exists());
     }
 
     // Rejecting keeps it on the list -- only approving is supposed to clear a flagged report.
@@ -359,13 +358,15 @@ class PortalManageRequestsTest extends TestCase
             ->assertForbidden();
     }
 
+    // The page follows its rule: a plain refusal, not a security alert, since switching it off yourself lands here too.
     public function test_a_member_cannot_read_the_company_queue(): void
     {
         $this->getJson('/api/development/portal/manage/requests', [
             'Authorization' => 'Bearer '.$this->tokenForMember(),
         ])
             ->assertForbidden()
-            ->assertJsonPath('warning', PortalAccessDenied::WARNING_NOTIFIED);
+            ->assertJsonPath('message', PortalRules::REFUSAL)
+            ->assertJsonMissingPath('warning');
     }
 
     public function test_the_queue_requires_a_bearer_token(): void
@@ -654,6 +655,109 @@ class PortalManageRequestsTest extends TestCase
         $this->assertNull($item['receiptThumbUrl']);
     }
 
+    // Flagged users (supervisor, 2026-10-07): an approver puts someone on review, and they are never told.
+    public function test_an_approver_flags_a_member_who_is_never_told(): void
+    {
+        [$member] = $this->membersInBothDepartments();
+        $this->clearFlags($member);
+        $token = $this->loginToken($this->departmentAdmin());
+
+        $listed = $this->withToken($token)->getJson('/api/development/portal/manage/flagged-members')->assertOk();
+        $this->assertContains((string) $member->getKey(), array_column($listed->json('candidates'), 'employeeId'));
+        $this->assertNotContains((string) $member->getKey(), array_column($listed->json('data'), 'employeeId'));
+
+        $response = $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $member->getKey(),
+            'reason' => 'Reports need a second look this month.',
+        ])->assertCreated();
+
+        $flagged = collect($response->json('data'))->firstWhere('employeeId', (string) $member->getKey());
+        $this->assertIsArray($flagged);
+        $this->assertSame('Reports need a second look this month.', $flagged['reason']);
+        $this->assertSame($this->today(), $flagged['since']);
+        $this->assertNotContains((string) $member->getKey(), array_column($response->json('candidates'), 'employeeId'));
+
+        // The very record PortalSubmittedReports reads when it marks a filing for review.
+        $warning = DB::connection('portal')->table('employees_warnings')
+            ->join('warnings', 'warnings.id', '=', 'employees_warnings.warning_id')
+            ->where('employees_warnings.employee_id', $member->getKey())
+            ->where('warnings.status', 'Active')
+            ->first();
+        $this->assertNotNull($warning);
+        $this->assertSame('N/A', $warning->violation_type);
+
+        $this->assertFalse(PortalNotification::query()->where('employee_id', $member->getKey())->where('created_at', '>=', now()->subMinute())->exists());
+        $this->assertFalse(PortalLog::query()->where('employee_id', $member->getKey())->where('resource', 'manage.flagged-members')->exists());
+        $this->assertTrue(PortalLog::query()->where('resource', 'manage.flagged-members')->where('record_id', (string) $member->getKey())->exists());
+
+        $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $member->getKey(),
+            'reason' => 'Again.',
+        ])->assertStatus(422);
+    }
+
+    public function test_unflagging_takes_a_member_off_review_and_keeps_the_record(): void
+    {
+        [$member] = $this->membersInBothDepartments();
+        $this->clearFlags($member);
+        $token = $this->loginToken($this->departmentAdmin());
+        $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $member->getKey(),
+            'reason' => 'Review for a week.',
+        ])->assertCreated();
+
+        $response = $this->withToken($token)
+            ->deleteJson('/api/development/portal/manage/flagged-members/'.$member->getKey())
+            ->assertOk();
+
+        $this->assertNotContains((string) $member->getKey(), array_column($response->json('data'), 'employeeId'));
+        $this->assertContains((string) $member->getKey(), array_column($response->json('candidates'), 'employeeId'));
+        $statuses = DB::connection('portal')->table('employees_warnings')
+            ->join('warnings', 'warnings.id', '=', 'employees_warnings.warning_id')
+            ->where('employees_warnings.employee_id', $member->getKey())
+            ->where('warnings.description', 'Review for a week.')
+            ->pluck('warnings.status')
+            ->all();
+        $this->assertSame(['Inactive'], $statuses);
+
+        $this->withToken($token)
+            ->deleteJson('/api/development/portal/manage/flagged-members/'.$member->getKey())
+            ->assertNotFound();
+    }
+
+    // Flagging reaches only as far as Approve or reject on Flag Reports does: another department is not found.
+    public function test_a_department_admin_flags_only_their_own_department(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $this->clearFlags($inside, $outside);
+        $admin = $this->departmentAdmin();
+        $token = $this->loginToken($admin);
+
+        $candidates = array_column($this->withToken($token)->getJson('/api/development/portal/manage/flagged-members')->json('candidates'), 'employeeId');
+        $this->assertContains((string) $inside->getKey(), $candidates);
+        $this->assertNotContains((string) $outside->getKey(), $candidates);
+        $this->assertNotContains((string) $admin->getKey(), $candidates);
+
+        $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $outside->getKey(),
+            'reason' => 'Out of reach.',
+        ])->assertNotFound();
+        $this->withToken($token)->postJson('/api/development/portal/manage/flagged-members', [
+            'employeeId' => $admin->getKey(),
+            'reason' => 'Myself.',
+        ])->assertStatus(422)->assertJsonPath('message', 'You cannot flag yourself.');
+    }
+
+    public function test_flagging_needs_approve_or_reject_on_flag_reports(): void
+    {
+        $this->withToken($this->tokenForMember())
+            ->getJson('/api/development/portal/manage/flagged-members')
+            ->assertForbidden();
+        $this->withToken($this->tokenForMember())
+            ->postJson('/api/development/portal/manage/flagged-members', ['employeeId' => 1, 'reason' => 'x'])
+            ->assertForbidden();
+    }
+
     public function test_a_department_admin_sees_only_their_own_department_on_the_queue(): void
     {
         [$inside, $outside] = $this->membersInBothDepartments();
@@ -704,26 +808,210 @@ class PortalManageRequestsTest extends TestCase
         ])->assertNotFound();
     }
 
-    // Executives work from their own portal, so here they are held to their department like any admin.
-    public function test_an_executive_sees_only_their_own_department(): void
+    // Executives start with every department, so their queue is the whole company's.
+    public function test_an_executive_sees_every_department(): void
     {
         [$inside, $outside] = $this->membersInBothDepartments();
         $date = $this->today();
         $mine = $this->insertLeave($this->memberName($inside), $date);
         $theirs = $this->insertLeave($this->memberName($outside), $date);
-        $executive = Employee::query()
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
-            ->whereNotNull('id_no')
-            ->where('id_no', '!=', '')
-            ->first();
-        $this->assertNotNull($executive);
-        $executive->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
 
-        $ids = $this->queuedLeaveIds($this->loginToken($executive), $date);
+        $ids = $this->queuedLeaveIds($this->loginToken($this->executive()), $date);
 
         $this->assertContains((string) $mine, $ids);
-        $this->assertNotContains((string) $theirs, $ids);
+        $this->assertContains((string) $theirs, $ids);
+    }
+
+    // Each row names its owner's department, which the page filters on.
+    public function test_each_row_names_its_owner_s_department(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $mine = $this->insertLeave($this->memberName($inside), $date);
+        $theirs = $this->insertLeave($this->memberName($outside), $date);
+        $claim = $this->insertApprovedClaim($outside, $date);
+        $flag = $this->insertFlaggedLine($inside, $date);
+
+        $response = $this->withToken($this->tokenForAdmin())
+            ->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date)
+            ->assertOk();
+
+        $this->assertSame('mis', collect($response->json('leave'))->firstWhere('id', (string) $mine)['department']);
+        $this->assertSame('Engineering', collect($response->json('leave'))->firstWhere('id', (string) $theirs)['department']);
+        $this->assertSame('Engineering', collect($response->json('data'))->firstWhere('id', (string) $theirs)['department']);
+        $this->assertSame('Engineering', collect($response->json('reimbursements'))->firstWhere('id', (string) $claim)['department']);
+        $this->assertSame('mis', collect($response->json('flaggedReports'))->firstWhere('id', (string) $flag)['department']);
+    }
+
+    // Each kind follows its own rule: someone given only Leave Requests works the leave queue and nothing else.
+    public function test_a_member_given_leave_requests_works_only_that_queue(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $member = $this->misMember($inside, $outside);
+        $date = $this->today();
+        $mine = $this->insertLeave($this->memberName($inside), $date);
+        $theirs = $this->insertLeave($this->memberName($outside), $date);
+        $claim = $this->insertApprovedClaim($inside, $date);
+        $this->insertFlaggedLine($inside, $date);
+        $this->withToken($this->loginToken($this->departmentAdmin()))
+            ->patchJson("/api/development/portal/manage/access/{$member->id}", ['key' => 'manage.requests.leave', 'action' => 'on', 'reach' => 'department'])
+            ->assertOk();
+        $token = $this->loginToken($member);
+
+        $response = $this->withToken($token)->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date)->assertOk();
+
+        $this->assertContains((string) $mine, $response->json('leave.*.id'));
+        $this->assertNotContains((string) $theirs, $response->json('leave.*.id'));
+        $this->assertContains((string) $mine, $response->json('data.*.id'));
+        $this->assertSame([], $response->json('reimbursements'));
+        $this->assertSame([], $response->json('flaggedReports'));
+        $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => (string) $mine, 'kind' => 'leave', 'status' => 'approved', 'approverRemarks' => '']],
+        ])->assertOk()->assertJsonPath('saved', 1);
+        $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => (string) $claim, 'kind' => 'reimbursement', 'status' => 'rejected', 'approverRemarks' => '']],
+        ])->assertForbidden()->assertJsonPath('message', 'You cannot approve or reject reimbursement requests.');
+        $this->assertSame('Approved', DB::connection('portal')->table('reimbursements')->where('id', $claim)->value('status'));
+    }
+
+    // Late reports follow manage.requests.late like every other kind: its reach, and its own Approve or reject.
+    public function test_late_reports_follow_their_own_rule_and_reach(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $mine = $this->insertLateLine($inside, $date);
+        $theirs = $this->insertLateLine($outside, $date);
+        $token = $this->loginToken($this->departmentAdmin());
+        $decide = fn (Employee $member, string $status): mixed => $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => $member->id.':'.$date, 'kind' => 'late', 'status' => $status, 'approverRemarks' => 'Checked.']],
+        ]);
+
+        $ids = $this->withToken($token)->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date)->assertOk()->json('lateReports.*.id');
+        $this->assertContains($inside->id.':'.$date, $ids);
+        $this->assertNotContains($outside->id.':'.$date, $ids);
+
+        $decide($outside, 'approved')->assertNotFound()->assertJsonPath('message', 'That late report is not on the queue.');
+        $this->assertSame('Pending', DB::connection('portal')->table('user_reports')->where('id', $theirs)->value('late_submission_approval'));
+
+        $decide($inside, 'approved')->assertOk()->assertJsonPath('saved', 1);
+        $this->assertSame('Approved', DB::connection('portal')->table('user_reports')->where('id', $mine)->value('late_submission_approval'));
+        // Ledgered apart from reports.submitted, which the sync sends as the filing itself.
+        $action = Action::query()->where('resource', 'reports.late')->where('record_id', $inside->id.':'.$date)->first();
+        $this->assertNotNull($action);
+        $this->assertSame('portal.user_reports', $action->database_target);
+        $this->assertSame([$mine], $action->parameters['parameters']['userReportIds']);
+
+        $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => 'manage.requests.late.decide', 'on' => false])->assertOk();
+        $decide($inside, 'rejected')->assertForbidden()->assertJsonPath('message', 'You cannot approve or reject late reports.');
+        $this->assertSame('Approved', DB::connection('portal')->table('user_reports')->where('id', $mine)->value('late_submission_approval'));
+    }
+
+    // Switching a kind off takes its list away and every decision on it with it.
+    public function test_switching_a_kind_off_takes_its_list_away(): void
+    {
+        [$inside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $mine = $this->insertLeave($this->memberName($inside), $date);
+        $flag = $this->insertFlaggedLine($inside, $date);
+        $token = $this->loginToken($this->departmentAdmin());
+        $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => 'manage.requests.leave', 'on' => false])->assertOk();
+
+        $response = $this->withToken($token)->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date)->assertOk();
+
+        $this->assertNotContains((string) $mine, $response->json('leave.*.id'));
+        $this->assertNotContains((string) $mine, $response->json('data.*.id'));
+        $this->assertContains((string) $flag, $response->json('flaggedReports.*.id'));
+        $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => (string) $mine, 'kind' => 'leave', 'status' => 'approved', 'approverRemarks' => '']],
+        ])->assertForbidden()->assertJsonPath('message', 'You cannot approve or reject leave requests.');
+    }
+
+    // Without Approve or reject the queue stays readable, and a batch touching that kind writes nothing at all.
+    public function test_without_approve_or_reject_a_kind_is_read_only(): void
+    {
+        [$inside] = $this->membersInBothDepartments();
+        $date = $this->today();
+        $mine = $this->insertLeave($this->memberName($inside), $date);
+        $flag = $this->insertFlaggedLine($inside, $date);
+        $token = $this->loginToken($this->departmentAdmin());
+        $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => 'manage.requests.leave.decide', 'on' => false])->assertOk();
+
+        $this->assertContains((string) $mine, $this->queuedLeaveIds($token, $date));
+        $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [
+                ['id' => (string) $flag, 'kind' => 'flag', 'status' => 'approved', 'approverRemarks' => ''],
+                ['id' => (string) $mine, 'kind' => 'leave', 'status' => 'approved', 'approverRemarks' => ''],
+            ],
+        ])->assertForbidden()->assertJsonPath('message', 'You cannot approve or reject leave requests.');
+
+        $this->assertSame('Pending', DB::connection('portal')->table('requests')->where('id', $mine)->value('status'));
+        $this->assertSame('Pending', DB::connection('portal')->table('employees_user_reports')->where('user_report_id', $flag)->value('flag_status'));
+    }
+
+    // Narrowed to own, a kind lists only the person's own requests, and deciding anyone else's is refused.
+    public function test_an_own_reach_lists_only_their_own_requests(): void
+    {
+        [$inside] = $this->membersInBothDepartments();
+        $admin = $this->departmentAdmin();
+        $date = $this->today();
+        $own = $this->insertLeave($this->memberName($admin), $date);
+        $mine = $this->insertLeave($this->memberName($inside), $date);
+        $token = $this->loginToken($admin);
+        $this->withToken($token)->patchJson('/api/development/portal/access/reach', ['key' => 'manage.requests.leave', 'reach' => 'own'])->assertOk();
+
+        $ids = $this->queuedLeaveIds($token, $date);
+
+        $this->assertContains((string) $own, $ids);
+        $this->assertNotContains((string) $mine, $ids);
+        $this->withToken($token)->patchJson('/api/development/portal/manage/requests', [
+            'changes' => [['id' => (string) $mine, 'kind' => 'leave', 'status' => 'approved', 'approverRemarks' => '']],
+        ])->assertNotFound()->assertJsonPath('message', 'That request is not on the queue.');
+    }
+
+    public function test_payout_receipts_follow_their_own_rule(): void
+    {
+        Http::preventStrayRequests();
+        [$inside] = $this->membersInBothDepartments();
+        $claim = $this->insertApprovedClaim($inside, $this->today());
+        $token = $this->loginToken($this->departmentAdmin());
+        $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => 'manage.requests.reimbursement.payout', 'on' => false])->assertOk();
+
+        $this->withToken($token)->post(
+            "/api/development/portal/manage/requests/reimbursement/{$claim}/payout-receipt",
+            ['file' => UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg')],
+            ['Accept' => 'application/json'],
+        )->assertForbidden()->assertJsonPath('message', PortalRules::REFUSAL);
+    }
+
+    // Request alerts reach whoever holds them and whose rule for that kind covers the person filing.
+    public function test_request_alerts_follow_their_rule_and_its_reach(): void
+    {
+        [$inside, $outside] = $this->membersInBothDepartments();
+        $admin = $this->departmentAdmin();
+        $executive = $this->executive();
+        $alert = function (Employee $filer): void {
+            app(PortalAudit::class)->notifyManagers($filer, 'manage.requests.leave', 'requests.leave.filed', 'New leave request', 'Filed', PortalShellPath::MANAGE_REQUESTS);
+        };
+        $inbox = static fn (Employee $recipient, Employee $filer): int => PortalNotification::query()
+            ->where('employee_id', $recipient->id)
+            ->where('actor_id', $filer->id)
+            ->count();
+
+        $alert($inside);
+        $alert($outside);
+
+        $this->assertSame(1, $inbox($admin, $inside));
+        $this->assertSame(0, $inbox($admin, $outside));
+        $this->assertSame(1, $inbox($executive, $outside));
+        $this->assertSame(0, $inbox($outside, $inside));
+
+        // Switched off, or without the kind itself, the admin hears nothing even from their own department.
+        foreach ([PortalAudit::ALERTS_RULE, 'manage.requests.leave'] as $key) {
+            DB::connection('portal')->table('access_toggles')->delete();
+            DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $admin->id, 'permission_key' => $key]);
+            $alert($inside);
+            $this->assertSame(1, $inbox($admin, $inside));
+        }
     }
 
     // One department's cached queue must never be served to another department's admin.
@@ -850,6 +1138,16 @@ class PortalManageRequestsTest extends TestCase
     }
 
     // A developer sees every department, so tests about the queue itself do not depend on who is where.
+    // Live data carries real flags; a test starts its people off review, inside its own transaction.
+    private function clearFlags(Employee ...$members): void
+    {
+        $ids = DB::connection('portal')->table('employees_warnings')
+            ->whereIn('employee_id', array_map(static fn (Employee $member): int => (int) $member->getKey(), $members))
+            ->pluck('warning_id')
+            ->all();
+        DB::connection('portal')->table('warnings')->whereIn('id', $ids)->update(['status' => 'Inactive']);
+    }
+
     private function tokenForAdmin(): string
     {
         return $this->developerModeOn($this->loginToken($this->departmentAdmin(developer: true)));
@@ -949,6 +1247,38 @@ class PortalManageRequestsTest extends TestCase
         return $ids;
     }
 
+    private function executive(): Employee
+    {
+        $executive = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->first();
+        $this->assertNotNull($executive);
+        $executive->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+
+        return $executive;
+    }
+
+    // One more active member in MIS, never one of the people given.
+    private function misMember(Employee ...$except): Employee
+    {
+        $employee = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role, '')) = 'user'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->whereNotNull('first_name')
+            ->whereNotIn('id', array_map(static fn (Employee $person): int => (int) $person->getKey(), $except))
+            ->first();
+        $this->assertNotNull($employee);
+        $employee->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+
+        return $employee;
+    }
+
     private function tokenForMember(): string
     {
         return $this->loginToken($this->activeMember());
@@ -986,6 +1316,26 @@ class PortalManageRequestsTest extends TestCase
             is_string($actor->first_name) ? $actor->first_name : null,
             is_string($actor->last_name) ? $actor->last_name : null,
         );
+    }
+
+    private function insertLateLine(Employee $member, string $date): int
+    {
+        $id = (int) DB::connection('portal')->table('user_reports')->insertGetId([
+            'report_date' => $date,
+            'hours_rendered' => 8,
+            'change_in_elements' => 0,
+            'remarks' => 'Filed late',
+            'late_submission' => 'Yes',
+            'late_submission_approval' => 'Pending',
+            'approval' => 'Approved',
+            'date_created' => $date.' 09:00:00',
+        ]);
+        DB::connection('portal')->table('employees_user_reports')->insert([
+            'employee_id' => $member->getKey(),
+            'user_report_id' => $id,
+        ]);
+
+        return $id;
     }
 
     private function insertFlaggedLine(Employee $member, string $date, bool $isFlag = true): int

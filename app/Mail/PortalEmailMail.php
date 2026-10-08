@@ -2,13 +2,24 @@
 
 namespace App\Mail;
 
+use App\Support\Portal\PortalEmailAttachments;
+use App\Support\Portal\PortalEmailMarkup;
 use Illuminate\Mail\Mailable;
+use Illuminate\Mail\Mailables\Address;
+use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 
 /**
- * One notice from Administration / Send Email: the composed body with the footer that was
- * chosen for it. Both arrive as text they typed, escaped here rather than trusted.
+ * One notice from Send Email: the composed body with the footer that was chosen for it, each in its
+ * own format (the toolbar's markup, or HTML sent as written). PortalEmailMarkup builds it, the same
+ * builder the composer's preview shows, so the preview is the email.
+ *
+ * Sent as an administrator, it still leaves from the portal's own address -- only the display name
+ * becomes "<Name> via IKAIKA Portal" and Reply-To points at them -- so it passes the domain's own
+ * sender checks rather than looking like a spoofed personal address.
+ *
+ * Attached files come off the private disk under the names they were attached with.
  */
 class PortalEmailMail extends Mailable
 {
@@ -16,27 +27,38 @@ class PortalEmailMail extends Mailable
         public readonly string $subjectLine,
         public readonly string $body,
         public readonly ?string $footerBody = null,
+        public readonly string $bodyFormat = PortalEmailMarkup::FORMAT_MARKUP,
+        public readonly string $footerFormat = PortalEmailMarkup::FORMAT_MARKUP,
+        public readonly ?string $fromName = null,
+        public readonly ?string $replyToAddress = null,
+        /** @var list<array{path: string, name: string, mime: string}> */
+        public readonly array $attachedFiles = [],
     ) {}
 
     public function envelope(): Envelope
     {
         return new Envelope(
+            from: $this->fromName === null ? null : new Address((string) config('mail.from.address'), $this->fromName),
+            replyTo: $this->replyToAddress === null ? [] : [new Address($this->replyToAddress, $this->fromName)],
             subject: $this->subjectLine,
         );
     }
 
     public function content(): Content
     {
-        $footer = $this->footerBody === null
-            ? ''
-            : '<hr style="border:none;border-top:1px solid #d1d5db;margin:24px 0 12px">'
-                .'<div style="white-space:pre-wrap;color:#4b5563;font-size:13px">'.e($this->footerBody).'</div>';
+        return new Content(htmlString: PortalEmailMarkup::document($this->body, $this->footerBody, $this->bodyFormat, $this->footerFormat));
+    }
 
-        return new Content(
-            htmlString: '<div style="font-family:sans-serif;font-size:15px;line-height:1.6;color:#111827">'
-                .'<div style="white-space:pre-wrap">'.e($this->body).'</div>'
-                .$footer
-                .'</div>',
+    /**
+     * @return list<Attachment>
+     */
+    public function attachments(): array
+    {
+        return array_map(
+            static fn (array $file): Attachment => Attachment::fromStorageDisk(PortalEmailAttachments::DISK, $file['path'])
+                ->as($file['name'])
+                ->withMime($file['mime']),
+            $this->attachedFiles,
         );
     }
 }

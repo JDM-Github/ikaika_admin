@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -99,7 +100,6 @@ final class PortalHome
 
         $activeProjects = $this->activeProjects((int) $actor->getKey());
         $activeCount = count($activeProjects);
-        $portfolioCompletion = $this->portfolioCompletion($activeProjects);
 
         return [
             'section' => 'home',
@@ -109,7 +109,6 @@ final class PortalHome
                 'monthHours' => round((float) ($counts['hours'] ?? 0), 2),
                 'monthReportCount' => (int) ($counts['reports'] ?? 0),
                 'activeProjectCount' => $activeCount,
-                'portfolioCompletion' => $portfolioCompletion,
                 'reportTrend' => $this->reportTrend($reportGroups),
                 'projectMix' => $this->projectMix($activeProjects),
                 'recentReports' => array_slice($reportGroups, 0, self::RECENT_REPORT_LIMIT),
@@ -154,7 +153,17 @@ final class PortalHome
     }
 
     /**
-     * @return list<array{id: string, code: string, name: string, departmentName: string, completionRatio: float}>
+     * The member's active projects, each with the work its reports hold (hours and last report)
+     * from PortalProjectWork. Never a completion ratio: nobody records progress.
+     *
+     * @return list<array{
+     *     id: string,
+     *     code: string,
+     *     name: string,
+     *     departmentName: string,
+     *     hoursTotal: float,
+     *     lastReportOn: string|null
+     * }>
      */
     private function activeProjects(int $employeeId): array
     {
@@ -162,22 +171,30 @@ final class PortalHome
             ->table('employees_projects')
             ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
             ->where('employees_projects.employee_id', $employeeId)
+            // A deleted project waits in the Recycle Bin, so it is no longer an active project.
+            ->whereNull('projects.deleted_at')
             ->select([
                 'projects.id',
                 'projects.project_number',
                 'projects.project_name',
                 'projects.department',
                 'projects.status',
-                'projects.progress_pct',
             ])
             ->distinct()
             ->get();
 
-        $projects = [];
+        $active = [];
         foreach ($rows as $row) {
-            if (! $this->isActiveStatus($row->status ?? null)) {
-                continue;
+            if ($this->isActiveStatus($row->status ?? null)) {
+                $active[] = $row;
             }
+        }
+
+        $today = CarbonImmutable::instance($this->timezone->today());
+        $work = (new PortalProjectWork)->byProject($active, $today);
+
+        $projects = [];
+        foreach ($active as $row) {
             $id = (string) (int) $row->id;
             $code = trim((string) ($row->project_number ?? ''));
             $name = trim((string) ($row->project_name ?? ''));
@@ -187,12 +204,14 @@ final class PortalHome
                 $name = trim($match[2]);
             }
             $department = trim((string) ($row->department ?? ''));
+            $summary = $work[(int) $row->id] ?? null;
             $projects[$id] = [
                 'id' => $id,
                 'code' => $code !== '' ? $code : $id,
                 'name' => $name !== '' ? $name : 'Project',
                 'departmentName' => $department !== '' ? $department : 'Unassigned',
-                'completionRatio' => $this->completionRatio($row->progress_pct ?? null),
+                'hoursTotal' => (float) ($summary['hoursTotal'] ?? 0),
+                'lastReportOn' => $summary['lastReportOn'] ?? null,
             ];
         }
 
@@ -200,7 +219,7 @@ final class PortalHome
     }
 
     /**
-     * @param  list<array{id: string, code: string, name: string, departmentName: string, completionRatio: float}>  $projects
+     * @param  list<array{id: string, code: string, name: string, departmentName: string, hoursTotal: float, lastReportOn: string|null}>  $projects
      * @return list<array{key: string, label: string, count: int, ratio: float}>
      */
     private function projectMix(array $projects): array
@@ -236,30 +255,17 @@ final class PortalHome
     }
 
     /**
-     * @param  list<array{id: string, code: string, name: string, departmentName: string, completionRatio: float}>  $projects
-     * @return list<array{id: string, code: string, name: string, departmentName: string, completionRatio: float}>
+     * The five projects that most need attention: least recently reported first, and a project with
+     * no report at all before any of those.
+     *
+     * @param  list<array{id: string, code: string, name: string, departmentName: string, hoursTotal: float, lastReportOn: string|null}>  $projects
+     * @return list<array{id: string, code: string, name: string, departmentName: string, hoursTotal: float, lastReportOn: string|null}>
      */
     private function trackedProjects(array $projects): array
     {
-        usort($projects, static fn (array $first, array $second): int => $first['completionRatio'] <=> $second['completionRatio']);
+        usort($projects, static fn (array $first, array $second): int => ($first['lastReportOn'] ?? null) <=> ($second['lastReportOn'] ?? null));
 
         return array_slice($projects, 0, self::TRACKED_PROJECT_LIMIT);
-    }
-
-    /**
-     * @param  list<array{completionRatio: float}>  $projects
-     */
-    private function portfolioCompletion(array $projects): float
-    {
-        if ($projects === []) {
-            return 0.0;
-        }
-        $total = 0.0;
-        foreach ($projects as $project) {
-            $total += $project['completionRatio'];
-        }
-
-        return round($total / count($projects), 4);
     }
 
     private function isActiveStatus(mixed $status): bool
@@ -270,23 +276,6 @@ final class PortalHome
         }
 
         return ! in_array($value, self::INACTIVE_STATUSES, true);
-    }
-
-    private function completionRatio(mixed $progressPct): float
-    {
-        if ($progressPct === null || $progressPct === '') {
-            return 0.0;
-        }
-        $value = (float) $progressPct;
-        if ($value < 0) {
-            return 0.0;
-        }
-        // Airtable stored whole percents; a 0..1 ratio is already finished.
-        if ($value > 1) {
-            $value = $value / 100;
-        }
-
-        return round(min(1.0, $value), 4);
     }
 
     private function connection(): Connection

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Bitbucket\BitbucketWebhookController;
 use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ResourceController;
@@ -17,6 +18,9 @@ Route::prefix($channel)->group(function (): void {
     Route::get('{product}', [ProductController::class, 'show']);
 
     require __DIR__.'/portal/api.php';
+
+    // Bitbucket calls this on a push, not a signed-in person; its HMAC signature is the only way in.
+    Route::middleware('throttle:bitbucket-webhook')->post('bitbucket/webhook', BitbucketWebhookController::class);
 
     // Before the {product}/{resource} catch-all below, which would otherwise swallow
     // _schema and _grid and report them as unknown resources.

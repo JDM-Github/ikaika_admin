@@ -70,6 +70,120 @@ class PortalViewProjectsTest extends TestCase
         $this->assertNotContains((string) $unassigned->id, array_column($rows, 'id'));
     }
 
+    // A lead may edit and delete their project, so it is on their own board even without a member row.
+    public function test_a_member_sees_a_project_they_lead_without_a_member_row(): void
+    {
+        $actor = $this->activeMember();
+        $led = DB::connection('portal')->table('projects')
+            ->whereNull('deleted_at')
+            ->whereNotIn('id', DB::connection('portal')->table('employees_projects')->where('employee_id', $actor->getKey())->pluck('project_id'))
+            ->value('id');
+        $this->assertNotNull($led);
+        DB::connection('portal')->table('projects')->where('id', $led)->update(['project_lead_email' => strtoupper((string) $actor->email)]);
+
+        $rows = $this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data');
+
+        $row = collect($rows)->firstWhere('id', (string) $led);
+        $this->assertNotNull($row);
+        $this->assertTrue($row['isAssigned']);
+        $this->assertTrue($row['isLeading']);
+        $this->assertNotContains(true, array_column(array_filter($rows, fn (array $item): bool => $item['id'] !== (string) $led && strcasecmp((string) $item['leadName'], (string) $row['leadName']) !== 0), 'isLeading'));
+    }
+
+    // Each project says what this person may do with it: a member only the ones they lead, an admin every one.
+    public function test_each_project_says_whether_it_can_be_edited_scoped_or_deleted(): void
+    {
+        $actor = $this->activeMember();
+        $led = (int) DB::connection('portal')->table('projects')->whereNull('deleted_at')->value('id');
+        DB::connection('portal')->table('projects')->where('id', $led)->update(['project_lead_email' => $actor->email]);
+        DB::connection('portal')->table('projects')->where('id', '!=', $led)->whereRaw('LOWER(COALESCE(project_lead_email, \'\')) = ?', [strtolower((string) $actor->email)])->update(['project_lead_email' => null]);
+        // Members hold no Edit / Manage scopes / Delete by preset: give them at own, the projects they lead.
+        $this->grant($actor, ['projects.edit' => 'lead', 'projects.scopes' => 'lead', 'projects.delete' => 'lead']);
+
+        $rows = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'));
+        $this->assertSame(['canEdit' => true, 'canManageScopes' => true, 'canDelete' => true], collect($rows->firstWhere('id', (string) $led))->only(['canEdit', 'canManageScopes', 'canDelete'])->all());
+        $this->assertTrue($rows->where('id', '!=', (string) $led)->every(static fn (array $row): bool => ! $row['canEdit'] && ! $row['canManageScopes'] && ! $row['canDelete']));
+        $this->assertSame(['hoursTotal', 'hoursLast30Days', 'reporterCount', 'firstReportOn', 'lastReportOn', 'linesTotal', 'rhythmDays', 'activities'], array_keys($rows->firstWhere('id', (string) $led)['work']));
+
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $actor->getKey(), 'permission_key' => 'projects.delete']);
+        $row = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'))->firstWhere('id', (string) $led);
+        $this->assertTrue($row['canEdit']);
+        $this->assertFalse($row['canDelete']);
+
+        $adminRows = collect($this->withToken($this->loginToken($this->activeAdmin()))->getJson('/api/development/portal/projects')->assertOk()->json('data'));
+        $this->assertTrue($adminRows->every(static fn (array $row): bool => $row['canEdit'] && $row['canManageScopes'] && $row['canDelete']));
+    }
+
+    // "Only your own" marks a project the person is on, even when somebody else leads it.
+    public function test_own_reach_marks_the_projects_the_person_is_on(): void
+    {
+        $actor = $this->activeMember();
+        $on = (int) DB::connection('portal')->table('employees_projects')->where('employee_id', $actor->getKey())->value('project_id');
+        DB::connection('portal')->table('projects')->where('id', $on)->update(['project_lead_email' => 'nobody@ikaika.test']);
+        $this->grant($actor, ['projects.edit' => 'own']);
+
+        $row = collect($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'))->firstWhere('id', (string) $on);
+        $this->assertNotNull($row);
+        $this->assertTrue($row['canEdit']);
+    }
+
+    // The list follows View Projects (projects.view): switched off, the page is refused like any other ruled page.
+    public function test_view_projects_switched_off_is_refused(): void
+    {
+        $actor = $this->activeMember();
+        $this->clearProjectRules($actor);
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $actor->getKey(), 'permission_key' => 'projects.view']);
+
+        $this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertForbidden();
+    }
+
+    // Given department reach, a member also sees their department's projects, and keeps their own.
+    public function test_a_member_given_department_reach_sees_their_department_too(): void
+    {
+        $actor = $this->activeMember();
+        $this->clearProjectRules($actor);
+        $department = strtolower(trim((string) DB::connection('portal')->table('projects')
+            ->whereNull('deleted_at')
+            ->whereNotIn('id', $this->ownProjectIds($actor))
+            ->whereNotNull('department')->where('department', '!=', '')
+            ->value('department')));
+        $actor->forceFill(['department' => $department])->save();
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $actor->getKey(), 'permission_key' => 'projects.view', 'reach' => 'department']);
+
+        $ids = array_map('intval', array_column($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'), 'id'));
+
+        $departmentIds = DB::connection('portal')->table('projects')->whereNull('deleted_at')
+            ->whereRaw('LOWER(TRIM(department)) = ?', [$department])->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        $this->assertEqualsCanonicalizing(array_values(array_unique([...$departmentIds, ...array_intersect($this->ownProjectIds($actor), $this->liveProjectIds())])), $ids);
+    }
+
+    // An admin who narrows their own reach to Own sees only the projects they are on or lead.
+    public function test_an_admin_narrowed_to_own_sees_only_their_projects(): void
+    {
+        $actor = $this->activeAdmin();
+        $this->clearProjectRules($actor);
+        DB::connection('portal')->table('access_self_reach')->insert(['employee_id' => $actor->getKey(), 'permission_key' => 'projects.view', 'reach' => 'own']);
+
+        $ids = array_map('intval', array_column($this->withToken($this->loginToken($actor))->getJson('/api/development/portal/projects')->assertOk()->json('data'), 'id'));
+
+        $this->assertEqualsCanonicalizing(array_values(array_intersect($this->ownProjectIds($actor), $this->liveProjectIds())), $ids);
+    }
+
+    private function clearProjectRules(Employee $employee): void
+    {
+        foreach (['access_toggles', 'access_personal', 'access_self_reach', 'access_grants', 'access_limits'] as $table) {
+            DB::connection('portal')->table($table)->where('employee_id', $employee->getKey())->where('permission_key', 'like', 'projects%')->delete();
+        }
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function liveProjectIds(): array
+    {
+        return DB::connection('portal')->table('projects')->whereNull('deleted_at')->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+    }
+
     public function test_an_admin_sees_all_projects_with_an_assignment_flag(): void
     {
         $actor = $this->activeAdmin();
@@ -147,6 +261,13 @@ class PortalViewProjectsTest extends TestCase
             'project_id' => $projectId,
             'project_action_id' => $historyId,
         ]);
+        // Airtable's report-date rows are work, not changes: they never reach the trail.
+        foreach (['Initial report was on 2026-08-10', 'Last Report was on 2026-08-31'] as $reportRow) {
+            $portal->table('projects_action_history')->insert([
+                'project_id' => $projectId,
+                'project_action_id' => $portal->table('project_action_history')->insertGetId(['action_name' => $reportRow, 'created_by' => 'Airtable', 'created_at' => '2026-09-02 08:00:00']),
+            ]);
+        }
 
         $response = $this->withToken($this->loginToken($actor))
             ->getJson('/api/development/portal/projects')
@@ -159,9 +280,6 @@ class PortalViewProjectsTest extends TestCase
         $this->assertSame([
             'tierLabel' => '',
             'total' => 4,
-            'completed' => 1,
-            'inProgress' => 1,
-            'overallCompletion' => 0.375,
         ], $row['scopeSummary']);
         $this->assertSame([
             [
@@ -169,6 +287,7 @@ class PortalViewProjectsTest extends TestCase
                 'changedOn' => '2026-09-01T08:00:00+00:00',
                 'actorName' => 'Metrics Tester',
                 'summary' => 'Project Edited: Updated scope totals',
+                'actorPhotoUrl' => null,
             ],
         ], $row['trail']);
     }
@@ -213,11 +332,31 @@ class PortalViewProjectsTest extends TestCase
         $this->assertSame([
             'tierLabel' => '',
             'total' => 1,
-            'completed' => 0,
-            'inProgress' => 1,
-            'overallCompletion' => 0.5,
         ], $row['scopeSummary']);
         $this->assertSame(['500'], $row['scopeCodes']);
+    }
+
+    /**
+     * A member's project powers are given now, not presets: grant the keys (key => reach) as an executive.
+     *
+     * @param  array<string, string|null>  $reaches
+     */
+    private function grant(Employee $target, array $reaches): void
+    {
+        $giver = Employee::query()
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->orderBy('id')
+            ->firstOrFail();
+        foreach ($reaches as $key => $reach) {
+            DB::connection('portal')->table('access_grants')->insertOrIgnore([
+                'employee_id' => $target->id,
+                'permission_key' => $key,
+                'reach' => $reach,
+                'granted_by' => $giver->id,
+                'as_developer' => 0,
+            ]);
+        }
     }
 
     private function activeMember(): Employee
@@ -269,9 +408,14 @@ class PortalViewProjectsTest extends TestCase
      */
     private function ownProjectIds(Employee $employee): array
     {
+        $led = DB::connection('portal')->table('projects')
+            ->whereRaw('LOWER(TRIM(project_lead_email)) = ?', [strtolower(trim((string) $employee->email))])
+            ->pluck('id');
+
         return DB::connection('portal')->table('employees_projects')
             ->where('employee_id', $employee->getKey())
             ->pluck('project_id')
+            ->concat($led)
             ->map(static fn ($id): int => (int) $id)
             ->unique()
             ->values()

@@ -16,13 +16,16 @@ use Illuminate\Support\Facades\DB;
  * Normally only someone above a person manages them. Holding "Manage other admins" also lets an
  * admin manage fellow admins (an executive fellow executives); between equals a gift or limit is
  * judged against the maker's base powers (role plus what came from above), never against what
- * equals gave them, so two admins can never keep each other's powers alive in a loop.
+ * equals gave them, so two admins can never keep each other's powers alive in a loop. "Manage other
+ * admins" received from an equal still lets them manage equals, never the equal who gave it, and
+ * since it is not a base power they can never pass it on.
  *
  * Developers: is_developer grants nothing by itself. Everyone, a developer included, starts from
  * their role (tier), and that default config is what anyone editing them changes. Only the viewer
- * with Developer mode on ($liveDeveloper) holds every rule and acts as a developer. A gift or limit
- * a developer made is judged as a developer's, so it survives their signing out of Developer mode
- * and nobody can end it by limiting them.
+ * with Developer mode on ($liveDeveloper) holds every rule and acts as a developer. A gift, limit or
+ * list made in Developer mode (as_developer) is judged as a developer's, so it survives their
+ * signing out of Developer mode and nobody can end it by limiting them; one made in Default is
+ * judged on the maker's role like anyone's, even while they are in Developer mode later.
  */
 final class PortalAccessGraph
 {
@@ -38,6 +41,13 @@ final class PortalAccessGraph
 
     public const PEERS_KEY = 'manage.users.access.peers';
 
+    // How a Developer mode act is named to anyone not in Developer mode, and the mode to someone who is.
+    public const DEVELOPER_NAME = 'a developer';
+
+    public const DEVELOPER_NAME_CAPITAL = 'A developer';
+
+    public const DEVELOPER_MODE_SUFFIX = ' (Developer mode)';
+
     /**
      * @var array<string, int>
      */
@@ -46,10 +56,10 @@ final class PortalAccessGraph
     /**
      * @var array<string, int>
      */
-    private const REACH_RANK = ['own' => 1, 'team' => 2, 'department' => 3, 'all' => 4];
+    private const REACH_RANK = ['lead' => 1, 'own' => 2, 'team' => 3, 'department' => 4, 'all' => 5];
 
     /**
-     * @var array<string, array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>}>>
+     * @var array<string, array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}>>
      */
     private array $memo = [];
 
@@ -58,12 +68,17 @@ final class PortalAccessGraph
      */
     private array $computing = [];
 
+    // The same tables with nobody in Developer mode, for judging what the live developer made in Default.
+    private ?self $asRoles = null;
+
     /**
      * @param  array<string, object>  $catalog  Rules keyed by permission_key, in catalog order.
      * @param  array<string, array<string, array{reach: ?string, executives: bool}>>  $presets  Role => rule => reach.
      * @param  array<int, Employee>  $employees
      * @param  list<object>  $grants
      * @param  list<object>  $limits
+     * @param  list<object>  $lists
+     * @param  array<int, array<string, ?string>>  $personal  Employee => rule => reach: their own defaults.
      */
     private function __construct(
         private readonly array $catalog,
@@ -71,6 +86,8 @@ final class PortalAccessGraph
         private readonly array $employees,
         private readonly array $grants,
         private readonly array $limits,
+        private readonly array $lists,
+        private readonly array $personal,
         private readonly ?int $liveDeveloper,
     ) {}
 
@@ -97,6 +114,11 @@ final class PortalAccessGraph
             ];
         }
 
+        $personal = [];
+        foreach ($connection->table('access_personal')->get() as $row) {
+            $personal[(int) $row->employee_id][(string) $row->permission_key] = $row->reach;
+        }
+
         $employees = [];
         foreach (Employee::query()->get(['id', 'first_name', 'last_name', 'id_no', 'department', 'role', 'role_level', 'is_developer', 'status']) as $employee) {
             $employees[(int) $employee->getKey()] = $employee;
@@ -108,6 +130,8 @@ final class PortalAccessGraph
             $employees,
             $connection->table('access_grants')->orderBy('id')->get()->all(),
             $connection->table('access_limits')->orderBy('id')->get()->all(),
+            $connection->table('access_lists')->orderBy('id')->get()->all(),
+            $personal,
             $liveDeveloper,
         );
     }
@@ -165,7 +189,7 @@ final class PortalAccessGraph
     /**
      * Every rule the person effectively holds, keyed by rule, in catalog order.
      *
-     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>}>
+     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}>
      */
     public function effective(int $employeeId): array
     {
@@ -176,11 +200,11 @@ final class PortalAccessGraph
      * The rules a maker may hand to, or limit on, this target: everything they hold for someone
      * below them, only their base rules for an equal.
      *
-     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>}>
+     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}>
      */
     public function powersFor(int $makerId, int $targetId): array
     {
-        return $this->compute($makerId, ! $this->areEquals($makerId, $targetId));
+        return $this->compute($makerId, ! $this->areEquals($makerId, $targetId, null));
     }
 
     /**
@@ -191,15 +215,113 @@ final class PortalAccessGraph
     {
         $employee = $this->employees[$employeeId] ?? null;
         $minimum = $this->catalog[$key]->min_tier ?? null;
+        $department = $this->catalog[$key]->only_department ?? null;
+        // A department-only rule is an admin's only while they are in that department; executives and Developer mode always may.
+        if ($employee !== null && $department !== null
+            && ! in_array($this->actingTier($employeeId), [self::TIER_EXECUTIVE, self::TIER_DEVELOPER], true)
+            && PortalPreview::department($employee->department) !== PortalPreview::department($department)) {
+            return false;
+        }
 
         return $employee !== null && ($minimum === null || self::TIER_RANK[$this->actingTier($employeeId)] >= (self::TIER_RANK[$minimum] ?? PHP_INT_MAX));
+    }
+
+    // Why the person can never hold the rule, for a refusal; null when they can.
+    public function holdRefusal(int $employeeId, string $key): ?string
+    {
+        if ($this->canHold($employeeId, $key)) {
+            return null;
+        }
+        $department = $this->catalog[$key]->only_department ?? null;
+
+        return $department !== null && ($this->catalog[$key]->min_tier ?? null) !== self::TIER_DEVELOPER
+            && self::TIER_RANK[$this->actingTier($employeeId)] >= self::TIER_RANK[self::TIER_ADMIN]
+            ? 'Only executives and '.$department.' administrators can hold that power.'
+            : 'Only an administrator or above can hold that power.';
+    }
+
+    /**
+     * Where the person starts, before any gift or limit: their role preset and their own defaults,
+     * each only where their role and department may hold it.
+     *
+     * @return array<string, array{reach: ?string, executives: bool, personal: bool}>
+     */
+    private function startingRules(int $employeeId): array
+    {
+        $employee = $this->employees[$employeeId] ?? null;
+        if ($employee === null) {
+            return [];
+        }
+        $rules = [];
+        foreach ($this->presets[self::tier($employee)] ?? [] as $key => $preset) {
+            if ($this->canHold($employeeId, $key)) {
+                $rules[$key] = ['reach' => $preset['reach'], 'executives' => $preset['executives'], 'personal' => false];
+            }
+        }
+        foreach ($this->personal[$employeeId] ?? [] as $key => $reach) {
+            if (! isset($this->catalog[$key]) || ! $this->canHold($employeeId, $key)) {
+                continue;
+            }
+            $current = $rules[$key] ?? null;
+            $rules[$key] = [
+                'reach' => self::reachRank($reach) > self::reachRank($current['reach'] ?? null) ? $reach : ($current['reach'] ?? null),
+                'executives' => $current['executives'] ?? false,
+                'personal' => $current === null,
+            ];
+        }
+
+        return $rules;
+    }
+
+    // Held only in Developer mode, so no gift or limit can ever reach it, even from another developer.
+    public function isDeveloperOnly(string $key): bool
+    {
+        return ($this->catalog[$key]->min_tier ?? null) === self::TIER_DEVELOPER;
+    }
+
+    // A rule whose people can be narrowed with a white or black list.
+    public function supportsList(string $key): bool
+    {
+        return (bool) ($this->catalog[$key]->supports_list ?? false);
+    }
+
+    /**
+     * The white and black lists on a person's rule that count right now: like a limit, each counts
+     * only while its maker may still manage them and holds the rule. A maker's Developer mode list
+     * and Default list are two lists.
+     *
+     * @return list<array{maker: int, asDeveloper: bool, mode: string, ids: list<int>}>
+     */
+    public function listsOn(int $targetId, string $key): array
+    {
+        $lists = [];
+        $refused = [];
+        foreach ($this->lists as $row) {
+            $makerId = (int) $row->set_by;
+            $asDeveloper = (bool) $row->as_developer;
+            $slot = $makerId.':'.($asDeveloper ? 'dev' : 'role');
+            if ((int) $row->employee_id !== $targetId || $row->permission_key !== $key || isset($refused[$slot])) {
+                continue;
+            }
+            if (! isset($lists[$slot])) {
+                if ($this->validMaker($makerId, $targetId, $key, $asDeveloper) === null) {
+                    $refused[$slot] = true;
+
+                    continue;
+                }
+                $lists[$slot] = ['maker' => $makerId, 'asDeveloper' => $asDeveloper, 'mode' => (string) $row->mode, 'ids' => []];
+            }
+            $lists[$slot]['ids'][] = (int) $row->subject_id;
+        }
+
+        return array_values($lists);
     }
 
     /**
      * The person's rules, from their role and the people above them; with $withEquals, also from
      * the equals who may manage them. Equals are judged on these base rules alone.
      *
-     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>}>
+     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}>
      */
     private function compute(int $employeeId, bool $withEquals): array
     {
@@ -222,8 +344,10 @@ final class PortalAccessGraph
 
         $this->computing[$slot] = true;
         $rules = [];
-        foreach ($this->presets[self::tier($employee)] ?? [] as $key => $preset) {
-            $rules[$key] = ['reach' => $preset['reach'], 'executives' => $preset['executives'], 'fromRole' => true, 'givenBy' => []];
+        // Their role preset, then their own defaults on top: both count as where they start, so a limit takes either away.
+        foreach ($this->startingRules($employeeId) as $key => $start) {
+            $rules[$key] = ['reach' => $start['reach'], 'executives' => $start['executives'], 'fromRole' => true, 'givenBy' => [], 'givenByDeveloper' => []]
+                + ($start['personal'] ? ['personal' => true] : []);
         }
 
         foreach ($this->grants as $grant) {
@@ -231,30 +355,33 @@ final class PortalAccessGraph
                 continue;
             }
             $giverId = (int) $grant->granted_by;
-            if ((! $withEquals && $this->areEquals($giverId, $employeeId)) || ! $this->canHold($employeeId, (string) $grant->permission_key)) {
+            $asDeveloper = (bool) $grant->as_developer;
+            if ((! $withEquals && $this->areEquals($giverId, $employeeId, $asDeveloper)) || ! $this->canHold($employeeId, (string) $grant->permission_key)) {
                 continue;
             }
-            $held = $this->validMaker($giverId, $employeeId, (string) $grant->permission_key);
+            $held = $this->validMaker($giverId, $employeeId, (string) $grant->permission_key, $asDeveloper);
             if ($held === null) {
                 continue;
             }
             $reach = self::reachRank($grant->reach) <= self::reachRank($held['reach']) ? $grant->reach : $held['reach'];
             $executives = (bool) $grant->include_executives && $held['executives'];
             $key = (string) $grant->permission_key;
-            $current = $rules[$key] ?? ['reach' => null, 'executives' => false, 'fromRole' => false, 'givenBy' => []];
+            $current = $rules[$key] ?? ['reach' => null, 'executives' => false, 'fromRole' => false, 'givenBy' => [], 'givenByDeveloper' => []];
             $rules[$key] = [
                 'reach' => self::reachRank($reach) > self::reachRank($current['reach']) ? $reach : $current['reach'],
                 'executives' => $current['executives'] || $executives,
                 'fromRole' => $current['fromRole'],
                 'givenBy' => array_values(array_unique([...$current['givenBy'], $giverId])),
+                'givenByDeveloper' => $asDeveloper ? array_values(array_unique([...$current['givenByDeveloper'], $giverId])) : $current['givenByDeveloper'],
             ];
         }
 
         foreach ($this->limits as $limit) {
-            if ((int) $limit->employee_id !== $employeeId || (! $withEquals && $this->areEquals((int) $limit->limited_by, $employeeId))) {
+            $asDeveloper = (bool) $limit->as_developer;
+            if ((int) $limit->employee_id !== $employeeId || (! $withEquals && $this->areEquals((int) $limit->limited_by, $employeeId, $asDeveloper))) {
                 continue;
             }
-            if ($this->validMaker((int) $limit->limited_by, $employeeId, (string) $limit->permission_key) !== null) {
+            if ($this->validMaker((int) $limit->limited_by, $employeeId, (string) $limit->permission_key, $asDeveloper) !== null) {
                 foreach ($this->subtree((string) $limit->permission_key) as $key) {
                     unset($rules[$key]);
                 }
@@ -273,6 +400,16 @@ final class PortalAccessGraph
      */
     public function canManage(int $makerId, int $targetId): bool
     {
+        return $this->manages($makerId, $targetId, true);
+    }
+
+    /**
+     * With $borrowed, "Manage other admins" received from an equal counts too, except over whoever
+     * gave it. Without it only a base "Manage other admins" does, which is how an equal's gift is
+     * judged, so borrowing never leans on another borrowed power and cannot loop.
+     */
+    private function manages(int $makerId, int $targetId, bool $borrowed): bool
+    {
         $maker = $this->employees[$makerId] ?? null;
         $target = $this->employees[$targetId] ?? null;
         if ($maker === null || $target === null || $makerId === $targetId || ! self::isActive($maker) || ! self::isActive($target)) {
@@ -287,7 +424,11 @@ final class PortalAccessGraph
         } elseif ($makerRank === $targetRank) {
             $rules = $this->compute($makerId, false);
             if (! isset($rules[self::PEERS_KEY])) {
-                return false;
+                // Borrowed from an equal: it counts only while it survives every limit, and never over a lender.
+                $held = $borrowed ? ($this->compute($makerId, true)[self::PEERS_KEY] ?? null) : null;
+                if ($held === null || in_array($targetId, $held['givenBy'], true)) {
+                    return false;
+                }
             }
         } else {
             return false;
@@ -307,22 +448,22 @@ final class PortalAccessGraph
     }
 
     /**
-     * How far the person would hold a rule without one maker's gift: their role plus everyone
-     * else's gifts. Tells an editor whether switching a power off takes back or limits.
+     * How far the person would hold a rule without one maker's gift (in one mode, or either when
+     * null): their role plus every other gift. Tells an editor whether switching off takes back or limits.
      *
      * @return array{holds: bool, reach: ?string}
      */
-    public function without(int $targetId, string $key, int $makerId): array
+    public function without(int $targetId, string $key, int $makerId, ?bool $asDeveloper = null): array
     {
-        $employee = $this->employees[$targetId] ?? null;
-        $preset = $employee === null ? null : ($this->presets[self::tier($employee)][$key] ?? null);
-        $holds = $preset !== null;
-        $reach = $preset['reach'] ?? null;
+        $start = $this->startingRules($targetId)[$key] ?? null;
+        $holds = $start !== null;
+        $reach = $start['reach'] ?? null;
         foreach ($this->grantsOn($targetId) as $grant) {
-            if ($grant->permission_key !== $key || (int) $grant->granted_by === $makerId) {
+            $isTheirs = (int) $grant->granted_by === $makerId && ($asDeveloper === null || (bool) $grant->as_developer === $asDeveloper);
+            if ($grant->permission_key !== $key || $isTheirs) {
                 continue;
             }
-            $held = $this->validMaker((int) $grant->granted_by, $targetId, $key);
+            $held = $this->validMaker((int) $grant->granted_by, $targetId, $key, (bool) $grant->as_developer);
             if ($held === null) {
                 continue;
             }
@@ -396,6 +537,45 @@ final class PortalAccessGraph
         return $names;
     }
 
+    /**
+     * Makers as a viewer should read them: what someone did in Developer mode is "a developer" to a
+     * viewer who is not in Developer mode, and their name with the mode to one who is.
+     *
+     * @param  list<array{id: int, asDeveloper: bool}>  $makers
+     * @return list<string>
+     */
+    public function makerNames(array $makers, bool $viewerIsDeveloper): array
+    {
+        $names = [];
+        foreach ($makers as $maker) {
+            $employee = $this->employees[$maker['id']] ?? null;
+            if ($employee === null) {
+                continue;
+            }
+            $names[] = match (true) {
+                ! $maker['asDeveloper'] => self::name($employee),
+                $viewerIsDeveloper => self::name($employee).self::DEVELOPER_MODE_SUFFIX,
+                default => self::DEVELOPER_NAME,
+            };
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    /**
+     * Who gave a rule, each with the mode their counted gift was made in.
+     *
+     * @param  array{givenBy: list<int>, givenByDeveloper: list<int>}  $rule
+     * @return list<array{id: int, asDeveloper: bool}>
+     */
+    public static function givers(array $rule): array
+    {
+        return array_map(
+            static fn (int $id): array => ['id' => $id, 'asDeveloper' => in_array($id, $rule['givenByDeveloper'], true)],
+            $rule['givenBy'],
+        );
+    }
+
     public static function name(Employee $employee): string
     {
         return PortalSubmittedReportPresenter::memberName(
@@ -421,23 +601,38 @@ final class PortalAccessGraph
     }
 
     /**
-     * What the maker holds of a rule, when their grant or limit on the target still counts.
+     * What the maker holds of a rule, when their grant, limit or list on the target still counts.
+     * One made in Developer mode counts while the maker is still a developer; one made in Default
+     * is judged on the maker's role, whatever mode they are in now.
      *
-     * @return array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>}|null
+     * @return array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}|null
      */
-    public function validMaker(int $makerId, int $targetId, string $key): ?array
+    public function validMaker(int $makerId, int $targetId, string $key, bool $asDeveloper = false): ?array
     {
-        if ($this->isDeveloperMaker($makerId, $targetId)) {
-            return ['reach' => 'all', 'executives' => true, 'fromRole' => true, 'givenBy' => []];
+        if ($asDeveloper) {
+            return $this->isDeveloperMaker($makerId, $targetId)
+                ? ['reach' => 'all', 'executives' => true, 'fromRole' => true, 'givenBy' => [], 'givenByDeveloper' => []]
+                : null;
         }
-        if (! $this->canManage($makerId, $targetId)) {
+        $judge = $this->judgeOf($makerId);
+        if (! $judge->canManage($makerId, $targetId)) {
             return null;
         }
 
-        return $this->powersFor($makerId, $targetId)[$key] ?? null;
+        return $judge->powersFor($makerId, $targetId)[$key] ?? null;
     }
 
-    // A developer's gift or limit counts as a developer's whatever mode they are in now.
+    // The graph that judges what this maker did in Default: the one with nobody live when it is them.
+    private function judgeOf(int $makerId): self
+    {
+        if ($makerId !== $this->liveDeveloper) {
+            return $this;
+        }
+
+        return $this->asRoles ??= new self($this->catalog, $this->presets, $this->employees, $this->grants, $this->limits, $this->lists, $this->personal, null);
+    }
+
+    // Still a developer and still active: what they made in Developer mode keeps counting.
     private function isDeveloperMaker(int $makerId, int $targetId): bool
     {
         $maker = $this->employees[$makerId] ?? null;
@@ -446,28 +641,38 @@ final class PortalAccessGraph
             && isset($this->employees[$targetId]) && self::isActive($maker);
     }
 
-    // Same role tier: two admins, two executives. A developer maker is never an equal.
-    private function areEquals(int $makerId, int $targetId): bool
+    /**
+     * Same role tier: two admins, two executives. For a stored row ($asDeveloper set) it is the
+     * maker's role, and a Developer mode row is never an equal's; for someone acting now (null) it
+     * is how they act, so a developer in Developer mode is nobody's equal.
+     */
+    private function areEquals(int $makerId, int $targetId, ?bool $asDeveloper): bool
     {
         $maker = $this->employees[$makerId] ?? null;
         $target = $this->employees[$targetId] ?? null;
-        if ($maker === null || $target === null || $this->isDeveloperMaker($makerId, $targetId)) {
+        if ($maker === null || $target === null) {
+            return false;
+        }
+        if ($asDeveloper === null) {
+            return $this->actingTier($makerId) === self::tier($target);
+        }
+        if ($asDeveloper && $this->isDeveloperMaker($makerId, $targetId)) {
             return false;
         }
 
-        return $this->actingTier($makerId) === self::tier($target);
+        return self::tier($maker) === self::tier($target);
     }
 
     /**
      * Every rule in the catalog at its widest, for the viewer in Developer mode.
      *
-     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>}>
+     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}>
      */
     private function everything(): array
     {
         $rules = [];
         foreach ($this->catalog as $key => $row) {
-            $rules[$key] = ['reach' => (bool) $row->supports_reach ? 'all' : null, 'executives' => true, 'fromRole' => true, 'givenBy' => []];
+            $rules[$key] = ['reach' => (bool) $row->supports_reach ? 'all' : null, 'executives' => true, 'fromRole' => true, 'givenBy' => [], 'givenByDeveloper' => []];
         }
 
         return $rules;
@@ -482,8 +687,8 @@ final class PortalAccessGraph
      * Catalog order, and a rule whose parent is not held is dropped: a tab without its page is
      * nowhere to be.
      *
-     * @param  array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>}>  $rules
-     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>}>
+     * @param  array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}>  $rules
+     * @return array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}>
      */
     private function ordered(array $rules): array
     {

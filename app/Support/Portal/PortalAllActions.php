@@ -56,6 +56,8 @@ final class PortalAllActions
      * Resolved per call, never captured: a Route memoizes the controller it built, so a zone held
      * in a constructor would answer for whoever happened to call first.
      */
+    private const RULE = 'administration.actions';
+
     public function __construct(private readonly PortalTimezone $timezone) {}
 
     /**
@@ -85,6 +87,8 @@ final class PortalAllActions
         $resource = $this->resource($request);
         $databaseTarget = $this->databaseTarget($request);
         $actorId = $this->actorId($request);
+        $viewerIsDeveloper = $this->viewerIsDeveloper($request);
+        $visible = $this->visible($request);
         $year = $this->year($request);
         $month = $this->month($request);
         $day = $this->day($request);
@@ -96,11 +100,14 @@ final class PortalAllActions
         $key = 'portal:administration:all-actions:'.$version.':'.$timezoneKey.':'.$page.':'.$perPage
             .':'.md5($search).':'.($actionType ?? 'all').':'.md5($resource ?? 'all')
             .':'.md5($databaseTarget ?? 'all').':'.($actorId ?? 'all')
-            .':'.($year ?? 'all').':'.($month ?? 'all').':'.($day ?? 'all').':'.$sort.':'.$dir;
+            .':'.($year ?? 'all').':'.($month ?? 'all').':'.($day ?? 'all').':'.$sort.':'.$dir
+            .':'.($viewerIsDeveloper ? 'dev' : 'default').':'.md5((string) json_encode($visible));
 
         return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use (
             $actionType,
             $actorId,
+            $viewerIsDeveloper,
+            $visible,
             $databaseTarget,
             $day,
             $dir,
@@ -127,23 +134,33 @@ final class PortalAllActions
                 $search,
                 $sort,
                 $timezone,
+                $viewerIsDeveloper,
+                $visible,
             );
         });
     }
 
     /**
-     * One ledger row, payload included. `AllActionsController` is already Admin/Executive only, so
-     * no further ownership check happens here.
+     * One ledger row, payload included, when its actor is one the viewer may see; otherwise 404,
+     * exactly like one that does not exist.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function showAll(int $id): array
+    public function showAll(int $id, Request $request): array
     {
         $timezone = $this->timezone->zone();
+        $viewerIsDeveloper = $this->viewerIsDeveloper($request);
+        $visible = $this->visible($request);
+        $readable = Action::query()->where('product', CoreLedger::PRODUCT_PORTAL)->where('id', $id);
+        PortalVisibleActors::apply($readable, $visible, 'actor_id');
+        if (! $readable->exists()) {
+            abort(404, 'That action was not found.');
+        }
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:administration:all-actions:detail:'.$version.':'.md5($timezone->getName()).':'.$id;
+        $key = 'portal:administration:all-actions:detail:'.$version.':'.md5($timezone->getName()).':'.$id
+            .':'.($viewerIsDeveloper ? 'dev' : 'default');
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($id, $timezone): array {
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($id, $timezone, $viewerIsDeveloper): array {
             $row = Action::query()
                 ->select(PortalAllActionsPresenter::detailColumns())
                 ->where('product', CoreLedger::PRODUCT_PORTAL)
@@ -162,6 +179,7 @@ final class PortalAllActions
                     $row,
                     $this->employeeDirectory($employeeId > 0 ? [$employeeId] : []),
                     $timezone,
+                    $viewerIsDeveloper,
                 ),
             ];
         });
@@ -211,16 +229,23 @@ final class PortalAllActions
         string $search,
         string $sort,
         DateTimeZone $timezone,
+        bool $viewerIsDeveloper,
+        array $visible,
     ): array {
         $columns = PortalAllActionsPresenter::columns();
         $query = Action::query()
             ->select($columns)
             ->where('product', CoreLedger::PRODUCT_PORTAL);
+        PortalVisibleActors::apply($query, $visible, 'actor_id');
         $total = (int) (clone $query)->toBase()->count();
-        $filters = $this->filters($timezone);
+        $filters = $this->filters($timezone, $viewerIsDeveloper, $visible);
 
         if ($actorId !== null) {
             $query->where('actor_id', $actorId);
+            // Someone's name never leads to what they did in Developer mode, for a viewer who cannot see it.
+            if (! $viewerIsDeveloper) {
+                $query->where('as_developer', false);
+            }
         }
         if ($actionType !== null) {
             $query->where('action_type', $actionType);
@@ -232,7 +257,7 @@ final class PortalAllActions
             $query->where('database_target', $databaseTarget);
         }
         $this->applyDate($query, $year, $month, $day, $timezone, $filters['years']);
-        $this->applySearch($query, $search);
+        $this->applySearch($query, $search, $viewerIsDeveloper);
         $this->applyOrder($query, $sort, $dir);
 
         $pageResult = $query->paginate($perPage, $columns, 'page', $page);
@@ -251,7 +276,7 @@ final class PortalAllActions
         $rows = [];
         foreach ($pageResult->items() as $row) {
             if ($row instanceof Action) {
-                $rows[] = PortalAllActionsPresenter::item($row, $employees, $timezone);
+                $rows[] = PortalAllActionsPresenter::item($row, $employees, $timezone, $viewerIsDeveloper);
             }
         }
 
@@ -285,14 +310,14 @@ final class PortalAllActions
      *     actors: list<array{value: string, label: string}>
      * }
      */
-    private function filters(DateTimeZone $timezone): array
+    private function filters(DateTimeZone $timezone, bool $viewerIsDeveloper, array $visible): array
     {
         // toBase() drops the model casts, so created_at arrives as a string here.
-        $rows = Action::query()
-            ->select(['action_type', 'resource', 'database_target', 'actor_id', 'actor_id_no', 'created_at'])
-            ->where('product', CoreLedger::PRODUCT_PORTAL)
-            ->toBase()
-            ->get();
+        $query = Action::query()
+            ->select(['action_type', 'resource', 'database_target', 'actor_id', 'actor_id_no', 'as_developer', 'created_at'])
+            ->where('product', CoreLedger::PRODUCT_PORTAL);
+        PortalVisibleActors::apply($query, $visible, 'actor_id');
+        $rows = $query->toBase()->get();
 
         $actionTypes = [];
         $resources = [];
@@ -316,7 +341,9 @@ final class PortalAllActions
                 $databaseTargets[$databaseTarget] = true;
             }
             $actorId = (int) ($row->actor_id ?? 0);
-            if ($actorId > 0 && ! isset($actors[$actorId])) {
+            // A Developer mode row offers no name to a viewer who cannot see who it was.
+            $hidden = ! $viewerIsDeveloper && (bool) ($row->as_developer ?? false);
+            if ($actorId > 0 && ! $hidden && ! isset($actors[$actorId])) {
                 $idNo = trim((string) ($row->actor_id_no ?? ''));
                 $actors[$actorId] = $idNo !== '' ? $idNo : (string) $actorId;
             }
@@ -467,7 +494,7 @@ final class PortalAllActions
      * The `parameters` blob is deliberately not searched: it is the one unindexed column, and every
      * field worth matching on is already duplicated into a column beside it.
      */
-    private function applySearch(Builder $query, string $search): void
+    private function applySearch(Builder $query, string $search, bool $viewerIsDeveloper): void
     {
         if ($search === '') {
             return;
@@ -476,19 +503,46 @@ final class PortalAllActions
         foreach (preg_split('/\s+/', $search, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
             $like = '%'.$word.'%';
             $matchingIds = $this->employeeIdsMatching($word);
-            $query->where(function (Builder $builder) use ($like, $matchingIds): void {
+            $query->where(function (Builder $builder) use ($like, $matchingIds, $viewerIsDeveloper): void {
                 $builder
                     ->where('action_type', 'like', $like)
                     ->orWhere('resource', 'like', $like)
                     ->orWhere('record_id', 'like', $like)
-                    ->orWhere('recycle_key', 'like', $like)
-                    ->orWhere('database_target', 'like', $like)
-                    ->orWhere('actor_id_no', 'like', $like);
-                if ($matchingIds !== []) {
-                    $builder->orWhereIn('actor_id', $matchingIds);
-                }
+                    ->orWhere('database_target', 'like', $like);
+                // Whatever names the actor finds a Developer mode row only for a viewer who may see who it was.
+                $builder->orWhere(function (Builder $named) use ($like, $matchingIds, $viewerIsDeveloper): void {
+                    $named->where(function (Builder $who) use ($like, $matchingIds): void {
+                        $who->where('actor_id_no', 'like', $like)->orWhere('recycle_key', 'like', $like);
+                        if ($matchingIds !== []) {
+                            $who->orWhereIn('actor_id', $matchingIds);
+                        }
+                    });
+                    if (! $viewerIsDeveloper) {
+                        $named->where('as_developer', false);
+                    }
+                });
             });
         }
+    }
+
+    private function viewerIsDeveloper(Request $request): bool
+    {
+        $viewer = $request->attributes->get('portalEmployee');
+
+        return $viewer instanceof Employee && PortalDeveloperMode::isOn($viewer, $request);
+    }
+
+    /**
+     * @return array{ids: list<int>, unknownToo: bool, everyone: list<int>}
+     */
+    private function visible(Request $request): array
+    {
+        $viewer = $request->attributes->get('portalEmployee');
+        if (! $viewer instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return PortalVisibleActors::for($viewer, $request, self::RULE);
     }
 
     /**

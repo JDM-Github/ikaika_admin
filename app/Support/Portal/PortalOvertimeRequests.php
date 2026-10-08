@@ -172,10 +172,11 @@ final class PortalOvertimeRequests
             );
             $this->audit->notifyManagers(
                 $actor,
+                'manage.requests.overtime',
                 PortalNotificationType::REQUEST_FILED_OVERTIME,
                 'New overtime request',
                 PortalActivityCopy::notifyFiled(
-                    PortalActivityCopy::displayName($actor),
+                    PortalActivityCopy::actorName($actor, $request, true),
                     'overtime request',
                     $group['date'],
                     $group['date'],
@@ -347,9 +348,10 @@ final class PortalOvertimeRequests
         );
         $this->audit->notifyManagers(
             $actor,
+            'manage.requests.overtime',
             PortalNotificationType::REQUEST_CANCELLED_OVERTIME,
             'Overtime request cancelled',
-            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'overtime request', $day),
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::actorName($actor, $request, true), 'overtime request', $day),
             PortalShellPath::MANAGE_REQUESTS,
             'Open queue',
             ['recordId' => (string) (int) $row->id],
@@ -511,6 +513,8 @@ final class PortalOvertimeRequests
             ->table('employees_projects')
             ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
             ->where('employees_projects.employee_id', $employeeId)
+            // A deleted project waits in the Recycle Bin: nothing new may be filed against it.
+            ->whereNull('projects.deleted_at')
             ->select(['projects.id', 'projects.project_number', 'projects.project_name'])
             ->get();
 

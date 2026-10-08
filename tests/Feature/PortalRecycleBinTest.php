@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Modules\Core\Models\Action;
 use App\Modules\Core\Models\Recycle;
 use App\Modules\Portal\Models\Employee;
-use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreLedger;
 use App\Support\Core\CoreRecycleKey;
@@ -198,6 +197,10 @@ class PortalRecycleBinTest extends TestCase
         )->assertOk();
 
         $this->assertSame(2, $requests->json('counts.total'));
+        // The type tabs' counts ignore the open tab, and All is the three together.
+        $types = $requests->json('counts.types');
+        $this->assertSame(2, $types['request']);
+        $this->assertSame($types['report'] + $types['request'] + $types['project'], $types['all']);
         $this->assertSame(['request'], collect($requests->json('data'))->pluck('type')->unique()->values()->all());
         $this->assertNotContains('2026-08-20-daily', collect($requests->json('data'))->pluck('recordId')->all());
 
@@ -389,7 +392,8 @@ class PortalRecycleBinTest extends TestCase
         $this->assertSame(1, Recycle::query()->where('id', $recycled->id)->count());
     }
 
-    public function test_an_admin_restores_another_members_row_to_that_member(): void
+    // All Recycle only looks: restoring someone else's item could backfire on them, so they restore their own.
+    public function test_an_admin_sees_another_members_row_but_cannot_restore_it(): void
     {
         $admin = $this->adminWhoIsNotExecutive();
         $member = $this->activeMember();
@@ -417,34 +421,25 @@ class PortalRecycleBinTest extends TestCase
             ->first();
         $this->assertNotNull($recycled);
 
+        $this->getJson('/api/development/portal/administration/recycle-bin/'.$recycled->id, $adminHeaders)->assertOk();
         $this->postJson(
             '/api/development/portal/administration/recycle-bin/'.$recycled->id.'/restore',
             [],
             $adminHeaders,
-        )->assertNoContent();
+        )->assertForbidden()->assertJsonPath('message', 'All Recycle is view only: people restore their own items.');
 
+        $this->assertSame(1, Recycle::query()->where('id', $recycled->id)->count());
         $memberList = $this->getJson(
             '/api/development/portal/reports/submitted?from='.$today.'&to='.$today,
             $memberHeaders,
         )->assertOk();
-        $this->assertContains($today.'-daily', collect($memberList->json('data'))->pluck('id')->all());
-
-        $inbox = PortalNotification::query()
-            ->where('employee_id', $member->getKey())
-            ->where('type', 'administration.recycle-bin.restored')
-            ->where('actor_id', $admin->getKey())
-            ->orderByDesc('id')
-            ->first();
-        $this->assertNotNull($inbox);
-        $this->assertStringContainsString('was restored by', (string) $inbox->message);
-
-        $added = Action::query()
+        $this->assertNotContains($today.'-daily', collect($memberList->json('data'))->pluck('id')->all());
+        $this->assertFalse(Action::query()
             ->where('product', CoreLedger::PRODUCT_PORTAL)
             ->where('recycle_key', $recycleKey)
             ->where('action_type', CoreActionType::ADD)
-            ->first();
-        $this->assertNotNull($added);
-        $this->assertSame((int) $admin->getKey(), $added->actor_id);
+            ->where('actor_id', $admin->getKey())
+            ->exists());
     }
 
     public function test_restore_is_refused_when_a_live_report_already_occupies_the_day(): void
@@ -640,6 +635,28 @@ class PortalRecycleBinTest extends TestCase
     {
         $this->getJson('/api/development/portal/administration/recycle-bin/1')
             ->assertUnauthorized();
+    }
+
+    // Their own bin follows User / Recycle Bin, and restoring their own item follows its Restore rule.
+    public function test_the_own_bin_follows_its_rules(): void
+    {
+        $member = $this->activeMember();
+        $member->forceFill(['is_developer' => false])->save();
+        DB::connection('portal')->table('access_toggles')->where('employee_id', $member->id)->delete();
+        $this->emptyPortalBin();
+        $theirs = $this->putInBin($member);
+        $token = $this->loginToken($member);
+        $switch = fn (string $key) => $this->withToken($token)
+            ->patchJson('/api/development/portal/access/switches', ['key' => $key, 'on' => false])->assertOk();
+
+        $switch('user.recycle.restore');
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$theirs)->assertOk();
+        $this->withToken($token)->postJson('/api/development/portal/administration/recycle-bin/'.$theirs.'/restore')
+            ->assertForbidden()->assertJsonPath('message', 'You do not have access to this page.');
+
+        $switch('user.recycle');
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin')->assertForbidden();
+        $this->withToken($token)->getJson('/api/development/portal/administration/recycle-bin/'.$theirs)->assertForbidden();
     }
 
     private function activeMember(): Employee

@@ -21,6 +21,7 @@ class Action extends ProductModel
         return [
             'parameters' => 'array',
             'actor_id' => 'integer',
+            'as_developer' => 'boolean',
             'synced_at' => 'datetime',
             'created_at' => 'datetime',
         ];

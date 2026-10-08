@@ -11,7 +11,9 @@ use Illuminate\Support\Facades\Mail;
 use Throwable;
 
 /**
- * Emails Admin/Executive inboxes when a signed-in user hits a route they cannot use.
+ * Emails whoever holds Access alerts (administration.alerts) when a signed-in user hits a route they
+ * cannot use. Admins and executives hold it by preset, so by default they get it; switching it off,
+ * or a limit on it, takes someone off the list, and a gift puts them on it.
  *
  * Unauthenticated 401s are login noise and stay quiet. Mail is rate-limited per actor,
  * method, and path so a probe cannot become a mail bomb. The body never includes tokens.
@@ -19,6 +21,8 @@ use Throwable;
 final class PortalAccessAlert
 {
     public const CACHE_TTL_SECONDS = 900;
+
+    private const ALERTS_RULE = 'administration.alerts';
 
     public function report(Request $request, string $reason): bool
     {
@@ -68,15 +72,19 @@ final class PortalAccessAlert
      */
     private function recipientEmails(Employee $actor): array
     {
+        $ids = [];
+        foreach (PortalRules::holders([self::ALERTS_RULE]) as $holder) {
+            $ids[] = (int) $holder['employee']->getKey();
+        }
+        if ($ids === []) {
+            return [];
+        }
+
         $emails = Employee::query()
             ->toBase()
-            ->select(['id', 'email'])
+            ->whereIn('id', $ids)
             ->where('id', '!=', $actor->getKey())
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->where(function ($builder): void {
-                $builder->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
-                    ->orWhereRaw("LOWER(COALESCE(role, '')) = 'admin'");
-            })
             ->whereNotNull('email')
             ->where('email', '!=', '')
             ->pluck('email');

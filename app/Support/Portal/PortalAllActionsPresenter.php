@@ -27,6 +27,7 @@ final class PortalAllActionsPresenter
             'recycle_key',
             'actor_id',
             'actor_id_no',
+            'as_developer',
             'synced_at',
             'created_at',
         ];
@@ -68,8 +69,18 @@ final class PortalAllActionsPresenter
      *     createdAtLabel: string
      * }
      */
-    public static function item(Action $row, array $employees, DateTimeZone $timezone): array
+    public static function item(Action $row, array $employees, DateTimeZone $timezone, bool $viewerIsDeveloper = false): array
     {
+        if ((bool) $row->as_developer && ! $viewerIsDeveloper) {
+            // Nothing that points back at them: no id, no ID number, and not the key built from their id.
+            return [
+                ...self::item($row, [], $timezone, true),
+                'recycleKey' => null,
+                'employeeId' => null,
+                'employeeIdNo' => null,
+                'employeeName' => PortalAccessGraph::DEVELOPER_NAME_CAPITAL,
+            ];
+        }
         $createdAt = self::instant($row->created_at);
         $local = $createdAt->copy()->setTimezone($timezone);
 
@@ -94,7 +105,7 @@ final class PortalAllActionsPresenter
             'recycleKey' => $recycleKey !== '' ? $recycleKey : null,
             'employeeId' => $employeeId,
             'employeeIdNo' => $idNo,
-            'employeeName' => $known['name'] ?? ($idNo ?? 'Member'),
+            'employeeName' => ($known['name'] ?? ($idNo ?? 'Member')).((bool) $row->as_developer ? PortalAccessGraph::DEVELOPER_MODE_SUFFIX : ''),
             'syncedAt' => $row->synced_at === null ? null : self::instant($row->synced_at)->utc()->toIso8601String(),
             'createdAt' => $createdAt->copy()->utc()->toIso8601String(),
             'dateLabel' => $local->format('l, F j, Y'),
@@ -119,13 +130,13 @@ final class PortalAllActionsPresenter
      * @param  array<int, array{name: string, idNo: ?string}>  $employees
      * @return array<string, mixed>
      */
-    public static function detail(Action $row, array $employees, DateTimeZone $timezone): array
+    public static function detail(Action $row, array $employees, DateTimeZone $timezone, bool $viewerIsDeveloper = false): array
     {
         $blob = is_array($row->parameters) ? $row->parameters : [];
         $payload = $blob['parameters'] ?? $blob;
 
         return [
-            ...self::item($row, $employees, $timezone),
+            ...self::item($row, $employees, $timezone, $viewerIsDeveloper),
             'payload' => is_array($payload) ? $payload : [],
         ];
     }

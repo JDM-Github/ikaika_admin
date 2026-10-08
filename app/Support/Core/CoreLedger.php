@@ -25,6 +25,8 @@ final class CoreLedger
 
     public const DEFAULT_RETAIN_DAYS = 30;
 
+    public function __construct(private readonly ?CoreDeveloperActs $developerActs = null) {}
+
     /**
      * Runs a product write and its ledger rows as one unit: the core transaction nests inside the
      * product one, so a throw anywhere rolls both back and a write can never land unlogged.
@@ -225,6 +227,7 @@ final class CoreLedger
             'recycle_key' => $recycleKey,
             'actor_id' => $actorId,
             'actor_id_no' => $actorIdNo,
+            'as_developer' => $actorId !== null && $this->developerActs?->isDevelopersAct($actorId) === true,
             'parameters' => $this->json($envelope),
             'synced_at' => null,
             'created_at' => Carbon::now(),

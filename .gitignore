@@ -63,10 +63,16 @@ msal_test/
 .ikaika_scripts_configs/.sql-applied.json
 *.private.*
 __pycache__/
+*.pyc
 # Generated exports: raw Airtable JSON, downloaded bank certificates, SSS/PhilHealth/TIN
-# scans and employee photos, plus the SQL built from them. Never commit any of it.
+# scans and employee photos, plus the SQL built from them. Never commit any of it. The
+# Airtable token authenticates to the live base.
 migrations/outputs/
 migrations/export_*/
 migrations/*.sql
-migrations/.token.private.txt
-graphify-out/
+/migrations/.token*
+/migrations/generate/__pycache__/
+# Local copies of other systems' code, kept for reference while working on email.
+email-test/
+
+/deployment/out/

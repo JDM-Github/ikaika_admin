@@ -113,10 +113,13 @@ class PortalSubmittedReportsTest extends TestCase
 
         $first = $daily['entries'][0];
         $this->assertSame(
-            ['id', 'projectLabel', 'activityLabel', 'earnCodeLabel', 'hoursRendered', 'elementChange'],
+            ['id', 'projectLabel', 'activityLabel', 'earnCodeLabel', 'hoursRendered', 'elementChange', 'projectId', 'projectDepartment'],
             array_keys($first),
         );
         $this->assertNotSame('Unassigned', $first['projectLabel']);
+        // The project the line was filed on, so an MIS line can show its code instead of items.
+        $this->assertSame((string) $project->id, $first['projectId']);
+        $this->assertSame(is_string($project->department ?? null) && trim($project->department) !== '' ? trim($project->department) : null, $first['projectDepartment']);
         $this->assertArrayNotHasKey('approval', $daily);
         $this->assertArrayNotHasKey('late_submission_approval', $daily);
         $this->assertArrayNotHasKey('approver_remarks', $daily);
@@ -157,6 +160,7 @@ class PortalSubmittedReportsTest extends TestCase
             '/api/development/portal/reports/submitted?from=2025-02-01&to=2025-02-28',
             ['Authorization' => "Bearer {$token}"],
         )->assertOk()->assertJsonPath('counts.reports', 5);
+        $queries = $this->withoutRuleCheck($queries);
 
         $this->assertLessThanOrEqual(9, count($queries));
         $this->assertSame(1, $this->countContaining($queries, 'offset_work_day'));
@@ -713,11 +717,12 @@ class PortalSubmittedReportsTest extends TestCase
             ->orderBy('user_reports.id')
             ->get(['user_reports.late_submission_approval', 'user_reports.approver_remarks', 'user_reports.is_support', 'user_reports.duration']);
         $this->assertCount(2, $lines);
-        $this->assertSame('Approved', $lines[0]->late_submission_approval);
+        // An edited late report goes back for approval (PortalLateReportsTest); the rest carries.
+        $this->assertSame('Pending', $lines[0]->late_submission_approval);
         $this->assertSame('Late is fine', $lines[0]->approver_remarks);
         $this->assertSame('Y', $lines[0]->is_support);
         $this->assertEquals(8, $lines[0]->duration);
-        $this->assertSame('Approved', $lines[1]->late_submission_approval);
+        $this->assertSame('Pending', $lines[1]->late_submission_approval);
         $this->assertSame('Late is fine', $lines[1]->approver_remarks);
         $this->assertNull($lines[1]->is_support);
     }
@@ -777,98 +782,13 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertSame(1, (int) $junction->is_flag);
     }
 
-    // The member's own view of Flag Reports: no name, since it can only ever be their own.
-    public function test_get_reports_flagged_returns_only_the_signed_in_member_s_own_flagged_reports(): void
+    // The member's own Flag Reports read is gone: a flagged member must never learn they are flagged.
+    public function test_a_member_cannot_read_their_own_flagged_reports(): void
     {
         $actor = $this->activeMember();
-        $other = $this->otherActiveMember($actor);
-        DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
-        $this->insertWarning($actor, 'Active');
-        $project = $this->firstOwnProject($actor);
-        $activity = $this->firstActivity();
-        $today = $this->freeDate($actor, 0);
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
 
-        $this->postJson('/api/development/portal/reports/submitted', [
-            'kind' => 'daily',
-            'reports' => [[
-                'reportDate' => $today,
-                'remarks' => 'Filed while on a warning',
-                'entries' => [[
-                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
-                        $project->project_number ?? null,
-                        $project->project_name ?? null,
-                    ),
-                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
-                        $activity->name ?? null,
-                        $activity->id_no ?? null,
-                    ),
-                    'hoursRendered' => 8,
-                    'elementChange' => 1,
-                ]],
-            ]],
-        ], $headers)->assertCreated();
-        // A different member's unrelated report, flagged or not, must never leak into this read.
-        $this->insertLine($other, [
-            'report_date' => $today,
-            'remarks' => 'OTHER-EMPLOYEE-SECRET',
-        ], $project, $activity, $this->firstEarnCode());
-
-        $response = $this->getJson(
-            '/api/development/portal/reports/flagged?from='.$today.'&to='.$today,
-            $headers,
-        )->assertOk()
-            ->assertJsonPath('section', 'reports')
-            ->assertJsonPath('resource', 'flagged');
-
-        $data = $response->json('data');
-        $this->assertIsArray($data);
-        $this->assertCount(1, $data);
-        $row = $data[0];
-        $this->assertIsArray($row);
-        $this->assertNull($row['memberName']);
-        $this->assertIsString($row['id']);
-        $this->assertSame($today, $row['submittedOn']);
-        $this->assertSame('daily', $row['kind']);
-        $this->assertSame('pending', $row['status']);
-        $this->assertNull($row['approverRemarks']);
-        $this->assertStringNotContainsString('OTHER-EMPLOYEE-SECRET', $response->getContent());
-    }
-
-    // A report filed without an active warning is never flagged, so it never appears here.
-    public function test_get_reports_flagged_omits_a_report_that_was_never_flagged(): void
-    {
-        $actor = $this->activeMember();
-        DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
-        $project = $this->firstOwnProject($actor);
-        $activity = $this->firstActivity();
-        $today = $this->freeDate($actor, 0);
-        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
-
-        $this->postJson('/api/development/portal/reports/submitted', [
-            'kind' => 'daily',
-            'reports' => [[
-                'reportDate' => $today,
-                'remarks' => 'Filed with no warning on file',
-                'entries' => [[
-                    'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
-                        $project->project_number ?? null,
-                        $project->project_name ?? null,
-                    ),
-                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
-                        $activity->name ?? null,
-                        $activity->id_no ?? null,
-                    ),
-                    'hoursRendered' => 8,
-                    'elementChange' => 1,
-                ]],
-            ]],
-        ], $headers)->assertCreated();
-
-        $this->getJson(
-            '/api/development/portal/reports/flagged?from='.$today.'&to='.$today,
-            $headers,
-        )->assertOk()->assertJsonPath('data', []);
+        $this->getJson('/api/development/portal/reports/flagged', $headers)->assertNotFound();
     }
 
     public function test_a_late_report_files_against_an_older_day_and_reads_back_as_late(): void
@@ -1022,7 +942,8 @@ class PortalSubmittedReportsTest extends TestCase
         $activity = $this->firstActivity();
         $earn = $this->firstEarnCode();
         $free = $this->freeDate($actor, 2);
-        $taken = $this->freeDate($actor, 3);
+        // Behind the first, so skipping a weekend can never hand both the same Friday.
+        $taken = $this->freeDate($actor, $this->daysAgo($free) + 1);
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
 
         $this->insertLine($actor, ['report_date' => $taken, 'hours_rendered' => 8], $project, $activity, $earn);
@@ -1053,6 +974,56 @@ class PortalSubmittedReportsTest extends TestCase
             ->where('employees_user_reports.employee_id', $actor->getKey())
             ->where('user_reports.report_date', $free)
             ->count());
+    }
+
+    // The reported ask: User Requests' Late tab edits and withdraws a pending late report of any age.
+    public function test_a_pending_late_report_is_edited_and_withdrawn_whatever_its_day(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $day = $this->freeDate($actor, 40);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $entry = [
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name ?? null, $activity->id_no ?? null),
+            'hoursRendered' => 8,
+            'elementChange' => 0,
+        ];
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'late',
+            'reports' => [['reportDate' => $day, 'remarks' => 'Filed after a power outage', 'entries' => [$entry]]],
+        ], $headers)->assertCreated();
+
+        $this->patchJson('/api/development/portal/reports/submitted/'.$day.'-late', [
+            'remarks' => 'Filed after a long power outage',
+            'entries' => [[...$entry, 'hoursRendered' => 6]],
+        ], $headers)->assertOk();
+
+        $this->deleteJson('/api/development/portal/reports/submitted/'.$day.'-late', [], $headers)->assertNoContent();
+        $this->getJson('/api/development/portal/reports/submitted/days?from='.$day.'&to='.$day, $headers)
+            ->assertOk()->assertJsonCount(0, 'data');
+    }
+
+    // Once decided, a late report is a record like any other: past the window it stays as it is.
+    public function test_a_decided_late_report_past_the_window_cannot_be_changed(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $earn = $this->firstEarnCode();
+        $day = $this->freeDate($actor, 40);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $this->insertLine($actor, [
+            'report_date' => $day,
+            'hours_rendered' => 8,
+            'late_submission' => 'Yes',
+            'late_submission_approval' => 'Approved',
+        ], $project, $activity, $earn);
+
+        $this->deleteJson('/api/development/portal/reports/submitted/'.$day.'-late', [], $headers)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Reports can only be changed for today or the last seven days.');
     }
 
     public function test_a_late_report_cannot_be_filed_for_today(): void
@@ -1091,6 +1062,46 @@ class PortalSubmittedReportsTest extends TestCase
         ], $headers)->assertCreated();
     }
 
+    public function test_filing_refuses_a_saturday_or_a_sunday_of_either_kind(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        // The portal's own day, so both weekend days fall inside the daily window it checks.
+        $today = app(PortalTimezone::class)->today();
+        $saturday = $today->copy()->previous(Carbon::SATURDAY)->toDateString();
+        $sunday = $today->copy()->previous(Carbon::SUNDAY)->toDateString();
+        $entries = [[
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel(
+                $project->project_number ?? null,
+                $project->project_name ?? null,
+            ),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                $activity->name ?? null,
+                $activity->id_no ?? null,
+            ),
+            'hoursRendered' => 4,
+            'elementChange' => 0,
+        ]];
+
+        foreach ([['daily', $saturday], ['daily', $sunday], ['late', $saturday], ['late', $sunday]] as [$kind, $day]) {
+            $this->postJson('/api/development/portal/reports/submitted', [
+                'kind' => $kind,
+                'reports' => [['reportDate' => $day, 'remarks' => 'Came in for a deadline', 'entries' => $entries]],
+            ], $headers)
+                ->assertStatus(422)
+                ->assertJsonPath('message', 'Reports are not filed for Saturdays or Sundays.');
+        }
+
+        $this->assertSame(0, DB::connection('portal')->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->whereIn('user_reports.report_date', [$saturday, $sunday])
+            ->whereNull('user_reports.airtable_record_id')
+            ->count());
+    }
+
     public function test_leave_blocks_a_filing_unless_the_request_was_rejected(): void
     {
         $actor = $this->activeMember();
@@ -1099,7 +1110,8 @@ class PortalSubmittedReportsTest extends TestCase
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
 
         $onLeave = $this->freeDate($actor, 1);
-        $refused = $this->freeDate($actor, 2);
+        // Behind the first, so skipping a weekend can never hand both the same Friday.
+        $refused = $this->freeDate($actor, $this->daysAgo($onLeave) + 1);
         $this->insertRequest($actor, ['request_date' => $onLeave, 'status' => 'Pending']);
         $this->insertRequest($actor, ['request_date' => $refused, 'status' => 'Rejected']);
 
@@ -1162,7 +1174,7 @@ class PortalSubmittedReportsTest extends TestCase
         )->assertOk();
         // The token check reads the employee row; the payload itself is the two below.
         $queries = array_values(array_filter(
-            $queries,
+            $this->withoutRuleCheck($queries),
             static fn (string $sql): bool => ! str_contains($sql, 'from `employees` '),
         ));
 
@@ -1323,24 +1335,43 @@ class PortalSubmittedReportsTest extends TestCase
     }
 
     /**
-     * A day inside the filing window that this member has not already used. The seeded database
-     * carries real timesheets, so a hard-coded offset is not reliably free.
+     * A weekday inside the filing window that this member has neither reported nor taken leave on.
+     * The seeded database carries real timesheets and leave, so a hard-coded offset is not reliably
+     * free, and a report is never filed for a Saturday or a Sunday.
      */
     private function freeDate(Employee $actor, int $daysAgo): string
     {
+        $name = PortalSubmittedReportPresenter::memberName(
+            is_string($actor->first_name) ? $actor->first_name : null,
+            is_string($actor->last_name) ? $actor->last_name : null,
+        );
         for ($offset = $daysAgo; $offset < $daysAgo + 400; $offset++) {
-            $candidate = Carbon::today()->subDays($offset)->toDateString();
+            $day = Carbon::today()->subDays($offset);
+            if ($day->isWeekend()) {
+                continue;
+            }
+            $candidate = $day->toDateString();
             $taken = DB::connection('portal')->table('user_reports')
                 ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
                 ->where('employees_user_reports.employee_id', $actor->getKey())
                 ->where('user_reports.report_date', $candidate)
                 ->exists();
-            if (! $taken) {
+            $onLeave = DB::connection('portal')->table('requests')
+                ->where('name', $name)
+                ->where('request_date', $candidate)
+                ->exists();
+            if (! $taken && ! $onLeave) {
                 return $candidate;
             }
         }
 
         $this->fail('No free report date was available for this member.');
+    }
+
+    // How many days back a date is, so a second free day can be looked for behind the first.
+    private function daysAgo(string $date): int
+    {
+        return (int) Carbon::parse($date)->startOfDay()->diffInDays(Carbon::today(), true);
     }
 
     private function firstProject(): object

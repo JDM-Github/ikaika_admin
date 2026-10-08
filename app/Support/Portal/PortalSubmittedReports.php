@@ -50,6 +50,13 @@ final class PortalSubmittedReports
     // A freshly flagged report has not been reviewed yet either; replace() keeps whatever it finds.
     private const NEW_FLAG_STATUS = 'Pending';
 
+    /*
+     * A late filing waits on an approver, in late_submission_approval -- the column Airtable kept
+     * for exactly this, apart from the general approval. Filing a late report sets it, and so does
+     * editing one: the approver answered for the report as it was, not as it now reads.
+     */
+    private const LATE_PENDING = 'Pending';
+
     public function __construct(
         private readonly CoreLedger $ledger,
         private readonly PortalRecycleBin $recycleBin,
@@ -97,58 +104,32 @@ final class PortalSubmittedReports
      */
     public function listManaged(Employee $actor, Request $request): array
     {
-        $scope = PortalPreview::departmentScope($actor, $request);
-        $subject = $this->managedSubject($actor, $request, $scope);
+        $roster = PortalRules::people($actor, $request, 'manage.reports');
+        $subject = $this->managedSubject($actor, $request, $roster);
         $page = $this->list($subject, $request);
         $page['section'] = 'manage';
         $page['resource'] = 'reports';
-        $page['employees'] = $this->roster($actor, $scope);
+        $page['employees'] = array_map(static fn (Employee $employee): array => [
+            'value' => (string) $employee->getKey(),
+            'label' => PortalSubmittedReportPresenter::memberName(
+                is_string($employee->first_name) ? $employee->first_name : null,
+                is_string($employee->last_name) ? $employee->last_name : null,
+            ),
+        ], $roster);
         $page['employeeId'] = (string) $subject->getKey();
 
         return $page;
     }
 
     /**
-     * Reports / Flagged: the signed-in member's own reports that were flagged at filing time.
-     * Same cache version as list()/bumpCache() -- a decided flag or an edited report must
-     * invalidate both.
-     *
-     * @return array{
-     *     section: string,
-     *     resource: string,
-     *     data: list<array<string, mixed>>,
-     *     range: array{from: string, to: string}
-     * }
-     */
-    public function listFlagged(Employee $actor, Request $request): array
-    {
-        [$from, $to] = $this->dateRange($request);
-        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:reports:flagged:'.$version.':'.$actor->getKey().':'.$from.':'.$to;
-
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor, $from, $to): array {
-            return [
-                'section' => 'reports',
-                'resource' => 'flagged',
-                'data' => $this->flaggedReports($from, $to, (int) $actor->getKey()),
-                'range' => ['from' => $from, 'to' => $to],
-            ];
-        });
-    }
-
-    /**
      * Every report flagged at filing time (employees_user_reports.is_flag), for the given window.
      * Grouped by (employee, date, kind) -- the exact unit create() flagged together and the unit a
-     * decision must land on as one, the same way build() groups one member's own lines.
-     *
-     * $onlyEmployeeId scopes to one member and nulls memberName in the output -- the same
-     * "null means the signed-in member filed it" convention LeaveRequestModel uses on the portal.
-     * Left null, every flagged report in range comes back with its real name, for the approver
-     * queue PortalManageRequests bundles this into.
+     * decision must land on as one, the same way build() groups one member's own lines. Only the
+     * approver queue PortalManageRequests bundles reads this; a member never sees their own.
      *
      * @return list<array<string, mixed>>
      */
-    public function flaggedReports(string $from, string $to, ?int $onlyEmployeeId = null): array
+    public function flaggedReports(string $from, string $to): array
     {
         $query = $this->connection()
             ->table('user_reports')
@@ -171,9 +152,6 @@ final class PortalSubmittedReports
                 'employees.last_name',
                 'employees.id_no',
             ]);
-        if ($onlyEmployeeId !== null) {
-            $query->where('employees_user_reports.employee_id', $onlyEmployeeId);
-        }
         $rows = $query
             ->orderBy('user_reports.report_date', 'desc')
             ->orderBy('user_reports.id')
@@ -209,8 +187,7 @@ final class PortalSubmittedReports
                         $row->id_no ?? null,
                         $employeeId,
                     ),
-                    // Own view names nobody; the approver bundle names everybody.
-                    'memberName' => $onlyEmployeeId !== null ? null : PortalSubmittedReportPresenter::memberName(
+                    'memberName' => PortalSubmittedReportPresenter::memberName(
                         is_string($row->first_name ?? null) ? $row->first_name : null,
                         is_string($row->last_name ?? null) ? $row->last_name : null,
                     ),
@@ -283,6 +260,155 @@ final class PortalSubmittedReports
         return $this->occupancy($actor, $from, $to)['blocked'];
     }
 
+    /**
+     * Manage / Requests: every member's late reports whose day falls in the window, with where
+     * each one's approval stands. A day holds one report, so a member and a date name exactly one
+     * late report -- which is why that pair is its id.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function lateQueue(string $from, string $to): array
+    {
+        return $this->lateReports(null, $from, $to);
+    }
+
+    /**
+     * User Requests: the signed-in member's own late reports and the decisions on them.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>, range: array{from: string, to: string}}
+     */
+    public function ownLate(Employee $actor, Request $request): array
+    {
+        [$from, $to] = $this->dateRange($request);
+
+        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+        $key = 'portal:reports:late:'.$version.':'.$actor->getKey().':'.$from.':'.$to;
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor, $from, $to): array {
+            return [
+                'section' => 'reports',
+                'resource' => 'late',
+                'data' => $this->lateReports((int) $actor->getKey(), $from, $to),
+                'range' => ['from' => $from, 'to' => $to],
+            ];
+        });
+    }
+
+    /**
+     * An approver's answer to a late report. Every line of it takes the decision: the day was filed
+     * as one report and is decided as one. The caller holds the transaction and the audit trail.
+     *
+     * @return array{owner: ?Employee, date: string, lineIds: list<int>}
+     */
+    public function decideLate(string $id, string $status, ?string $remarks): array
+    {
+        [$employeeId, $date] = $this->parseLateReportId($id);
+        $lines = $this->ownedLines($employeeId, $date, PortalSubmittedReportPresenter::KIND_LATE);
+        if ($lines === []) {
+            abort(404, 'That late report is not on the queue.');
+        }
+
+        $lineIds = $this->lineIds($lines);
+        $this->connection()->table('user_reports')->whereIn('id', $lineIds)->update([
+            'late_submission_approval' => $status,
+            'approver_remarks' => $remarks,
+        ]);
+
+        return [
+            'owner' => Employee::query()->find($employeeId),
+            'date' => $date,
+            'lineIds' => $lineIds,
+        ];
+    }
+
+    // Whoever a late report's id names, so a decision outside the approver's reach is refused before any write.
+    public function lateReportOwner(string $id): ?Employee
+    {
+        [$employeeId] = $this->parseLateReportId($id);
+
+        return Employee::query()->find($employeeId);
+    }
+
+    /**
+     * Part of the approval queue's cache key, so a late report filed, edited or deleted reaches the
+     * queue at once instead of after that cache runs out.
+     */
+    public function cacheVersion(): int
+    {
+        return (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+    }
+
+    /**
+     * Administration / Missing Reports: the days every member filed in the window, so the screen can
+     * say for any day who filed and when each of the rest last did. Keyed by employee id rather than
+     * by name, and a day counts whichever kind was filed on it.
+     *
+     * earlierDay is the newest day a member filed before the window began, so someone quiet for
+     * longer than the window still reads as quiet rather than as never having filed.
+     *
+     * @return array{
+     *     section: string,
+     *     resource: string,
+     *     data: list<array{employeeId: string, days: list<string>, earlierDay: ?string}>,
+     *     range: array{from: string, to: string}
+     * }
+     */
+    public function filedDaysByMember(Request $request): array
+    {
+        [$from, $to] = $this->dateRange($request);
+
+        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+        $key = 'portal:reports:filed-days:'.$version.':'.$from.':'.$to;
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($from, $to): array {
+            $days = [];
+            $rows = $this->connection()
+                ->table('user_reports')
+                ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+                ->whereBetween('user_reports.report_date', [$from, $to])
+                ->select(['employees_user_reports.employee_id', 'user_reports.report_date'])
+                ->distinct()
+                ->orderByDesc('user_reports.report_date')
+                ->get();
+            foreach ($rows as $row) {
+                $date = $this->calendarDate($row->report_date);
+                if ($date !== null) {
+                    $days[(int) $row->employee_id][$date] = true;
+                }
+            }
+
+            $earlier = [];
+            $before = $this->connection()
+                ->table('user_reports')
+                ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+                ->where('user_reports.report_date', '<', $from)
+                ->groupBy('employees_user_reports.employee_id')
+                ->selectRaw('employees_user_reports.employee_id AS employee_id, MAX(user_reports.report_date) AS last_day')
+                ->get();
+            foreach ($before as $row) {
+                $earlier[(int) $row->employee_id] = $this->calendarDate($row->last_day);
+            }
+
+            $members = array_unique(array_merge(array_keys($days), array_keys($earlier)));
+            sort($members);
+            $data = [];
+            foreach ($members as $employeeId) {
+                $data[] = [
+                    'employeeId' => (string) $employeeId,
+                    'days' => array_keys($days[$employeeId] ?? []),
+                    'earlierDay' => $earlier[$employeeId] ?? null,
+                ];
+            }
+
+            return [
+                'section' => 'administration',
+                'resource' => 'missing-reports',
+                'data' => $data,
+                'range' => ['from' => $from, 'to' => $to],
+            ];
+        });
+    }
+
     public function bumpCache(): void
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
@@ -299,13 +425,13 @@ final class PortalSubmittedReports
     public function replace(Employee $actor, string $id, Request $request): array
     {
         [$date, $kind] = $this->parseGroupId($id);
-        $this->assertMutableDate($date);
 
         $employeeId = (int) $actor->getKey();
         $existing = $this->ownedLines($employeeId, $date, $kind);
         if ($existing === []) {
             abort(404, 'That report was not found.');
         }
+        $this->assertChangeable($date, $kind, $existing);
 
         $this->assertSoleOwner($employeeId, $this->lineIds($existing));
 
@@ -316,6 +442,10 @@ final class PortalSubmittedReports
         $first = $existing[0];
         $lateSubmission = $first->late_submission ?? null;
         $approval = $first->approval ?? 'Approved';
+        $lateApproval = $kind === PortalSubmittedReportPresenter::KIND_LATE
+            ? self::LATE_PENDING
+            : ($first->late_submission_approval ?? null);
+        $approverRemarks = $first->approver_remarks ?? null;
         $created = $first->date_created ?? null;
         // Carried over, not recomputed: a flag is set once at filing time, and editing a report's
         // entries must not silently re-derive it from whatever the employee's warning status
@@ -331,6 +461,8 @@ final class PortalSubmittedReports
             $remarks,
             $lateSubmission,
             $approval,
+            $lateApproval,
+            $approverRemarks,
             $created,
             $isFlagged,
             $flagStatus,
@@ -354,6 +486,8 @@ final class PortalSubmittedReports
                     $remarks,
                     $lateSubmission,
                     $approval,
+                    $lateApproval,
+                    $approverRemarks,
                     $created,
                     $isFlagged,
                     $flagStatus,
@@ -467,6 +601,7 @@ final class PortalSubmittedReports
     public function create(Employee $actor, Request $request): array
     {
         $kind = $this->validatedKind($request);
+        PortalRules::requireOwn($actor, $request, $kind === PortalSubmittedReportPresenter::KIND_LATE ? 'reports.late' : 'reports.daily');
         $groups = $this->validatedGroups($request, $kind);
         $employeeId = (int) $actor->getKey();
 
@@ -478,7 +613,9 @@ final class PortalSubmittedReports
 
         $this->assertDatesAreWorked($actor, $dates);
 
-        $lateSubmission = $kind === PortalSubmittedReportPresenter::KIND_LATE ? 'Yes' : null;
+        $isLate = $kind === PortalSubmittedReportPresenter::KIND_LATE;
+        $lateSubmission = $isLate ? 'Yes' : null;
+        $lateApproval = $isLate ? self::LATE_PENDING : null;
         // The filer's own wall clock, so date_created reads beside report_date the way the
         // seeded rows do. The audit instant lives on core.actions, which keeps server time.
         $createdAt = $this->timezone->now()->toDateTimeString();
@@ -502,6 +639,7 @@ final class PortalSubmittedReports
             $groups,
             $resolved,
             $lateSubmission,
+            $lateApproval,
             $createdAt,
             $isFlagged,
             $kind,
@@ -517,6 +655,8 @@ final class PortalSubmittedReports
                         $group['remarks'],
                         $lateSubmission,
                         self::NEW_APPROVAL,
+                        $lateApproval,
+                        null,
                         $createdAt,
                         $isFlagged,
                         self::NEW_FLAG_STATUS,
@@ -564,6 +704,24 @@ final class PortalSubmittedReports
             );
         }
 
+        if ($isLate) {
+            $this->audit->notifyManagers(
+                $actor,
+                'manage.requests.late',
+                PortalNotificationType::REPORT_FILED_LATE,
+                'New late report',
+                PortalActivityCopy::notifyFiled(
+                    PortalActivityCopy::actorName($actor, $request, true),
+                    'late report',
+                    min($dates),
+                    max($dates),
+                ),
+                PortalShellPath::MANAGE_REQUESTS,
+                'Open queue',
+                ['recordId' => $this->lateReportId($employeeId, min($dates))],
+            );
+        }
+
         $this->bumpCache();
         $this->recycleBin->bumpCache();
 
@@ -592,13 +750,13 @@ final class PortalSubmittedReports
     public function destroy(Employee $actor, string $id, Request $request): void
     {
         [$date, $kind] = $this->parseGroupId($id);
-        $this->assertMutableDate($date);
 
         $employeeId = (int) $actor->getKey();
         $existing = $this->ownedLines($employeeId, $date, $kind);
         if ($existing === []) {
             abort(404, 'That report was not found.');
         }
+        $this->assertChangeable($date, $kind, $existing);
 
         $ids = $this->lineIds($existing);
         $this->assertSoleOwner($employeeId, $ids);
@@ -739,7 +897,7 @@ final class PortalSubmittedReports
                 $actor,
                 PortalNotificationType::BIN_RESTORED,
                 'Report restored',
-                PortalActivityCopy::notifyReportRestored($kind, $date, PortalActivityCopy::displayName($actor)),
+                PortalActivityCopy::notifyReportRestored($kind, $date, PortalActivityCopy::actorName($actor, $request)),
                 PortalShellPath::SUBMITTED_REPORTS,
                 'Open reports',
                 ['recordId' => (string) $row->record_id],
@@ -769,7 +927,8 @@ final class PortalSubmittedReports
             $ids[] = (int) $line->id;
         }
 
-        $projects = $this->projectLabels($ids);
+        $projectRefs = [];
+        $projects = $this->projectLabels($ids, $projectRefs);
         $activities = $this->activityLabels($ids);
         $earnCodes = $this->earnCodeLabels($ids);
 
@@ -807,6 +966,7 @@ final class PortalSubmittedReports
                 $earnCodes[$id] ?? [],
                 $line->hours_rendered ?? 0,
                 $line->change_in_elements ?? 0,
+                $projectRefs[$id] ?? null,
             );
         }
 
@@ -856,6 +1016,135 @@ final class PortalSubmittedReports
     }
 
     /**
+     * Late reports in the window, one per member and day: everybody's for the queue, or one
+     * member's own when an id is given.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function lateReports(?int $employeeId, string $from, string $to): array
+    {
+        $onTime = PortalSubmittedReportPresenter::ON_TIME_VALUES;
+        $query = UserReport::query()
+            ->toBase()
+            ->select([
+                'user_reports.id',
+                'user_reports.report_date',
+                'user_reports.hours_rendered',
+                'user_reports.change_in_elements',
+                'user_reports.remarks',
+                'user_reports.late_submission',
+                'user_reports.late_submission_approval',
+                'user_reports.approver_remarks',
+                'user_reports.date_created',
+                'employees_user_reports.employee_id',
+                'employees.id_no',
+                'employees.first_name',
+                'employees.last_name',
+            ])
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->leftJoin('employees', 'employees.id', '=', 'employees_user_reports.employee_id')
+            ->whereNotNull('user_reports.report_date')
+            ->whereBetween('user_reports.report_date', [$from, $to])
+            ->whereNotNull('user_reports.late_submission')
+            ->whereRaw(
+                'LOWER(TRIM(user_reports.late_submission)) NOT IN ('.implode(', ', array_fill(0, count($onTime), '?')).')',
+                $onTime,
+            )
+            ->orderByDesc('user_reports.report_date')
+            ->orderBy('user_reports.id');
+        if ($employeeId !== null) {
+            $query->where('employees_user_reports.employee_id', $employeeId);
+        }
+
+        $lines = [];
+        foreach ($query->get() as $line) {
+            if (PortalSubmittedReportPresenter::kind($line->late_submission ?? null) === PortalSubmittedReportPresenter::KIND_LATE) {
+                $lines[] = $line;
+            }
+        }
+
+        $ids = $this->lineIds($lines);
+        $projects = $this->projectLabels($ids);
+        $activities = $this->activityLabels($ids);
+        $earnCodes = $this->earnCodeLabels($ids);
+
+        $groups = [];
+        foreach ($lines as $line) {
+            $date = $this->calendarDate($line->report_date);
+            $owner = (int) ($line->employee_id ?? 0);
+            if ($date === null || $owner < 1) {
+                continue;
+            }
+            $key = $this->lateReportId($owner, $date);
+            if (! isset($groups[$key])) {
+                $groups[$key] = [
+                    'referenceCode' => PortalSubmittedReportPresenter::referenceCode($line->id_no ?? null, $owner),
+                    'memberName' => $employeeId === null
+                        ? PortalSubmittedReportPresenter::memberName(
+                            is_string($line->first_name ?? null) ? $line->first_name : null,
+                            is_string($line->last_name ?? null) ? $line->last_name : null,
+                        )
+                        : null,
+                    // Older imported rows may carry no creation stamp; the day itself stands in.
+                    'createdOn' => $this->calendarDate($line->date_created ?? null) ?? $date,
+                    'submittedOn' => $date,
+                    'reason' => null,
+                    'approval' => $line->late_submission_approval ?? null,
+                    'approverRemarks' => PortalSubmittedReportPresenter::reason($line->approver_remarks ?? null),
+                    'entries' => [],
+                ];
+            }
+            $reason = PortalSubmittedReportPresenter::reason($line->remarks ?? null);
+            if ($groups[$key]['reason'] === null && $reason !== null) {
+                $groups[$key]['reason'] = $reason;
+            }
+            $id = (int) $line->id;
+            $groups[$key]['entries'][] = PortalSubmittedReportPresenter::entry(
+                (string) $id,
+                $projects[$id] ?? [],
+                $activities[$id] ?? [],
+                $earnCodes[$id] ?? [],
+                $line->hours_rendered ?? 0,
+                $line->change_in_elements ?? 0,
+            );
+        }
+
+        $rows = [];
+        foreach ($groups as $key => $group) {
+            $rows[] = PortalSubmittedReportPresenter::lateReport(
+                $key,
+                $group['referenceCode'],
+                $group['memberName'],
+                $group['createdOn'],
+                $group['submittedOn'],
+                $group['reason'],
+                $group['approval'],
+                $group['approverRemarks'],
+                $group['entries'],
+            );
+        }
+
+        return $rows;
+    }
+
+    private function lateReportId(int $employeeId, string $date): string
+    {
+        return $employeeId.':'.$date;
+    }
+
+    /**
+     * @return array{0: int, 1: string}
+     */
+    private function parseLateReportId(string $id): array
+    {
+        if (preg_match('/^([1-9]\d*):(\d{4}-\d{2}-\d{2})$/', $id, $match) !== 1) {
+            abort(422, 'A late report is named by its member and day.');
+        }
+
+        return [(int) $match[1], $this->parseDate($match[2])->toDateString()];
+    }
+
+    /**
      * @return list<object>
      */
     private function lines(int $employeeId, string $from, string $to): array
@@ -881,10 +1170,13 @@ final class PortalSubmittedReports
     }
 
     /**
+     * Fills $refs with each line's project id and department in the same read, for the person's own list.
+     *
      * @param  list<int>  $reportIds
+     * @param  array<int, array{id: int, department: ?string}>  $refs
      * @return array<int, list<string>>
      */
-    private function projectLabels(array $reportIds): array
+    private function projectLabels(array $reportIds, array &$refs = []): array
     {
         $labels = [];
         foreach ($this->chunks($reportIds) as $chunk) {
@@ -894,12 +1186,15 @@ final class PortalSubmittedReports
                 ->whereIn('pivot.user_report_id', $chunk)
                 ->select([
                     'pivot.user_report_id',
+                    'projects.id',
+                    'projects.department',
                     'projects.project_number',
                     'projects.project_name',
                 ])
                 ->get();
 
             foreach ($rows as $row) {
+                $refs[(int) $row->user_report_id] ??= ['id' => (int) $row->id, 'department' => $this->text($row->department ?? null)];
                 $labels[(int) $row->user_report_id][] = PortalSubmittedReportPresenter::projectLabel(
                     $row->project_number ?? null,
                     $row->project_name ?? null,
@@ -1233,22 +1528,30 @@ final class PortalSubmittedReports
      * Daily files against the same seven-day strip an edit may touch. Late is any previous day:
      * a missed daily filing is filed here, and the two forms still cannot double a day because
      * assertDatesAreFree refuses a second report on one date.
+     *
+     * Neither files a Saturday or a Sunday: a report records a working day. That is checked last,
+     * so a day outside the window is told about the window. Only filing asks -- an edit or a
+     * restore keeps the day the report already has -- and overtime and offset keep weekends,
+     * since that is when that work happens.
      */
     private function assertFilableDate(string $date, string $kind): void
     {
+        $day = $this->parseDate($date);
+
         if ($kind === PortalSubmittedReportPresenter::KIND_DAILY) {
             $this->assertMutableDate($date);
-
-            return;
+        } else {
+            $today = $this->timezone->today();
+            if ($day->gte($today)) {
+                abort(422, 'A late report is for a previous day.');
+            }
+            if ($day->lt($today->copy()->subMonths(self::MAX_RANGE_MONTHS)->startOfMonth())) {
+                abort(422, 'A late report cannot reach further back than two years.');
+            }
         }
 
-        $day = $this->parseDate($date);
-        $today = $this->timezone->today();
-        if ($day->gte($today)) {
-            abort(422, 'A late report is for a previous day.');
-        }
-        if ($day->lt($today->copy()->subMonths(self::MAX_RANGE_MONTHS)->startOfMonth())) {
-            abort(422, 'A late report cannot reach further back than two years.');
+        if ($day->dayOfWeekIso >= 6) {
+            abort(422, 'Reports are not filed for Saturdays or Sundays.');
         }
     }
 
@@ -1348,6 +1651,21 @@ final class PortalSubmittedReports
         return [$match[1], $match[2]];
     }
 
+    /**
+     * A report changes within the recent window. A late report still waiting on its approver is the
+     * exception: it is past by nature, and it stays the member's to fix or withdraw until decided.
+     *
+     * @param  list<object>  $lines
+     */
+    private function assertChangeable(string $date, string $kind, array $lines): void
+    {
+        $approval = trim((string) ($lines[0]->late_submission_approval ?? ''));
+        if ($kind === PortalSubmittedReportPresenter::KIND_LATE && strcasecmp($approval, self::LATE_PENDING) === 0) {
+            return;
+        }
+        $this->assertMutableDate($date);
+    }
+
     private function assertMutableDate(string $date): void
     {
         $day = $this->parseDate($date);
@@ -1374,6 +1692,8 @@ final class PortalSubmittedReports
                 'user_reports.remarks',
                 'user_reports.late_submission',
                 'user_reports.approval',
+                'user_reports.late_submission_approval',
+                'user_reports.approver_remarks',
                 'user_reports.date_created',
                 'employees_user_reports.is_flag',
                 'employees_user_reports.flag_status',
@@ -1471,6 +1791,8 @@ final class PortalSubmittedReports
                 'remarks' => $line->remarks ?? null,
                 'late_submission' => $line->late_submission ?? null,
                 'approval' => $line->approval ?? null,
+                'late_submission_approval' => $line->late_submission_approval ?? null,
+                'approver_remarks' => $line->approver_remarks ?? null,
                 'date_created' => $line->date_created ?? null,
                 'project_ids' => $junctions['projects'][$lineId] ?? [],
                 'activity_code_ids' => $junctions['activities'][$lineId] ?? [],
@@ -1708,6 +2030,8 @@ final class PortalSubmittedReports
             ->table('employees_projects')
             ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
             ->where('employees_projects.employee_id', $employeeId)
+            // A deleted project waits in the Recycle Bin: nothing new may be filed against it.
+            ->whereNull('projects.deleted_at')
             ->select(['projects.id', 'projects.project_number', 'projects.project_name'])
             ->get();
 
@@ -1829,6 +2153,8 @@ final class PortalSubmittedReports
             'remarks' => $line['remarks'] ?? null,
             'late_submission' => $line['late_submission'] ?? null,
             'approval' => $line['approval'] ?? null,
+            'late_submission_approval' => $line['late_submission_approval'] ?? null,
+            'approver_remarks' => $line['approver_remarks'] ?? null,
             'date_created' => $line['date_created'] ?? null,
         ]);
 
@@ -1947,6 +2273,8 @@ final class PortalSubmittedReports
         ?string $remarks,
         mixed $lateSubmission,
         mixed $approval,
+        mixed $lateApproval,
+        mixed $approverRemarks,
         mixed $created,
         bool $isFlagged,
         string $flagStatus,
@@ -1960,6 +2288,8 @@ final class PortalSubmittedReports
             'remarks' => $remarks,
             'late_submission' => $lateSubmission,
             'approval' => $approval,
+            'late_submission_approval' => $lateApproval,
+            'approver_remarks' => $approverRemarks,
             'date_created' => $created,
         ]);
 
@@ -2003,59 +2333,36 @@ final class PortalSubmittedReports
         return strtolower(trim($label));
     }
 
-    private function managedSubject(Employee $actor, Request $request, ?string $scope): Employee
+    /**
+     * @param  list<Employee>  $roster
+     */
+    private function managedSubject(Employee $actor, Request $request, array $roster): Employee
     {
         $raw = trim((string) $request->query('employee_id', ''));
         if ($raw === '') {
-            return $actor;
+            // Their own timesheets first; an executive, who has none here, opens the first person listed.
+            $first = $roster[0] ?? null;
+            foreach ($roster as $employee) {
+                if ($employee->is($actor)) {
+                    return $actor;
+                }
+            }
+            if ($first === null) {
+                abort(404, 'Nobody is in your reach.');
+            }
+            $raw = (string) $first->getKey();
         }
         if (preg_match('/^\d{1,11}$/', $raw) !== 1) {
             abort(404, 'That member was not found.');
         }
 
-        $subject = Employee::query()->find((int) $raw);
-        // Someone outside the admin's department answers exactly like someone who does not exist.
-        if (! $subject instanceof Employee || (! $subject->is($actor) && ! PortalPreview::inScope($scope, $subject))) {
+        // Someone outside the reach answers exactly like someone who does not exist.
+        $listed = array_filter($roster, static fn (Employee $employee): bool => (string) $employee->getKey() === $raw);
+        $subject = $listed === [] ? null : Employee::query()->find((int) $raw);
+        if (! $subject instanceof Employee) {
             abort(404, 'That member was not found.');
         }
 
         return $subject;
-    }
-
-    /**
-     * Active members the picker can open: the admin's department, never an executive (they are
-     * managed from their own portal), and always the admin themself. Skinny: an id and a name.
-     *
-     * @return list<array{value: string, label: string}>
-     */
-    private function roster(Employee $actor, ?string $scope): array
-    {
-        $rows = Employee::query()
-            ->select(['id', 'first_name', 'last_name'])
-            ->where(fn ($query) => $query
-                ->where('id', $actor->getKey())
-                ->orWhere(fn ($managed) => $managed
-                    ->whereRaw("LOWER(TRIM(COALESCE(role, ''))) != 'executive'")
-                    ->whereRaw("LOWER(TRIM(COALESCE(role_level, ''))) != 'executive'")
-                    ->when($scope !== null, fn ($inDepartment) => $inDepartment
-                        ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ? AND ? != ''", [$scope, $scope]))))
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->orderBy('last_name')
-            ->orderBy('first_name')
-            ->orderBy('id')
-            ->get();
-
-        $employees = [];
-        foreach ($rows as $row) {
-            $employees[] = [
-                'value' => (string) $row->getKey(),
-                'label' => PortalSubmittedReportPresenter::memberName(
-                    is_string($row->first_name) ? $row->first_name : null,
-                    is_string($row->last_name) ? $row->last_name : null,
-                ),
-            ];
-        }
-
-        return $employees;
     }
 }
