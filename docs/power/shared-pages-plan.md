@@ -37,11 +37,11 @@ Nothing here is an employee. A guest holds no role, no department and no persona
    a **result card**:
    - the **QR** (encodes the link),
    - the **link** (`<portal-base>/share/<code>`) with a Copy action,
-   - the **password**, shown **once**, with a Copy action,
+   - the **password**, kept in the record and shown with a Copy action,
    - a line saying whether it was emailed to the bound address.
 3. The row's actions: **QR & link**, **Edit**, **Regenerate password**, **Revoke**.
    - Revoke is immediate: a live guest session is refused on its next request.
-   - Regenerate shows a new password once, and kills live sessions too.
+   - Regenerate shows the new password, which replaces the kept one, and kills live sessions too.
 
 The list is a `DataTableShared`: Label, Pages (count and names), Email, Expires, Last used,
 Actions. No tabs, so no `stateKey`.
@@ -65,7 +65,7 @@ Actions. No tabs, so no `stateKey`.
 | # | Decision |
 |---|---|
 | 1 | A share grants **whole pages**, picked from the catalog, **all off by default**. Every page is listed; unverified pages are disabled with "Not ready" until we clear them. |
-| 2 | The **password is auto-generated**, shown once (create and regenerate), and **emailed** to the bound email when one is set. |
+| 2 | The **password is auto-generated**, kept readable in the record so a forgotten one is sent again rather than regenerated (user, 2026-10-08; reversed the earlier show-once rule), and **emailed** to the bound email when one is set. |
 | 3 | The guest sees the **normal portal shell**, only the granted pages. A Guest chip replaces the profile; notifications, Settings and the personal Access page are gone; every write control hides. |
 | 4 | **Email binding is optional per share; when bound, every sign-in needs a mailed OTP.** |
 | 5 | The page lives at **Manage / Shared Pages**, rule `manage.shares`, `min_tier = developer` (Developer mode only for now, like References and Backup before it). |
@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS shared_pages (
     label           VARCHAR(100) NOT NULL,
     code            CHAR(24)     NOT NULL,
     password_hash   VARCHAR(255) NOT NULL,
+    password_value  VARCHAR(32)  NULL,           -- the readable password, for re-sending
     email           VARCHAR(255) NULL,
     expires_at      TIMESTAMP    NULL,           -- NULL = never, only when cleared
     rate_per_minute SMALLINT     NOT NULL DEFAULT 60,
@@ -212,15 +213,16 @@ Notes:
 
 ### 5.2 Endpoints
 
-Private (`portal.rule:manage.shares`, `throttle:portal-manage-*` like the rest of Manage):
+Private (`portal.rule:manage.shares`, `throttle:portal-manage-*` like the rest of Manage). Every
+answer rides in `data`, the portal's envelope:
 
 ```text
 GET    manage/shared-pages               -> { shares: [...], pages: [{key, label, isReady}] }
 POST   manage/shared-pages               { label, email?, expiresInDays?|expiresAt?, ratePerMinute, rules[] }
-                                         -> { share, password }        // password shown once
+                                         -> { share, password }        // the share carries its password too
 PATCH  manage/shared-pages/{id}          { label, email, expiresInDays?|expiresAt?, ratePerMinute, rules[] }
 DELETE manage/shared-pages/{id}          -> revoked
-POST   manage/shared-pages/{id}/password -> { password }               // new one, once
+POST   manage/shared-pages/{id}/password -> { password }               // the new one, replacing the kept value
 GET    manage/shared-pages/{id}/qr       -> { svg }                    // the link, as SVG text
 ```
 
@@ -236,7 +238,7 @@ POST share/{code}/resend   { password } -> { sent: true }     // 60-second coold
 
 - A wrong code/password always answers the same, generic refusal (no code probing).
 - `access` with no bound email does the `verify` work directly and returns the token.
-- The password is never echoed by `GET`; only `store` and `regenerate` return it, once.
+- The password is never echoed by a public GET; it rides in every share the developer reads.
 - `expiresAt` in the response is the guest token's expiry (the earlier of the share's and the
   JWT TTL).
 
@@ -342,7 +344,7 @@ The portal draws the SVG with `react-native-svg`'s `SvgXml`, so the portal gains
 - **Result sheet** after create/regenerate: `QrWidget` (SVG), the link in a copyable field with
   a Copy action (`expo-clipboard` is not installed — use the existing export/copy path or a
   read-only `TextSharedField` plus a Copy button backed by `navigator.clipboard` on web), the
-  password shown once with a warning that it will not be shown again, and the emailed note.
+  password shown with a Copy action and the kept-in-the-record note, and the emailed note.
 - Toasts follow the house rules: a loading toast on save, settling into success.
 
 ### 6.3 Guest sign-in
@@ -430,8 +432,8 @@ rule), `reports.daily` and `reports.late` (the report entry form), and the edit 
 
 ## 8. Security
 
-- The password and the OTP are stored **hashed**; the plain password exists only in the create /
-  regenerate response (and the email, when bound).
+- The share password is kept readable (`password_value`) so the developer can send it again, with
+  the hash kept for verification; the OTP is stored hashed only.
 - The code is 96 random bits; a wrong code and a wrong password answer identically.
 - Guests are **GET-only** at the middleware, not by convention; every write route is behind the
   refusal.

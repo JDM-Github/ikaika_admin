@@ -960,6 +960,8 @@ CREATE TABLE IF NOT EXISTS shared_pages (
     label           VARCHAR(100) NOT NULL,
     code            CHAR(24)     NOT NULL,
     password_hash   VARCHAR(255) NOT NULL,
+    -- The generated password, kept readable so the developer can send it again; the hash still verifies.
+    password_value  VARCHAR(32)  NULL,
     email           VARCHAR(255) NULL,
     expires_at      TIMESTAMP    NULL,           -- NULL only when the developer clears it
     rate_per_minute SMALLINT     NOT NULL DEFAULT 60,
@@ -969,6 +971,10 @@ CREATE TABLE IF NOT EXISTS shared_pages (
     last_used_at    TIMESTAMP    NULL,
     UNIQUE KEY shared_pages_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Existing databases: run the ALTER below (pre-change rows keep a NULL value until regenerated).
+ALTER TABLE shared_pages
+    ADD COLUMN password_value VARCHAR(32) NULL AFTER password_hash;
 
 CREATE TABLE IF NOT EXISTS shared_page_rules (
     share_id INT          NOT NULL,

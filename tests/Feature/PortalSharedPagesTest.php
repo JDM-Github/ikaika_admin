@@ -97,7 +97,7 @@ class PortalSharedPagesTest extends TestCase
         $this->withToken($this->token($admin))->getJson(self::BASE)->assertForbidden();
     }
 
-    public function test_a_share_is_created_with_a_password_shown_once(): void
+    public function test_a_share_is_created_with_its_password_kept_in_the_record(): void
     {
         $token = $this->developerToken();
 
@@ -109,6 +109,8 @@ class PortalSharedPagesTest extends TestCase
         $this->assertStringEndsWith('/share/'.$share['code'], $share['link']);
         $this->assertIsString($password);
         $this->assertSame(12, strlen($password));
+        // The record carries the readable password too, so it can be sent again.
+        $this->assertSame($password, $share['password']);
         $this->assertSame(['projects.view', 'finance.envelopes'], $share['rules']);
         $this->assertNull($share['email']);
         $this->assertFalse($share['isRevoked']);
@@ -118,13 +120,16 @@ class PortalSharedPagesTest extends TestCase
         $this->assertNotNull($row);
         $this->assertNotSame($password, $row->password_hash);
         $this->assertTrue(Hash::check($password, (string) $row->password_hash));
+        $this->assertSame($password, $row->password_value);
         $this->assertNull($row->revoked_at);
         $this->assertSame(['finance.envelopes', 'projects.view'], DB::connection('portal')->table('shared_page_rules')
             ->where('share_id', $share['id'])->orderBy('rule_key')->pluck('rule_key')->all());
 
         // The list carries it back, and the page list carries every shareable page.
         $listed = $this->withToken($token)->getJson(self::BASE)->assertOk();
-        $this->assertSame($share['code'], collect($listed->json('data.shares'))->firstWhere('id', $share['id'])['code']);
+        $listedShare = collect($listed->json('data.shares'))->firstWhere('id', $share['id']);
+        $this->assertSame($share['code'], $listedShare['code']);
+        $this->assertSame($password, $listedShare['password']);
         $this->assertContains('projects.view', array_column($listed->json('data.pages'), 'key'));
         $this->assertTrue(collect($listed->json('data.pages'))->firstWhere('key', 'projects.view')['isReady']);
     }
@@ -185,6 +190,9 @@ class PortalSharedPagesTest extends TestCase
         $regenerated = $this->withToken($token)->postJson(self::BASE.'/'.$share['id'].'/regenerate')->assertOk()->json('data.password');
         $this->assertIsString($regenerated);
         $this->assertNotSame($oldPassword, $regenerated);
+        // The record keeps the new one, so the old one is gone from the list as well as the hash.
+        $this->assertSame($regenerated, DB::connection('portal')->table('shared_pages')->where('id', $share['id'])->value('password_value'));
+        $this->assertSame($regenerated, collect($this->withToken($token)->getJson(self::BASE)->json('data.shares'))->firstWhere('id', $share['id'])['password']);
 
         // The new one signs in; the password it replaced does not.
         $this->postJson('/api/development/portal/share/'.$share['code'].'/access', ['password' => $regenerated])->assertOk();

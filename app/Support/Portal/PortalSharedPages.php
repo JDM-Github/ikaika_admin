@@ -85,6 +85,7 @@ final class PortalSharedPages
             'label' => $data['label'],
             'code' => $code,
             'password_hash' => Hash::make($password),
+            'password_value' => $password,
             'email' => $data['email'],
             'expires_at' => $data['expiresAt'],
             'rate_per_minute' => $data['ratePerMinute'],
@@ -141,7 +142,10 @@ final class PortalSharedPages
     {
         $row = $this->row($id);
         $password = self::password();
-        $this->connection()->table('shared_pages')->where('id', $id)->update(['password_hash' => Hash::make($password)]);
+        $this->connection()->table('shared_pages')->where('id', $id)->update([
+            'password_hash' => Hash::make($password),
+            'password_value' => $password,
+        ]);
         $this->audit->record($actor, PortalLogAction::PATCH, 'manage.shares', '{UserName|You} changed the password of '.trim((string) $row->label), (string) $id, $request);
 
         if ($row->email !== null && trim((string) $row->email) !== '') {
@@ -355,6 +359,9 @@ final class PortalSharedPages
             'label' => (string) $row->label,
             'code' => (string) $row->code,
             'link' => $this->link((string) $row->code),
+            // The readable password, so the developer can send it again. Null for a share made before
+            // the value was kept, until its password is regenerated.
+            'password' => $row->password_value === null ? null : (string) $row->password_value,
             'email' => $row->email === null ? null : (string) $row->email,
             'expiresAt' => $row->expires_at === null ? null : (string) $row->expires_at,
             'ratePerMinute' => (int) $row->rate_per_minute,
