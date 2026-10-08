@@ -106,6 +106,7 @@ class PortalSharedPagesTest extends TestCase
         $password = $created->json('password');
 
         $this->assertMatchesRegularExpression('/^[0-9a-f]{24}$/', $share['code']);
+        $this->assertStringEndsWith('/share/'.$share['code'], $share['link']);
         $this->assertIsString($password);
         $this->assertSame(12, strlen($password));
         $this->assertSame(['projects.view', 'finance.envelopes'], $share['rules']);

@@ -354,6 +354,7 @@ final class PortalSharedPages
             'id' => (string) (int) $row->id,
             'label' => (string) $row->label,
             'code' => (string) $row->code,
+            'link' => $this->link((string) $row->code),
             'email' => $row->email === null ? null : (string) $row->email,
             'expiresAt' => $row->expires_at === null ? null : (string) $row->expires_at,
             'ratePerMinute' => (int) $row->rate_per_minute,
