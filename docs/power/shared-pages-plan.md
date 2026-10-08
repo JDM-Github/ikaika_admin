@@ -1,11 +1,15 @@
 # Shared Pages — guest read-only links (plan)
 
-Status: **server core built (2026-10-08, Step 1).** The SQL, `PortalSharedPages`, the guest branch
-of `AuthenticatePortalJwt`, the `PortalRules` guest override, the public `share/*` routes, the
-Manage `manage/shared-pages` routes, the limiters and the QR all exist, with
-`PortalSharedPagesTest` + `PortalShareAccessTest` green (plus the full admin suite). Still to build:
-the portal page (Step 2), the guest sign-in + shell (Step 3), and the per-page readiness pass
-(Step 4). Every decision below is the user's answer or direction of 2026-10-08.
+Status: **Steps 1-3 built (2026-10-08); Step 4 (the per-page readiness pass) is under way: 22 of
+the 34 catalog pages are cleared and seeded `is_ready` 1, guarded by
+`tests/Feature/PortalShareReadinessTest.php`.**
+Step 1: the SQL, `PortalSharedPages`, the guest branch of `AuthenticatePortalJwt`, the `PortalRules`
+guest override, the public `share/*` routes, the Manage `manage/shared-pages` routes, the limiters
+and the QR (admin 0ebd52b, 0af6c2c; `PortalSharedPagesTest` + `PortalShareAccessTest` green).
+Step 2: the Manage / Shared Pages screen, model, endpoints, QR widget and wiring (portal 5484911).
+Step 3: the public `/share/<code>` sign-in (password + OTP), `enterAsGuest`, the stored and
+revalidated guest session, and the read-only guest shell (portal 0a5983f). Every decision below is
+the user's answer or direction of 2026-10-08.
 
 ## 1. What this is
 
@@ -406,6 +410,21 @@ Readiness checklist per page before flipping `shared_page_shareable.is_ready` to
 First set to verify (seeded 1 in section 4; lower any that fail): `projects.view`,
 `projects.track`, `finance.overview`, `finance.transactions`, `finance.envelopes`,
 `finance.accounts`, `calendar`. Then the reach-based admin pages, then the rest.
+
+Cleared 2026-10-08 (checklist 1 and 2 proven by `PortalShareReadinessTest`; checklist 3 by reading
+each screen's write gates): `home`, `projects.view`, `projects.track`, `projects.create`,
+`projects.manager`, `reports.submitted`, `calendar`, `manage.requests`, `manage.reports`,
+`manage.users`, all four `finance.*`, `administration.recycle` (view-only by design),
+`administration.logs`, `administration.actions`, `administration.missing`,
+`administration.emails`, `user.logs`, `user.recycle`, `requests.own`.
+
+Held back because the page rule is also its write power, so its controls would show to a guest:
+`projects.references` (unconditional Add pills), `email` (the composer form and its own-scope
+image controls), `email.library` (the library editor itself), `reports.daily` and `reports.late`
+(the report entry form). Held back as forms: `reports.submitted.edit`, `requests.leave`,
+`requests.overtime`, `requests.offset`, `requests.reimbursement`, `requests.own.edit`.
+`administration.backup` has no server route. The portal needs a guest read-only rule before the
+held-back pages can be flipped.
 
 ## 8. Security
 

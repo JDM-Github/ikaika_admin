@@ -145,8 +145,11 @@ class PortalSharedPagesTest extends TestCase
 
     public function test_a_page_that_is_not_ready_is_refused(): void
     {
+        $rule = DB::connection('portal')->table('shared_page_shareable')->where('is_ready', 0)->value('rule_key');
+        $this->assertIsString($rule, 'The catalog has no not-ready page left to refuse.');
+
         $this->withToken($this->developerToken())
-            ->postJson(self::BASE, $this->payload(['rules' => ['home']]))
+            ->postJson(self::BASE, $this->payload(['rules' => [$rule]]))
             ->assertStatus(422);
     }
 

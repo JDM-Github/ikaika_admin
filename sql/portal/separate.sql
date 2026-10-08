@@ -996,45 +996,50 @@ CREATE TABLE IF NOT EXISTS shared_page_visits (
 
 -- Which pages a share may grant. Every page-level rule is seeded; is_ready stays 0 until a guest
 -- check is run against that page (a guest has no person, so reach pages read all and own pages read
--- empty). The page keys are the ones RouteRuleConstant maps on the portal side, plus home.
+-- empty), and the command that flips a key is the one that maps its guest read in
+-- tests/Feature/PortalShareReadinessTest.php. The page keys are the ones RouteRuleConstant maps on
+-- the portal side, plus home.
 CREATE TABLE IF NOT EXISTS shared_page_shareable (
     rule_key VARCHAR(100) NOT NULL PRIMARY KEY,
     is_ready TINYINT(1)   NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
-    ('home', 0),
+    ('home', 1),
     ('projects.view', 1),
     ('projects.track', 1),
-    ('projects.create', 0),
-    ('projects.manager', 0),
+    ('projects.create', 1),
+    ('projects.manager', 1),
+    -- Held back: its page rule is also its write power, so its Add and Edit pills would show.
     ('projects.references', 0),
     ('reports.daily', 0),
     ('reports.late', 0),
-    ('reports.submitted', 0),
+    ('reports.submitted', 1),
     ('reports.submitted.edit', 0),
-    ('requests.own', 0),
+    ('requests.own', 1),
     ('requests.leave', 0),
     ('requests.overtime', 0),
     ('requests.offset', 0),
     ('requests.reimbursement', 0),
     ('requests.own.edit', 0),
-    ('user.logs', 0),
-    ('user.recycle', 0),
+    ('user.logs', 1),
+    ('user.recycle', 1),
     ('calendar', 1),
-    ('manage.requests', 0),
-    ('manage.reports', 0),
-    ('manage.users', 0),
+    ('manage.requests', 1),
+    ('manage.reports', 1),
+    ('manage.users', 1),
     ('finance.overview', 1),
     ('finance.transactions', 1),
     ('finance.envelopes', 1),
     ('finance.accounts', 1),
-    ('administration.recycle', 0),
-    ('administration.logs', 0),
-    ('administration.actions', 0),
-    ('administration.missing', 0),
-    ('administration.emails', 0),
+    ('administration.recycle', 1),
+    ('administration.logs', 1),
+    ('administration.actions', 1),
+    ('administration.missing', 1),
+    ('administration.emails', 1),
+    -- Held back: the composer is a form, and its own-scope image controls follow the same rule.
     ('email', 0),
+    -- Held back: the page is the library editor itself.
     ('email.library', 0),
     ('administration.backup', 0);
 
