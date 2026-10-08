@@ -404,7 +404,8 @@ class PortalBudgetMovementsTest extends TestCase
         $this->postJson(self::BASE.'budget-accounts/transfers', [
             'sourceAccountId' => $ben, 'destinationAccountId' => $nat, 'amount' => 10, 'transferredOn' => '2026-10-09',
         ], $this->admin())->assertCreated();
-        $plain = collect($this->getJson(self::BASE.'budget-accounts', $this->admin())->json('transfers'))->firstWhere('settledOn', '2026-10-09');
+        $plain = collect($this->getJson(self::BASE.'budget-accounts', $this->admin())->json('transfers'))
+            ->where('sourceAccountId', (string) $ben)->firstWhere('settledOn', '2026-10-09');
         $this->assertSame('Account Transfer', $plain['reason']);
 
         $this->postJson(self::BASE.'budget-accounts/transfers/'.$pending->id.'/complete', [], $this->admin())
@@ -426,14 +427,45 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertEqualsWithDelta(300.00, $this->accountRemaining($ben), 0.001);
     }
 
-    public function test_a_transaction_needs_a_type_and_an_envelope_or_account(): void
+    public function test_a_transaction_needs_a_type_and_an_envelope(): void
     {
         $this->addTransaction(['type' => 'Transfer', 'name' => 'Odd', 'amount' => 10, 'occurredOn' => '2026-10-07'])
             ->assertStatus(422)
             ->assertJsonPath('message', 'Choose Income or Expense for the type.');
         $this->addTransaction(['type' => 'Expense', 'name' => 'Loose', 'amount' => 10])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Choose the envelope or the account this transaction touches.');
+            ->assertJsonPath('message', 'Choose the envelope this transaction comes out of or goes into.');
+
+        // The reported ask (2026-10-09): an account alone is not enough; it is funded from Accounts instead.
+        $account = $this->account('Seeded Loose Account', 'loose.seeded@example.test', 500.00);
+        $before = DB::connection('tracker')->table('transactions')->count();
+        $this->addTransaction(['type' => 'Income', 'name' => 'Loose deposit', 'amount' => 100, 'accountId' => $account])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Choose the envelope this transaction comes out of or goes into.');
+        $this->assertSame($before, DB::connection('tracker')->table('transactions')->count());
+    }
+
+    // The reported ask (2026-10-08): no money is recorded against a budget code without its envelope.
+    public function test_a_budget_code_comes_only_from_the_envelope(): void
+    {
+        $tracker = DB::connection('tracker');
+        $account = $this->account('Seeded Code Account', 'code.seeded@example.test', 500.00);
+        $own = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-MOVE-OWN']);
+        $other = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-MOVE-OTHER']);
+        $envelope = $this->envelope('Seeded Coded Envelope', 0.00);
+        $tracker->table('envelopes_budget_codes')->insert(['envelope_id' => $envelope, 'budget_code_id' => $own]);
+
+        // Sent with another code, it is recorded against the envelope's own.
+        $id = (int) $this->addTransaction([
+            'type' => 'Income', 'name' => 'Coded deposit', 'amount' => 100, 'envelopeId' => $envelope, 'accountId' => $account, 'budgetCodeId' => $other,
+        ])->assertCreated()->json('data.id');
+        $this->assertSame([$own], $tracker->table('transactions_budget_codes')->where('transaction_id', $id)->pluck('budget_code_id')->map(fn ($code) => (int) $code)->all());
+
+        // An envelope under no code records none.
+        $loose = $this->envelope('Seeded Uncoded Envelope', 0.00);
+        $plain = (int) $this->addTransaction(['type' => 'Income', 'name' => 'Plain deposit', 'amount' => 10, 'envelopeId' => $loose, 'accountId' => $account])
+            ->assertCreated()->json('data.id');
+        $this->assertSame(0, $tracker->table('transactions_budget_codes')->where('transaction_id', $plain)->count());
     }
 
     public function test_a_member_reaches_none_of_the_money_routes(): void
@@ -522,7 +554,7 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertSame('https://res.cloudinary.com/test-cloud/image/upload/c_fill,h_96,w_96,f_auto,q_auto/v1/ikaika-portal/transactions/fare.jpg', $listed['receipts'][0]['thumbUrl']);
 
         // An upload is named once; a second use, or a made-up id, finds nothing.
-        $this->addTransaction(['type' => 'Income', 'name' => 'Again', 'amount' => 5, 'accountId' => $account, 'receiptId' => $receiptId])
+        $this->addTransaction(['type' => 'Income', 'name' => 'Again', 'amount' => 5, 'envelopeId' => $envelope, 'accountId' => $account, 'receiptId' => $receiptId])
             ->assertStatus(422)
             ->assertJsonPath('message', 'That receipt upload has expired. Choose the photo again.');
         $this->postJson(self::BASE.'budget-transactions/receipts', [], $this->admin())

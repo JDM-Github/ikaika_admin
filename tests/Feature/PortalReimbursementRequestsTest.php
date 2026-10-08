@@ -226,6 +226,14 @@ class PortalReimbursementRequestsTest extends TestCase
             ->assertStatus(422)
             ->assertJsonPath('message', 'Every reimbursement needs a cost above zero.');
 
+        // The reported ask (2026-10-08): ten million pesos at most.
+        $this->withToken($token)->postJson('/api/development/portal/requests/reimbursement', [
+            'requestDate' => $date,
+            'items' => [$this->item('Snacks', 10000000.01, 1)],
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'A reimbursement cost cannot be more than ₱10,000,000.00.');
+
         $this->withToken($token)->postJson('/api/development/portal/requests/reimbursement', [
             'requestDate' => $date,
             'items' => [$this->item('Snacks', 120, 1.5)],

@@ -130,6 +130,19 @@ final class PortalBudgetLedger
         }
     }
 
+    // The budget code an envelope sits under -- the first by name when it sits under more -- or null for none.
+    public function codeIdOf(int $envelopeId): ?int
+    {
+        $id = $this->connection()
+            ->table('envelopes_budget_codes as ebc')
+            ->join('budget_codes as c', 'c.id', '=', 'ebc.budget_code_id')
+            ->where('ebc.envelope_id', $envelopeId)
+            ->orderBy('c.name')
+            ->value('c.id');
+
+        return $id === null ? null : (int) $id;
+    }
+
     public function assertBudgetCode(?int $codeId): void
     {
         if ($codeId !== null && ! $this->connection()->table('budget_codes')->where('id', $codeId)->exists()) {

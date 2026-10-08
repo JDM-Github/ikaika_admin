@@ -118,9 +118,10 @@ class PortalBudgetSetupTest extends TestCase
         $this->addCode(['name' => 'SEED-SETUP-004', 'expectedAmount' => 'lots'])
             ->assertStatus(422)
             ->assertJsonPath('message', 'The quotation must be a number.');
-        $this->addCode(['name' => 'SEED-SETUP-004', 'expectedAmount' => '10000000000000'])
+        // The reported ask (2026-10-08): ten million pesos at most.
+        $this->addCode(['name' => 'SEED-SETUP-004', 'expectedAmount' => '10000000.01'])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'The quotation is too large.');
+            ->assertJsonPath('message', 'The quotation cannot be more than ₱10,000,000.00.');
 
         $this->assertSame($before, $this->codeCount());
     }

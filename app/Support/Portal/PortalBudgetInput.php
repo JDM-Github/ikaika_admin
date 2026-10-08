@@ -16,8 +16,8 @@ final class PortalBudgetInput
 
     public const MAX_TEXT = 5000;
 
-    // DECIMAL(15, 2): thirteen digits before the point.
-    public const MAX_AMOUNT_CENTS = 999_999_999_999_999;
+    // Ten million pesos, the most any one amount in Finance may be (2026-10-08).
+    public const MAX_AMOUNT_CENTS = 1_000_000_000;
 
     public function validatedName(Request $request, string $missing, string $label, string $key = 'name'): string
     {
@@ -81,7 +81,7 @@ final class PortalBudgetInput
             abort(422, $label.' cannot be negative.');
         }
         if ($cents > self::MAX_AMOUNT_CENTS) {
-            abort(422, $label.' is too large.');
+            abort(422, $label.' cannot be more than ₱10,000,000.00.');
         }
 
         return $cents;

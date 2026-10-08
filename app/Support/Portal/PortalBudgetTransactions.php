@@ -99,8 +99,9 @@ final class PortalBudgetTransactions
         $payorPayee = $this->input->validatedText($request, 'payorPayee', 'The payor or payee', PortalBudgetInput::MAX_NAME);
         $notes = $this->input->validatedText($request, 'notes', 'The notes');
         $isConfirmed = $this->input->confirmed($request, 'allowOverspend');
-        if ($envelopeId === null && $accountId === null) {
-            abort(422, 'Choose the envelope or the account this transaction touches.');
+        // Every transaction goes through an envelope (2026-10-09); an account is funded from Accounts instead.
+        if ($envelopeId === null) {
+            abort(422, 'Choose the envelope this transaction comes out of or goes into.');
         }
         $receiptKey = $this->receiptKeyFrom($actor, $request);
         $receipt = $receiptKey === null ? null : Cache::get($receiptKey);
@@ -110,17 +111,17 @@ final class PortalBudgetTransactions
         $type = $kind === self::INCOME ? PortalBudgetLedger::TYPE_CREDIT : PortalBudgetLedger::TYPE_EXPENSE;
 
         [$id, $envelopeName, $pending] = $this->ledger->transaction(function () use ($actor, $type, $name, $cents, $occurredOn, $envelopeId, $accountId, $codeId, $payorPayee, $notes, $isConfirmed, $receipt): array {
-            $envelope = $envelopeId === null ? null : $this->ledger->lockEnvelope($envelopeId);
+            $envelope = $this->ledger->lockEnvelope($envelopeId);
             $account = $accountId === null ? null : $this->ledger->lockAccount($accountId);
-            if ($envelope !== null) {
-                $this->ledger->assertOpenEnvelope($envelope, 'adding a transaction to it');
-            }
+            $this->ledger->assertOpenEnvelope($envelope, 'adding a transaction to it');
+            // Whatever code was sent, the line is recorded against the one its envelope sits under.
+            $codeId = $this->ledger->codeIdOf((int) $envelope->id);
             if ($account !== null) {
                 $this->ledger->assertOpenAccount($account);
             }
             $this->ledger->assertBudgetCode($codeId);
             $isExpense = $type === PortalBudgetLedger::TYPE_EXPENSE;
-            if ($isExpense && $envelope !== null) {
+            if ($isExpense) {
                 $this->ledger->assertCovers($this->ledger->envelopeRemainingCents($envelopeId), $cents, $this->ledger->envelopeName($envelope), $isConfirmed);
             }
 
@@ -142,7 +143,7 @@ final class PortalBudgetTransactions
                 ]);
             }
 
-            $owner = $isExpense && $envelope !== null && $account !== null ? $this->ledger->ownerOf($envelopeId) : null;
+            $owner = $isExpense && $account !== null ? $this->ledger->ownerOf($envelopeId) : null;
             $pending = null;
             if ($owner !== null && (int) $owner->id !== $accountId) {
                 $reason = 'Cross-account envelope expense on '.$this->ledger->envelopeName($envelope).': '.$name;
@@ -154,7 +155,7 @@ final class PortalBudgetTransactions
                 ];
             }
 
-            return [$id, $envelope === null ? null : $this->ledger->envelopeName($envelope), $pending];
+            return [$id, $this->ledger->envelopeName($envelope), $pending];
         });
 
         if ($receiptKey !== null) {

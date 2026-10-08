@@ -40,7 +40,8 @@ final class PortalReimbursementRequests
 
     private const MAX_PURPOSE = 500;
 
-    private const MAX_COST = 999999999.99;
+    // Ten million pesos, the most any one amount in the portal may be (2026-10-08).
+    private const MAX_COST = 10000000.00;
 
     private const MAX_QUANTITY = 9999;
 
@@ -842,8 +843,11 @@ final class PortalReimbursementRequests
             abort(422, 'Every reimbursement needs a cost above zero.');
         }
         $cost = round((float) $value, 2);
-        if ($cost <= 0 || $cost > self::MAX_COST) {
+        if ($cost <= 0) {
             abort(422, 'Every reimbursement needs a cost above zero.');
+        }
+        if ($cost > self::MAX_COST) {
+            abort(422, 'A reimbursement cost cannot be more than ₱10,000,000.00.');
         }
 
         return $cost;
