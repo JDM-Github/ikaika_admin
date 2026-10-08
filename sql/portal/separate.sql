@@ -958,7 +958,9 @@ CREATE TABLE IF NOT EXISTS employee_signatures (
 CREATE TABLE IF NOT EXISTS shared_pages (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     label           VARCHAR(100) NOT NULL,
-    code            CHAR(24)     NOT NULL,
+    -- What the guest is called on their own screens; null falls back to the label.
+    guest_name      VARCHAR(100) NULL,
+    code            VARCHAR(64)  NOT NULL,       -- a typed slug, or a generated 24-hex code
     password_hash   VARCHAR(255) NOT NULL,
     -- The generated password, kept readable so the developer can send it again; the hash still verifies.
     password_value  VARCHAR(32)  NULL,
@@ -972,9 +974,13 @@ CREATE TABLE IF NOT EXISTS shared_pages (
     UNIQUE KEY shared_pages_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Existing databases: run the ALTER below (pre-change rows keep a NULL value until regenerated).
+-- Existing databases: run the ALTERs below (pre-change rows keep a NULL value until regenerated).
 ALTER TABLE shared_pages
     ADD COLUMN password_value VARCHAR(32) NULL AFTER password_hash;
+
+ALTER TABLE shared_pages
+    MODIFY COLUMN code VARCHAR(64) NOT NULL,
+    ADD COLUMN guest_name VARCHAR(100) NULL AFTER label;
 
 CREATE TABLE IF NOT EXISTS shared_page_rules (
     share_id INT          NOT NULL,

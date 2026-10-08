@@ -134,6 +134,70 @@ class PortalSharedPagesTest extends TestCase
         $this->assertTrue(collect($listed->json('data.pages'))->firstWhere('key', 'projects.view')['isReady']);
     }
 
+    public function test_a_typed_slug_becomes_the_link_and_a_guest_name_is_kept(): void
+    {
+        $token = $this->developerToken();
+
+        $created = $this->createShare($token, ['slug' => 'truebeck', 'guestName' => 'Truebeck']);
+        $share = $created->json('data.share');
+
+        $this->assertSame('truebeck', $share['code']);
+        $this->assertStringEndsWith('/share/truebeck', $share['link']);
+        $this->assertSame('Truebeck', $share['guestName']);
+
+        // The guest-facing name is the guest name; the developer's label stays the record's own.
+        $this->getJson('/api/development/portal/share/truebeck')->assertOk()->assertJsonPath('data.label', 'Truebeck');
+
+        // The sign-in answer and the restored session both call the guest by their name.
+        $guestToken = (string) $this->postJson('/api/development/portal/share/truebeck/access', ['password' => $created->json('data.password')])
+            ->assertOk()
+            ->assertJsonPath('data.label', 'Truebeck')
+            ->json('data.token');
+        $this->withToken($guestToken)->getJson('/api/development/portal/share/session')
+            ->assertOk()
+            ->assertJsonPath('data.label', 'Truebeck');
+    }
+
+    public function test_a_blank_slug_still_generates_a_code_and_clears_the_guest_name(): void
+    {
+        $token = $this->developerToken();
+        $share = $this->createShare($token, ['slug' => '   ', 'guestName' => ''])->json('data.share');
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{24}$/', $share['code']);
+        $this->assertNull($share['guestName']);
+        // With no guest name, the label is what the guest sees.
+        $this->getJson('/api/development/portal/share/'.$share['code'])->assertOk()->assertJsonPath('data.label', 'Truebeck walkthrough');
+    }
+
+    public function test_a_taken_or_malformed_slug_is_refused(): void
+    {
+        $token = $this->developerToken();
+        $this->createShare($token, ['slug' => 'truebeck']);
+
+        foreach (['truebeck', 'Truebeck', 'no', 'has_underscore', 'trailing-', 'session'] as $slug) {
+            $this->withToken($token)->postJson(self::BASE, $this->payload(['slug' => $slug]))->assertStatus(422);
+        }
+    }
+
+    public function test_an_edit_can_change_the_slug_and_the_old_link_dies(): void
+    {
+        $token = $this->developerToken();
+        $share = $this->createShare($token)->json('data.share');
+
+        $saved = $this->withToken($token)->patchJson(self::BASE.'/'.$share['id'], $this->payload([
+            'slug' => 'truebeck-2', 'guestName' => 'Truebeck',
+        ]))->assertOk()->json('data.share');
+
+        $this->assertSame('truebeck-2', $saved['code']);
+        $this->assertSame('Truebeck', $saved['guestName']);
+        $this->getJson('/api/development/portal/share/'.$share['code'])->assertStatus(404);
+        $this->getJson('/api/development/portal/share/truebeck-2')->assertOk();
+
+        // A blank slug on the next edit keeps the link the share already has.
+        $kept = $this->withToken($token)->patchJson(self::BASE.'/'.$share['id'], $this->payload(['slug' => '']))->assertOk()->json('data.share');
+        $this->assertSame('truebeck-2', $kept['code']);
+    }
+
     public function test_a_password_is_mailed_when_an_email_is_bound(): void
     {
         $token = $this->developerToken();

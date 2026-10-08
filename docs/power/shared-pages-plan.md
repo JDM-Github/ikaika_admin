@@ -72,6 +72,7 @@ Actions. No tabs, so no `stateKey`.
 | 6 | The guest session **persists until the share expires** — the guest token is stored on the device (localStorage on web). This is the one deliberate exception to "a token never goes in PreferencesStorage". |
 | 7 | **Expiry** is chosen per share, default **7 days**, revocable immediately. |
 | 8 | **Rate cap**: requests per minute per share, default **60**; plus a sign-in attempt cap and OTP limits regardless. |
+| 9 | The **link slug** is optional (user, 2026-10-08): a typed slug becomes `/share/<slug>` (lowercase letters, numbers, dashes, 3-64, unique, `session` reserved); blank keeps a generated 24-hex code. Editable any time, and the old link dies with the change. A **guest name** is optional and is what the guest sees on the sign-in screen and the Guest chip, falling back to the label. |
 
 Defaults the user has not objected to (change them here, not in code):
 
@@ -95,9 +96,10 @@ Defaults the user has not objected to (change them here, not in code):
 CREATE TABLE IF NOT EXISTS shared_pages (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     label           VARCHAR(100) NOT NULL,
-    code            CHAR(24)     NOT NULL,
+    code            VARCHAR(64)  NOT NULL,       -- a typed slug, or a generated 24-hex code
     password_hash   VARCHAR(255) NOT NULL,
     password_value  VARCHAR(32)  NULL,           -- the readable password, for re-sending
+    guest_name      VARCHAR(100) NULL,           -- what the guest is called on their screens
     email           VARCHAR(255) NULL,
     expires_at      TIMESTAMP    NULL,           -- NULL = never, only when cleared
     rate_per_minute SMALLINT     NOT NULL DEFAULT 60,
@@ -218,7 +220,7 @@ answer rides in `data`, the portal's envelope:
 
 ```text
 GET    manage/shared-pages               -> { shares: [...], pages: [{key, label, isReady}] }
-POST   manage/shared-pages               { label, email?, expiresInDays?|expiresAt?, ratePerMinute, rules[] }
+POST   manage/shared-pages               { label, guestName?, slug?, email?, expiresInDays?|expiresAt?, ratePerMinute, rules[] }
                                          -> { share, password }        // the share carries its password too
 PATCH  manage/shared-pages/{id}          { label, email, expiresInDays?|expiresAt?, ratePerMinute, rules[] }
 DELETE manage/shared-pages/{id}          -> revoked
@@ -337,6 +339,8 @@ The portal draws the SVG with `react-native-svg`'s `SvgXml`, so the portal gains
   Expires, Last used; trailing Actions cell with **QR & link**, **Edit**, **Regenerate
   password**, **Revoke** — `rowActions` with the eye for the QR/details sheet.
 - **New / Edit sheet** (`SlideSheetSharedOverlay`): `TextSharedField` label, `TextSharedField`
+  guest name (optional), `TextSharedField` slug (optional; blank makes a random link on create and
+  keeps the link on edit), `TextSharedField`
   email, expiry select (1 day / 7 days / 30 days / Custom / Never) with a `CalendarPickerSharedField`
   when custom, `TextSharedField` rate (numeric), and the page list — a `PowerSharedList`-shaped
   list with `SwitchSharedButton` per page, **all off**, unready rows dimmed with a "Not ready"

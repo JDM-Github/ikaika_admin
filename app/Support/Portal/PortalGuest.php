@@ -3,9 +3,9 @@
 namespace App\Support\Portal;
 
 /**
- * A guest resolved from a shared-page token: which share, its label, and the page rules the developer
- * granted. It stands in for the employee on a guest request, so PortalRules answers from this list
- * instead of a role, and the request is read-only (AuthenticatePortalJwt refuses every non-GET).
+ * A guest resolved from a shared-page token: which share, and the page rules the developer granted.
+ * It stands in for the employee on a guest request, so PortalRules answers from this list instead of
+ * a role, and the request is read-only (AuthenticatePortalJwt refuses every non-GET).
  */
 final class PortalGuest
 {
@@ -14,7 +14,6 @@ final class PortalGuest
      */
     public function __construct(
         public readonly int $shareId,
-        public readonly string $label,
         public readonly array $rules,
     ) {}
 

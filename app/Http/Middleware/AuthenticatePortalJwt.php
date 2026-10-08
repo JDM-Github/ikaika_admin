@@ -96,7 +96,7 @@ class AuthenticatePortalJwt
             ->pluck('rule_key')
             ->all();
 
-        $request->attributes->set('portalShare', new PortalGuest((int) $share->id, (string) $share->label, array_values($rules)));
+        $request->attributes->set('portalShare', new PortalGuest((int) $share->id, array_values($rules)));
         // An empty employee stands in so services reading the actor get nulls instead of crashing.
         $request->attributes->set('portalEmployee', new Employee);
         $request->attributes->set('portalSessionId', is_string($payload['sid'] ?? null) ? $payload['sid'] : null);

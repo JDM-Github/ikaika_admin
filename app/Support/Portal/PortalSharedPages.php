@@ -79,10 +79,11 @@ final class PortalSharedPages
     {
         $data = $this->validated($request);
         $password = self::password();
-        $code = $this->newCode();
+        $code = $this->codeFor($data['slug']);
 
         $id = (int) $this->connection()->table('shared_pages')->insertGetId([
             'label' => $data['label'],
+            'guest_name' => $data['guestName'],
             'code' => $code,
             'password_hash' => Hash::make($password),
             'password_value' => $password,
@@ -109,12 +110,18 @@ final class PortalSharedPages
         $row = $this->row($id);
         $data = $this->validated($request);
 
-        $this->connection()->table('shared_pages')->where('id', $id)->update([
+        $update = [
             'label' => $data['label'],
+            'guest_name' => $data['guestName'],
             'email' => $data['email'],
             'expires_at' => $data['expiresAt'],
             'rate_per_minute' => $data['ratePerMinute'],
-        ]);
+        ];
+        // A slug left blank keeps the link the share already has; a typed one replaces it.
+        if ($data['slug'] !== null) {
+            $update['code'] = $this->codeFor($data['slug'], $id);
+        }
+        $this->connection()->table('shared_pages')->where('id', $id)->update($update);
         $this->writeRules($id, $data['rules']);
         $this->audit->record($actor, PortalLogAction::PATCH, 'manage.shares', '{UserName|You} changed the shared page '.$data['label'], (string) $id, $request);
 
@@ -172,7 +179,7 @@ final class PortalSharedPages
     {
         $share = $this->shareByCode($code);
 
-        return ['label' => (string) $share->label, 'hasEmail' => $this->hasEmail($share)];
+        return ['label' => $this->displayName($share), 'hasEmail' => $this->hasEmail($share)];
     }
 
     /**
@@ -234,16 +241,18 @@ final class PortalSharedPages
      */
     public function session(PortalGuest $guest): array
     {
-        return ['label' => $guest->label, 'rules' => array_values($guest->rules)];
+        return ['label' => $this->displayName($this->row($guest->shareId)), 'rules' => array_values($guest->rules)];
     }
 
     /**
-     * @return array{label: string, email: ?string, expiresAt: ?string, ratePerMinute: int, rules: list<string>}
+     * @return array{label: string, guestName: ?string, slug: ?string, email: ?string, expiresAt: ?string, ratePerMinute: int, rules: list<string>}
      */
     private function validated(Request $request): array
     {
         $data = $request->validate([
             'label' => ['required', 'string', 'max:100'],
+            'guestName' => ['nullable', 'string', 'max:100'],
+            'slug' => ['nullable', 'string', 'max:64'],
             'email' => ['nullable', 'email', 'max:255'],
             'expiresInDays' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_EXPIRY_DAYS],
             'expiresAt' => ['nullable', 'date'],
@@ -258,6 +267,17 @@ final class PortalSharedPages
             abort(422, 'Give the shared page a name.');
         }
         $email = isset($data['email']) && trim((string) $data['email']) !== '' ? trim((string) $data['email']) : null;
+        $guestName = isset($data['guestName']) && trim((string) $data['guestName']) !== '' ? trim((string) $data['guestName']) : null;
+        $slug = isset($data['slug']) && trim((string) $data['slug']) !== '' ? strtolower(trim((string) $data['slug'])) : null;
+        if ($slug !== null) {
+            if (preg_match('/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/', $slug) !== 1) {
+                abort(422, 'A link slug is 3-64 characters: lowercase letters, numbers and dashes.');
+            }
+            // share/session is the guest session route, so a share can never answer there.
+            if ($slug === 'session') {
+                abort(422, 'That link slug is reserved.');
+            }
+        }
 
         // Only pages that have been verified guest-safe can be granted.
         $ready = $this->readyRules();
@@ -273,6 +293,8 @@ final class PortalSharedPages
 
         return [
             'label' => $label,
+            'guestName' => $guestName,
+            'slug' => $slug,
             'email' => $email,
             'expiresAt' => $this->expiresAt($data),
             'ratePerMinute' => (int) ($data['ratePerMinute'] ?? self::DEFAULT_RATE_PER_MINUTE),
@@ -357,6 +379,7 @@ final class PortalSharedPages
         return [
             'id' => (string) (int) $row->id,
             'label' => (string) $row->label,
+            'guestName' => $row->guest_name === null ? null : (string) $row->guest_name,
             'code' => (string) $row->code,
             'link' => $this->link((string) $row->code),
             // The readable password, so the developer can send it again. Null for a share made before
@@ -456,7 +479,7 @@ final class PortalSharedPages
         $token = $this->jwt->issue([
             'guest' => true,
             'share' => (int) $share->id,
-            'label' => (string) $share->label,
+            'label' => $this->displayName($share),
             'rules' => $rules,
         ], $ttl);
         $this->connection()->table('shared_page_visits')->insert([
@@ -468,7 +491,7 @@ final class PortalSharedPages
         return [
             'token' => $token,
             'expiresAt' => now()->addSeconds($ttl)->toIso8601String(),
-            'label' => (string) $share->label,
+            'label' => $this->displayName($share),
             'rules' => $rules,
         ];
     }
@@ -492,6 +515,31 @@ final class PortalSharedPages
         }
 
         abort(500, 'Could not make a link code.');
+    }
+
+    // The link's code: the typed slug when there is one, a generated one otherwise.
+    private function codeFor(?string $slug, ?int $exceptId = null): string
+    {
+        if ($slug === null) {
+            return $this->newCode();
+        }
+
+        $taken = $this->connection()->table('shared_pages')->where('code', $slug)
+            ->when($exceptId !== null, static fn ($query) => $query->where('id', '!=', $exceptId))
+            ->exists();
+        if ($taken) {
+            abort(422, 'That link slug is already taken.');
+        }
+
+        return $slug;
+    }
+
+    // What the guest is called on their own screens: their name when the developer set one.
+    private function displayName(object $share): string
+    {
+        $name = trim((string) ($share->guest_name ?? ''));
+
+        return $name !== '' ? $name : (string) $share->label;
     }
 
     private function mailPassword(string $code, string $email, string $label, string $password, ?string $expiresAt): void
