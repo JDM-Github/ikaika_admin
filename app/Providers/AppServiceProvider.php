@@ -52,6 +52,18 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(10)->by('auth:'.(string) $request->ip());
         });
 
+        // A guest on a shared page: the share's own cap is on its token; this holds the door.
+        RateLimiter::for('portal-share', function (Request $request) {
+            return Limit::perMinute(30)->by('share:'.(string) $request->ip());
+        });
+
+        // Signing into a share: a password and a code are checked on these routes.
+        RateLimiter::for('portal-share-auth', function (Request $request) {
+            $code = $request->route('code');
+
+            return Limit::perMinute(5)->by('share-auth:'.(is_scalar($code) ? (string) $code : '').':'.(string) $request->ip());
+        });
+
         RateLimiter::for('portal-home', function (Request $request) {
             return Limit::perMinute(60)->by('home:'.$this->portalLimiterKey($request));
         });

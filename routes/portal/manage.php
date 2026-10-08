@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
 use App\Http\Controllers\Api\Portal\Manage\ReferencesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
+use App\Http\Controllers\Api\Portal\Manage\SharedPagesController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
 use App\Http\Middleware\AuthenticatePortalJwt;
 use App\Support\Portal\PortalFlaggedMembers;
@@ -48,6 +49,21 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::patch('manage/references/clients/{id}', [ReferencesController::class, 'updateClient'])
             ->whereNumber('id');
         Route::delete('manage/references/clients/{id}', [ReferencesController::class, 'destroyClient'])
+            ->whereNumber('id');
+    });
+    // Manage / Shared Pages: the guest read-only links. Developers only, in Developer mode.
+    Route::middleware(['portal.rule:manage.shares', 'throttle:portal-projects'])
+        ->get('manage/shared-pages', [SharedPagesController::class, 'index']);
+    Route::middleware(['portal.rule:manage.shares', 'throttle:portal-projects'])
+        ->get('manage/shared-pages/{id}/qr', [SharedPagesController::class, 'qr'])
+        ->whereNumber('id');
+    Route::middleware(['portal.rule:manage.shares', 'throttle:portal-projects-write'])->group(function (): void {
+        Route::post('manage/shared-pages', [SharedPagesController::class, 'store']);
+        Route::patch('manage/shared-pages/{id}', [SharedPagesController::class, 'update'])
+            ->whereNumber('id');
+        Route::delete('manage/shared-pages/{id}', [SharedPagesController::class, 'destroy'])
+            ->whereNumber('id');
+        Route::post('manage/shared-pages/{id}/regenerate', [SharedPagesController::class, 'regenerate'])
             ->whereNumber('id');
     });
     // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.

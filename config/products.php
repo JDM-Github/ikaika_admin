@@ -64,6 +64,9 @@ return [
             'password' => env('PORTAL_DB_PASSWORD', env('DB_PASSWORD', '')),
             'enabled' => filter_var(env('PORTAL_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
             'module' => PortalModule::class,
+            // Where the web app answers, for links the server builds (a shared page's link and QR).
+            // Empty locally; the hosted build sets the subfolder base, e.g. https://host/website_x/portal.
+            'public_url' => env('PORTAL_PUBLIC_URL', ''),
         ],
 
         'project-estimator' => [

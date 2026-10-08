@@ -19,6 +19,8 @@ class RequirePortalLocation
 {
     private const EXEMPT = [
         '*/portal/auth/*',
+        // A guest signing into a shared page is not an employee act, and nothing is written.
+        '*/portal/share/*',
         '*/portal/developer/mode',
         '*/portal/developer/password',
         '*/portal/user/notifications/*',

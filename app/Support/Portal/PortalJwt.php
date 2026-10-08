@@ -9,11 +9,13 @@ class PortalJwt
 {
     /**
      * @param  array<string, mixed>  $claims
+     * @param  ?int  $ttlSeconds  Overrides the configured session TTL, for a guest whose link must
+     *                            outlive it; the share's own expiry bounds it instead.
      */
-    public function issue(array $claims): string
+    public function issue(array $claims, ?int $ttlSeconds = null): string
     {
         $now = now()->getTimestamp();
-        $ttl = $this->ttlSeconds();
+        $ttl = $ttlSeconds === null ? $this->ttlSeconds() : max(60, $ttlSeconds);
         $payload = array_merge($claims, [
             // One id per sign-in: Developer mode is tied to it, so a new sign-in starts in Default.
             'sid' => bin2hex(random_bytes(16)),

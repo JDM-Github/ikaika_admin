@@ -1,0 +1,199 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Mail\PortalEmailMail;
+use App\Modules\Portal\Models\Employee;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Testing\TestResponse;
+use Tests\TestCase;
+
+/**
+ * Manage / Shared Pages: a developer makes guest read-only links. The page is a work in progress, so
+ * its `manage.shares` rule is Developer-mode-only: a developer in Developer mode opens it, an admin
+ * in Default does not.
+ */
+class PortalSharedPagesTest extends TestCase
+{
+    use DatabaseTransactions;
+
+    /**
+     * @var list<string>
+     */
+    protected array $connectionsToTransact = ['portal', 'core'];
+
+    private const BASE = '/api/development/portal/manage/shared-pages';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::flush();
+        $this->withoutMiddleware(ThrottleRequests::class);
+        Mail::fake();
+    }
+
+    private function employee(string $where): Employee
+    {
+        $employee = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw($where)
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->whereNotNull('email')->where('email', '!=', '')
+            ->orderBy('id')
+            ->firstOrFail();
+        $employee->forceFill(['is_developer' => false])->save();
+
+        return $employee;
+    }
+
+    private function token(Employee $employee): string
+    {
+        return (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
+    }
+
+    // The page's rule is Developer mode only, so every working call signs in a developer and turns it on.
+    private function developerToken(): string
+    {
+        $developer = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->where('is_developer', true)
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->orderBy('id')
+            ->firstOrFail();
+
+        return $this->developerModeOn($this->token($developer));
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function payload(array $overrides = []): array
+    {
+        return array_merge([
+            'label' => 'Truebeck walkthrough',
+            'expiresInDays' => 7,
+            'ratePerMinute' => 60,
+            'rules' => ['projects.view', 'finance.envelopes'],
+        ], $overrides);
+    }
+
+    private function createShare(string $token, array $overrides = []): TestResponse
+    {
+        return $this->withToken($token)->postJson(self::BASE, $this->payload($overrides))->assertOk();
+    }
+
+    public function test_the_page_is_developer_mode_only(): void
+    {
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+
+        $this->withToken($this->token($member))->getJson(self::BASE)->assertForbidden();
+        $this->withToken($this->token($admin))->getJson(self::BASE)->assertForbidden();
+    }
+
+    public function test_a_share_is_created_with_a_password_shown_once(): void
+    {
+        $token = $this->developerToken();
+
+        $created = $this->createShare($token)->assertJsonPath('share.label', 'Truebeck walkthrough');
+        $share = $created->json('share');
+        $password = $created->json('password');
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{24}$/', $share['code']);
+        $this->assertIsString($password);
+        $this->assertSame(12, strlen($password));
+        $this->assertSame(['projects.view', 'finance.envelopes'], $share['rules']);
+        $this->assertNull($share['email']);
+        $this->assertFalse($share['isRevoked']);
+        $this->assertNotNull($share['expiresAt']);
+
+        $row = DB::connection('portal')->table('shared_pages')->where('id', $share['id'])->first();
+        $this->assertNotNull($row);
+        $this->assertNotSame($password, $row->password_hash);
+        $this->assertTrue(Hash::check($password, (string) $row->password_hash));
+        $this->assertNull($row->revoked_at);
+        $this->assertSame(['finance.envelopes', 'projects.view'], DB::connection('portal')->table('shared_page_rules')
+            ->where('share_id', $share['id'])->orderBy('rule_key')->pluck('rule_key')->all());
+
+        // The list carries it back, and the page list carries every shareable page.
+        $listed = $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $this->assertSame($share['code'], collect($listed->json('shares'))->firstWhere('id', $share['id'])['code']);
+        $this->assertContains('projects.view', array_column($listed->json('pages'), 'key'));
+        $this->assertTrue(collect($listed->json('pages'))->firstWhere('key', 'projects.view')['isReady']);
+    }
+
+    public function test_a_password_is_mailed_when_an_email_is_bound(): void
+    {
+        $token = $this->developerToken();
+
+        $created = $this->withToken($token)
+            ->postJson(self::BASE, $this->payload(['email' => 'guest@example.com']))
+            ->assertOk();
+        $password = (string) $created->json('password');
+
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com')
+            && str_contains($mail->body, $password)
+            && str_contains($mail->body, '/share/'.$created->json('share.code')));
+    }
+
+    public function test_a_page_that_is_not_ready_is_refused(): void
+    {
+        $this->withToken($this->developerToken())
+            ->postJson(self::BASE, $this->payload(['rules' => ['home']]))
+            ->assertStatus(422);
+    }
+
+    public function test_a_share_is_edited_and_revoked(): void
+    {
+        $token = $this->developerToken();
+        $share = $this->createShare($token)->json('share');
+
+        $this->withToken($token)
+            ->patchJson(self::BASE.'/'.$share['id'], $this->payload([
+                'label' => 'Truebeck, second look',
+                'ratePerMinute' => 20,
+                'rules' => ['projects.track'],
+            ]))
+            ->assertOk()
+            ->assertJsonPath('share.label', 'Truebeck, second look');
+        $this->assertSame(['projects.track'], collect($this->withToken($token)->getJson(self::BASE)->json('shares'))->firstWhere('id', $share['id'])['rules']);
+
+        $this->withToken($token)->deleteJson(self::BASE.'/'.$share['id'])
+            ->assertOk()
+            ->assertJsonPath('share.isRevoked', true);
+        $this->withToken($token)->patchJson(self::BASE.'/99999999', $this->payload())->assertNotFound();
+        $this->withToken($token)->deleteJson(self::BASE.'/99999999')->assertNotFound();
+    }
+
+    public function test_regenerating_replaces_the_password(): void
+    {
+        $token = $this->developerToken();
+        $created = $this->createShare($token);
+        $share = $created->json('share');
+        $oldPassword = (string) $created->json('password');
+
+        $regenerated = $this->withToken($token)->postJson(self::BASE.'/'.$share['id'].'/regenerate')->assertOk()->json('password');
+        $this->assertIsString($regenerated);
+        $this->assertNotSame($oldPassword, $regenerated);
+
+        // The new one signs in; the password it replaced does not.
+        $this->postJson('/api/development/portal/share/'.$share['code'].'/access', ['password' => $regenerated])->assertOk();
+        $this->postJson('/api/development/portal/share/'.$share['code'].'/access', ['password' => $oldPassword])->assertStatus(422);
+    }
+
+    public function test_the_qr_is_an_svg_of_the_link(): void
+    {
+        $token = $this->developerToken();
+        $share = $this->createShare($token)->json('share');
+
+        $svg = $this->withToken($token)->getJson(self::BASE.'/'.$share['id'].'/qr')->assertOk()->json('svg');
+        $this->assertIsString($svg);
+        $this->assertStringContainsString('<svg', $svg);
+    }
+}

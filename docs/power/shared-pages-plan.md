@@ -1,8 +1,11 @@
 # Shared Pages — guest read-only links (plan)
 
-Status: **planned, not built (2026-10-08).** Every decision below is the user's answer or direction
-of 2026-10-08; nothing is enforced, seeded or coded yet. Build order, tests and deployment are at
-the end.
+Status: **server core built (2026-10-08, Step 1).** The SQL, `PortalSharedPages`, the guest branch
+of `AuthenticatePortalJwt`, the `PortalRules` guest override, the public `share/*` routes, the
+Manage `manage/shared-pages` routes, the limiters and the QR all exist, with
+`PortalSharedPagesTest` + `PortalShareAccessTest` green (plus the full admin suite). Still to build:
+the portal page (Step 2), the guest sign-in + shell (Step 3), and the per-page readiness pass
+(Step 4). Every decision below is the user's answer or direction of 2026-10-08.
 
 ## 1. What this is
 
@@ -220,10 +223,11 @@ GET    manage/shared-pages/{id}/qr       -> { svg }                    // the li
 Public:
 
 ```text
+GET  share/session         (guest token) -> { label, rules }  // the stored session, re-checked
 GET  share/{code}          -> { label, hasEmail }            // never the email itself
 POST share/{code}/access   { password } -> { otpRequired: true } | { token, expiresAt, label, rules }
 POST share/{code}/verify   { password, otp? } -> { token, expiresAt, label, rules }
-POST share/{code}/resend   -> { sent: true }                 // 60-second cooldown
+POST share/{code}/resend   { password } -> { sent: true }     // 60-second cooldown
 ```
 
 - A wrong code/password always answers the same, generic refusal (no code probing).
@@ -241,8 +245,10 @@ POST share/{code}/resend   -> { sent: true }                 // 60-second cooldo
   "label": "Truebeck walkthrough", "sub": null, "exp": 0 }
 ```
 
-  `exp` is `min(now + jwt_ttl, share.expires_at)`; a share with no expiry uses the JWT TTL and is
-  re-validated on every request anyway.
+  `exp` is the share's remaining life (so a guest outlives the portal's own JWT TTL, which is the
+  point of decision 6), capped at 30 days; a share with no expiry gets the 30 days. The share is
+  re-validated on every request regardless, so the token's own life only decides how long the
+  device stays signed in.
 
 - `AuthenticatePortalJwt`:
   - parses the token as today;
@@ -479,6 +485,11 @@ above green and the page visual-checked in the live app.
 - **Portal**: no new package; the usual web export/deploy.
 - The share link is built with `ShellRoutePathUtility.withBase('/share/<code>')`, so it carries
   the subfolder base (`/website_a85fbf18/portal`) automatically.
+- **`PORTAL_PUBLIC_URL`** must be set wherever the server builds a link (the password/code emails
+  and the QR): the portal's public base, e.g. `https://host/website_a85fbf18/portal`. Empty
+  locally (`config('products.catalog.portal.public_url')`, added with the feature), so local
+  emails carry a relative link; the hosted build's `push-env`/deploy sets it beside the other
+  portal envs.
 
 ## 12. Open / parked
 

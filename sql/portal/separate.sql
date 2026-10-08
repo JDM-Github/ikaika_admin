@@ -945,3 +945,104 @@ CREATE TABLE IF NOT EXISTS employee_signatures (
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
     FOREIGN KEY (footer_id) REFERENCES email_blocks(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- SHARED PAGES - guest read-only links, made on Manage / Shared Pages
+-- A developer picks pages; the server issues a link (/share/<code>) and a
+-- password. The guest signs in with the password, plus a code emailed when a
+-- bound email is set, and browses those pages read-only. Guests are GET-only.
+-- Existing databases: run the CREATEs, the seed and the catalog row below.
+-- Plan: docs/power/shared-pages-plan.md.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS shared_pages (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    label           VARCHAR(100) NOT NULL,
+    code            CHAR(24)     NOT NULL,
+    password_hash   VARCHAR(255) NOT NULL,
+    email           VARCHAR(255) NULL,
+    expires_at      TIMESTAMP    NULL,           -- NULL only when the developer clears it
+    rate_per_minute SMALLINT     NOT NULL DEFAULT 60,
+    revoked_at      TIMESTAMP    NULL,
+    created_by      INT          NOT NULL,       -- employees.id, the developer
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at    TIMESTAMP    NULL,
+    UNIQUE KEY shared_pages_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shared_page_rules (
+    share_id INT          NOT NULL,
+    rule_key VARCHAR(100) NOT NULL,
+    PRIMARY KEY (share_id, rule_key),
+    FOREIGN KEY (share_id) REFERENCES shared_pages(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shared_page_otps (
+    share_id   INT          NOT NULL PRIMARY KEY,
+    code_hash  VARCHAR(255) NOT NULL,
+    attempts   TINYINT      NOT NULL DEFAULT 0,
+    issued_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP    NOT NULL,
+    FOREIGN KEY (share_id) REFERENCES shared_pages(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shared_page_visits (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    share_id   INT NOT NULL,
+    visited_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ip         VARCHAR(45) NULL,
+    FOREIGN KEY (share_id) REFERENCES shared_pages(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Which pages a share may grant. Every page-level rule is seeded; is_ready stays 0 until a guest
+-- check is run against that page (a guest has no person, so reach pages read all and own pages read
+-- empty). The page keys are the ones RouteRuleConstant maps on the portal side, plus home.
+CREATE TABLE IF NOT EXISTS shared_page_shareable (
+    rule_key VARCHAR(100) NOT NULL PRIMARY KEY,
+    is_ready TINYINT(1)   NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
+    ('home', 0),
+    ('projects.view', 1),
+    ('projects.track', 1),
+    ('projects.create', 0),
+    ('projects.manager', 0),
+    ('projects.references', 0),
+    ('reports.daily', 0),
+    ('reports.late', 0),
+    ('reports.submitted', 0),
+    ('reports.submitted.edit', 0),
+    ('requests.own', 0),
+    ('requests.leave', 0),
+    ('requests.overtime', 0),
+    ('requests.offset', 0),
+    ('requests.reimbursement', 0),
+    ('requests.own.edit', 0),
+    ('user.logs', 0),
+    ('user.recycle', 0),
+    ('calendar', 1),
+    ('manage.requests', 0),
+    ('manage.reports', 0),
+    ('manage.users', 0),
+    ('finance.overview', 1),
+    ('finance.transactions', 1),
+    ('finance.envelopes', 1),
+    ('finance.accounts', 1),
+    ('administration.recycle', 0),
+    ('administration.logs', 0),
+    ('administration.actions', 0),
+    ('administration.missing', 0),
+    ('administration.emails', 0),
+    ('email', 0),
+    ('email.library', 0),
+    ('administration.backup', 0);
+
+-- The page's own power: developers only, held in Developer mode alone, so nobody can give it.
+-- Existing databases: add the row.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.shares', 'manage', 'Shared pages',
+     'Create read-only guest links to portal pages: pick the pages, hand out the link and its password.',
+     0, 1, 'developer', 860);
