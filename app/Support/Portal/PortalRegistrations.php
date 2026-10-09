@@ -201,7 +201,7 @@ final class PortalRegistrations
 
         return [
             'registration' => $this->present($row),
-            'details' => $this->detailsOf($row),
+            'details' => (object) $this->detailsOf($row),
             'documents' => $this->documents->listFor($id),
         ];
     }
@@ -370,7 +370,7 @@ final class PortalRegistrations
         return [
             'name' => (string) $row->candidate_name,
             'status' => $this->statusOf($row),
-            'details' => $this->detailsOf($row),
+            'details' => (object) $this->detailsOf($row),
             'documents' => $this->documents->listFor((int) $row->id),
         ];
     }
@@ -651,7 +651,7 @@ final class PortalRegistrations
             'token' => $token,
             'expiresAt' => now()->addSeconds($ttl)->toIso8601String(),
             'name' => (string) $registration->candidate_name,
-            'details' => $this->detailsOf($registration),
+            'details' => (object) $this->detailsOf($registration),
             'documents' => $this->documents->listFor((int) $registration->id),
         ];
     }

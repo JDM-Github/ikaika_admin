@@ -271,10 +271,12 @@ class PortalOnboardingTest extends TestCase
         $this->postJson(self::REGISTER.'/liza/verify', ['password' => $created['password'], 'otp' => '654321'])->assertStatus(422);
         $this->assertSame(1, (int) DB::connection('portal')->table('register_otps')->where('registration_id', $id)->value('attempts'));
 
-        $sessionToken = (string) $this->postJson(self::REGISTER.'/liza/verify', ['password' => $created['password'], 'otp' => '123456'])
+        $verify = $this->postJson(self::REGISTER.'/liza/verify', ['password' => $created['password'], 'otp' => '123456'])
             ->assertOk()
-            ->assertJsonPath('data.name', 'Liza Reyes')
-            ->json('data.token');
+            ->assertJsonPath('data.name', 'Liza Reyes');
+        // A fresh draft is an object, never an empty array: the portal's parser refuses [].
+        $this->assertStringContainsString('"details":{}', $verify->getContent());
+        $sessionToken = (string) $verify->json('data.token');
         $this->withToken($sessionToken)->getJson(self::REGISTER.'/session')->assertOk()->assertJsonPath('data.status', 'opened');
         $this->assertNotNull(DB::connection('portal')->table('registrations')->where('id', $id)->value('opened_at'));
     }
