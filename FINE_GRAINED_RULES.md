@@ -105,6 +105,13 @@ Done so far (display only, nothing enforced):
     developers `all`), covers projects by the project's department. An add it covers is Approved at
     once; any other waits as Pending for a covering manager. The rest of the tree stays planned in
     `docs/power/view-projects-plan.md`.
+  - Created Projects (2026-10-09, user): its own power, `projects.created`, no reach (the page is
+    only ever the person's own list). The page and `GET /portal/projects/mine`
+    (`portal.rule:projects.created`) follow it; every role holds it by preset, so nothing
+    disappears on the day it lands. It used to follow `projects.create`, which took the record of
+    what someone already submitted away when they were barred from adding. The Shared Pages
+    catalogue row and existing shares moved off `projects.create` with it; migration
+    `add_portal_created_projects_rule`.
   - Auto-approve split (2026-10-07, supervisor): `projects.create.direct` is "Auto-approve projects",
     min_tier admin, no preset but developer, personal default for Nathaniel and Steven only; it alone
     approves a new project (and keeps a Rejected one from resending). `projects.manager` is "Project
@@ -401,6 +408,7 @@ Descriptions (what the Access page shows on each row) live in the SQL.
     - `projects.lead` Project Lead [R] — MAED (members department)
   - `projects.create` Add projects [R] — MAED
     - `projects.create.direct` Auto-approve projects — D (Nathaniel, Steven by personal default)
+  - `projects.created` Created Projects — MAED
   - `projects.track` Track Projects — MAED
     - `projects.track.export` Export — MAED
 - `reports` Reports — MAED

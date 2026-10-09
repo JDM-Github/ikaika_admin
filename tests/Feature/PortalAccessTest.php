@@ -131,6 +131,7 @@ class PortalAccessTest extends TestCase
         $everything = [
             'projects' => null, 'projects.view' => 'all', 'projects.edit' => 'all', 'projects.scopes' => 'all',
             'projects.delete' => 'all', 'projects.lead' => 'all', 'projects.create' => 'all', 'projects.create.direct' => null,
+            'projects.created' => null,
             'projects.manager' => 'all', 'projects.track' => 'all', 'projects.track.export' => null,
         ];
         // References and Shared Pages are administrators' powers now (2026-10-09): admins hold them
@@ -157,8 +158,10 @@ class PortalAccessTest extends TestCase
         $this->assertSame($executive, $presets['executive']);
         $this->assertSame($developer, $presets['developer']);
         // Anyone may add a project (2026-10-06); a member's waits for a Project Manager.
+        // Created Projects is every role's own record (2026-10-09): its own rule, no reach.
         $this->assertSame([
-            'projects' => null, 'projects.create' => 'all', 'projects.track' => 'own', 'projects.track.export' => null, 'projects.view' => 'own',
+            'projects' => null, 'projects.create' => 'all', 'projects.created' => null,
+            'projects.track' => 'own', 'projects.track.export' => null, 'projects.view' => 'own',
         ], $presets['member']);
     }
 

@@ -217,7 +217,7 @@ class PortalManageProjectsTest extends TestCase
     // Created Projects lists only what the person added, by approval, with the project's own status.
     public function test_my_projects_lists_only_what_i_added(): void
     {
-        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.create', 'reach' => 'all']);
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.created', 'reach' => null]);
         $othersId = (int) DB::connection('portal')->table('projects')->insertGetId([
             'project_name' => 'Someone Else 2020',
             'department' => 'Engineering',
@@ -246,9 +246,9 @@ class PortalManageProjectsTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $after->json('counts.approved'));
     }
 
-    public function test_my_projects_needs_add_projects(): void
+    public function test_my_projects_needs_the_created_projects_rule(): void
     {
-        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.create']);
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $this->member->getKey(), 'permission_key' => 'projects.created']);
         $this->withToken($this->token($this->member))->getJson('/api/development/portal/projects/mine')->assertForbidden();
     }
 

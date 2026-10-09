@@ -595,6 +595,9 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.lead', 'projects.view', 'Project Lead', 'Be chosen as the lead of {UserName|Your} department''s projects or of any project.', 1, 1, 214),
 ('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project, for {UserName|Your} department or every department.', 1, 1, 220),
 ('projects.create.direct', 'projects.create', 'Auto-approve projects', 'A project {UserName|You} add is approved at once, without waiting for a Project Approver.', 0, 1, 221),
+-- Created Projects is its own power (2026-10-09, user): a person may be barred from adding projects
+-- while still seeing the record of what they already submitted. No reach: it is only ever their own.
+('projects.created', 'projects', 'Created Projects', 'See the projects {UserName|You} added and where their approval stands.', 0, 1, 225),
 ('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
 ('projects.references', 'projects', 'References', 'Open Manage / References.', 0, 1, 240),
@@ -759,7 +762,7 @@ SELECT 'member', permission_key,
 FROM access_permissions
 WHERE permission_key IN (
     'home',
-    'projects', 'projects.view', 'projects.track', 'projects.track.export', 'projects.create',
+    'projects', 'projects.view', 'projects.track', 'projects.track.export', 'projects.create', 'projects.created',
     'reports', 'reports.daily', 'reports.late', 'reports.submitted',
     'reports.submitted.edit', 'reports.submitted.delete', 'reports.submitted.export',
     'requests', 'requests.own', 'requests.own.edit', 'requests.own.cancel', 'requests.own.export',
@@ -1022,7 +1025,7 @@ INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('home', 1),
     ('projects.view', 1),
     ('projects.track', 1),
-    ('projects.create', 1),
+    ('projects.created', 1),
     ('projects.manager', 1),
     ('projects.references', 1),
     ('reports.daily', 0),

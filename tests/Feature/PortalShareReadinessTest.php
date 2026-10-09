@@ -30,7 +30,7 @@ class PortalShareReadinessTest extends TestCase
         'home' => ['/api/development/portal/home'],
         'projects.view' => ['/api/development/portal/projects'],
         'projects.track' => ['/api/development/portal/projects/track'],
-        'projects.create' => ['/api/development/portal/projects/mine'],
+        'projects.created' => ['/api/development/portal/projects/mine'],
         'projects.manager' => ['/api/development/portal/manage/projects'],
         'projects.references' => ['/api/development/portal/manage/references'],
         'reports.submitted' => ['/api/development/portal/reports/submitted'],
