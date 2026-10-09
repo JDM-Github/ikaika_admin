@@ -409,6 +409,8 @@ Descriptions (what the Access page shows on each row) live in the SQL.
   - `projects.create` Add projects [R] — MAED
     - `projects.create.direct` Auto-approve projects — D (Nathaniel, Steven by personal default)
   - `projects.created` Created Projects — MAED
+    - `projects.created.export` Export — MAED (2026-10-09: the table's export menu follows its own
+      power, the way Track Projects' does; migration `add_portal_created_projects_export_rule`)
   - `projects.track` Track Projects — MAED
     - `projects.track.export` Export — MAED
 - `reports` Reports — MAED
