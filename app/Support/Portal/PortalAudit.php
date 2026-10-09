@@ -28,6 +28,7 @@ final class PortalAudit
 
     public function __construct(
         private readonly PortalLocationResolver $locationResolver,
+        private readonly PortalNotificationEmails $notificationEmails,
     ) {}
 
     /**
@@ -260,6 +261,8 @@ final class PortalAudit
         $notification->created_at = Carbon::now();
         $notification->save();
         $this->bumpNotificationCache();
+        // Mapped notices also go by email; the mailer itself decides whether anything leaves.
+        $this->notificationEmails->send($employeeId, $type, $title, $message, $linkPath, $notification->link_label);
 
         return (int) $notification->id;
     }
@@ -327,6 +330,9 @@ final class PortalAudit
             PortalNotification::query()->insert($chunk);
         }
         $this->bumpNotificationCache();
+        foreach ($recipients as $employeeId) {
+            $this->notificationEmails->send($employeeId, $type, $title, $message, $linkPath, $linkLabel);
+        }
 
         return count($rows);
     }

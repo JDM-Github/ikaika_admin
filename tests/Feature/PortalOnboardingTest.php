@@ -332,6 +332,7 @@ class PortalOnboardingTest extends TestCase
     public function test_documents_are_checked_and_kept_privately(): void
     {
         $created = $this->createRegistration($this->adminToken(), ['slug' => 'liza']);
+        $registrationId = (int) $created['registration']['id'];
         $session = $this->signIn('liza', $created['password']);
 
         // A program renamed .pdf is refused by content, and an unknown kind is refused.
@@ -352,12 +353,12 @@ class PortalOnboardingTest extends TestCase
         // One file per kind: the newer replaces the older, and its bytes go.
         $second = $this->withToken($session)->post(self::REGISTER.'/documents', ['kind' => 'tin', 'file' => $this->upload('tin-2.pdf', self::PDF)], ['Accept' => 'application/json'])
             ->assertOk()->json('data.document');
-        $this->assertSame(1, DB::connection('portal')->table('register_documents')->where('kind', 'tin')->count());
+        $this->assertSame(1, DB::connection('portal')->table('register_documents')->where('registration_id', $registrationId)->where('kind', 'tin')->count());
         $this->assertNull(DB::connection('portal')->table('register_documents')->where('id', (int) $first['id'])->first());
 
         // Removing one takes its row.
         $this->withToken($session)->deleteJson(self::REGISTER.'/documents/'.$second['id'])->assertNoContent();
-        $this->assertSame(0, DB::connection('portal')->table('register_documents')->where('kind', 'tin')->count());
+        $this->assertSame(0, DB::connection('portal')->table('register_documents')->where('registration_id', $registrationId)->where('kind', 'tin')->count());
     }
 
     public function test_a_submitted_candidate_is_promoted(): void

@@ -286,6 +286,19 @@ final class PortalProjectEditor
         if (! $isApproved) {
             $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), (string) $numbered, false);
         }
+        $memberIds = array_values(array_diff($fields['memberIds'], [$employeeId]));
+        if ($memberIds !== []) {
+            $this->audit->notifyEach(
+                $memberIds,
+                PortalNotificationType::PROJECT_REQUESTED_MEMBERS,
+                'You were added to a project',
+                PortalActivityCopy::notifyProjectMembersAdded(PortalActivityCopy::actorName($actor, $request, true), (string) $numbered),
+                PortalShellPath::VIEW_PROJECTS,
+                'Open projects',
+                ['recordId' => (string) $projectId],
+                $employeeId,
+            );
+        }
         $this->projects->bumpCache();
 
         return $this->response($projectId);
@@ -352,6 +365,16 @@ final class PortalProjectEditor
             (string) $projectId,
             $request,
             ['projectName' => $fields['name'], 'department' => $fields['columns']['department']],
+        );
+        $this->audit->notifyManagers(
+            $actor,
+            PortalProjectApproval::RULE,
+            PortalNotificationType::PROJECT_MODIFIED,
+            'Project updated',
+            PortalActivityCopy::notifyProjectModified(PortalActivityCopy::actorName($actor, $request, true), $fields['name']),
+            PortalShellPath::MANAGE_PROJECTS,
+            'Open Manage / Projects',
+            ['recordId' => (string) $projectId],
         );
         $this->projects->bumpCache();
 
