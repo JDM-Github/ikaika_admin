@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalAdvancedSettings;
 use App\Support\Portal\PortalNotificationType;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -51,6 +52,10 @@ class PortalNotificationEmailsTest extends TestCase
         foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'access_self_reach', 'developer_modes'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
+        DB::connection('core')->table('settings')
+            ->where('product', 'portal')
+            ->where('setting_key', PortalAdvancedSettings::NOTIFICATION_EMAILS)
+            ->delete();
     }
 
     public function test_filing_a_leave_request_emails_the_department_admins(): void
@@ -206,6 +211,46 @@ class PortalNotificationEmailsTest extends TestCase
             ->exists());
     }
 
+    // The stored choice is the setting now; the .env value only fills in when nothing is stored.
+    public function test_a_stored_off_choice_beats_the_config_on(): void
+    {
+        $this->storeNotificationEmails(false);
+        $member = $this->member('MIS');
+        $admin = $this->admin('MIS');
+        $date = $this->freeWeekday();
+
+        $this->withToken($this->token($member))->postJson(self::LEAVE_ENDPOINT, [
+            'leaveType' => '01 Vacation Leave',
+            'startDate' => $date,
+            'endDate' => $date,
+            'reason' => 'Family event',
+        ])->assertCreated();
+
+        Mail::assertNothingSent();
+        $this->assertTrue(DB::connection('portal')->table('notifications')
+            ->where('employee_id', $admin->getKey())
+            ->where('type', PortalNotificationType::REQUEST_FILED_LEAVE)
+            ->exists());
+    }
+
+    public function test_a_stored_on_choice_beats_the_config_off(): void
+    {
+        config(['products.catalog.portal.notification_emails' => false]);
+        $this->storeNotificationEmails(true);
+        $member = $this->member('MIS');
+        $admin = $this->admin('MIS');
+        $date = $this->freeWeekday();
+
+        $this->withToken($this->token($member))->postJson(self::LEAVE_ENDPOINT, [
+            'leaveType' => '01 Vacation Leave',
+            'startDate' => $date,
+            'endDate' => $date,
+            'reason' => 'Family event',
+        ])->assertCreated();
+
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo((string) $admin->email));
+    }
+
     public function test_a_mail_failure_never_fails_the_write(): void
     {
         Mail::shouldReceive('to')->andReturnUsing(function () {
@@ -227,6 +272,14 @@ class PortalNotificationEmailsTest extends TestCase
         ])->assertCreated();
 
         $this->assertSame(1, DB::connection('portal')->table('requests')->where('request_date', $date)->count());
+    }
+
+    private function storeNotificationEmails(bool $on): void
+    {
+        DB::connection('core')->table('settings')->updateOrInsert(
+            ['product' => 'portal', 'setting_key' => PortalAdvancedSettings::NOTIFICATION_EMAILS],
+            ['setting_value' => $on ? '1' : '0'],
+        );
     }
 
     private function admin(string $department, int $skip = 0): Employee

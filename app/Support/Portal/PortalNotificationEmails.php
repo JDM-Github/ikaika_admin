@@ -47,7 +47,7 @@ final class PortalNotificationEmails
 
     public function send(Employee|int $employeeId, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
     {
-        if (! (bool) config('products.catalog.portal.notification_emails', true)) {
+        if (! PortalAdvancedSettings::notificationEmails()) {
             return;
         }
         if (! (self::TYPES[$type] ?? false)) {
