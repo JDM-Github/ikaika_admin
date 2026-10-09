@@ -1,6 +1,8 @@
 # Onboarding — candidate registration with bound links (plan)
 
-Status: **Planned 2026-10-09; decisions taken with the user; nothing built yet.** This replaces the
+Status: **All four steps built 2026-10-09: the admin half (admin d73d7dc, 10215ee), the portal's
+existing registration interface wired to the new endpoints (portal 903b74b, fc8277d), and Manage /
+Onboarding with the Send handoff and Promote to employee (portal 2026-10-09).** This replaces the
 old WordPress registration page (portal-ikaikabim-site, snippet-338) where a candidate typed their
 email, was looked up in Airtable, then typed a password and an OTP — with no admin-side entry and no
 bound link. The new flow gives the administrator a Manage page to create a candidate entry, hands
@@ -385,3 +387,41 @@ plus the private columns above copied from the registration. The documents stay 
   readiness discipline). Rules tier pattern: `2026_10_09_090000_open_portal_references_and_shared_pages_rules.php`.
 - Private uploads precedent: `App\Support\Portal\PortalEmailAttachments` and the composer's staged
   attachments; composer handoff precedent: Missing Reports' `emailDraftFor` / `startEmailTo`.
+
+## 14. Step 3-4 revision (2026-10-09, decided with the user)
+
+The portal already carried the registration interface, built into the login screen and awaiting a
+backend: `RegistrationFormController` ("nothing is sent or kept; the service plugs in at sendCode,
+verifyCode and submitDocuments when it exists"), its stepper sections under
+`components/screens/login/sections/`, `registration.utility.ts` + enum + tests, opened by the login
+card's "New employee? Register here" link. The plan's `/register` screen would have duplicated it; it
+was removed. Decisions:
+
+- **Reuse the existing UI**, wired to the new `register/*` endpoints (transport already committed:
+  `src/apis/endpoint/register/*` + `registration.model.ts`, portal fc8277d).
+- **First step is the password, then the OTP** to the bound address: the email field is replaced
+  (the agreed flow; no email-typing step).
+- **The emailed link is the only entry**: the login invite is removed (or repurposed), and the
+  `/register/<code>` route renders the existing stepper.
+
+Checklist (DONE 2026-10-09):
+
+1. `RegistrationFormController` wired: the password step calls `access`; `verify` opens the session
+   (token, details, documents); `submitDetails` PATCHes the mapped draft; `submitDocuments` uploads
+   every picked file (mapped kinds) and calls `submit`; the 8 APIs are injected in `bootstrap`.
+2. Field mapping as listed; `startDate` added; `bloodType` and `qrCode` dropped.
+3. Document kinds mapped as listed; all six required.
+4. Routing: `registrationCodeFromPath`, the RootLayout branch with the shared signed-in gate, and
+   `registration.screen.tsx` mounting the sections; the login invite is removed.
+5. Tests updated (`registration-form` controller 38 cases across the touched files, utility, login,
+   path, a new screen test); full portal suite 300/3861 green.
+6. DONE 2026-10-09: Step 4 built -- `administration.onboarding.screen.tsx` + controller + constant,
+   `onboarding.model.ts` + nine `manage/registrations*` endpoints, the details sheet (QR, link, kept
+   password, sent note) with Send (`markSent` then `startEmailToAddresses` on the section 2.1 draft),
+   New password/Revoke confirms, and Promote to employee (ID No., department, role User, job title);
+   `ShellRoute.onboarding` -> `manage.onboarding` under Manage, `onboardingScreenController` in
+   bootstrap; tests: 20 controller + 7 screen cases, full portal suite 3888 green.
+
+Parked: `deleteRegistrationDocumentApi` is injected but unused (files stay local until submit; a
+same-kind upload overwrites on the server); the receipt picker allows 8 MB while the hints say 5 MB,
+so a 5-8 MB pick fails only at submit.
