@@ -360,6 +360,41 @@ final class PortalRules
     }
 
     /**
+     * The rules off because the person switched them off themselves: their own toggles plus every
+     * page under them, since switching a section off takes its pages with it. The portal names the
+     * page a refused link was aiming at, and only this set earns the "you switched this off" notice.
+     *
+     * @return list<string>
+     */
+    public static function switchedOffEffective(Employee $employee): array
+    {
+        $off = array_keys(self::switchedOff($employee));
+        if ($off === []) {
+            return [];
+        }
+
+        $children = [];
+        foreach (DB::connection('portal')->table('access_permissions')->select('permission_key', 'parent_key')->get() as $row) {
+            if ($row->parent_key !== null) {
+                $children[$row->parent_key][] = $row->permission_key;
+            }
+        }
+
+        $all = $off;
+        for ($queue = $off; $queue !== [];) {
+            $key = array_pop($queue);
+            foreach ($children[$key] ?? [] as $child) {
+                if (! in_array($child, $all, true)) {
+                    $all[] = $child;
+                    $queue[] = $child;
+                }
+            }
+        }
+
+        return $all;
+    }
+
+    /**
      * @param  list<string>  $keys
      * @return list<string>
      */

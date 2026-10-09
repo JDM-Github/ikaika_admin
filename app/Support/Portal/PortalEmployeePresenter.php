@@ -31,6 +31,9 @@ class PortalEmployeePresenter
             'developer_mode' => PortalDeveloperMode::isOn($employee, $request),
             // Active rule => reach, so the portal hides what cannot be opened; the server still checks.
             'rules' => (object) PortalRules::active($employee, $request),
+            // Rules off by the person's own switch, with every page under them: only these earn the
+            // portal's "you switched this off" notice, never a rule they were simply never given.
+            'switched_off' => PortalRules::switchedOffEffective($employee),
             // In Developer mode only: what Default would allow, so the portal can warn before an export past it.
             'default_rules' => PortalDeveloperMode::isOn($employee, $request) ? array_keys(PortalRules::activeInDefault($employee, $request)) : null,
             'photo_url' => self::photoUrl($employee),
