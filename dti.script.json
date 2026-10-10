@@ -2,7 +2,7 @@
   "version": "0.0.0+1",
   "name": "Ikaika Portal",
   "title": "Ikaika Portal",
-  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.35.0",
+  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.36.1",
   "rules": {
     "global": [
       "flag",
@@ -1011,6 +1011,14 @@
             ]
           },
           {
+            "flag": "Collect",
+            "label": "-Collect   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Copy every one ready to share into share.uploadDir (share-upload/), with a README of what each is; git must ignore it.",
+            "default": ""
+          },
+          {
             "flag": "Eas",
             "label": "-Eas   [SwitchParameter]",
             "type": "boolean",
@@ -1020,7 +1028,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 signing/certificates -Check ${certificates.args.Check} -Lint ${certificates.args.Lint} -Fix ${certificates.args.Fix} -New ${certificates.args.New} -Replace ${certificates.args.Replace} -Format ${certificates.args.Format} -Convert ${certificates.args.Convert} -Export ${certificates.args.Export} -Eas ${certificates.args.Eas}"
+          "pwsh -NoProfile -File ${root}/script.ps1 signing/certificates -Check ${certificates.args.Check} -Lint ${certificates.args.Lint} -Fix ${certificates.args.Fix} -New ${certificates.args.New} -Replace ${certificates.args.Replace} -Format ${certificates.args.Format} -Convert ${certificates.args.Convert} -Export ${certificates.args.Export} -Collect ${certificates.args.Collect} -Eas ${certificates.args.Eas}"
         ]
       }
     },
