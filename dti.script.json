@@ -2,7 +2,7 @@
   "version": "0.0.0+1",
   "name": "Ikaika Portal",
   "title": "Ikaika Portal",
-  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.34.0",
+  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.35.0",
   "rules": {
     "global": [
       "flag",
@@ -953,13 +953,14 @@
             "label": "-New   [String]",
             "type": "string",
             "required": false,
-            "description": "Make one that is missing, with the password signing.env holds: a keystore, or a self-signed code-signing certificate.",
+            "description": "Make one that is missing, with the password it is opened with: a keystore, a self-signed code-signing certificate, or the SSH deploy key.",
             "default": "",
             "allowed_values": [
               "android-release",
               "android-debug",
               "windows-release",
-              "windows-debug"
+              "windows-debug",
+              "ssh"
             ]
           },
           {
@@ -971,6 +972,45 @@
             "default": ""
           },
           {
+            "flag": "Format",
+            "label": "-Format   [String]",
+            "type": "string",
+            "required": false,
+            "description": "With -New on a keystore, its format: PKCS#12, or JKS for a toolchain that cannot read anything else.",
+            "default": "pkcs12",
+            "allowed_values": [
+              "pkcs12",
+              "jks"
+            ]
+          },
+          {
+            "flag": "Convert",
+            "label": "-Convert   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Move a JKS keystore to PKCS#12, the same key inside; the JKS is kept beside it.",
+            "default": "",
+            "allowed_values": [
+              "android-release",
+              "android-debug"
+            ]
+          },
+          {
+            "flag": "Export",
+            "label": "-Export   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Write the public half beside it - <file>.pem, or the deploy key's .pub - with its fingerprints.",
+            "default": "",
+            "allowed_values": [
+              "android-release",
+              "android-debug",
+              "windows-release",
+              "windows-debug",
+              "ssh"
+            ]
+          },
+          {
             "flag": "Eas",
             "label": "-Eas   [SwitchParameter]",
             "type": "boolean",
@@ -980,7 +1020,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 signing/certificates -Check ${certificates.args.Check} -Lint ${certificates.args.Lint} -Fix ${certificates.args.Fix} -New ${certificates.args.New} -Replace ${certificates.args.Replace} -Eas ${certificates.args.Eas}"
+          "pwsh -NoProfile -File ${root}/script.ps1 signing/certificates -Check ${certificates.args.Check} -Lint ${certificates.args.Lint} -Fix ${certificates.args.Fix} -New ${certificates.args.New} -Replace ${certificates.args.Replace} -Format ${certificates.args.Format} -Convert ${certificates.args.Convert} -Export ${certificates.args.Export} -Eas ${certificates.args.Eas}"
         ]
       }
     },
