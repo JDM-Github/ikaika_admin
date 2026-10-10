@@ -17,5 +17,9 @@
         # There is no production yet; the plan says so rather than building for a folder nobody named.
         @{ Name = 'production with no production set up is refused'; Answers = @{ target = 'production'; upload = $true; confirm_production = $true }; Exit = 1; Says = 'There is no production to build for yet' }
         @{ Name = 'a target the form cannot send is refused'; Answers = @{ target = 'qa' }; Exit = 1; Says = "target is 'qa'" }
+        # A bump is kept as a GitHub release, where it costs no Actions storage; anything else stays an artifact.
+        @{ Name = 'a bump is kept as a GitHub release'; Answers = @{ version = 'patch' }; Exit = 0; Outputs = @{ RELEASING = 'true' }; Says = '| Kept as | a GitHub release' }
+        @{ Name = 'github_release off keeps a bump as an artifact'; Answers = @{ version = 'patch'; github_release = $false }; Exit = 0; Outputs = @{ RELEASING = 'false' } }
+        @{ Name = 'a build that keeps its version has no tag to release under'; Answers = @{}; Exit = 0; Outputs = @{ RELEASING = 'false' }; Says = 'kept as an artifact instead' }
     )
 }

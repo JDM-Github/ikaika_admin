@@ -591,19 +591,21 @@ try {
         $ghLines = @('@ECHO off', 'ECHO %*>> "%~dp0calls.txt"', 'IF "%1 %2"=="release view" EXIT /B 1', 'IF "%1"=="api" ECHO {"body":"generated notes"}', 'EXIT /B 0')
         [IO.File]::WriteAllText((Join-Path $fakeGh 'gh.cmd'), ($ghLines -join "`r`n") + "`r`n")
         $releaseProblems = @()
-        foreach ($kind in @(@{ Name = 'staging'; Debug = 'true'; Stem = "$prefix-$version-debug"; Flags = '--prerelease --latest=false' }, @{ Name = 'production'; Debug = 'false'; Stem = "$prefix-$version"; Flags = '--latest' })) {
+        # The tag comes from the run, as the tag its version step pushed: a staging tag, and production's -released one.
+        foreach ($kind in @(@{ Name = 'staging'; Debug = 'true'; Stem = "$prefix-$version-debug"; Flags = '--prerelease --latest=false'; Tag = 'v1.2.3+4' }, @{ Name = 'production'; Debug = 'false'; Stem = "$prefix-$version"; Flags = '--latest'; Tag = 'v1.2.3+4-released' })) {
             $dist = Join-Path $work "dist-$($kind.Name)"
             New-Item -ItemType Directory -Path $dist | Out-Null
             foreach ($name in "$($kind.Stem)-web-wasm.zip", "$($kind.Stem)-web-wasm.zip.sha256", "$($kind.Stem).apk") { Set-Content -LiteralPath (Join-Path $dist $name) -Value 'x' }
             $calls = Join-Path $fakeGh 'calls.txt'
             if (Test-Path -LiteralPath $calls) { Remove-Item -LiteralPath $calls }
-            $environment = @{ PATH = "$fakeGh;$env:PATH"; GITHUB_REPOSITORY = 'owner/repo'; BUILD_DEBUG = $kind.Debug; RUNNER_TEMP = $work; GH_TOKEN = 'not-a-token' }
+            $environment = @{ PATH = "$fakeGh;$env:PATH"; GITHUB_REPOSITORY = 'owner/repo'; BUILD_DEBUG = $kind.Debug; RELEASE_TAG = $kind.Tag; RUNNER_TEMP = $work; GH_TOKEN = 'not-a-token' }
             $run = Invoke-Child $releaseScript @('-DistDir', $dist) $environment
             $logged = if (Test-Path -LiteralPath $calls) { @(Get-Content -LiteralPath $calls) } else { @() }
             $create = $logged | Where-Object { $_ -match '^release create ' } | Select-Object -First 1
             if ($run.Code -ne 0) { $releaseProblems += "$($kind.Name) exits $($run.Code): $(($run.Out -split "`n" | Where-Object { $_ } | Select-Object -Last 1))" }
             elseif (@($logged | Where-Object { $_ -match '^release ' -and $_ -notmatch '--repo owner/repo' }).Count) { $releaseProblems += "$($kind.Name): a gh release call without --repo" }
             elseif (-not $create -or $create -notmatch [regex]::Escape($kind.Flags) -or $create -notmatch '--verify-tag') { $releaseProblems += "$($kind.Name): gh release create is not $($kind.Flags) --verify-tag" }
+            elseif ($create -notmatch "^release create $([regex]::Escape($kind.Tag)) ") { $releaseProblems += "$($kind.Name): the release is not for $($kind.Tag), the tag the run pushed" }
             elseif (@($create -split ' ' | Where-Object { $_ -like "$dist*" }).Count -ne 3) { $releaseProblems += "$($kind.Name): not every file in dist is attached" }
         }
         if ($releaseProblems) { Add-Result 'FAIL' 'ci-github-release.ps1' ($releaseProblems -join '; ') }

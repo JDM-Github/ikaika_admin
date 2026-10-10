@@ -34,6 +34,7 @@ $target = Get-Answer 'target' 'staging'
 $version = Get-Answer 'version' 'same'
 $customVersion = Get-Answer 'custom_version' ''
 $upload = Test-Answer 'upload'
+$githubRelease = Test-Answer 'github_release' $true
 $refType = "$env:GITHUB_REF_TYPE"
 $refName = "$env:GITHUB_REF_NAME"
 
@@ -71,6 +72,10 @@ Set-JobVariable 'UPLOADING' $(if ($upload) { 'true' } else { 'false' })
 Set-JobVariable 'DEPLOY_PLAN' $(if ($deploy) { $deploy | ConvertTo-Json -Depth 3 -Compress } else { '' })
 Set-JobVariable 'PURPOSES' $(if ($upload) { "deploy-$target" } else { '' })
 Set-JobVariable 'TAGGING' $(if ($tagging) { 'true' } else { 'false' })
+# A release hangs on the tag a bump pushes, so a build that keeps its version stays an artifact.
+$releasing = $githubRelease -and $tagging
+if ($githubRelease -and -not $tagging) { Write-Output '::notice title=No GitHub release::A release hangs on a new version tag, and version is same, so the build is kept as an artifact instead.' }
+Set-JobVariable 'RELEASING' $(if ($releasing) { 'true' } else { 'false' })
 Set-JobVariable 'ARTIFACT_NAME' ("portal-api-$target-$refName" -replace '[^A-Za-z0-9._-]', '-')
 
 $stages = @('| 1 - Check | These choices, then GitHub synced from Bitbucket and the toolkit fetched |')
@@ -78,8 +83,10 @@ if ($tagging) { $stages += "| $($stages.Count + 1) - Version | $bump`: VERSION b
 $stages += "| $($stages.Count + 1) - Package | The $target archive, its fonts served from $(Get-ConfigValue "$kind.assetUrl") |"
 if ($upload) { $stages += "| $($stages.Count + 1) - Upload | To $target with deploy-admin.sh: composer, the swap, migrations, then the health check |" }
 if ($tagging) { $stages += "| $($stages.Count + 1) - GitHub | The version commit and tag pushed to GitHub as well |" }
+if ($releasing) { $stages += "| $($stages.Count + 1) - GitHub release | $(if ($target -eq 'staging') { 'A prerelease' } else { 'The latest release' }) keeps the build and this version's changelog, so no artifact takes Actions storage |" }
 $summary = @('### Build release', '', '| Stage | What it does |', '| --- | --- |') + $stages + @('', '| Choice | Value |', '| --- | --- |')
 $summary += "| Version | $(if ($tagging) { $bump } else { 'same, nothing committed or tagged' }) |"
+$summary += "| Kept as | $(if ($releasing) { 'a GitHub release (an artifact only if the release fails)' } else { 'an artifact, 30 days' }) |"
 foreach ($key in $arguments.Keys) { $summary += "| $key | $($arguments[$key]) |" }
 if ($deploy) { $summary += "| Upload | $(@($deploy.Keys | ForEach-Object { "$_ $($deploy[$_])" }) -join ', ') |" }
 $summary += "| Secrets for | $(if ($upload) { "deploy-$target" } else { 'nothing' }) |", ''
