@@ -2,7 +2,7 @@
   "version": "0.0.0+1",
   "name": "Ikaika Portal",
   "title": "Ikaika Portal",
-  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.33.1",
+  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.34.0",
   "rules": {
     "global": [
       "flag",
