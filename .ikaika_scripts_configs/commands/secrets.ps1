@@ -679,7 +679,7 @@ function Get-SealPassword {
     Save-StoredPassword $password
     if (-not $typed) {
         Write-Host "  Made a new password and kept it for this Windows account; every $group repo seals with it from now on." -ForegroundColor Yellow
-        Write-Host "  Put it in $($passwordEntry.name) in each repo's GitHub secrets with .\script.ps1 secrets -Export, and seal again any archive made with another." -ForegroundColor Yellow
+        Write-Host "  Put it in $($passwordEntry.name) in each repo's GitHub secrets with .\script.ps1 secrets -GitHub, and seal again any archive made with another." -ForegroundColor Yellow
     }
     return $password
 }
@@ -690,15 +690,136 @@ function Get-DownloadsDir {
     return (Join-Path $HOME 'Downloads')
 }
 
-# Only files their committed checksum trusts are sealed, so CI is never handed one it would refuse. -Seal writes to the
-# group's folder for upload; -Export writes the archive in the repo, which git must ignore.
-function Invoke-Seal([string]$Destination, [string]$ArchivePath = '') {
+# Packs $Stage - a folder per file, and sealed.json - into $Archive with $Password, tests it, and only then puts it in
+# place, so a failure leaves whatever was there before. Returns why it failed, or nothing.
+function Write-SealedArchive([string]$SevenZip, [string]$Stage, [string]$Password, [string]$Archive) {
+    $ErrorActionPreference = 'Continue'
+    $fresh = "$Stage.7z"
+    try {
+        $output = & $SevenZip a -t7z -mhe=on -mx=9 "-p$Password" -bso0 -bsp0 -- $fresh (Join-Path $Stage '*') 2>&1
+        if ($LASTEXITCODE -ne 0) { return "7-Zip could not write the archive (exit $LASTEXITCODE): $output" }
+        $output = & $SevenZip t "-p$Password" -bso0 -bsp0 -- $fresh 2>&1
+        if ($LASTEXITCODE -ne 0) { return "the new archive did not test clean (exit $LASTEXITCODE): $output" }
+        $target = Split-Path -Parent $Archive
+        if (-not (Test-Path -LiteralPath $target)) { New-Item -ItemType Directory -Force -Path $target -ErrorAction Stop | Out-Null }
+        Move-Item -LiteralPath $fresh -Destination $Archive -Force -ErrorAction Stop
+        return ''
+    } catch {
+        return "$($_.Exception.Message)"
+    } finally {
+        if (Test-Path -LiteralPath $fresh) { Remove-Item -LiteralPath $fresh -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+# -Export: the archive in the repo, brought up to date from this machine. What is here and trusted goes in; what is not -
+# missing here, or not the copy its checksum trusts - is kept from the archive already there rather than dropped, so a
+# machine that lacks the tokens cannot erase them. Nothing is set up first: no share is fetched and nothing is asked
+# but the archive's password. An archive there that does not open is never replaced, since nothing in it could be kept.
+function Invoke-LocalExport {
     if ($ciMode) {
-        Write-Host '  Sealing runs where the secrets are; a CI job only opens the archive.' -ForegroundColor Yellow
+        Write-Host '  -Export runs where the secrets are; a CI job only opens the archive.' -ForegroundColor Yellow
         return $false
     }
-    if ($ArchivePath -and -not (Test-LocalArchiveIgnored)) {
-        Write-Host "  Not exported: git does not ignore $ArchivePath, and it would commit every secret it holds - add it to .gitignore first." -ForegroundColor Red
+    if (-not (Test-LocalArchiveIgnored)) {
+        Write-Host "  Not exported: git does not ignore $localArchive, and it would commit every secret it holds - add it to .gitignore first." -ForegroundColor Red
+        return $false
+    }
+    $sevenZip = Find-SevenZip
+    if (-not $sevenZip) {
+        Write-Host '  7-Zip is not installed: winget install --id 7zip.7zip, then run this again.' -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host ''
+    Write-Host "  Exporting into $localArchive" -ForegroundColor Cyan
+    $stage = Join-Path ([IO.Path]::GetTempPath()) "ikaika-seal-$([Guid]::NewGuid().ToString('N'))"
+    $counts = [ordered]@{ packed = 0; kept = 0; left = 0 }
+    try {
+        $previous = $null
+        if (Test-Path -LiteralPath $localArchive) {
+            $previous = Open-LocalArchive -Ask
+            if ($previous.Error) {
+                Write-Host "  Not exported: the archive there $($previous.Error) Nothing in it could be kept, so it is left as it is." -ForegroundColor Red
+                Write-Host ''
+                return $false
+            }
+        }
+        $password = Get-SealPassword
+        if (-not $password) { return $false }
+        New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
+        $files = @()
+        $values = [ordered]@{}
+        $github = [ordered]@{}
+        foreach ($s in @($all | Where-Object { $_.kind -in ($sealedKinds + $githubKinds) })) {
+            $state = Get-LocalState $s
+            $from = ''
+            if ($state -eq 'ok') {
+                $from = 'here'
+                if ($s.kind -in $githubKinds) { $github[$s.name] = Get-LocalGitHubValue $s }
+                elseif ($s.kind -eq 'value') { $values[$s.name] = Get-LocalValue $s }
+                else {
+                    $source = Resolve-SecretPath $s.path
+                    $dir = New-Item -ItemType Directory -Path (Join-Path $stage $s.name) -ErrorAction Stop
+                    [IO.File]::WriteAllBytes((Join-Path $dir.FullName (Split-Path -Leaf $source)), [IO.File]::ReadAllBytes($source))
+                    $files += $s.name
+                }
+            } elseif (Test-InArchive $s $previous) {
+                if ($s.kind -in $githubKinds) { $github[$s.name] = "$($previous.Sealed.github.($s.name))"; $from = 'kept' }
+                elseif ($s.kind -eq 'value') { $values[$s.name] = "$($previous.Sealed.values.($s.name))"; $from = 'kept' }
+                else {
+                    $old = Get-ChildItem -LiteralPath (Join-Path $previous.Dir $s.name) -File | Select-Object -First 1
+                    if (-not $s.checksum -or (Test-FileHash $old.FullName (Resolve-SecretPath $s.checksum))) {
+                        $dir = New-Item -ItemType Directory -Path (Join-Path $stage $s.name) -ErrorAction Stop
+                        Copy-Item -LiteralPath $old.FullName -Destination (Join-Path $dir.FullName $old.Name)
+                        $files += $s.name
+                        $from = 'kept'
+                    }
+                }
+            }
+            if ($from -eq 'here') { $counts.packed++; $line = @('packed', 'Green', 'from this machine') }
+            elseif ($from -eq 'kept') { $counts.kept++; $line = @('kept', 'DarkCyan', "the archive's copy, since this machine's is $state") }
+            else { $counts.left++; $line = @($(if ($s.optional) { 'skip' } else { 'left out' }), $(if ($s.optional) { 'DarkGray' } else { 'Yellow' }), "$state here, and not in the archive either$(if ($s.optional) { ' - optional' })") }
+            Write-Host ('    {0,-10}{1,-26} {2}' -f $line[0], $s.name, $line[2]) -ForegroundColor $line[1]
+        }
+        if (-not ($counts.packed + $counts.kept)) {
+            Write-Host ''
+            Write-Host '  Not exported: this machine has none of the secrets, and there is no archive to keep any from.' -ForegroundColor Red
+            Write-Host ''
+            return $false
+        }
+        $sealed = [ordered]@{
+            format = 1
+            archive = $archiveName
+            sealedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'
+            files = $files
+            values = $values
+            github = $github
+        }
+        [IO.File]::WriteAllText((Join-Path $stage 'sealed.json'), ($sealed | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+        $problem = Write-SealedArchive $sevenZip $stage $password $localArchive
+        if ($problem) {
+            Write-Host "  Not exported: $problem" -ForegroundColor Red
+            return $false
+        }
+    } catch {
+        Write-Host "  Not exported: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    } finally {
+        Close-LocalArchive
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    $inRepo = -not [IO.Path]::GetRelativePath($repoRoot, $localArchive).StartsWith('..')
+    Write-Host ''
+    Write-Host "  Exported $($counts.packed) from this machine$(if ($counts.kept) { ", kept $($counts.kept) from the archive already there" })$(if ($counts.left) { ", $($counts.left) in neither" })." -ForegroundColor Green
+    Write-Host "  $(if ($inRepo) { 'Kept in the repo and ignored by git' } else { "Written to $localArchive" }); another machine with it takes the update with .\script.ps1 secrets -Import." -ForegroundColor Cyan
+    Write-Host ''
+    return $true
+}
+
+# Only files their committed checksum trusts are sealed, so CI is never handed one it would refuse. -Seal writes to the
+# group's folder, for upload where the link points.
+function Invoke-Seal([string]$Destination) {
+    if ($ciMode) {
+        Write-Host '  Sealing runs where the secrets are; a CI job only opens the archive.' -ForegroundColor Yellow
         return $false
     }
     $sevenZip = Find-SevenZip
@@ -721,10 +842,9 @@ function Invoke-Seal([string]$Destination, [string]$ArchivePath = '') {
     $password = Get-SealPassword
     if (-not $password) { return $false }
 
-    $target = if ($ArchivePath) { Split-Path -Parent $ArchivePath } elseif ($Destination) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination) } else { Join-Path (Get-DownloadsDir) "$group-secrets" }
-    $archive = if ($ArchivePath) { $ArchivePath } else { Join-Path $target $archiveName }
+    $target = if ($Destination) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination) } else { Join-Path (Get-DownloadsDir) "$group-secrets" }
+    $archive = Join-Path $target $archiveName
     $stage = Join-Path ([IO.Path]::GetTempPath()) "ikaika-seal-$([Guid]::NewGuid().ToString('N'))"
-    $fresh = "$stage.7z"
     $files = @()
     $values = [ordered]@{}
     $left = @()
@@ -753,40 +873,31 @@ function Invoke-Seal([string]$Destination, [string]$ArchivePath = '') {
             github = $github
         }
         [IO.File]::WriteAllText((Join-Path $stage 'sealed.json'), ($sealed | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
-        $output = & $sevenZip a -t7z -mhe=on -mx=9 "-p$password" -bso0 -bsp0 -- $fresh (Join-Path $stage '*') 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "  7-Zip could not write the archive (exit $LASTEXITCODE): $output" -ForegroundColor Red
+        $problem = Write-SealedArchive $sevenZip $stage $password $archive
+        if ($problem) {
+            Write-Host "  Not sealed: $problem" -ForegroundColor Red
             return $false
         }
-        $output = & $sevenZip t "-p$password" -bso0 -bsp0 -- $fresh 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "  The new archive did not test clean (exit $LASTEXITCODE): $output" -ForegroundColor Red
-            return $false
-        }
-        if (-not (Test-Path -LiteralPath $target)) { New-Item -ItemType Directory -Force -Path $target -ErrorAction Stop | Out-Null }
-        Move-Item -LiteralPath $fresh -Destination $archive -Force -ErrorAction Stop
     } catch {
         Write-Host "  Not sealed: $($_.Exception.Message)" -ForegroundColor Red
         return $false
     } finally {
         if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
-        if (Test-Path -LiteralPath $fresh) { Remove-Item -LiteralPath $fresh -Force -ErrorAction SilentlyContinue }
     }
     Write-Host ''
     Write-Host "  Sealed $($files.Count) file(s), $($values.Count) value(s) and $($github.Count) GitHub secret(s) into $archive" -ForegroundColor Green
     if ($left.Count) { Write-Host "  Left out, optional and not set up here: $($left -join ', ')" -ForegroundColor DarkGray }
     $unkept = @($all | Where-Object { $_.kind -in $githubKinds -and -not $github.Contains($_.name) -and -not $_.optional } | ForEach-Object name)
     if ($unkept.Count) { Write-Host "  Not in $(Split-Path -Leaf $actionsFile) here, so not carried: $($unkept -join ', ') - put them there to carry them." -ForegroundColor Yellow }
-    if ($ArchivePath) { Write-Host '  Kept in the repo and ignored by git; another machine with it takes the update with .\script.ps1 secrets -Import.' -ForegroundColor Cyan }
-    else { Write-Host "  Upload it to the folder $($linkEntry.name) links to, replacing the one there." -ForegroundColor Cyan }
+    Write-Host "  Upload it to the folder $($linkEntry.name) links to, replacing the one there." -ForegroundColor Cyan
     Write-Host ''
     return $true
 }
 
-function Invoke-Export([object[]]$Selected) {
+function Invoke-GitHubCopy([object[]]$Selected) {
     if (-not $canAsk) {
         Write-Host ''
-        Write-Host '  -Export needs a console with someone at it, because it waits between secrets.' -ForegroundColor Yellow
+        Write-Host '  -GitHub needs a console with someone at it, because it waits between secrets.' -ForegroundColor Yellow
         Write-Host ''
         return $false
     }
@@ -829,7 +940,7 @@ if (@($Import, $Export, $Seal, $GitHub | Where-Object { $_ }).Count -gt 1) {
 }
 
 if ($GitHub) {
-    $exported = Invoke-Export @($(if ($For) { $all | Where-Object { $_.for -contains $For } } else { $all }))
+    $exported = Invoke-GitHubCopy @($(if ($For) { $all | Where-Object { $_.for -contains $For } } else { $all }))
     exit $(if ($exported) { 0 } else { 1 })
 }
 
@@ -838,7 +949,7 @@ if ($Import) {
 }
 
 if ($Export) {
-    exit $(if (Invoke-Seal '' $localArchive) { 0 } else { 1 })
+    exit $(if (Invoke-LocalExport) { 0 } else { 1 })
 }
 
 if ($Seal) {
