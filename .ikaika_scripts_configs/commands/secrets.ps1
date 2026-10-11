@@ -137,7 +137,11 @@ $sealedKinds = @('file', 'value')
 # The GitHub secrets a workflow reads from the repo's settings - its tokens and the link - kept on a workstation by their GitHub names in
 # .local.actions-secret.env, the file ci-local reads, and carried in the archive so -Import fills them in and -GitHub can hand them over.
 $githubKinds = @('workflow', 'link')
-$actionsFile = Join-Path $repoRoot '.local.actions-secret.env'
+# It is looked for beside the other env files in .ikaika_scripts_configs, then at the repo root where ci-local first kept it;
+# a new one is made beside the other env files.
+$actionsFile = @((Join-Path $configsDir '.local.actions-secret.env'), (Join-Path $repoRoot '.local.actions-secret.env') | Where-Object { Test-Path -LiteralPath $_ })[0]
+if (-not $actionsFile) { $actionsFile = Join-Path $configsDir '.local.actions-secret.env' }
+$actionsName = [IO.Path]::GetRelativePath($repoRoot, $actionsFile)
 $archiveName = "$($manifest.archive.name)"
 $group = "$($manifest.archive.group)"
 if (-not $group) { $group = [IO.Path]::GetFileNameWithoutExtension($archiveName) }
@@ -229,7 +233,7 @@ function Get-LocalState($Secret) {
             return 'ok'
         }
         'value' { return $(if (Get-LocalValue $Secret) { 'ok' } else { 'missing' }) }
-        'password' { return $(if (Get-StoredPassword) { 'ok' } else { 'missing' }) }
+        'password' { return $(if ((Get-StoredPassword) -or (Get-LocalGitHubValue $Secret)) { 'ok' } else { 'missing' }) }
         default { return '-' }
     }
 }
@@ -267,10 +271,10 @@ function Show-StatusLines {
         if (-not $opened.Missing -and -not (Test-LocalArchiveIgnored)) { Write-Host "  Git does not ignore it - add it to .gitignore before anything commits the secrets in it." -ForegroundColor Red }
 
         $githubSecrets = @($all | Where-Object { $_.kind -in $githubKinds })
-        $envName = Split-Path -Leaf $actionsFile
-        $template = "$actionsFile.template"
+        $envName = $actionsName
+        $template = @("$actionsFile.template", (Join-Path $repoRoot '.local.actions-secret.env.template') | Where-Object { Test-Path -LiteralPath $_ })[0]
         if ($githubSecrets.Count -and -not (Test-Path -LiteralPath $actionsFile)) {
-            $from = if (Test-Path -LiteralPath $template) { "copy $envName.template to it and fill it in" } else { "make it with NAME=value lines" }
+            $from = if ($template) { "copy $([IO.Path]::GetRelativePath($repoRoot, $template)) to it and fill it in" } else { "make it with NAME=value lines" }
             Write-Host "  GitHub secrets file: none at $envName - $from, or -Import from the archive in the repo; ci-local and -Export read it." -ForegroundColor Yellow
         } elseif ($githubSecrets.Count) {
             $set = @($githubSecrets | Where-Object { Get-LocalGitHubValue $_ })
@@ -401,7 +405,7 @@ function Open-LocalArchive([switch]$Ask) {
     $work = Join-Path ([IO.Path]::GetTempPath()) "ikaika-sealed-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $work | Out-Null
     $script:localWork = $work
-    $candidates = @(@(Get-StoredPassword), "$([Environment]::GetEnvironmentVariable($passwordEntry.name))") | Where-Object { $_ } | Select-Object -Unique
+    $candidates = @(@(Get-StoredPassword), "$([Environment]::GetEnvironmentVariable($passwordEntry.name))", (Get-LocalGitHubValue $passwordEntry)) | Where-Object { $_ } | Select-Object -Unique
     foreach ($password in $candidates) {
         $result = Expand-SealedArchive $localArchive $password $work
         if (-not $result.Error) { return $result }
@@ -437,7 +441,7 @@ function Import-FromArchive($Secret, $Opened) {
     if ($Secret.kind -in $githubKinds) {
         $value = "$($Opened.Sealed.github.($Secret.name))"
         if ((Get-LocalGitHubValue $Secret) -ceq $value) { return 'same' }
-        & git -C $repoRoot check-ignore -q --no-index -- (Split-Path -Leaf $actionsFile) 2>$null
+        & git -C $repoRoot check-ignore -q --no-index -- $actionsName 2>$null
         if ($LASTEXITCODE -ne 0) { return 'unignored' }
         if (-not (Test-Path -LiteralPath $actionsFile)) { [IO.File]::WriteAllText($actionsFile, '') }
         if (-not (Set-EnvValue -Path $actionsFile -Key $Secret.name -Value $value)) { return 'failed' }
@@ -488,10 +492,10 @@ function Invoke-Import {
             $result = Import-FromArchive $s $opened
             $counts[$result] = 1 + [int]$counts[$result]
             $colour = @{ imported = 'Green'; same = 'DarkGray'; absent = 'DarkGray'; untrusted = 'Red'; failed = 'Red'; unignored = 'Red' }[$result]
-            $where = if ($s.kind -in $githubKinds) { "$($s.name) in $(Split-Path -Leaf $actionsFile)" } elseif ($s.kind -eq 'value') { "$($s.local.key) in $(Resolve-SecretPath $s.local.file)" } else { Resolve-SecretPath $s.path }
+            $where = if ($s.kind -in $githubKinds) { "$($s.name) in $actionsName" } elseif ($s.kind -eq 'value') { "$($s.local.key) in $(Resolve-SecretPath $s.local.file)" } else { Resolve-SecretPath $s.path }
             $note = @{ imported = "-> $where"; same = 'already here'; absent = 'not in the archive'
                 untrusted = "the archive's copy is not the one $(Resolve-Template $s.checksum) trusts - -Export it again from a machine that has the trusted one"; failed = 'could not be written'
-                unignored = "not written: git does not ignore $(Split-Path -Leaf $actionsFile) - add it to .gitignore first" }[$result]
+                unignored = "not written: git does not ignore $actionsName - add it to .gitignore first" }[$result]
             Write-Host ('    {0,-10}{1,-26} {2}' -f $result, $s.name, $note) -ForegroundColor $colour
         }
     } finally {
@@ -663,6 +667,11 @@ function New-ArchivePassword {
 function Get-SealPassword {
     $stored = Get-StoredPassword
     if ($stored) { return $stored }
+    $kept = Get-LocalGitHubValue $passwordEntry
+    if ($kept) {
+        Save-StoredPassword $kept
+        return $kept
+    }
     if (-not $canAsk) {
         Write-Host "  No archive password is kept for this Windows account, and there is nobody to ask. Run this at a console." -ForegroundColor Yellow
         return ''
@@ -888,7 +897,7 @@ function Invoke-Seal([string]$Destination) {
     Write-Host "  Sealed $($files.Count) file(s), $($values.Count) value(s) and $($github.Count) GitHub secret(s) into $archive" -ForegroundColor Green
     if ($left.Count) { Write-Host "  Left out, optional and not set up here: $($left -join ', ')" -ForegroundColor DarkGray }
     $unkept = @($all | Where-Object { $_.kind -in $githubKinds -and -not $github.Contains($_.name) -and -not $_.optional } | ForEach-Object name)
-    if ($unkept.Count) { Write-Host "  Not in $(Split-Path -Leaf $actionsFile) here, so not carried: $($unkept -join ', ') - put them there to carry them." -ForegroundColor Yellow }
+    if ($unkept.Count) { Write-Host "  Not in $actionsName here, so not carried: $($unkept -join ', ') - put them there to carry them." -ForegroundColor Yellow }
     Write-Host "  Upload it to the folder $($linkEntry.name) links to, replacing the one there." -ForegroundColor Cyan
     Write-Host ''
     return $true
@@ -913,7 +922,7 @@ function Invoke-GitHubCopy([object[]]$Selected) {
             $label = "  [$i/$($inGitHub.Count)] $($s.name)"
             $value = if ($s.kind -eq 'password') { Get-StoredPassword } elseif ($s.kind -in $githubKinds) { Get-LocalGitHubValue $s } else { '' }
             if (-not $value) {
-                $why = if ($s.kind -eq 'password') { 'not kept for this Windows account yet; .\script.ps1 secrets -Seal or -Import keeps it.' } else { "not in $(Split-Path -Leaf $actionsFile) here; -Import fills it from the archive in the repo, or create it yourself. $($s.setup)" }
+                $why = if ($s.kind -eq 'password') { 'not kept for this Windows account yet; .\script.ps1 secrets -Seal or -Import keeps it.' } else { "not in $actionsName here; -Import fills it from the archive in the repo, or create it yourself. $($s.setup)" }
                 Write-Host "$label - $why" -ForegroundColor $(if ($s.optional) { 'DarkGray' } else { 'Yellow' })
                 continue
             }

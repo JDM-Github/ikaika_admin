@@ -25,7 +25,7 @@ param(
     [switch]$NoGitHub,
     # Plan, and print what each phase would run; nothing is run, and no secret is read.
     [switch]$PlanOnly,
-    # The secrets file; .local.actions-secret.env at the repo root when left out.
+    # The secrets file; .local.actions-secret.env in .ikaika_scripts_configs or the repo root when left out.
     [string]$SecretsPath = '',
     [switch]$Help
 )
@@ -188,7 +188,11 @@ try {
 
     # ---------------------------------------------------------------- the secrets file
     Write-Phase 'Secrets - the workflow''s, from the local file'
-    $secretsFile = if ($SecretsPath) { $SecretsPath } else { Join-Path $repoRoot '.local.actions-secret.env' }
+    # Beside the other env files in .ikaika_scripts_configs, or at the repo root, as secrets looks for it.
+    $secretsFile = if ($SecretsPath) { $SecretsPath } else {
+        $found = @((Join-Path $repoRoot '.ikaika_scripts_configs\.local.actions-secret.env'), (Join-Path $repoRoot '.local.actions-secret.env') | Where-Object { Test-Path -LiteralPath $_ })[0]
+        if ($found) { $found } else { Join-Path $repoRoot '.ikaika_scripts_configs\.local.actions-secret.env' }
+    }
     if (-not (Test-Path -LiteralPath $secretsFile)) {
         Stop-Run "No $secretsFile. Copy .local.actions-secret.env.template to it and fill in the values GitHub keeps as this repo's Actions secrets."
     }
