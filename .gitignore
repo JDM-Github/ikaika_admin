@@ -82,3 +82,6 @@ email-test/
 
 # certificates -Collect: private keys gathered for the shared folder, never committed.
 /share-upload/
+
+# The sealed secrets archive kept in the repo for secrets -Import and -Export; every secret is in it.
+/.ikaika_scripts_configs/*.7z

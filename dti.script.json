@@ -367,8 +367,32 @@
             "default": ""
           },
           {
+            "flag": "ArchiveFile",
+            "label": "-ArchiveFile   [String]",
+            "type": "file",
+            "required": false,
+            "description": "The sealed archive kept in the repo, gitignored, that -For looks in first, -Import opens and -Export writes; omitted, archive.local in...",
+            "default": ""
+          },
+          {
+            "flag": "Import",
+            "label": "-Import   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Put every file and value the archive in the repo holds where the toolkit reads it, replacing a copy that differs; a file only when its...",
+            "default": ""
+          },
+          {
             "flag": "Export",
             "label": "-Export   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Pack this machine's files and values into the archive in the repo, replacing it - after an update, so every other machine can -Import it.",
+            "default": ""
+          },
+          {
+            "flag": "GitHub",
+            "label": "-GitHub   [SwitchParameter]",
             "type": "boolean",
             "required": false,
             "description": "Copy each GitHub secret this machine keeps to the clipboard in turn, ready to paste into the repository's settings.",
@@ -376,7 +400,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/secrets -For ${secrets.args.For} -Ci ${secrets.args.Ci} -Seal ${secrets.args.Seal} -OutDir ${secrets.args.OutDir} -Export ${secrets.args.Export}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/secrets -For ${secrets.args.For} -Ci ${secrets.args.Ci} -Seal ${secrets.args.Seal} -OutDir ${secrets.args.OutDir} -ArchiveFile ${secrets.args.ArchiveFile} -Import ${secrets.args.Import} -Export ${secrets.args.Export} -GitHub ${secrets.args.GitHub}"
         ]
       },
       "update-database": {

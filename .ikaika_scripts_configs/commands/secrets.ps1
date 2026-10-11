@@ -4,11 +4,18 @@
 # In GitHub Actions, or with -Ci, nothing is ever asked: the archive is fetched, opened with its password, and only what the job needs is installed.
 # Every file is checked against its committed checksum, every value is masked in the job's log, and nothing is printed or kept in a transcript.
 #
-#     .\script.ps1 secrets                           every secret, and whether this machine has it
-#     .\script.ps1 secrets -For deploy-staging       set up what a staging deploy needs
+# LOCALLY THE SAME ARCHIVE LIVES IN THE REPO, gitignored: secrets.json's archive.local, or -ArchiveFile. Every run looks for it - the status says
+# whether it is there and what it holds - and -For takes a missing or untrusted secret from it before the team share or a prompt. -Import puts
+# everything it holds in place, and -Export packs this machine's files and values back into it, so an update is one -Export here and one -Import
+# on every other machine. It opens with the group's archive password, kept for this Windows account; nothing it holds is printed.
+#
+#     .\script.ps1 secrets                           every secret, whether this machine has it, and the archive in the repo
+#     .\script.ps1 secrets -For deploy-staging       set up what a staging deploy needs, from the archive in the repo first
+#     .\script.ps1 secrets -Import                   everything the archive in the repo holds, put in place
+#     .\script.ps1 secrets -Export                   this machine's files and values, packed into the archive in the repo
 #     .\script.ps1 secrets -Seal                     seal this repo's files and values, ready to upload
 #     .\script.ps1 secrets -For deploy-staging -Ci   the same from the sealed archive, never asking
-#     .\script.ps1 secrets -Export                   copy the archive password to the clipboard for GitHub
+#     .\script.ps1 secrets -GitHub                   copy the archive password to the clipboard for GitHub
 
 # Advanced binding, so a mistyped switch is refused instead of silently ignored.
 [CmdletBinding()]
@@ -21,8 +28,14 @@ param(
     [switch]$Seal,
     # Where -Seal writes the archive; omitted, a folder in Downloads that every repo in the same group seals into.
     [string]$OutDir = '',
-    # Copy each GitHub secret this machine keeps to the clipboard in turn, ready to paste into the repository's settings.
+    # The sealed archive kept in the repo, gitignored, that -For looks in first, -Import opens and -Export writes; omitted, archive.local in secrets.json.
+    [string]$ArchiveFile = '',
+    # Put every file and value the archive in the repo holds where the toolkit reads it, replacing a copy that differs; a file only when its committed checksum trusts it.
+    [switch]$Import,
+    # Pack this machine's files and values into the archive in the repo, replacing it - after an update, so every other machine can -Import it.
     [switch]$Export,
+    # Copy each GitHub secret this machine keeps to the clipboard in turn, ready to paste into the repository's settings.
+    [switch]$GitHub,
     [switch]$Help
 )
 
@@ -41,7 +54,8 @@ if ($Help) {
     Write-Host '  secrets - check and set up what this repo''s commands and workflows need.'
     Write-Host ''
     Write-Host '  Usage'
-    Write-Host '    .\script.ps1 secrets [-For <job>] [-Ci] [-Seal [-OutDir <folder>]] [-Export]'
+    Write-Host '    .\script.ps1 secrets [-For <job>] [-Ci] [-Import | -Export] [-ArchiveFile <file>]'
+    Write-Host '                         [-Seal [-OutDir <folder>]] [-GitHub]'
     Write-Host ''
     Write-Host '  Without -For it lists every secret in .ikaika_scripts_configs/secrets.json and'
     Write-Host '  whether this machine has it. With -For it sets up what that job needs: a missing'
@@ -50,12 +64,26 @@ if ($Help) {
     Write-Host ''
     Write-Host '  Examples'
     Write-Host '    .\script.ps1 secrets'
-    Write-Host '        Every secret secrets.json lists, and whether this machine has it.'
-    Write-Host '        Changes nothing.'
+    Write-Host '        Every secret secrets.json lists, whether this machine has it, and'
+    Write-Host '        whether the archive in the repo is there and has it. Changes nothing.'
     Write-Host ''
     Write-Host '    .\script.ps1 secrets -For deploy-staging'
-    Write-Host '        Sets up what a staging deploy needs: a missing file is fetched from'
-    Write-Host '        the team share, and one its checksum does not trust is only reported.'
+    Write-Host '        Sets up what a staging deploy needs: a missing file, or one its'
+    Write-Host '        checksum does not trust, comes from the archive in the repo, else the'
+    Write-Host '        team share; a missing value from the archive, else a prompt.'
+    Write-Host ''
+    Write-Host '    .\script.ps1 secrets -Import'
+    Write-Host '        Everything the archive in the repo holds, put where the toolkit reads'
+    Write-Host '        it - after someone has -Exported an update. A file goes in only when'
+    Write-Host '        its committed checksum trusts the archive''s copy.'
+    Write-Host ''
+    Write-Host '    .\script.ps1 secrets -Export'
+    Write-Host '        This machine''s files and values, packed into the archive in the repo,'
+    Write-Host '        replacing it. Git must ignore it; send it to the team the usual way.'
+    Write-Host ''
+    Write-Host '    .\script.ps1 secrets -Import -ArchiveFile C:\path\to\other.7z'
+    Write-Host '        The same from an archive somewhere else, for one run; archive.local in'
+    Write-Host '        secrets.json changes where it is looked for every time.'
     Write-Host ''
     Write-Host '    .\script.ps1 secrets -Seal'
     Write-Host '        Packs every file and value into this repo''s archive in Downloads,'
@@ -68,7 +96,7 @@ if ($Help) {
     Write-Host '        What CI runs: never asks, takes what a staging deploy needs from the'
     Write-Host '        sealed archive, and writes each file over any copy already there.'
     Write-Host ''
-    Write-Host '    .\script.ps1 secrets -Export'
+    Write-Host '    .\script.ps1 secrets -GitHub'
     Write-Host '        Copies the archive password to the clipboard for GitHub''s Actions'
     Write-Host '        secrets, and says how to make the rest. Needs someone at a console.'
     Write-Host ''
@@ -84,7 +112,11 @@ if ($Help) {
     Write-Host '  A missing or wrong one fails the step by name. Automatic when GITHUB_ACTIONS or'
     Write-Host '  CI is true.'
     Write-Host ''
-    Write-Host '  -Export copies the archive password to the clipboard, for pasting into'
+    Write-Host '  The archive in the repo is .ikaika_scripts_configs/<repo>.7z unless secrets.json''s'
+    Write-Host '  archive.local or -ArchiveFile says otherwise. It is the same archive -Seal makes,'
+    Write-Host '  opened with the same password, and git must ignore it.'
+    Write-Host ''
+    Write-Host '  -GitHub copies the archive password to the clipboard, for pasting into'
     Write-Host '  Settings > Secrets and variables > Actions, and says how to make the rest. It'
     Write-Host '  needs a console, and never prints a value.'
     Write-Host ''
@@ -106,8 +138,12 @@ $archiveName = "$($manifest.archive.name)"
 $group = "$($manifest.archive.group)"
 if (-not $group) { $group = [IO.Path]::GetFileNameWithoutExtension($archiveName) }
 $linkEntry = $all | Where-Object { $_.kind -eq 'link' } | Select-Object -First 1
+$localName = "$($manifest.archive.local)"
+if (-not $localName) { $localName = ".ikaika_scripts_configs/$(Split-Path -Leaf $repoRoot).7z" }
+$localArchive = if ($ArchiveFile) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ArchiveFile) } else { Join-Path $repoRoot $localName }
 $passwordEntry = $all | Where-Object { $_.kind -eq 'password' } | Select-Object -First 1
 $script:sealedWork = ''
+$script:localWork = ''
 
 # GitHub sets GITHUB_ACTIONS=true on every runner, and CI=true is what most other runners set.
 $ciMode = $Ci -or $env:GITHUB_ACTIONS -eq 'true' -or $env:CI -eq 'true'
@@ -195,6 +231,29 @@ function Get-SetupHint($Secret) {
 }
 
 function Show-Status {
+    try {
+        Show-StatusLines
+    } finally {
+        Close-LocalArchive
+    }
+}
+
+# Kept open by Show-Status until every line is drawn, since a line says whether the archive has what this machine lacks.
+function Show-StatusLines {
+    $opened = $null
+    if (-not $ciMode) {
+        Write-Host ''
+        $opened = Open-LocalArchive
+        $where = [IO.Path]::GetRelativePath($repoRoot, $localArchive)
+        if ($opened.Missing) {
+            Write-Host "  Archive in the repo: none at $where - .\script.ps1 secrets -Export makes it from this machine, or put the team's copy there." -ForegroundColor Yellow
+        } elseif ($opened.Error) {
+            Write-Host "  Archive in the repo: $where, not opened - $($opened.Error)" -ForegroundColor Yellow
+        } else {
+            Write-Host "  Archive in the repo: $where, sealed $($opened.Sealed.sealedAt) - $(@($opened.Sealed.files).Count) file(s), $(@($opened.Sealed.values.PSObject.Properties).Count) value(s). -Import puts them in place." -ForegroundColor Green
+        }
+        if (-not $opened.Missing -and -not (Test-LocalArchiveIgnored)) { Write-Host "  Git does not ignore it - add it to .gitignore before anything commits the secrets in it." -ForegroundColor Red }
+    }
     Write-Host ''
     Write-Host "  $(if ($ciMode) { 'In this job' } else { 'On this machine' }) - secrets.json lists $($all.Count):" -ForegroundColor Cyan
     Write-Host ''
@@ -206,7 +265,8 @@ function Show-Status {
         if ($s.optional -and $state -eq 'missing') { $state = 'optional' }
         $colour = @{ ok = 'Green'; set = 'Green'; sealed = 'DarkCyan'; missing = 'Yellow'; mismatch = 'Red'; optional = 'DarkGray'; '-' = 'DarkGray' }[$state]
         Write-Host ('    {0,-9}' -f $state) -ForegroundColor $colour -NoNewline
-        Write-Host ('{0,-26} {1}' -f $s.name, ($s.for -join ', '))
+        Write-Host ('{0,-26} {1}' -f $s.name, ($s.for -join ', ')) -NoNewline
+        Write-Host $(if ($state -in 'missing', 'mismatch', 'optional' -and (Test-InArchive $s $opened)) { '  (the archive in the repo has it)' } else { '' }) -ForegroundColor DarkCyan
         Write-Host "             $($s.description)" -ForegroundColor DarkGray
     }
     Write-Host ''
@@ -281,6 +341,128 @@ function ConvertTo-DownloadUrl([string]$Url) {
     return "$Url${separator}dl=1"
 }
 
+# Opens a sealed archive into $Into: its folder and sealed.json, or why it could not be opened.
+function Expand-SealedArchive([string]$Archive, [string]$Password, [string]$Into) {
+    $sevenZip = Find-SevenZip
+    if (-not $sevenZip) { return @{ Error = "$(Split-Path -Leaf $Archive) is opened with 7-Zip, and it is not installed here: winget install --id 7zip.7zip." } }
+    $ErrorActionPreference = 'Continue'
+    $opened = Join-Path $Into 'open'
+    $output = & $sevenZip x -y "-p$Password" "-o$opened" -bso0 -bsp0 -- $Archive 2>&1
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        return @{ Error = $(if ("$output" -match 'Wrong password') { "it does not open with $($passwordEntry.name), the password it was sealed with." } else { "7-Zip could not open it (exit $code): $output" }); WrongPassword = "$output" -match 'Wrong password' }
+    }
+    $sealedFile = Join-Path $opened 'sealed.json'
+    if (-not (Test-Path -LiteralPath $sealedFile)) { return @{ Error = 'it holds no sealed.json - seal it again with .\script.ps1 secrets -Seal or -Export.' } }
+    $sealed = Get-Content -LiteralPath $sealedFile -Raw | ConvertFrom-Json
+    if ("$($sealed.archive)" -ne $archiveName) { return @{ Error = "it is $($sealed.archive), another repo's archive; this repo's is $archiveName." } }
+    return @{ Dir = $opened; Sealed = $sealed; Error = '' }
+}
+
+# Whether git ignores the archive in the repo; one it does not would commit every secret it holds.
+function Test-LocalArchiveIgnored {
+    $relative = [IO.Path]::GetRelativePath($repoRoot, $localArchive)
+    if ($relative.StartsWith('..')) { return $true }
+    & git -C $repoRoot check-ignore -q --no-index -- $relative 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+# Locally: the archive in the repo, opened with the password kept for this Windows account, then the one in the link's
+# password variable, then - when -Ask and someone is there - one pasted in, kept once it opens the archive.
+function Open-LocalArchive([switch]$Ask) {
+    if (-not (Test-Path -LiteralPath $localArchive -PathType Leaf)) { return @{ Error = 'missing'; Missing = $true } }
+    $work = Join-Path ([IO.Path]::GetTempPath()) "ikaika-sealed-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $work | Out-Null
+    $script:localWork = $work
+    $candidates = @(@(Get-StoredPassword), "$([Environment]::GetEnvironmentVariable($passwordEntry.name))") | Where-Object { $_ } | Select-Object -Unique
+    foreach ($password in $candidates) {
+        $result = Expand-SealedArchive $localArchive $password $work
+        if (-not $result.Error) { return $result }
+        if (-not $result.WrongPassword) { return $result }
+    }
+    if (-not ($Ask -and $canAsk)) { return @{ Error = $(if ($candidates.Count) { "it does not open with the $($passwordEntry.name) kept here." } else { "no $($passwordEntry.name) is kept for this Windows account to open it with." }) } }
+    Write-Host "  $(Split-Path -Leaf $localArchive) opens with $($passwordEntry.name), the $group archives' password; paste it to open it and keep it for this Windows account." -ForegroundColor Cyan
+    $typed = ConvertFrom-SecureString -AsPlainText (Read-Host -AsSecureString '    password')
+    if (-not $typed) { return @{ Error = 'no password was given.' } }
+    $result = Expand-SealedArchive $localArchive $typed $work
+    if (-not $result.Error) { Save-StoredPassword $typed }
+    return $result
+}
+
+function Close-LocalArchive {
+    if ($script:localWork -and (Test-Path -LiteralPath $script:localWork)) { Remove-Item -LiteralPath $script:localWork -Recurse -Force -ErrorAction SilentlyContinue }
+    $script:localWork = ''
+}
+
+# Whether an opened archive holds a secret, file or value.
+function Test-InArchive($Secret, $Opened) {
+    if (-not $Opened -or $Opened.Error) { return $false }
+    if ($Secret.kind -eq 'value') { return [bool]"$($Opened.Sealed.values.($Secret.name))" }
+    return [bool](Get-ChildItem -LiteralPath (Join-Path $Opened.Dir $Secret.name) -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+
+# Locally: one secret from the opened archive, put where the toolkit reads it. A file goes in only when its committed
+# checksum trusts the archive's copy, and one already here byte for byte is left alone; a value goes to its env file.
+function Import-FromArchive($Secret, $Opened) {
+    if (-not (Test-InArchive $Secret $Opened)) { return 'absent' }
+    if ($Secret.kind -eq 'value') {
+        $value = "$($Opened.Sealed.values.($Secret.name))"
+        if ((Get-LocalValue $Secret) -ceq $value) { return 'same' }
+        $store = Resolve-SecretPath $Secret.local.file
+        if (-not (Test-Path -LiteralPath $store)) { [IO.File]::WriteAllText($store, '') }
+        if (-not (Set-EnvValue -Path $store -Key $Secret.local.key -Value $value)) { return 'failed' }
+        return 'imported'
+    }
+    $source = Get-ChildItem -LiteralPath (Join-Path $Opened.Dir $Secret.name) -File | Select-Object -First 1
+    if ($Secret.checksum -and -not (Test-FileHash $source.FullName (Resolve-SecretPath $Secret.checksum))) { return 'untrusted' }
+    $path = Resolve-SecretPath $Secret.path
+    if ((Test-Path -LiteralPath $path) -and (Get-FileHash -LiteralPath $path).Hash -eq (Get-FileHash -LiteralPath $source.FullName).Hash) { return 'same' }
+    $dir = Split-Path -Parent $path
+    try {
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+        Remove-TightenedFile $path
+        [IO.File]::WriteAllBytes($path, [IO.File]::ReadAllBytes($source.FullName))
+    } catch {
+        return 'failed'
+    }
+    if ($Secret.ssh) { Assert-SshKeyPermissions $path }
+    return 'imported'
+}
+
+function Invoke-Import {
+    if ($ciMode) {
+        Write-Host '  -Import is for a workstation; a CI job opens the archive from the link with -For.' -ForegroundColor Yellow
+        return $false
+    }
+    if (-not (Test-LocalArchiveIgnored)) { Write-Host "  Git does not ignore $localArchive - add it to .gitignore before anything commits the secrets in it." -ForegroundColor Yellow }
+    Write-Host ''
+    Write-Host "  Importing $localArchive" -ForegroundColor Cyan
+    try {
+        $opened = Open-LocalArchive -Ask
+        if ($opened.Error) {
+            Write-Host "  Not imported: $(if ($opened.Missing) { "there is no archive there - .\script.ps1 secrets -Export makes one from a machine that has the secrets, or put the team's copy there." } else { "it $($opened.Error)" })" -ForegroundColor Red
+            Write-Host ''
+            return $false
+        }
+        Write-Host "    sealed   $($opened.Sealed.sealedAt)" -ForegroundColor DarkGray
+        $counts = @{}
+        foreach ($s in @($all | Where-Object { $_.kind -in $sealedKinds })) {
+            $result = Import-FromArchive $s $opened
+            $counts[$result] = 1 + [int]$counts[$result]
+            $colour = @{ imported = 'Green'; same = 'DarkGray'; absent = 'DarkGray'; untrusted = 'Red'; failed = 'Red' }[$result]
+            $note = @{ imported = "-> $(if ($s.kind -eq 'value') { "$($s.local.key) in $(Resolve-SecretPath $s.local.file)" } else { Resolve-SecretPath $s.path })"; same = 'already here'; absent = 'not in the archive'
+                untrusted = "the archive's copy is not the one $(Resolve-Template $s.checksum) trusts - -Export it again from a machine that has the trusted one"; failed = 'could not be written' }[$result]
+            Write-Host ('    {0,-10}{1,-26} {2}' -f $result, $s.name, $note) -ForegroundColor $colour
+        }
+    } finally {
+        Close-LocalArchive
+    }
+    Write-Host ''
+    Write-Host "  Imported $([int]$counts['imported']), $([int]$counts['same']) already here$(if ($counts['absent']) { ", $($counts['absent']) not in the archive" })." -ForegroundColor $(if ($counts['untrusted'] -or $counts['failed']) { 'Red' } else { 'Green' })
+    Write-Host ''
+    return -not ($counts['untrusted'] -or $counts['failed'])
+}
+
 # CI: the archive is fetched and opened once, into a folder removed with everything in it when the step ends.
 function Open-SealedArchive {
     $url = "$([Environment]::GetEnvironmentVariable($linkEntry.name))"
@@ -290,8 +472,7 @@ function Open-SealedArchive {
         Write-Host "::error title=Missing secret $($m.name)::$($m.description) Add it under Settings > Secrets and variables > Actions."
     }
     if ($missing.Count) { return $null }
-    $sevenZip = Find-SevenZip
-    if (-not $sevenZip) {
+    if (-not (Find-SevenZip)) {
         Write-Host "::error title=7-Zip not found::$archiveName is opened with 7-Zip, which the GitHub Windows runners have; this runner needs it installed."
         return $null
     }
@@ -305,28 +486,14 @@ function Open-SealedArchive {
         Write-Host "::error title=$archiveName not fetched::$($fetch.Error) It is the archive .\script.ps1 secrets -Seal makes, uploaded to the folder $($linkEntry.name) links to."
         return $null
     }
-    $ErrorActionPreference = 'Continue'
-    $opened = Join-Path $script:sealedWork 'open'
-    $output = & $sevenZip x -y "-p$password" "-o$opened" -bso0 -bsp0 -- $archive 2>&1
-    $code = $LASTEXITCODE
+    $result = Expand-SealedArchive $archive $password $script:sealedWork
     Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-    if ($code -ne 0) {
-        $why = if ("$output" -match 'Wrong password') { "$($passwordEntry.name) is not the password $archiveName was sealed with." } else { "7-Zip could not open it (exit $code): $output" }
-        Write-Host "::error title=Cannot open $archiveName::$why"
+    if ($result.Error) {
+        Write-Host "::error title=Cannot open $archiveName::The archive the link served $($result.Error)"
         return $null
     }
-    $sealedFile = Join-Path $opened 'sealed.json'
-    if (-not (Test-Path -LiteralPath $sealedFile)) {
-        Write-Host "::error title=Not a sealed archive::$archiveName holds no sealed.json. Seal it again with .\script.ps1 secrets -Seal."
-        return $null
-    }
-    $sealed = Get-Content -LiteralPath $sealedFile -Raw | ConvertFrom-Json
-    if ("$($sealed.archive)" -ne $archiveName) {
-        Write-Host "::error title=Another repo's archive::The link served $($sealed.archive), but this repo opens $archiveName."
-        return $null
-    }
-    Write-Host "    opened   $archiveName, sealed $($sealed.sealedAt)" -ForegroundColor Green
-    return @{ Dir = $opened; Sealed = $sealed }
+    Write-Host "    opened   $archiveName, sealed $($result.Sealed.sealedAt)" -ForegroundColor Green
+    return $result
 }
 
 function Skip-OrFail($Secret, [string]$Why) {
@@ -415,12 +582,20 @@ function Install-ValueLocally($Secret) {
     return 'ok'
 }
 
-# Locally a missing secret is set up where it can be, and a file that is not the trusted copy is reported rather than replaced.
-function Install-Locally($Secret) {
+# Locally a missing secret is set up where it can be - from the archive in the repo first - and a file that is not the
+# trusted copy is replaced from the archive when the archive's copy is the trusted one, and otherwise only reported.
+function Install-Locally($Secret, $Opened = $null) {
     $state = Get-LocalState $Secret
     if ($state -eq 'ok') {
         Write-Host "    ok       $($Secret.name)" -ForegroundColor Green
         return 'ok'
+    }
+    if ($Opened -and $state -in 'missing', 'mismatch') {
+        $imported = Import-FromArchive $Secret $Opened
+        if ($imported -in 'imported', 'same' -and (Get-LocalState $Secret) -eq 'ok') {
+            Write-Host "    imported $($Secret.name) from the archive in the repo" -ForegroundColor Green
+            return 'ok'
+        }
     }
     if ($state -eq 'mismatch') {
         Write-Host "    mismatch $($Secret.name): $(Resolve-SecretPath $Secret.path) is not the copy $(Resolve-Template $Secret.checksum) trusts." -ForegroundColor Red
@@ -475,10 +650,15 @@ function Get-DownloadsDir {
     return (Join-Path $HOME 'Downloads')
 }
 
-# Only files their committed checksum trusts are sealed, so CI is never handed one it would refuse.
-function Invoke-Seal([string]$Destination) {
+# Only files their committed checksum trusts are sealed, so CI is never handed one it would refuse. -Seal writes to the
+# group's folder for upload; -Export writes the archive in the repo, which git must ignore.
+function Invoke-Seal([string]$Destination, [string]$ArchivePath = '') {
     if ($ciMode) {
-        Write-Host '  -Seal runs where the secrets are; a CI job only opens the archive.' -ForegroundColor Yellow
+        Write-Host '  Sealing runs where the secrets are; a CI job only opens the archive.' -ForegroundColor Yellow
+        return $false
+    }
+    if ($ArchivePath -and -not (Test-LocalArchiveIgnored)) {
+        Write-Host "  Not exported: git does not ignore $ArchivePath, and it would commit every secret it holds - add it to .gitignore first." -ForegroundColor Red
         return $false
     }
     $sevenZip = Find-SevenZip
@@ -501,8 +681,8 @@ function Invoke-Seal([string]$Destination) {
     $password = Get-SealPassword
     if (-not $password) { return $false }
 
-    $target = if ($Destination) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination) } else { Join-Path (Get-DownloadsDir) "$group-secrets" }
-    $archive = Join-Path $target $archiveName
+    $target = if ($ArchivePath) { Split-Path -Parent $ArchivePath } elseif ($Destination) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination) } else { Join-Path (Get-DownloadsDir) "$group-secrets" }
+    $archive = if ($ArchivePath) { $ArchivePath } else { Join-Path $target $archiveName }
     $stage = Join-Path ([IO.Path]::GetTempPath()) "ikaika-seal-$([Guid]::NewGuid().ToString('N'))"
     $fresh = "$stage.7z"
     $files = @()
@@ -549,7 +729,8 @@ function Invoke-Seal([string]$Destination) {
     Write-Host ''
     Write-Host "  Sealed $($files.Count) file(s) and $($values.Count) value(s) into $archive" -ForegroundColor Green
     if ($left.Count) { Write-Host "  Left out, optional and not set up here: $($left -join ', ')" -ForegroundColor DarkGray }
-    Write-Host "  Upload it to the folder $($linkEntry.name) links to, replacing the one there." -ForegroundColor Cyan
+    if ($ArchivePath) { Write-Host '  Kept in the repo and ignored by git; another machine with it takes the update with .\script.ps1 secrets -Import.' -ForegroundColor Cyan }
+    else { Write-Host "  Upload it to the folder $($linkEntry.name) links to, replacing the one there." -ForegroundColor Cyan }
     Write-Host ''
     return $true
 }
@@ -577,7 +758,7 @@ function Invoke-Export([object[]]$Selected) {
             }
             $value = Get-StoredPassword
             if (-not $value) {
-                Write-Host "$label - not kept for this Windows account yet; .\script.ps1 secrets -Seal makes it." -ForegroundColor Yellow
+                Write-Host "$label - not kept for this Windows account yet; .\script.ps1 secrets -Seal or -Import keeps it." -ForegroundColor Yellow
                 continue
             }
             Set-Clipboard -Value $value
@@ -595,9 +776,24 @@ function Invoke-Export([object[]]$Selected) {
     return $true
 }
 
-if ($Export) {
+if (@($Import, $Export, $Seal, $GitHub | Where-Object { $_ }).Count -gt 1) {
+    Write-Host ''
+    Write-Host '  -Import, -Export, -Seal and -GitHub each do one thing; pick one.' -ForegroundColor Yellow
+    Write-Host ''
+    exit 1
+}
+
+if ($GitHub) {
     $exported = Invoke-Export @($(if ($For) { $all | Where-Object { $_.for -contains $For } } else { $all }))
     exit $(if ($exported) { 0 } else { 1 })
+}
+
+if ($Import) {
+    exit $(if (Invoke-Import) { 0 } else { 1 })
+}
+
+if ($Export) {
+    exit $(if (Invoke-Seal '' $localArchive) { 0 } else { 1 })
 }
 
 if ($Seal) {
@@ -622,7 +818,19 @@ if (-not $needed.Count) {
 $results = [ordered]@{}
 $opened = $null
 if (-not $ciMode) {
-    foreach ($s in $needed) { $results[$s.name] = Install-Locally $s }
+    try {
+        $local = $null
+        if (@($needed | Where-Object { (Get-LocalState $_) -in 'missing', 'mismatch' }).Count -and (Test-Path -LiteralPath $localArchive)) {
+            $local = Open-LocalArchive -Ask
+            if ($local.Error) {
+                Write-Host "    archive  $(Split-Path -Leaf $localArchive) not opened - $($local.Error)" -ForegroundColor Yellow
+                $local = $null
+            }
+        }
+        foreach ($s in $needed) { $results[$s.name] = Install-Locally $s $local }
+    } finally {
+        Close-LocalArchive
+    }
 } elseif (-not @($needed | Where-Object { -not $_.optional }).Count -and -not ([Environment]::GetEnvironmentVariable($linkEntry.name) -and [Environment]::GetEnvironmentVariable($passwordEntry.name))) {
     foreach ($s in $needed) {
         Write-Host "    skip     $($s.name) (optional, and this job has no archive to open)" -ForegroundColor DarkGray
