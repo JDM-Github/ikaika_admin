@@ -265,6 +265,21 @@ function Show-StatusLines {
             if (-not $carried) { Write-Host '  It carries no GitHub secrets - it was sealed before they were; -Export from a machine whose .local.actions-secret.env has them adds them.' -ForegroundColor DarkGray }
         }
         if (-not $opened.Missing -and -not (Test-LocalArchiveIgnored)) { Write-Host "  Git does not ignore it - add it to .gitignore before anything commits the secrets in it." -ForegroundColor Red }
+
+        $githubSecrets = @($all | Where-Object { $_.kind -in $githubKinds })
+        $envName = Split-Path -Leaf $actionsFile
+        $template = "$actionsFile.template"
+        if ($githubSecrets.Count -and -not (Test-Path -LiteralPath $actionsFile)) {
+            $from = if (Test-Path -LiteralPath $template) { "copy $envName.template to it and fill it in" } else { "make it with NAME=value lines" }
+            Write-Host "  GitHub secrets file: none at $envName - $from, or -Import from the archive in the repo; ci-local and -Export read it." -ForegroundColor Yellow
+        } elseif ($githubSecrets.Count) {
+            $set = @($githubSecrets | Where-Object { Get-LocalGitHubValue $_ })
+            $needed = @($githubSecrets | Where-Object { -not $_.optional })
+            $lacking = @($needed | Where-Object { -not (Get-LocalGitHubValue $_) } | ForEach-Object name)
+            Write-Host "  GitHub secrets file: $envName - $($set.Count) of $($githubSecrets.Count) set$(if ($lacking.Count) { "; $($lacking -join ', ') still blank" }). ci-local and -Export read it, -Import fills it, -GitHub copies it out." -ForegroundColor $(if ($lacking.Count) { 'Yellow' } else { 'Green' })
+            & git -C $repoRoot check-ignore -q --no-index -- $envName 2>$null
+            if ($LASTEXITCODE -ne 0) { Write-Host "  Git does not ignore $envName - add it to .gitignore before anything commits the tokens in it." -ForegroundColor Red }
+        }
     }
     Write-Host ''
     Write-Host "  $(if ($ciMode) { 'In this job' } else { 'On this machine' }) - secrets.json lists $($all.Count):" -ForegroundColor Cyan
