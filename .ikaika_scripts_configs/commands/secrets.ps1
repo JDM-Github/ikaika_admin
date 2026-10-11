@@ -134,6 +134,10 @@ $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $all = @($manifest.secrets)
 $purposes = @($manifest.purposes.PSObject.Properties.Name)
 $sealedKinds = @('file', 'value')
+# The GitHub secrets a workflow reads from the repo's settings - its tokens and the link - kept on a workstation by their GitHub names in
+# .local.actions-secret.env, the file ci-local reads, and carried in the archive so -Import fills them in and -GitHub can hand them over.
+$githubKinds = @('workflow', 'link')
+$actionsFile = Join-Path $repoRoot '.local.actions-secret.env'
 $archiveName = "$($manifest.archive.name)"
 $group = "$($manifest.archive.group)"
 if (-not $group) { $group = [IO.Path]::GetFileNameWithoutExtension($archiveName) }
@@ -186,6 +190,11 @@ function Get-LocalValue($Secret) {
     return "$((Read-EnvFile (Resolve-SecretPath $Secret.local.file))[$Secret.local.key])"
 }
 
+function Get-LocalGitHubValue($Secret) {
+    if (-not (Test-Path -LiteralPath $actionsFile)) { return '' }
+    return "$((Read-EnvFile $actionsFile)[$Secret.name])"
+}
+
 # The archive password is kept for this Windows account only, encrypted with DPAPI, and shared by every repo in the group.
 function Get-PasswordStorePath {
     $base = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [Environment]::GetFolderPath('LocalApplicationData') }
@@ -211,6 +220,7 @@ function Save-StoredPassword([string]$Password) {
 }
 
 function Get-LocalState($Secret) {
+    if ($Secret.kind -in $githubKinds) { return $(if (Get-LocalGitHubValue $Secret) { 'ok' } else { 'missing' }) }
     switch ($Secret.kind) {
         'file' {
             $path = Resolve-SecretPath $Secret.path
@@ -250,7 +260,9 @@ function Show-StatusLines {
         } elseif ($opened.Error) {
             Write-Host "  Archive in the repo: $where, not opened - $($opened.Error)" -ForegroundColor Yellow
         } else {
-            Write-Host "  Archive in the repo: $where, sealed $($opened.Sealed.sealedAt) - $(@($opened.Sealed.files).Count) file(s), $(@($opened.Sealed.values.PSObject.Properties).Count) value(s). -Import puts them in place." -ForegroundColor Green
+            $carried = @($opened.Sealed.github.PSObject.Properties | Where-Object { $_ }).Count
+            Write-Host "  Archive in the repo: $where, sealed $($opened.Sealed.sealedAt) - $(@($opened.Sealed.files).Count) file(s), $(@($opened.Sealed.values.PSObject.Properties).Count) value(s), $carried GitHub secret(s). -Import puts them in place." -ForegroundColor Green
+            if (-not $carried) { Write-Host '  It carries no GitHub secrets - it was sealed before they were; -Export from a machine whose .local.actions-secret.env has them adds them.' -ForegroundColor DarkGray }
         }
         if (-not $opened.Missing -and -not (Test-LocalArchiveIgnored)) { Write-Host "  Git does not ignore it - add it to .gitignore before anything commits the secrets in it." -ForegroundColor Red }
     }
@@ -398,6 +410,8 @@ function Close-LocalArchive {
 function Test-InArchive($Secret, $Opened) {
     if (-not $Opened -or $Opened.Error) { return $false }
     if ($Secret.kind -eq 'value') { return [bool]"$($Opened.Sealed.values.($Secret.name))" }
+    if ($Secret.kind -in $githubKinds) { return [bool]"$($Opened.Sealed.github.($Secret.name))" }
+    if ($Secret.kind -ne 'file') { return $false }
     return [bool](Get-ChildItem -LiteralPath (Join-Path $Opened.Dir $Secret.name) -File -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 
@@ -405,6 +419,15 @@ function Test-InArchive($Secret, $Opened) {
 # checksum trusts the archive's copy, and one already here byte for byte is left alone; a value goes to its env file.
 function Import-FromArchive($Secret, $Opened) {
     if (-not (Test-InArchive $Secret $Opened)) { return 'absent' }
+    if ($Secret.kind -in $githubKinds) {
+        $value = "$($Opened.Sealed.github.($Secret.name))"
+        if ((Get-LocalGitHubValue $Secret) -ceq $value) { return 'same' }
+        & git -C $repoRoot check-ignore -q --no-index -- (Split-Path -Leaf $actionsFile) 2>$null
+        if ($LASTEXITCODE -ne 0) { return 'unignored' }
+        if (-not (Test-Path -LiteralPath $actionsFile)) { [IO.File]::WriteAllText($actionsFile, '') }
+        if (-not (Set-EnvValue -Path $actionsFile -Key $Secret.name -Value $value)) { return 'failed' }
+        return 'imported'
+    }
     if ($Secret.kind -eq 'value') {
         $value = "$($Opened.Sealed.values.($Secret.name))"
         if ((Get-LocalValue $Secret) -ceq $value) { return 'same' }
@@ -446,21 +469,23 @@ function Invoke-Import {
         }
         Write-Host "    sealed   $($opened.Sealed.sealedAt)" -ForegroundColor DarkGray
         $counts = @{}
-        foreach ($s in @($all | Where-Object { $_.kind -in $sealedKinds })) {
+        foreach ($s in @($all | Where-Object { $_.kind -in ($sealedKinds + $githubKinds) })) {
             $result = Import-FromArchive $s $opened
             $counts[$result] = 1 + [int]$counts[$result]
-            $colour = @{ imported = 'Green'; same = 'DarkGray'; absent = 'DarkGray'; untrusted = 'Red'; failed = 'Red' }[$result]
-            $note = @{ imported = "-> $(if ($s.kind -eq 'value') { "$($s.local.key) in $(Resolve-SecretPath $s.local.file)" } else { Resolve-SecretPath $s.path })"; same = 'already here'; absent = 'not in the archive'
-                untrusted = "the archive's copy is not the one $(Resolve-Template $s.checksum) trusts - -Export it again from a machine that has the trusted one"; failed = 'could not be written' }[$result]
+            $colour = @{ imported = 'Green'; same = 'DarkGray'; absent = 'DarkGray'; untrusted = 'Red'; failed = 'Red'; unignored = 'Red' }[$result]
+            $where = if ($s.kind -in $githubKinds) { "$($s.name) in $(Split-Path -Leaf $actionsFile)" } elseif ($s.kind -eq 'value') { "$($s.local.key) in $(Resolve-SecretPath $s.local.file)" } else { Resolve-SecretPath $s.path }
+            $note = @{ imported = "-> $where"; same = 'already here'; absent = 'not in the archive'
+                untrusted = "the archive's copy is not the one $(Resolve-Template $s.checksum) trusts - -Export it again from a machine that has the trusted one"; failed = 'could not be written'
+                unignored = "not written: git does not ignore $(Split-Path -Leaf $actionsFile) - add it to .gitignore first" }[$result]
             Write-Host ('    {0,-10}{1,-26} {2}' -f $result, $s.name, $note) -ForegroundColor $colour
         }
     } finally {
         Close-LocalArchive
     }
     Write-Host ''
-    Write-Host "  Imported $([int]$counts['imported']), $([int]$counts['same']) already here$(if ($counts['absent']) { ", $($counts['absent']) not in the archive" })." -ForegroundColor $(if ($counts['untrusted'] -or $counts['failed']) { 'Red' } else { 'Green' })
+    Write-Host "  Imported $([int]$counts['imported']), $([int]$counts['same']) already here$(if ($counts['absent']) { ", $($counts['absent']) not in the archive" })." -ForegroundColor $(if ($counts['untrusted'] -or $counts['failed'] -or $counts['unignored']) { 'Red' } else { 'Green' })
     Write-Host ''
-    return -not ($counts['untrusted'] -or $counts['failed'])
+    return -not ($counts['untrusted'] -or $counts['failed'] -or $counts['unignored'])
 }
 
 # CI: the archive is fetched and opened once, into a folder removed with everything in it when the step ends.
@@ -699,12 +724,18 @@ function Invoke-Seal([string]$Destination, [string]$ArchivePath = '') {
             [IO.File]::WriteAllBytes((Join-Path $dir.FullName (Split-Path -Leaf $source)), [IO.File]::ReadAllBytes($source))
             $files += $s.name
         }
+        $github = [ordered]@{}
+        foreach ($s in @($all | Where-Object { $_.kind -in $githubKinds })) {
+            $value = Get-LocalGitHubValue $s
+            if ($value) { $github[$s.name] = $value }
+        }
         $sealed = [ordered]@{
             format = 1
             archive = $archiveName
             sealedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'
             files = $files
             values = $values
+            github = $github
         }
         [IO.File]::WriteAllText((Join-Path $stage 'sealed.json'), ($sealed | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
         $output = & $sevenZip a -t7z -mhe=on -mx=9 "-p$password" -bso0 -bsp0 -- $fresh (Join-Path $stage '*') 2>&1
@@ -727,8 +758,10 @@ function Invoke-Seal([string]$Destination, [string]$ArchivePath = '') {
         if (Test-Path -LiteralPath $fresh) { Remove-Item -LiteralPath $fresh -Force -ErrorAction SilentlyContinue }
     }
     Write-Host ''
-    Write-Host "  Sealed $($files.Count) file(s) and $($values.Count) value(s) into $archive" -ForegroundColor Green
+    Write-Host "  Sealed $($files.Count) file(s), $($values.Count) value(s) and $($github.Count) GitHub secret(s) into $archive" -ForegroundColor Green
     if ($left.Count) { Write-Host "  Left out, optional and not set up here: $($left -join ', ')" -ForegroundColor DarkGray }
+    $unkept = @($all | Where-Object { $_.kind -in $githubKinds -and -not $github.Contains($_.name) -and -not $_.optional } | ForEach-Object name)
+    if ($unkept.Count) { Write-Host "  Not in $(Split-Path -Leaf $actionsFile) here, so not carried: $($unkept -join ', ') - put them there to carry them." -ForegroundColor Yellow }
     if ($ArchivePath) { Write-Host '  Kept in the repo and ignored by git; another machine with it takes the update with .\script.ps1 secrets -Import.' -ForegroundColor Cyan }
     else { Write-Host "  Upload it to the folder $($linkEntry.name) links to, replacing the one there." -ForegroundColor Cyan }
     Write-Host ''
@@ -752,13 +785,10 @@ function Invoke-Export([object[]]$Selected) {
         foreach ($s in $inGitHub) {
             $i++
             $label = "  [$i/$($inGitHub.Count)] $($s.name)"
-            if ($s.kind -ne 'password') {
-                Write-Host "$label - not kept here; create it yourself. $($s.setup)" -ForegroundColor Yellow
-                continue
-            }
-            $value = Get-StoredPassword
+            $value = if ($s.kind -eq 'password') { Get-StoredPassword } elseif ($s.kind -in $githubKinds) { Get-LocalGitHubValue $s } else { '' }
             if (-not $value) {
-                Write-Host "$label - not kept for this Windows account yet; .\script.ps1 secrets -Seal or -Import keeps it." -ForegroundColor Yellow
+                $why = if ($s.kind -eq 'password') { 'not kept for this Windows account yet; .\script.ps1 secrets -Seal or -Import keeps it.' } else { "not in $(Split-Path -Leaf $actionsFile) here; -Import fills it from the archive in the repo, or create it yourself. $($s.setup)" }
+                Write-Host "$label - $why" -ForegroundColor $(if ($s.optional) { 'DarkGray' } else { 'Yellow' })
                 continue
             }
             Set-Clipboard -Value $value
