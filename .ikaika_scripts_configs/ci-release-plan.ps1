@@ -34,6 +34,7 @@ $target = Get-Answer 'target' 'staging'
 $version = Get-Answer 'version' 'same'
 $customVersion = Get-Answer 'custom_version' ''
 $upload = Test-Answer 'upload'
+$dryRun = Test-Answer 'dry_run'
 $githubRelease = Test-Answer 'github_release' $true
 $refType = "$env:GITHUB_REF_TYPE"
 $refName = "$env:GITHUB_REF_NAME"
@@ -53,7 +54,12 @@ $tagging = $version -ne 'same'
 if ($tagging -and $refType -ne 'branch') { $problems += "A version bump is committed to a branch, and this run is on the $refType $refName - pick a branch under 'Use workflow from'." }
 $kind = if ($target -eq 'staging') { 'debug' } else { 'release' }
 if (-not (Get-ConfigValue "$kind.assetUrl")) { $problems += "There is no $target to build for yet: $kind.assetUrl is blank in ikaika_scripts.env." }
-if ($upload -and $target -eq 'production' -and -not (Test-Answer 'confirm_production')) { $problems += 'Tick "Yes, upload to PRODUCTION" to upload to production.' }
+# As the project estimator's: a dry run sends nothing, so it needs no production box, and without an upload there is nothing to try.
+if (-not $upload -and $dryRun) {
+    Write-Output '::warning title=Upload options ignored::Dry run applies only with "Upload to the server" ticked.'
+    $dryRun = $false
+}
+if ($upload -and -not $dryRun -and $target -eq 'production' -and -not (Test-Answer 'confirm_production')) { $problems += 'Tick "Yes, upload to PRODUCTION" to upload to production.' }
 
 if ($problems.Count) {
     foreach ($p in $problems) { Write-Output "::error title=Build release::$p" }
@@ -63,7 +69,10 @@ if ($problems.Count) {
 $arguments = [ordered]@{ Debug = $target -eq 'staging' }
 $arguments | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $PlanFile -Encoding utf8
 $deploy = $null
-if ($upload) { $deploy = [ordered]@{ Debug = $arguments.Debug; Force = $true } }
+if ($upload) {
+    $deploy = [ordered]@{ Debug = $arguments.Debug; Force = $true }
+    if ($dryRun) { $deploy.DryRun = $true }
+}
 
 Set-JobVariable 'BUILD_PLAN' $PlanFile
 Set-JobVariable 'BUILD_DEBUG' "$($arguments.Debug)".ToLower()

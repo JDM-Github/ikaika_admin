@@ -21,5 +21,8 @@
         @{ Name = 'a bump is kept as a GitHub release'; Answers = @{ version = 'patch' }; Exit = 0; Outputs = @{ RELEASING = 'true' }; Says = '| Kept as | a GitHub release' }
         @{ Name = 'github_release off keeps a bump as an artifact'; Answers = @{ version = 'patch'; github_release = $false }; Exit = 0; Outputs = @{ RELEASING = 'false' } }
         @{ Name = 'a build that keeps its version has no tag to release under'; Answers = @{}; Exit = 0; Outputs = @{ RELEASING = 'false' }; Says = 'kept as an artifact instead' }
+        # dry_run, as the project estimator's: names what would go up and run, sends nothing, and needs no production box.
+        @{ Name = 'a dry-run upload sends nothing'; Answers = @{ upload = $true; dry_run = $true }; Exit = 0; Outputs = @{ UPLOADING = 'true'; DEPLOY_PLAN = '{"Debug":true,"Force":true,"DryRun":true}' } }
+        @{ Name = 'dry_run without an upload is ignored'; Answers = @{ dry_run = $true }; Exit = 0; Outputs = @{ UPLOADING = 'false'; DEPLOY_PLAN = '' }; Says = 'Dry run applies only with' }
     )
 }

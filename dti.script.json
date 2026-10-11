@@ -2,7 +2,7 @@
   "version": "0.0.0+1",
   "name": "Ikaika Portal",
   "title": "Ikaika Portal",
-  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.36.1",
+  "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.38.0",
   "rules": {
     "global": [
       "flag",
@@ -984,6 +984,8 @@
               "android-debug",
               "windows-release",
               "windows-debug",
+              "linux-release",
+              "linux-debug",
               "ssh"
             ]
           },
@@ -1031,6 +1033,8 @@
               "android-debug",
               "windows-release",
               "windows-debug",
+              "linux-release",
+              "linux-debug",
               "ssh"
             ]
           },

@@ -38,6 +38,10 @@ on:
         description: Upload to the server - composer, the swap, migrations, then the health check
         type: boolean
         default: false
+      dry_run:
+        description: Dry run - name what would go up and run, upload nothing
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,7 +53,7 @@ concurrency:
 
 jobs:
   build-release:
-    name: ${{ format('Package the API for {0}{1}', inputs.target, inputs.upload && ', then upload' || '') }}
+    name: ${{ format('Package the API for {0}{1}', inputs.target, inputs.upload && (inputs.dry_run && ', upload dry run' || ', then upload') || '') }}
     runs-on: windows-2025
     timeout-minutes: 30
     # github-actions[bot] pushes the version commit and tag to GitHub.
@@ -211,7 +215,7 @@ jobs:
           ./script.ps1 build-release @plan
           exit $LASTEXITCODE
 
-      - name: ${{ format('Upload to {0} - composer, the swap, migrations, the health check', inputs.target) }}
+      - name: ${{ format('Upload to {0}{1}', inputs.target, inputs.dry_run && ', a dry run that sends nothing' || ' - composer, the swap, migrations, the health check') }}
         id: upload
         if: env.UPLOADING == 'true'
         run: |
