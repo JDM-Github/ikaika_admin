@@ -7,8 +7,8 @@ HOME_DIR=${HOME_DIR:-/home2/eoxvhumy}
 SOURCE=${SOURCE:-$HOME_DIR/apps/central-platform/.env}
 ROOT=${ROOT:-$HOME_DIR/apps/test-server}
 TARGET=${TARGET:-$ROOT/.env}
-SITE_URL=${SITE_URL:-https://eox.vhu.mybluehost.me/website_a85fbf18}
-SITE_PATH=${SITE_PATH:-/website_a85fbf18}
+SITE_URL=${SITE_URL:-https://test.ikaikabim.com}
+SITE_PATH=${SITE_PATH-}
 
 if [ ! -f "$TARGET" ]; then
     [ -f "$SOURCE" ] || { echo "Staging .env not found at $SOURCE"; exit 1; }

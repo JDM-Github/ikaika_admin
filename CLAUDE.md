@@ -177,7 +177,7 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 
 # Deployment (Bluehost Test Server)
 
-Read `deployment/README.md` before touching anything deploy-related. The Test Server is live at `https://eox.vhu.mybluehost.me/website_a85fbf18/central-api/` (the admin workspace UI) and is deployed with `deployment\deploy.ps1` (build, upload, deploy over SSH alias `bluehost`). Local data is copied with `deployment\copy-databases.ps1`.
+Read `deployment/README.md` before touching anything deploy-related. The Test Server is live at `https://test.ikaikabim.com/central-api/` (the admin workspace UI) and is deployed with `deployment\deploy.ps1` (build, upload, deploy over SSH alias `bluehost`). Local data is copied with `deployment\copy-databases.ps1`.
 
 - Everything server-side lives in `/home2/eoxvhumy/apps/test-server/` (`app/`, `.env`, `db.env`, `scripts/`, `upload/`, `backups/`). Never add folders to the server's home directory.
 - Do not run `route:cache` (or `optimize`) on the server: cached routes answer 405 for `/central-api/` when Laravel sits in a subfolder. The scripts run `config:cache`, `event:cache` and `view:cache` only.

@@ -7,7 +7,7 @@ HOME_DIR=${HOME_DIR:-/home2/eoxvhumy}
 # server/deploy-release exports DEPLOY_DIR, the folder it uploaded to, so the two can never name different places.
 ROOT=${ROOT:-${DEPLOY_DIR:-$HOME_DIR/apps/test-server}}
 SITE_DIR=${SITE_DIR:-website_a85fbf18}
-SITE_URL=${SITE_URL:-https://eox.vhu.mybluehost.me/website_a85fbf18}
+SITE_URL=${SITE_URL:-https://test.ikaikabim.com}
 API_CHANNEL=${API_CHANNEL:-staging}
 
 APP_DIR=$ROOT/app
@@ -18,8 +18,10 @@ case "${API_PATH:-}" in
     /*|*..*) echo "API_PATH must be home-relative, like public_html/site/central-api: $API_PATH"; exit 1 ;;
 esac
 PUBLIC_DIR=$HOME_DIR/${API_PATH:-public_html/$SITE_DIR/central-api}
-# The URL path the API answers at - its folder under public_html - and the scheme and host it answers on.
-API_URL_PATH=/${PUBLIC_DIR#$HOME_DIR/public_html/}
+# The URL path the API answers at - its folder under the one the domain serves, SITE_ROOT, as test.ikaikabim.com
+# serves public_html/website_a85fbf18 - and the scheme and host it answers on.
+SITE_ROOT=${SITE_ROOT:-public_html}
+API_URL_PATH=/${PUBLIC_DIR#$HOME_DIR/$SITE_ROOT/}
 SITE_ORIGIN=$(printf '%s' "$SITE_URL" | sed -E 's#^(https?://[^/]+).*#\1#')
 COMPOSER="php $HOME_DIR/bin/composer"
 ZIP=${1:-$ROOT/upload/central-platform.zip}
@@ -70,7 +72,7 @@ set_release_key APP_URL "$SITE_ORIGIN$API_URL_PATH"
 set_release_key ASSET_URL "$API_URL_PATH"
 set_release_key SESSION_PATH "$API_URL_PATH"
 if [ -n "${PORTAL_PATH:-}" ]; then
-    set_release_key PORTAL_AZURE_REDIRECT_URI "$SITE_ORIGIN/${PORTAL_PATH#public_html/}"
+    set_release_key PORTAL_AZURE_REDIRECT_URI "$SITE_ORIGIN/${PORTAL_PATH#$SITE_ROOT/}"
 fi
 chmod 600 "$NEW/.env"
 chmod -R 775 "$NEW/storage" "$NEW/bootstrap/cache"

@@ -1,6 +1,6 @@
 # Builds deployment/out/central-platform.zip for Bluehost; see deployment/README.md.
 param(
-    [string]$AssetUrl = '/website_a85fbf18/central-api'
+    [string]$AssetUrl = '/central-api'
 )
 
 $ErrorActionPreference = 'Stop'
