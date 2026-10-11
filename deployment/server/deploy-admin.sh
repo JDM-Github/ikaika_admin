@@ -13,7 +13,11 @@ API_CHANNEL=${API_CHANNEL:-staging}
 APP_DIR=$ROOT/app
 NEW=$ROOT/app-new
 BACKUPS=$ROOT/backups
-PUBLIC_DIR=$HOME_DIR/public_html/$SITE_DIR/central-api
+# API_PATH, from the deploy config (deploy.exports), is where this target's API is served from.
+case "${API_PATH:-}" in
+    /*|*..*) echo "API_PATH must be home-relative, like public_html/site/central-api: $API_PATH"; exit 1 ;;
+esac
+PUBLIC_DIR=$HOME_DIR/${API_PATH:-public_html/$SITE_DIR/central-api}
 COMPOSER="php $HOME_DIR/bin/composer"
 ZIP=${1:-$ROOT/upload/central-platform.zip}
 STAMP=$(date +%Y%m%d-%H%M%S)
