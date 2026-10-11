@@ -18,6 +18,9 @@ case "${API_PATH:-}" in
     /*|*..*) echo "API_PATH must be home-relative, like public_html/site/central-api: $API_PATH"; exit 1 ;;
 esac
 PUBLIC_DIR=$HOME_DIR/${API_PATH:-public_html/$SITE_DIR/central-api}
+# The URL path the API answers at - its folder under public_html - and the scheme and host it answers on.
+API_URL_PATH=/${PUBLIC_DIR#$HOME_DIR/public_html/}
+SITE_ORIGIN=$(printf '%s' "$SITE_URL" | sed -E 's#^(https?://[^/]+).*#\1#')
 COMPOSER="php $HOME_DIR/bin/composer"
 ZIP=${1:-$ROOT/upload/central-platform.zip}
 STAMP=$(date +%Y%m%d-%H%M%S)
@@ -55,6 +58,20 @@ $COMPOSER install --no-dev --prefer-dist --optimize-autoloader --no-interaction 
 
 find "$NEW" -type d -exec chmod 755 {} +
 find "$NEW" -type f -exec chmod 644 {} +
+# Where this target serves the API and the portal, written into the release's .env from API_PATH and PORTAL_PATH every
+# deploy, so a folder that moves - production's v2 at the site root, say - never leaves the server's .env naming the
+# old one; the rest of the .env is the server's own.
+set_release_key() {
+    grep -v "^$1=" "$NEW/.env" > "$NEW/.env.paths" || true
+    printf '%s=%s\n' "$1" "$2" >> "$NEW/.env.paths"
+    mv "$NEW/.env.paths" "$NEW/.env"
+}
+set_release_key APP_URL "$SITE_ORIGIN$API_URL_PATH"
+set_release_key ASSET_URL "$API_URL_PATH"
+set_release_key SESSION_PATH "$API_URL_PATH"
+if [ -n "${PORTAL_PATH:-}" ]; then
+    set_release_key PORTAL_AZURE_REDIRECT_URI "$SITE_ORIGIN/${PORTAL_PATH#public_html/}"
+fi
 chmod 600 "$NEW/.env"
 chmod -R 775 "$NEW/storage" "$NEW/bootstrap/cache"
 
@@ -129,6 +146,6 @@ prune admin-app
 prune admin-public
 
 echo "== Health"
-curl -s "$SITE_URL/central-api/api/$API_CHANNEL/portal/health" || true
+curl -s "$SITE_ORIGIN$API_URL_PATH/api/$API_CHANNEL/portal/health" || true
 echo
 echo "Done. Previous release kept in $BACKUPS"
