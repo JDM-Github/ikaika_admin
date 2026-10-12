@@ -960,7 +960,7 @@ CREATE TABLE IF NOT EXISTS employee_signatures (
 -- A developer picks pages; the server issues a link (/share/<code>) and a
 -- password. The guest signs in with the password, plus a code emailed when a
 -- bound email is set, and browses those pages read-only. Guests are GET-only.
--- Existing databases: run the CREATEs, the seed and the catalog row below.
+-- Existing databases: migration create_portal_shared_pages adds whatever is missing (tables, seed, rules, presets).
 -- Plan: docs/power/shared-pages-plan.md.
 -- ============================================================================
 
