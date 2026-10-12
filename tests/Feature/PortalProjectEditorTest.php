@@ -281,9 +281,69 @@ class PortalProjectEditorTest extends TestCase
             ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
             ->where('projects_action_history.project_id', $id)->orderByDesc('project_action_history.id')->value('project_action_history.action_name'));
 
-        // Approved, it is no longer theirs to edit.
+        // Approved, it is still theirs to edit (2026-10-12) -- tested on its own below.
+    }
+
+    // The creator edits an approved project and it goes back to pending; the approvers hear it was sent again.
+    public function test_the_creator_editing_an_approved_project_sends_it_back_for_approval(): void
+    {
+        $member = $this->employee('user', 3);
+        $token = $this->token($member);
+        $this->grant($member, ['projects.create' => 'all']);
+        $payload = $this->payload();
+        $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
+        unset($payload['scopeCodes']);
+        DB::connection('portal')->table('projects')->where('id', $id)->update([
+            'project_creation_status' => 'Approved', 'project_creation_approver_remarks' => 'Looks right',
+        ]);
+
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'name' => 'Approved Then Edited 2020'])
+            ->assertOk()
+            ->assertJsonPath('data.creationStatus', 'pending')
+            ->assertJsonPath('data.creationRemarks', null);
+        $this->assertSame('Project Creation Resubmission', DB::connection('portal')->table('projects_action_history')
+            ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
+            ->where('projects_action_history.project_id', $id)->orderByDesc('project_action_history.id')->value('project_action_history.action_name'));
+
+        // Manage scopes is an edit too: approved again, the creator's scopes send it back as well.
         DB::connection('portal')->table('projects')->where('id', $id)->update(['project_creation_status' => 'Approved']);
-        $this->withToken($token)->patchJson(self::BASE.'/'.$id, $payload)->assertForbidden();
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$this->scopeCodes()[0]]])->assertOk();
+        $this->assertSame('Pending', DB::connection('portal')->table('projects')->where('id', $id)->value('project_creation_status'));
+
+        // Deleting stays out of the creator's reach.
+        $this->withToken($token)->deleteJson(self::BASE.'/'.$id)->assertForbidden();
+    }
+
+    // A creator who may approve it themselves, and any other editor, save an approved project straight through.
+    public function test_an_approved_project_stays_approved_for_auto_approve_and_other_editors(): void
+    {
+        // A member's approved project, edited by an admin: another editor, so it stays approved.
+        $member = $this->employee('user', 3);
+        $this->grant($member, ['projects.create' => 'all']);
+        $payload = $this->payload();
+        $memberProject = (int) $this->create($this->token($member), $payload)->assertCreated()->json('data.id');
+        unset($payload['scopeCodes']);
+        DB::connection('portal')->table('projects')->where('id', $memberProject)->update(['project_creation_status' => 'Approved']);
+
+        $admin = $this->employee('admin');
+        $adminToken = $this->token($admin);
+        $this->withToken($adminToken)->patchJson(self::BASE.'/'.$memberProject, [...$payload, 'name' => 'Admin Edit 2020'])
+            ->assertOk()
+            ->assertJsonPath('data.creationStatus', 'approved');
+
+        // The admin's own approved project, edited without Auto-approve or an approver reach over it: back to pending.
+        $ownProject = (int) $this->create($adminToken, $this->payload(['name' => 'Admin Own 2020']))->assertCreated()->json('data.id');
+        DB::connection('portal')->table('projects')->where('id', $ownProject)->update(['project_creation_status' => 'Approved']);
+        $this->withToken($adminToken)->patchJson(self::BASE.'/'.$ownProject, [...$payload, 'name' => 'Admin Own Edited 2020'])
+            ->assertOk()
+            ->assertJsonPath('data.creationStatus', 'pending');
+
+        // With Auto-approve (a personal default, as Nathaniel and Steven hold it) the same edit saves straight through.
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'projects.create.direct', 'reach' => null]);
+        DB::connection('portal')->table('projects')->where('id', $ownProject)->update(['project_creation_status' => 'Approved']);
+        $this->withToken($this->token($admin))->patchJson(self::BASE.'/'.$ownProject, [...$payload, 'name' => 'Admin Own Again 2020'])
+            ->assertOk()
+            ->assertJsonPath('data.creationStatus', 'approved');
     }
 
     public function test_adding_refuses_what_is_not_on_the_lists(): void

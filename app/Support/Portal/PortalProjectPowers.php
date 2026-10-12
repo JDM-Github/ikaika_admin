@@ -43,7 +43,7 @@ final class PortalProjectPowers
     public static function allows(Employee $actor, Request $request, string $key, object $project): bool
     {
         return self::coversProject(PortalRules::reach($actor, $request, $key), $actor, $project)
-            || ($key !== self::DELETE && self::isWaitingRequest($actor, $project));
+            || ($key !== self::DELETE && self::isRequester($actor, $project));
     }
 
     /**
@@ -54,7 +54,7 @@ final class PortalProjectPowers
      */
     public static function flags(array $reaches, Employee $actor, object $project): array
     {
-        $isRequest = self::isWaitingRequest($actor, $project);
+        $isRequest = self::isRequester($actor, $project);
 
         return [
             'canEdit' => self::coversProject($reaches[self::EDIT] ?? null, $actor, $project) || $isRequest,
@@ -158,9 +158,10 @@ final class PortalProjectPowers
         return $lead !== '' && $lead === $own;
     }
 
-    private static function isWaitingRequest(Employee $actor, object $project): bool
+    // The creator edits and scopes their own project at any status (2026-10-12, user); once it is approved,
+    // their edit sends it back for approval (PortalProjectEditor::sendsBackForApproval). Never delete.
+    private static function isRequester(Employee $actor, object $project): bool
     {
-        return (int) ($project->requested_by ?? 0) === (int) $actor->getKey()
-            && ($project->project_creation_status ?? null) !== PortalProjectApproval::APPROVED;
+        return (int) ($project->requested_by ?? 0) === (int) $actor->getKey();
     }
 }

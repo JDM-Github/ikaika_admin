@@ -38,6 +38,14 @@ use Illuminate\Validation\Rule;
  */
 final class PortalProjectEditor
 {
+    // What a project sent back for approval clears: it waits again, with no approver or remarks.
+    private const PENDING_AGAIN = [
+        'project_creation_status' => PortalProjectApproval::PENDING,
+        'project_creation_approver' => null,
+        'project_approver_email' => null,
+        'project_creation_approver_remarks' => null,
+    ];
+
     private const CORE_TARGET = 'portal.projects';
 
     private const CORE_RESOURCE = 'projects';
@@ -324,15 +332,8 @@ final class PortalProjectEditor
         [$number] = self::split($row);
         $fields['columns']['project_name'] = $number === null ? $fields['name'] : $number.' '.$fields['name'];
         $changes = $this->changes($projectId, $fields);
-        $isResubmitted = $row->project_creation_status === PortalProjectApproval::REJECTED
-            && ! PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
-        $columns = $isResubmitted ? [
-            ...$fields['columns'],
-            'project_creation_status' => PortalProjectApproval::PENDING,
-            'project_creation_approver' => null,
-            'project_approver_email' => null,
-            'project_creation_approver_remarks' => null,
-        ] : $fields['columns'];
+        $isResubmitted = $this->sendsBackForApproval($actor, $request, $row);
+        $columns = $isResubmitted ? [...$fields['columns'], ...self::PENDING_AGAIN] : $fields['columns'];
 
         $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted): void {
             $this->assertNameFree($fields['name'], $fields['columns']['department'], $projectId);
@@ -372,16 +373,19 @@ final class PortalProjectEditor
             $request,
             ['projectName' => $fields['name'], 'department' => $fields['columns']['department']],
         );
-        $this->audit->notifyManagers(
-            $actor,
-            PortalProjectApproval::RULE,
-            PortalNotificationType::PROJECT_MODIFIED,
-            'Project updated',
-            PortalActivityCopy::notifyProjectModified(PortalActivityCopy::actorName($actor, $request, true), $fields['name']),
-            PortalShellPath::MANAGE_PROJECTS,
-            'Open Manage / Projects',
-            ['recordId' => (string) $projectId],
-        );
+        // A project sent back for approval already told its approvers so; "updated" would be the same news twice.
+        if (! $isResubmitted) {
+            $this->audit->notifyManagers(
+                $actor,
+                PortalProjectApproval::RULE,
+                PortalNotificationType::PROJECT_MODIFIED,
+                'Project updated',
+                PortalActivityCopy::notifyProjectModified(PortalActivityCopy::actorName($actor, $request, true), $fields['name']),
+                PortalShellPath::MANAGE_PROJECTS,
+                'Open Manage / Projects',
+                ['recordId' => (string) $projectId],
+            );
+        }
         $this->projects->bumpCache();
 
         return $this->response($projectId);
@@ -399,10 +403,16 @@ final class PortalProjectEditor
 
         $scopeCodes = $this->validatedScopeCodes($request, $row->department ?? null);
         $name = $this->text($row->project_name) ?? 'Project';
+        // Scopes are an edit too, so the creator cannot change an approved project around its approval.
+        $isResubmitted = $this->sendsBackForApproval($actor, $request, $row);
 
-        $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request): void {
+        $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request, $isResubmitted): void {
             $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->delete();
             $this->writeScopes($projectId, $scopeCodes);
+            if ($isResubmitted) {
+                $this->connection()->table('projects')->where('id', $projectId)->update(self::PENDING_AGAIN);
+                $this->trail->record($projectId, PortalProjectTrail::RESUBMITTED, $actor, $request);
+            }
 
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,
@@ -419,6 +429,9 @@ final class PortalProjectEditor
                 ? 'Scopes cleared'
                 : $count.' '.($count === 1 ? 'scope' : 'scopes'));
         });
+        if ($isResubmitted) {
+            $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), $name, true);
+        }
 
         $this->audit->record(
             $actor,
@@ -895,7 +908,28 @@ final class PortalProjectEditor
         return in_array($level, self::LEVELS, true) ? $level : null;
     }
 
-    // Edit projects and Manage scopes reach this project, or the actor asked for it and it is not approved yet.
+    /*
+     * Whether a save sends the project back to the approvers (2026-10-12, user): a rejected project saved
+     * by anyone without Auto-approve, as before, and now also an approved one edited by its own creator --
+     * unless that creator may approve it themselves (Auto-approve, or a Project Approver reach that covers
+     * it). Anyone else holding Edit projects saves an approved project straight through.
+     */
+    private function sendsBackForApproval(Employee $actor, Request $request, object $row): bool
+    {
+        if (PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT)) {
+            return false;
+        }
+        $status = $row->project_creation_status ?? null;
+        if ($status === PortalProjectApproval::REJECTED) {
+            return true;
+        }
+
+        return $status === PortalProjectApproval::APPROVED
+            && (int) ($row->requested_by ?? 0) === (int) $actor->getKey()
+            && ! $this->approval->covers($actor, $request, $row);
+    }
+
+    // Edit projects and Manage scopes reach this project, or the actor is the one who asked for it.
     private function assertMay(Employee $actor, object $row, Request $request, string $key): void
     {
         if (! PortalProjectPowers::allows($actor, $request, $key, $row)) {
