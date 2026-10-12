@@ -396,7 +396,8 @@ final class PortalSharedPages
         return $row;
     }
 
-    // The share a link names. A revoked or expired one answers as a dead link, whatever the password.
+    // The share a link names. Unknown, revoked and expired all answer the same 404, so a link cannot be
+    // probed for whether it ever existed.
     private function shareByCode(string $code): object
     {
         $share = $this->connection()->table('shared_pages')->where('code', $code)->first();
@@ -404,7 +405,7 @@ final class PortalSharedPages
             abort(404, 'This link is not active.');
         }
         if ($share->expires_at !== null && strtotime((string) $share->expires_at) <= now()->getTimestamp()) {
-            abort(410, 'This link has expired.');
+            abort(404, 'This link is not active.');
         }
 
         return $share;

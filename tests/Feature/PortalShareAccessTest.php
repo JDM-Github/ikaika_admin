@@ -79,8 +79,10 @@ class PortalShareAccessTest extends TestCase
         $revoked = $this->share(overrides: ['revokedAt' => now()]);
         $this->getJson(self::BASE.'/'.$revoked['code'])->assertNotFound();
 
+        // Expired reads exactly like unknown, and its password step is just as dead.
         $expired = $this->share(overrides: ['expiresAt' => now()->subMinute()]);
-        $this->getJson(self::BASE.'/'.$expired['code'])->assertStatus(410);
+        $this->getJson(self::BASE.'/'.$expired['code'])->assertNotFound()->assertJsonPath('message', 'This link is not active.');
+        $this->postJson(self::BASE.'/'.$expired['code'].'/access', ['password' => $expired['password']])->assertNotFound();
     }
 
     public function test_a_wrong_password_is_refused_and_the_right_one_signs_the_guest_in(): void
