@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
+use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalNotificationEmails;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
@@ -123,7 +125,10 @@ class PortalShareAccessTest extends TestCase
         $this->postJson(self::BASE.'/'.$share['code'].'/access', ['password' => $share['password']])
             ->assertOk()
             ->assertJsonPath('data.otpRequired', true);
-        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com'));
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com')
+            && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
+            && $mail->fromName === PortalNotificationEmails::FROM_NAME
+            && str_starts_with($mail->subjectLine, 'Your code for '));
 
         // The mailed code is hashed; a known one stands in so the checks can be read.
         DB::connection('portal')->table('shared_page_otps')->where('share_id', $share['id'])->update([

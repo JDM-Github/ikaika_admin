@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalNotificationEmails;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
@@ -232,6 +234,20 @@ class PortalSharedPagesTest extends TestCase
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com')
             && str_contains($mail->body, $password)
             && str_contains($mail->body, '/share/'.$created->json('data.share.code')));
+
+        // The same letter the composer sends: letter design, the Company footer, from IKAIKA Portal.
+        [$footerBody] = PortalNotificationEmails::companyFooter();
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com')
+            && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
+            && $mail->fromName === PortalNotificationEmails::FROM_NAME
+            && $mail->footerBody === $footerBody
+            && str_starts_with($mail->body, 'Hi ')
+            && str_starts_with($mail->subjectLine, 'Your link and password for '));
+
+        // A new password says so in its own subject.
+        $this->withToken($token)->postJson(self::BASE.'/'.$created->json('data.share.id').'/regenerate')->assertOk();
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => str_starts_with($mail->subjectLine, 'Your new password for ')
+            && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER);
     }
 
     public function test_an_email_can_be_bound_without_asking_for_a_code(): void

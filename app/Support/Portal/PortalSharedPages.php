@@ -92,7 +92,7 @@ final class PortalSharedPages
         $this->audit->record($actor, PortalLogAction::INSERT, 'manage.shares', '{UserName|You} created the shared page '.$data['label'], (string) $id, $request);
 
         if ($data['email'] !== null) {
-            $this->mailPassword($code, $data['email'], $data['label'], $password, $data['expiresAt']);
+            $this->mailPassword($code, $data['email'], $data['label'], $data['guestName'] ?? $data['label'], $password, $data['expiresAt'], false);
         }
 
         return ['share' => $this->present($this->row($id), $data['rules']), 'password' => $password];
@@ -153,7 +153,7 @@ final class PortalSharedPages
         $this->audit->record($actor, PortalLogAction::PATCH, 'manage.shares', '{UserName|You} changed the password of '.trim((string) $row->label), (string) $id, $request);
 
         if ($row->email !== null && trim((string) $row->email) !== '') {
-            $this->mailPassword((string) $row->code, trim((string) $row->email), (string) $row->label, $password, $row->expires_at === null ? null : (string) $row->expires_at);
+            $this->mailPassword((string) $row->code, trim((string) $row->email), (string) $row->label, $this->displayName($row), $password, $row->expires_at === null ? null : (string) $row->expires_at, true);
         }
 
         return ['password' => $password];
@@ -460,11 +460,14 @@ final class PortalSharedPages
             ['share_id' => $share->id],
             ['code_hash' => Hash::make($code), 'attempts' => 0, 'issued_at' => now(), 'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES)],
         );
+        $link = $this->link((string) $share->code);
         $this->mailTo(
             trim((string) $share->email),
             'Your code for '.trim((string) $share->label),
-            'Your code is '.$code.'. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                ."\n\nOpen the shared page: ".$this->link((string) $share->code),
+            'Hi '.$this->displayName($share).','
+                ."\n\nYour code is **".$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
+                ."\n\nOpen the shared page: [".$link.']('.$link.')'
+                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
         );
     }
 
@@ -541,25 +544,40 @@ final class PortalSharedPages
         return $name !== '' ? $name : (string) $share->label;
     }
 
-    private function mailPassword(string $code, string $email, string $label, string $password, ?string $expiresAt): void
+    // The link and password letter, on creation and when the password is replaced.
+    private function mailPassword(string $code, string $email, string $label, string $name, string $password, ?string $expiresAt, bool $isNewPassword): void
     {
         $expiry = $expiresAt === null
             ? 'It does not expire until it is revoked.'
             : 'It is good until '.date('j M Y, g:i a', strtotime($expiresAt)).'.';
+        $link = $this->link($code);
 
         $this->mailTo(
             $email,
-            'Your link and password for '.$label,
-            'A read-only shared page is ready for you: '.$label.'.'
-                ."\n\nLink: ".$this->link($code)
-                ."\nPassword: ".$password
-                ."\n\n".$expiry.' It is read-only: you can look, not change anything.',
+            ($isNewPassword ? 'Your new password for ' : 'Your link and password for ').$label,
+            'Hi '.$name.','
+                ."\n\n".($isNewPassword
+                    ? 'The password for your read-only shared page, **'.$label.'**, was changed. The old one no longer works.'
+                    : 'A read-only shared page is ready for you: **'.$label.'**.')
+                ."\n\nLink: [".$link.']('.$link.')'
+                ."\nPassword: **".$password.'**'
+                ."\n\n".$expiry.' It is read-only: you can look, not change anything.'
+                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
         );
     }
 
+    // The same letter the composer and the notification emails send: letter design, Company footer, portal sender.
     private function mailTo(string $to, string $subject, string $body): void
     {
-        Mail::to($to)->send(new PortalEmailMail($subject, $body));
+        [$footerBody, $footerFormat] = PortalNotificationEmails::companyFooter();
+        Mail::to($to)->send(new PortalEmailMail(
+            $subject,
+            $body,
+            $footerBody,
+            PortalEmailMarkup::FORMAT_LETTER,
+            $footerFormat,
+            PortalNotificationEmails::FROM_NAME,
+        ));
     }
 
     public function link(string $code): string
