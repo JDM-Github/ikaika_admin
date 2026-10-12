@@ -971,6 +971,8 @@ CREATE TABLE IF NOT EXISTS shared_pages (
     -- The generated password, kept readable so the developer can send it again; the hash still verifies.
     password_value  VARCHAR(32)  NULL,
     email           VARCHAR(255) NULL,
+    -- With an email bound: 1 asks for a mailed code at every sign-in, 0 only mails the password.
+    require_otp     TINYINT(1)   NOT NULL DEFAULT 1,
     expires_at      TIMESTAMP    NULL,           -- NULL only when the developer clears it
     rate_per_minute SMALLINT     NOT NULL DEFAULT 60,
     revoked_at      TIMESTAMP    NULL,
@@ -987,6 +989,10 @@ ALTER TABLE shared_pages
 ALTER TABLE shared_pages
     MODIFY COLUMN code VARCHAR(64) NOT NULL,
     ADD COLUMN guest_name VARCHAR(100) NULL AFTER label;
+
+-- Existing databases: migration add_require_otp_to_portal_shared_pages runs this.
+ALTER TABLE shared_pages
+    ADD COLUMN require_otp TINYINT(1) NOT NULL DEFAULT 1 AFTER email;
 
 CREATE TABLE IF NOT EXISTS shared_page_rules (
     share_id INT          NOT NULL,

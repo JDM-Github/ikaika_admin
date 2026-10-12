@@ -234,6 +234,24 @@ class PortalSharedPagesTest extends TestCase
             && str_contains($mail->body, '/share/'.$created->json('data.share.code')));
     }
 
+    public function test_an_email_can_be_bound_without_asking_for_a_code(): void
+    {
+        $token = $this->developerToken();
+
+        $created = $this->withToken($token)
+            ->postJson(self::BASE, $this->payload(['email' => 'guest@example.com', 'requireOtp' => false]))
+            ->assertOk()
+            ->assertJsonPath('data.share.requireOtp', false);
+        $password = (string) $created->json('data.password');
+
+        // The email still carries the password; only the sign-in code is skipped.
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com')
+            && str_contains($mail->body, $password));
+
+        // Left out, the switch keeps asking, as every share did before it existed.
+        $this->createShare($token, ['email' => 'other@example.com'])->assertJsonPath('data.share.requireOtp', true);
+    }
+
     public function test_a_page_that_is_not_ready_is_refused(): void
     {
         $rule = DB::connection('portal')->table('shared_page_shareable')->where('is_ready', 0)->value('rule_key');

@@ -49,6 +49,7 @@ class PortalShareAccessTest extends TestCase
             'code' => $code,
             'password_hash' => Hash::make($password),
             'email' => $overrides['email'] ?? null,
+            'require_otp' => $overrides['requireOtp'] ?? true,
             'expires_at' => $overrides['expiresAt'] ?? now()->addDays(7),
             'rate_per_minute' => $overrides['ratePerMinute'] ?? 60,
             'revoked_at' => $overrides['revokedAt'] ?? null,
@@ -144,6 +145,18 @@ class PortalShareAccessTest extends TestCase
             'issued_at' => now(), 'expires_at' => now()->addMinutes(10),
         ]);
         $this->postJson(self::BASE.'/'.$share['code'].'/verify', ['password' => $share['password'], 'otp' => '123456'])
+            ->assertStatus(422);
+    }
+
+    public function test_an_email_bound_without_a_code_signs_in_with_the_password_alone(): void
+    {
+        $share = $this->share(overrides: ['email' => 'guest@example.com', 'requireOtp' => false]);
+
+        $this->postJson(self::BASE.'/'.$share['code'].'/access', ['password' => $share['password']])
+            ->assertOk()
+            ->assertJsonStructure(['data' => ['token']]);
+        Mail::assertNothingSent();
+        $this->postJson(self::BASE.'/'.$share['code'].'/resend', ['password' => $share['password']])
             ->assertStatus(422);
     }
 

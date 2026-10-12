@@ -83,6 +83,7 @@ final class PortalSharedPages
             'password_hash' => Hash::make($password),
             'password_value' => $password,
             'email' => $data['email'],
+            'require_otp' => $data['requireOtp'],
             'expires_at' => $data['expiresAt'],
             'rate_per_minute' => $data['ratePerMinute'],
             'created_by' => (int) $actor->getKey(),
@@ -109,6 +110,7 @@ final class PortalSharedPages
             'label' => $data['label'],
             'guest_name' => $data['guestName'],
             'email' => $data['email'],
+            'require_otp' => $data['requireOtp'],
             'expires_at' => $data['expiresAt'],
             'rate_per_minute' => $data['ratePerMinute'],
         ];
@@ -178,8 +180,8 @@ final class PortalSharedPages
     }
 
     /**
-     * The password step: right password, then a mailed code when an email is bound, or the token
-     * straight away when none is.
+     * The password step: right password, then a mailed code when the share asks for one, or the
+     * token straight away when it does not.
      *
      * @return array<string, mixed>
      */
@@ -188,7 +190,7 @@ final class PortalSharedPages
         $share = $this->shareByCode($code);
         $this->checkPassword($share, (string) $request->input('password', ''));
 
-        if (! $this->hasEmail($share)) {
+        if (! $this->needsOtp($share)) {
             return $this->issued($request, $share);
         }
 
@@ -198,7 +200,7 @@ final class PortalSharedPages
     }
 
     /**
-     * The code step, or the whole sign-in when no email is bound.
+     * The code step, or the whole sign-in when the share asks for no code.
      *
      * @return array<string, mixed>
      */
@@ -207,7 +209,7 @@ final class PortalSharedPages
         $share = $this->shareByCode($code);
         $this->checkPassword($share, (string) $request->input('password', ''));
 
-        if ($this->hasEmail($share)) {
+        if ($this->needsOtp($share)) {
             $this->checkOtp($share, (string) $request->input('otp', ''));
         }
 
@@ -221,8 +223,8 @@ final class PortalSharedPages
     {
         $share = $this->shareByCode($code);
         $this->checkPassword($share, (string) $request->input('password', ''));
-        if (! $this->hasEmail($share)) {
-            abort(422, 'This shared page has no email to send a code to.');
+        if (! $this->needsOtp($share)) {
+            abort(422, 'This shared page does not ask for a code.');
         }
         $this->sendOtp($share, true);
 
@@ -240,7 +242,7 @@ final class PortalSharedPages
     }
 
     /**
-     * @return array{label: string, guestName: ?string, slug: ?string, email: ?string, expiresAt: ?string, ratePerMinute: int, rules: list<string>}
+     * @return array{label: string, guestName: ?string, slug: ?string, email: ?string, requireOtp: bool, expiresAt: ?string, ratePerMinute: int, rules: list<string>}
      */
     private function validated(Request $request): array
     {
@@ -249,6 +251,7 @@ final class PortalSharedPages
             'guestName' => ['nullable', 'string', 'max:100'],
             'slug' => ['nullable', 'string', 'max:64'],
             'email' => ['nullable', 'email', 'max:255'],
+            'requireOtp' => ['nullable', 'boolean'],
             'expiresInDays' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_EXPIRY_DAYS],
             'expiresAt' => ['nullable', 'date'],
             'neverExpires' => ['nullable', 'boolean'],
@@ -282,6 +285,8 @@ final class PortalSharedPages
             'guestName' => $guestName,
             'slug' => $slug,
             'email' => $email,
+            // Absent means ask, as every share did before the switch existed.
+            'requireOtp' => (bool) ($data['requireOtp'] ?? true),
             'expiresAt' => $this->expiresAt($data),
             'ratePerMinute' => (int) ($data['ratePerMinute'] ?? self::DEFAULT_RATE_PER_MINUTE),
             'rules' => $rules,
@@ -372,6 +377,7 @@ final class PortalSharedPages
             // the value was kept, until its password is regenerated.
             'password' => $row->password_value === null ? null : (string) $row->password_value,
             'email' => $row->email === null ? null : (string) $row->email,
+            'requireOtp' => (bool) $row->require_otp,
             'expiresAt' => $row->expires_at === null ? null : (string) $row->expires_at,
             'ratePerMinute' => (int) $row->rate_per_minute,
             'isRevoked' => $row->revoked_at !== null,
@@ -414,6 +420,12 @@ final class PortalSharedPages
     private function hasEmail(object $share): bool
     {
         return $share->email !== null && trim((string) $share->email) !== '';
+    }
+
+    // A code needs somewhere to go, and the developer can choose to mail only the password.
+    private function needsOtp(object $share): bool
+    {
+        return $this->hasEmail($share) && (bool) $share->require_otp;
     }
 
     private function checkOtp(object $share, string $otp): void
