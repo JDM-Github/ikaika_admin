@@ -4,11 +4,15 @@ namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
 use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalLetters;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Support\Defer\DeferredCallbackCollection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -128,6 +132,22 @@ class PortalEmailLoginTest extends TestCase
         DB::connection('portal')->table('login_otps')->where('employee_id', $id)->update(['attempts' => 0, 'expires_at' => now()->subMinute()]);
         $this->postJson(self::BASE.'/email/verify', ['email' => 'kelly.login@example.test', 'codes' => ['work' => $code]])
             ->assertStatus(422)->assertJsonPath('message', 'Ask for new codes.');
+    }
+
+    // Each letter is a relay round trip; it waits for the answer, so two codes never hold the screen.
+    public function test_a_letter_goes_out_after_the_answer_and_a_failed_one_is_only_logged(): void
+    {
+        PortalLetters::send('kelly.login@example.test', 'Subject', 'Body');
+        Mail::assertNothingSent();
+
+        app(DeferredCallbackCollection::class)->invoke();
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('kelly.login@example.test'));
+
+        Mail::shouldReceive('to')->andThrow(new RuntimeException('relay down'));
+        Log::spy();
+        PortalLetters::send('kelly.login@example.test', 'Subject', 'Body');
+        app(DeferredCallbackCollection::class)->invoke();
+        Log::shouldHaveReceived('warning')->with('portal.letter.failed', ['subject' => 'Subject', 'reason' => 'relay down']);
     }
 
     // ID-number sign-in is for local development and the suite; staging and production answer 404.
