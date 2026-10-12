@@ -1,0 +1,4 @@
+[submodule "decoupled-script"]
+	path = decoupled-script
+	url = https://Alias2806@bitbucket.org/ikaika-web/ik4-ikaika_scripts.git
+	branch = main

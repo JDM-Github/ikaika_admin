@@ -57,5 +57,5 @@ echo
 echo "Layout now:"
 ls -la "$ROOT"
 echo
-curl -s https://eox.vhu.mybluehost.me/website_a85fbf18/central-api/api/staging/portal/health || true
+curl -s https://test.ikaikabim.com/central-api/api/staging/portal/health || true
 echo

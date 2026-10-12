@@ -4,15 +4,25 @@
 set -euo pipefail
 
 HOME_DIR=${HOME_DIR:-/home2/eoxvhumy}
-ROOT=${ROOT:-$HOME_DIR/apps/test-server}
+# server/deploy-release exports DEPLOY_DIR, the folder it uploaded to, so the two can never name different places.
+ROOT=${ROOT:-${DEPLOY_DIR:-$HOME_DIR/apps/test-server}}
 SITE_DIR=${SITE_DIR:-website_a85fbf18}
-SITE_URL=${SITE_URL:-https://eox.vhu.mybluehost.me/website_a85fbf18}
+SITE_URL=${SITE_URL:-https://test.ikaikabim.com}
 API_CHANNEL=${API_CHANNEL:-staging}
 
 APP_DIR=$ROOT/app
 NEW=$ROOT/app-new
 BACKUPS=$ROOT/backups
-PUBLIC_DIR=$HOME_DIR/public_html/$SITE_DIR/central-api
+# API_PATH, from the deploy config (deploy.exports), is where this target's API is served from.
+case "${API_PATH:-}" in
+    /*|*..*) echo "API_PATH must be home-relative, like public_html/site/central-api: $API_PATH"; exit 1 ;;
+esac
+PUBLIC_DIR=$HOME_DIR/${API_PATH:-public_html/$SITE_DIR/central-api}
+# The URL path the API answers at - its folder under the one the domain serves, SITE_ROOT, as test.ikaikabim.com
+# serves public_html/website_a85fbf18 - and the scheme and host it answers on.
+SITE_ROOT=${SITE_ROOT:-public_html}
+API_URL_PATH=/${PUBLIC_DIR#$HOME_DIR/$SITE_ROOT/}
+SITE_ORIGIN=$(printf '%s' "$SITE_URL" | sed -E 's#^(https?://[^/]+).*#\1#')
 COMPOSER="php $HOME_DIR/bin/composer"
 ZIP=${1:-$ROOT/upload/central-platform.zip}
 STAMP=$(date +%Y%m%d-%H%M%S)
@@ -50,6 +60,24 @@ $COMPOSER install --no-dev --prefer-dist --optimize-autoloader --no-interaction 
 
 find "$NEW" -type d -exec chmod 755 {} +
 find "$NEW" -type f -exec chmod 644 {} +
+# Where this target serves the API and the portal, written into the release's .env from API_PATH and PORTAL_PATH every
+# deploy, so a folder that moves - production's v2 in website_26e391bd, say - never leaves the server's .env naming the
+# old one; the rest of the .env is the server's own.
+set_release_key() {
+    grep -v "^$1=" "$NEW/.env" > "$NEW/.env.paths" || true
+    printf '%s=%s\n' "$1" "$2" >> "$NEW/.env.paths"
+    mv "$NEW/.env.paths" "$NEW/.env"
+}
+set_release_key APP_URL "$SITE_ORIGIN$API_URL_PATH"
+set_release_key ASSET_URL "$API_URL_PATH"
+set_release_key SESSION_PATH "$API_URL_PATH"
+# AZURE_REDIRECT_URI is the address the Azure app registers, the one the portal's build bakes in; without it, the
+# portal's own address stands in.
+if [ -n "${AZURE_REDIRECT_URI:-}" ]; then
+    set_release_key PORTAL_AZURE_REDIRECT_URI "$AZURE_REDIRECT_URI"
+elif [ -n "${PORTAL_PATH:-}" ]; then
+    set_release_key PORTAL_AZURE_REDIRECT_URI "$SITE_ORIGIN/${PORTAL_PATH#$SITE_ROOT/}"
+fi
 chmod 600 "$NEW/.env"
 chmod -R 775 "$NEW/storage" "$NEW/bootstrap/cache"
 
@@ -124,6 +152,6 @@ prune admin-app
 prune admin-public
 
 echo "== Health"
-curl -s "$SITE_URL/central-api/api/$API_CHANNEL/portal/health" || true
+curl -s "$SITE_ORIGIN$API_URL_PATH/api/$API_CHANNEL/portal/health" || true
 echo
 echo "Done. Previous release kept in $BACKUPS"

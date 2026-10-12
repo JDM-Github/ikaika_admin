@@ -1,0 +1,75 @@
+{
+  "description": "What a machine needs installed to develop the Ikaika portal API. Read by .\\script.ps1 development-setup, which installs what is missing and reports the rest. Package-level dependencies are NOT here - composer.json and package.json already declare those, and a second copy would go stale the first time somebody adds a package.",
+  "notes": {
+    "scope": "machine means a system-wide install that needs administrator; user means it lands in this profile and must not be installed elevated.",
+    "when": "A tool with a 'when' is only graded if the setup command was asked for it. Everything else always applies.",
+    "versions": "minVersion is a floor - this or newer. series pins a line (8.4 means any 8.4.x and never 8.5), which is what WampServer components need because a different line is a different Apache module and a different extension set."
+  },
+  "tools": {
+    "powershell": {
+      "name": "PowerShell 7",
+      "minVersion": "7.0",
+      "winget": "Microsoft.PowerShell",
+      "scope": "machine",
+      "for": "every command in this toolkit; the scripts are PowerShell 7 only"
+    },
+    "git": {
+      "name": "Git",
+      "winget": "Git.Git",
+      "scope": "machine",
+      "for": "the toolkit submodule, and every branch command"
+    },
+    "vcredist": {
+      "name": "VC++ runtimes",
+      "winget": "Microsoft.VCRedist.2015+.x64",
+      "scope": "machine",
+      "for": "Apache and PHP link against these; without them WampServer starts with an orange tray icon and a dialog naming a DLL"
+    },
+    "wampserver": {
+      "name": "WampServer",
+      "minVersion": "3.4.0",
+      "winget": "Wampserver.Wampserver",
+      "scope": "machine",
+      "for": "Apache, MySQL and phpMyAdmin - the stack this API is deployed on"
+    },
+    "php": {
+      "name": "PHP",
+      "series": "8.4",
+      "scope": "machine",
+      "for": "composer.json requires php ^8.3; 8.4 is what WampServer 3.4.0 bundles and what we run"
+    },
+    "mysql": {
+      "name": "MySQL",
+      "series": "8.0",
+      "scope": "machine",
+      "for": "the three product databases. WampServer 3.4.0 bundles 8.4, so 8.0 arrives as an aviatechno add-on"
+    },
+    "composer": {
+      "name": "Composer",
+      "minVersion": "2.0",
+      "scope": "user",
+      "for": "vendor/ and the autoloader. Installed from its own phar, verified against the signature Composer publishes"
+    },
+    "node": {
+      "name": "Node.js",
+      "minVersion": "20.19.0",
+      "winget": "OpenJS.NodeJS.LTS",
+      "scope": "machine",
+      "optional": true,
+      "for": "the Vite asset build only. The API itself needs nothing from Node, so a machine without it is not broken"
+    }
+  },
+  "phpExtensions": {
+    "description": "Switched on in BOTH php.ini files WampServer ships - the one beside php.exe that the CLI reads, and Apache's. An extension on in only one produces the bug where the site works and artisan does not.",
+    "required": [
+      "curl",
+      "fileinfo",
+      "intl",
+      "mbstring",
+      "openssl",
+      "pdo_mysql",
+      "sodium",
+      "zip"
+    ]
+  }
+}
