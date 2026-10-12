@@ -74,13 +74,18 @@ set_release_key() {
 set_release_key APP_URL "$SITE_ORIGIN$API_URL_PATH"
 set_release_key ASSET_URL "$API_URL_PATH"
 set_release_key SESSION_PATH "$API_URL_PATH"
-# AZURE_REDIRECT_URI is the address the Azure app registers, the one the portal's build bakes in; without it, the
-# portal's own address stands in.
-if [ -n "${AZURE_REDIRECT_URI:-}" ]; then
-    set_release_key PORTAL_AZURE_REDIRECT_URI "$AZURE_REDIRECT_URI"
-elif [ -n "${PORTAL_PATH:-}" ]; then
-    set_release_key PORTAL_AZURE_REDIRECT_URI "$SITE_ORIGIN/${PORTAL_PATH#$SITE_ROOT/}"
+# The portal's own address: from the deploy config's PORTAL_PATH, else the Test Server's, SITE_URL/portal -- what
+# deployment\deploy.ps1 builds the portal for. It backs the links and QR codes the API mails (PORTAL_PUBLIC_URL).
+if [ -n "${PORTAL_PATH:-}" ]; then
+    PORTAL_URL="$SITE_ORIGIN/${PORTAL_PATH#$SITE_ROOT/}"
+else
+    PORTAL_URL="$SITE_URL/portal"
 fi
+set_release_key PORTAL_PUBLIC_URL "$PORTAL_URL"
+# AZURE_REDIRECT_URI is the address the Azure app registers, the one the portal's build bakes in; without it, the
+# portal's own address stands in. Never left to the server's .env: a stale one (the old temporary domain) refuses
+# every Microsoft sign-in with a silent 401, since the code is only exchanged for a matching redirect.
+set_release_key PORTAL_AZURE_REDIRECT_URI "${AZURE_REDIRECT_URI:-$PORTAL_URL}"
 chmod 600 "$NEW/.env"
 chmod -R 775 "$NEW/storage" "$NEW/bootstrap/cache"
 
