@@ -4,9 +4,9 @@ Target: the **Test Server** WordPress site on Bluehost. The API and the portal l
 
 | What | URL |
 | --- | --- |
-| Admin workspace (backend UI) | `https://eox.vhu.mybluehost.me/website_a85fbf18/central-api/` |
-| Health check | `https://eox.vhu.mybluehost.me/website_a85fbf18/central-api/api/staging/portal/health` |
-| Portal (deployed from `ikaika-portal`) | `https://eox.vhu.mybluehost.me/website_a85fbf18/portal` |
+| Admin workspace (backend UI) | `https://test.ikaikabim.com/central-api/` |
+| Health check | `https://test.ikaikabim.com/central-api/api/staging/portal/health` |
+| Portal (deployed from `ikaika-portal`) | `https://test.ikaikabim.com/portal` |
 
 ## Day to day
 
@@ -125,7 +125,7 @@ Make the token under a dedicated read-only Bitbucket user if you can: it reads e
 
 | Field | Value |
 | --- | --- |
-| URL | `https://eox.vhu.mybluehost.me/website_a85fbf18/central-api/api/staging/bitbucket/webhook` |
+| URL | `https://test.ikaikabim.com/central-api/api/staging/bitbucket/webhook` |
 | Secret | the `BITBUCKET_WEBHOOK_SECRET` value |
 | Triggers | Repository push |
 
@@ -217,7 +217,7 @@ This creates the four databases and the user, with a random password written str
 
 ### 4. Azure
 
-Go to Azure portal → App registrations → the portal app (`f995e827-...`) → Authentication → **Single-page application**, and add `https://eox.vhu.mybluehost.me/website_a85fbf18/portal`. Without it, Microsoft sign-in fails.
+Go to Azure portal → App registrations → the portal app (`f995e827-...`) → Authentication → **Single-page application**, and add `https://test.ikaikabim.com/portal`. Without it, Microsoft sign-in fails.
 
 ### 5. Deploy
 

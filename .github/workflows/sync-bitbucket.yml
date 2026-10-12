@@ -1,0 +1,120 @@
+# Sync from Bitbucket: makes this GitHub repo match Bitbucket, where the code lives - every branch and every tag - by hand, without building anything.
+# Bitbucket always wins, as at the start of every Build release: new branches and tags are added, moved ones forced, and the ones Bitbucket no
+# longer has deleted unless prune is off. The push is atomic, so GitHub ends up matching Bitbucket or exactly as it was; dry run only lists the changes.
+# Self-contained, so it runs from main, which carries only the workflows: the source is mirror.source in ikaika_scripts.env when the branch it runs
+# from has one, else this repo's name under Bitbucket's ikaika-web. BITBUCKET_REPO_TOKEN reads and GH_MIRROR_TOKEN pushes, through GIT_CONFIG_*.
+# The same file in every repo mirrored from Bitbucket.
+name: Sync from Bitbucket
+
+on:
+  workflow_dispatch:
+    inputs:
+      prune:
+        description: Also delete the branches and tags Bitbucket no longer has
+        type: boolean
+        default: true
+      dry_run:
+        description: Only list what would change - nothing is pushed
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-from-bitbucket
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: ${{ format('{0} GitHub with Bitbucket{1}', inputs.dry_run && 'Compare' || 'Sync', inputs.prune && ', deleting what Bitbucket no longer has' || '') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # Git fails rather than asks for a credential it was not given; nobody is there to answer.
+      GIT_TERMINAL_PROMPT: '0'
+      GCM_INTERACTIVE: never
+    steps:
+      - name: Check out ikaika_scripts.env, where the branch has one
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: ikaika_scripts.env
+          sparse-checkout-cone-mode: false
+
+      - name: ${{ inputs.dry_run && 'List what syncing would change' || 'Sync every branch and tag from Bitbucket' }}
+        env:
+          BITBUCKET_REPO_TOKEN: ${{ secrets.BITBUCKET_REPO_TOKEN }}
+          BITBUCKET_REPO_USER: ${{ secrets.BITBUCKET_REPO_USER }}
+          GH_MIRROR_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PRUNE: ${{ inputs.prune }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          function Stop-Sync([string]$Title, [string]$Message) { Write-Output "::error title=$Title::$Message"; exit 1 }
+          foreach ($name in 'BITBUCKET_REPO_TOKEN', 'GH_MIRROR_TOKEN') {
+            if (-not [Environment]::GetEnvironmentVariable($name)) { Stop-Sync "Missing secret $name" 'Add it under Settings > Secrets and variables > Actions; .\script.ps1 secrets -GitHub says how to make it.' }
+          }
+
+          $source = ''
+          if (Test-Path -LiteralPath ikaika_scripts.env) {
+            $source = "$((Select-String -LiteralPath ikaika_scripts.env -Pattern '^mirror\.source=(.+)$' | Select-Object -First 1).Matches.Groups[1].Value)".Trim()
+          }
+          if (-not $source) { $source = "https://bitbucket.org/ikaika-web/$env:REPO_NAME.git" }
+          # A username left in the URL would be sent instead of the token's own.
+          $source = $source -replace '^(https://)[^@/]+@', '$1'
+          $target = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git"
+
+          $user = if ($env:BITBUCKET_REPO_USER) { $env:BITBUCKET_REPO_USER } else { 'x-token-auth' }
+          $sourceBase = ([uri]$source).GetLeftPart('Authority') + '/'
+          $targetBase = ([uri]$target).GetLeftPart('Authority') + '/'
+          $gitConfig = [ordered]@{ 'credential.helper' = '' }
+          $gitConfig["url.$($sourceBase.Replace('://', "://$($user):$($env:BITBUCKET_REPO_TOKEN)@")).insteadOf"] = $sourceBase
+          $gitConfig["url.$($targetBase.Replace('://', "://x-access-token:$($env:GH_MIRROR_TOKEN)@")).insteadOf"] = $targetBase
+          $index = 0
+          foreach ($key in $gitConfig.Keys) {
+            Set-Item -LiteralPath "env:GIT_CONFIG_KEY_$index" -Value $key
+            Set-Item -LiteralPath "env:GIT_CONFIG_VALUE_$index" -Value $gitConfig[$key]
+            $index++
+          }
+          $env:GIT_CONFIG_COUNT = "$index"
+
+          $mirror = Join-Path $env:RUNNER_TEMP "bitbucket-mirror-$([Guid]::NewGuid().ToString('N').Substring(0, 8)).git"
+          git clone --bare --quiet $source $mirror
+          if ($LASTEXITCODE -ne 0) { Stop-Sync 'Bitbucket fetch failed' "git could not read $source. Check that BITBUCKET_REPO_TOKEN can read it." }
+          $heads = @(git -C $mirror for-each-ref --format='%(refname:strip=2)' refs/heads)
+          $tags = @(git -C $mirror for-each-ref --format='%(refname:strip=2)' refs/tags)
+          if ($env:PRUNE -eq 'true' -and $env:DEFAULT_BRANCH -and $heads -notcontains $env:DEFAULT_BRANCH) {
+            Stop-Sync 'Default branch missing on Bitbucket' "Bitbucket has no '$env:DEFAULT_BRANCH', GitHub's default branch, and pruning would delete it. Turn prune off, or give Bitbucket that branch."
+          }
+
+          $pushArgs = @('--atomic', '--force', '--porcelain')
+          if ($env:PRUNE -eq 'true') { $pushArgs += '--prune' }
+          if ($env:DRY_RUN -eq 'true') { $pushArgs += '--dry-run' }
+          $lines = @(git -C $mirror push @pushArgs $target 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*')
+          if ($LASTEXITCODE -ne 0) { Stop-Sync 'GitHub update failed' "git could not update $target. Check that GH_MIRROR_TOKEN has Contents and Workflows write on this repo, and that no branch rule forbids force pushes." }
+
+          # Porcelain: a flag, a tab, from:to, a tab, a summary - * new, + forced, a space fast-forwarded, - deleted, = already the same.
+          $words = @{ '*' = 'added'; '+' = 'forced'; ' ' = 'moved forward'; '-' = 'deleted' }
+          $changes = @(foreach ($line in $lines) {
+              $parts = "$line" -split "`t"
+              if ($parts.Count -ge 2 -and $words.ContainsKey($parts[0])) {
+                $ref = ($parts[1] -split ':')[-1]
+                [pscustomobject]@{ What = $words[$parts[0]]; Kind = $(if ($ref -like 'refs/tags/*') { 'tag' } else { 'branch' }); Name = $ref -replace '^refs/(heads|tags)/', '' }
+              }
+            })
+          $verb = if ($env:DRY_RUN -eq 'true') { 'would be' } else { 'were' }
+          $headline = "Bitbucket has $($heads.Count) branch(es) and $($tags.Count) tag(s); $(if ($changes.Count) { "$($changes.Count) ref(s) on GitHub $verb changed" } else { 'GitHub already matches' })$(if ($env:PRUNE -ne 'true') { ', and nothing is deleted, since prune is off' })."
+          Write-Output $headline
+          $summary = @("### $(if ($env:DRY_RUN -eq 'true') { 'Dry run - nothing pushed' } else { 'GitHub synced from Bitbucket' })", '', $headline)
+          if ($changes.Count) {
+            $summary += @('', '| Change | Kind | Name |', '|---|---|---|')
+            $summary += @($changes | Select-Object -First 100 | ForEach-Object { "| $($_.What) | $($_.Kind) | ``$($_.Name)`` |" })
+            if ($changes.Count -gt 100) { $summary += "| ... | | $($changes.Count - 100) more |" }
+            $changes | ForEach-Object { Write-Output "  $($_.What) $($_.Kind) $($_.Name)" }
+          }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary

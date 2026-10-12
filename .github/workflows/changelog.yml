@@ -1,0 +1,166 @@
+# The changelog by hand, from any branch that has the CI scripts: what the next release will say, a lint, a mend, or a note filed under Unreleased.
+# status and lint change nothing; fix and add commit CHANGELOG.md and CHANGELOG.json as github-actions[bot], Bitbucket first, the source of truth, then GitHub - and only a changelog a build accepts is committed.
+# A push that touches the changelog is checked the way a build checks it, so a sync from Bitbucket that brings a bad one shows on its commit.
+# The same file in every repo that has the toolkit: the switches that keep it from asking come from env.prefix in ikaika_scripts.env.
+name: Changelog
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: status shows the drafts and the commits not filed; lint lists what reads badly; fix mends it; add files the note below
+        type: choice
+        options: [status, lint, fix, add]
+        default: status
+      note:
+        description: 'The note for add, worded as a commit - e.g. "fix: a report keeps its photos when it is saved offline"'
+        type: string
+        default: ''
+      sync_bitbucket:
+        description: Sync GitHub from Bitbucket first and work on what Bitbucket has (off uses GitHub's copy as it is)
+        type: boolean
+        default: true
+  push:
+    paths: [CHANGELOG.md, CHANGELOG.json]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two edits to one branch's changelog would push over each other.
+  group: changelog-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  changelog:
+    name: ${{ github.event_name == 'push' && 'Check the changelog' || format('Changelog - {0}', inputs.action) }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    # github-actions[bot] pushes the changelog commit to GitHub.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      ACTION: ${{ github.event_name == 'push' && 'check' || inputs.action }}
+      NOTE: ${{ inputs.note }}
+      # Git fails rather than asks for a credential it was not given; nobody is there to answer.
+      GIT_TERMINAL_PROMPT: '0'
+      GCM_INTERACTIVE: never
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+
+      # main carries only the workflow files, so a push there has nothing to check and stops here, quietly.
+      - name: Check the choices before anything is fetched
+        id: check
+        run: |
+          if (-not (Test-Path ./.ikaika_scripts_configs/fetch-toolkit.ps1)) {
+            if ($env:GITHUB_EVENT_NAME -eq 'push') {
+              Write-Output "::notice title=No CI scripts on $env:GITHUB_REF_NAME::Nothing to check the changelog with here."
+              exit 0
+            }
+            Write-Output "::error title=No CI scripts on $env:GITHUB_REF_NAME::Pick a branch that has .ikaika_scripts_configs/ under 'Use workflow from'."
+            exit 1
+          }
+          $problems = @()
+          if ($env:ACTION -eq 'add' -and -not "$env:NOTE".Trim()) { $problems += 'add files the note, and the note is blank.' }
+          if ($env:ACTION -ne 'add' -and "$env:NOTE".Trim()) { Write-Output "::warning title=note ignored::It is filed only by add, and the action is $env:ACTION." }
+          if (@('fix', 'add') -contains $env:ACTION -and $env:GITHUB_REF_TYPE -ne 'branch') { $problems += "$env:ACTION commits to a branch, and this run is on the $env:GITHUB_REF_TYPE $env:GITHUB_REF_NAME." }
+          if ($problems.Count) {
+            foreach ($p in $problems) { Write-Output "::error title=Changelog::$p" }
+            exit 1
+          }
+          $prefix = (Select-String -LiteralPath ikaika_scripts.env -Pattern '^env\.prefix=(.+)$').Matches[0].Groups[1].Value.Trim()
+          foreach ($switch in 'NO_PROMPT', 'NO_GUI', 'NO_UPDATE') { Add-Content -LiteralPath $env:GITHUB_ENV -Value "$($prefix)_SCRIPTS_$switch=1" }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'ready=true'
+
+      - name: Sync GitHub from Bitbucket, then check out what Bitbucket has
+        if: steps.check.outputs.ready == 'true' && github.event_name == 'workflow_dispatch' && inputs.sync_bitbucket
+        env:
+          BITBUCKET_REPO_TOKEN: ${{ secrets.BITBUCKET_REPO_TOKEN }}
+          BITBUCKET_REPO_USER: ${{ secrets.BITBUCKET_REPO_USER }}
+          GH_MIRROR_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: ./.ikaika_scripts_configs/sync-from-bitbucket.ps1
+
+      - name: Fetch the toolkit (decoupled-script) from Bitbucket
+        if: steps.check.outputs.ready == 'true'
+        env:
+          TOOLKIT_BITBUCKET_TOKEN: ${{ secrets.TOOLKIT_BITBUCKET_TOKEN }}
+          TOOLKIT_BITBUCKET_USER: ${{ secrets.TOOLKIT_BITBUCKET_USER }}
+        run: ./.ikaika_scripts_configs/fetch-toolkit.ps1
+
+      # What the command says goes to the run's summary as well, so the answer is on the run's page rather than in its log.
+      - name: ${{ github.event_name == 'push' && 'Check it the way a build does' || format('changelog {0}', inputs.action == 'status' && '(the drafts)' || format('-{0}', inputs.action)) }}
+        id: run
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          $command = switch ($env:ACTION) {
+            'status' { @() }
+            'lint' { @('-Lint') }
+            'fix' { @('-Fix') }
+            'add' { @('-Add', "$env:NOTE".Trim()) }
+            default { @('-Check') }
+          }
+          $said = @(./script.ps1 changelog @command 2>&1 | ForEach-Object { "$_" })
+          $code = $LASTEXITCODE
+          $said | ForEach-Object { Write-Output $_ }
+          if (@('fix', 'add') -contains $env:ACTION -and $code -eq 0) {
+            $check = @(./script.ps1 changelog -Check 2>&1 | ForEach-Object { "$_" })
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+              $check | ForEach-Object { Write-Output $_ }
+              $said += @('', 'A build would refuse this changelog, so nothing is committed:') + $check
+              Write-Output '::error title=Not committed::A build would refuse CHANGELOG.md as it now stands - see above. Mend it with lint and fix, or on a workstation with changelog -Edit.'
+            }
+          }
+          $text = ($said -join "`n") -replace '\x1b\[[0-9;]*m', ''
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value @("### Changelog - $env:ACTION on $env:GITHUB_REF_NAME", '', '```text', $text.Trim(), '```', '')
+          exit $code
+
+      # Bitbucket first, then the same commit to GitHub, so GitHub matches it without waiting for the next sync.
+      - name: Commit it on Bitbucket, then GitHub
+        if: steps.run.outcome == 'success' && (env.ACTION == 'fix' || env.ACTION == 'add')
+        env:
+          GIT_CONFIG_COUNT: '3'
+          GIT_CONFIG_KEY_0: ${{ format('url.https://{0}:{1}@bitbucket.org/.insteadOf', secrets.BITBUCKET_REPO_USER || 'x-token-auth', secrets.BITBUCKET_REPO_TOKEN) }}
+          GIT_CONFIG_VALUE_0: https://bitbucket.org/
+          GIT_CONFIG_KEY_1: ${{ format('url.https://x-access-token:{0}@github.com/.insteadOf', github.token) }}
+          GIT_CONFIG_VALUE_1: https://github.com/
+          GIT_CONFIG_KEY_2: credential.helper
+          GIT_CONFIG_VALUE_2: ''
+        run: |
+          if (-not (git status --porcelain -- CHANGELOG.md CHANGELOG.json)) {
+            Write-Output 'The changelog was already as it should be; nothing to commit.'
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Nothing to commit: the changelog was already as it should be.'
+            exit 0
+          }
+          git checkout -B $env:GITHUB_REF_NAME
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- CHANGELOG.md CHANGELOG.json
+          $subject = if ($env:ACTION -eq 'add') { "docs(changelog): file `"$("$env:NOTE".Trim())`" under Unreleased" } else { 'docs(changelog): mend what lint marks' }
+          $message = Join-Path $env:RUNNER_TEMP 'changelog-commit.txt'
+          Set-Content -LiteralPath $message -Value @($subject, '', "From the Changelog workflow, run $env:GITHUB_RUN_ID by $env:GITHUB_ACTOR.") -Encoding utf8
+          git commit --quiet -F $message
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $source = (Select-String -LiteralPath ikaika_scripts.env -Pattern '^mirror\.source=(.+)$').Matches[0].Groups[1].Value.Trim() -replace '^(https://)[^@/]+@', '$1'
+          $github = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git"
+          git push --quiet $source "HEAD:refs/heads/$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error title=Bitbucket refuses the changelog commit::Cannot push to $env:GITHUB_REF_NAME on Bitbucket: BITBUCKET_REPO_TOKEN needs Repositories: Write, and the branch must not have moved on since the sync. Nothing was committed anywhere."
+            exit 1
+          }
+          git push --quiet $github "HEAD:refs/heads/$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error title=Not on GitHub yet::Bitbucket has the changelog commit, but pushing it to GitHub failed; the next run's sync from Bitbucket brings it over."
+            exit 1
+          }
+          Write-Output "Committed $(git log -1 --format=%h HEAD) to $env:GITHUB_REF_NAME on Bitbucket, then GitHub, as github-actions[bot]."
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Committed **$subject** to $env:GITHUB_REF_NAME on Bitbucket, then GitHub ($(git log -1 --format=%h HEAD))."

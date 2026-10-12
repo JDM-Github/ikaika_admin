@@ -7,8 +7,8 @@ HOME_DIR=${HOME_DIR:-/home2/eoxvhumy}
 SOURCE=${SOURCE:-$HOME_DIR/apps/central-platform/.env}
 ROOT=${ROOT:-$HOME_DIR/apps/test-server}
 TARGET=${TARGET:-$ROOT/.env}
-SITE_URL=${SITE_URL:-https://eox.vhu.mybluehost.me/website_a85fbf18}
-SITE_PATH=${SITE_PATH:-/website_a85fbf18}
+SITE_URL=${SITE_URL:-https://test.ikaikabim.com}
+SITE_PATH=${SITE_PATH-}
 
 if [ ! -f "$TARGET" ]; then
     [ -f "$SOURCE" ] || { echo "Staging .env not found at $SOURCE"; exit 1; }
@@ -40,8 +40,8 @@ set_key APP_URL "$SITE_URL/central-api"
 set_key ASSET_URL "$SITE_PATH/central-api"
 set_key SESSION_PATH "$SITE_PATH/central-api"
 set_key API_PATH_PREFIX ""
-set_key PORTAL_AZURE_REDIRECT_URI "$SITE_URL/portal"
-set_key PORTAL_PUBLIC_URL "$SITE_URL/portal"
+set_key PORTAL_AZURE_REDIRECT_URI "${AZURE_REDIRECT_URI:-$SITE_URL/portal}"
+set_key PORTAL_PUBLIC_URL "${PORTAL_PUBLIC_URL:-$SITE_URL/portal}"
 
 # Public Azure app IDs, also in the portal's app.json; not secrets.
 echo "== Keys the staging .env predates"

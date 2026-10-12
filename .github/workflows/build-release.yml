@@ -1,0 +1,264 @@
+# The Build release dialog as a form: builds the API's release archive, and installs it on the server with the repo's own deploy-admin.sh when asked, by hand only.
+# Version, package and upload are steps of their own - tag-version, build-release, server/deploy-release - the version first since the archive carries it, so the run shows which one it is in.
+# Each run first syncs GitHub from Bitbucket, unless told not to, then builds Bitbucket's commit of the branch or tag picked under "Use workflow from".
+# A bump is committed and tagged by github-actions[bot] on that branch, with the changelog filed under it: Bitbucket first, the source of truth, then GitHub.
+# Staging is the Bluehost Test Server; production is refused until ikaika_scripts.env names one. Upload the API before the portal, which calls it.
+name: Build release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version - anything but same is committed and tagged on Bitbucket, then GitHub; keep takes the next build number only
+        type: choice
+        options: [same, patch, minor, major, keep, custom]
+        default: same
+      custom_version:
+        description: Custom version x.y.z (version custom only)
+        type: string
+        default: ''
+      sync_bitbucket:
+        description: Sync GitHub from Bitbucket first and build what Bitbucket has (off builds GitHub's copy as it is)
+        type: boolean
+        default: true
+      target:
+        description: Staging is the Bluehost Test Server; production is refused until one is set up
+        type: choice
+        options: [staging, production]
+        default: staging
+      confirm_production:
+        description: Yes, upload to PRODUCTION (needed for a production upload)
+        type: boolean
+        default: false
+      github_release:
+        description: Keep a version-bumped build as a GitHub release instead of an artifact - release files do not count toward the 500 MB of Actions storage
+        type: boolean
+        default: true
+      upload:
+        description: Upload to the server - composer, the swap, migrations, then the health check
+        type: boolean
+        default: false
+      dry_run:
+        description: Dry run - name what would go up and run, upload nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # A bump takes the next build number from the tags, and every upload to one target waits for the last.
+  group: ${{ inputs.version != 'same' && 'release-bump' || (inputs.upload && format('upload-{0}', inputs.target) || format('release-{0}', github.run_id)) }}
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    name: ${{ format('Package the API for {0}{1}', inputs.target, inputs.upload && (inputs.dry_run && ', upload dry run' || ', then upload') || '') }}
+    runs-on: windows-2025
+    timeout-minutes: 30
+    # github-actions[bot] pushes the version commit and tag to GitHub.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      IP_SCRIPTS_NO_PROMPT: '1'
+      IP_SCRIPTS_NO_GUI: '1'
+      IP_SCRIPTS_NO_UPDATE: '1'
+      # Git fails rather than asks for a credential it was not given; nobody is there to answer.
+      GIT_TERMINAL_PROMPT: '0'
+      GCM_INTERACTIVE: never
+    steps:
+      # Only for this repo's scripts; the sync step, when on, replaces it with what Bitbucket has.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+
+      # main carries only the workflow files until the CI work is merged into it, so a run from there stops here and names the branches that can run it.
+      - name: Check the choices before anything is fetched or built
+        env:
+          INPUTS_JSON: ${{ toJSON(inputs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if (-not (Test-Path ./.ikaika_scripts_configs/ci-release-plan.ps1)) {
+            $ready = @()
+            try {
+              $api = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY"
+              $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+              foreach ($branch in (Invoke-RestMethod -Headers $headers -Uri "$api/branches?per_page=100").name) {
+                try {
+                  $null = Invoke-RestMethod -Headers $headers -Uri "$api/contents/.ikaika_scripts_configs/ci-release-plan.ps1?ref=$([uri]::EscapeDataString($branch))"
+                  $ready += $branch
+                } catch { continue }
+              }
+            } catch { $ready = @() }
+            $hint = if ($ready.Count) { " Branches that have it: $($ready -join ', ')." } else { '' }
+            Write-Output "::error title=No CI scripts on $env:GITHUB_REF_NAME::Pick a branch that has .ikaika_scripts_configs/ under 'Use workflow from'.$hint"
+            exit 1
+          }
+          ./.ikaika_scripts_configs/ci-release-plan.ps1
+
+      - name: Sync GitHub from Bitbucket, then check out what Bitbucket has
+        if: inputs.sync_bitbucket
+        env:
+          BITBUCKET_REPO_TOKEN: ${{ secrets.BITBUCKET_REPO_TOKEN }}
+          BITBUCKET_REPO_USER: ${{ secrets.BITBUCKET_REPO_USER }}
+          GH_MIRROR_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: ./.ikaika_scripts_configs/sync-from-bitbucket.ps1
+
+      - name: Fetch the toolkit (decoupled-script) from Bitbucket
+        env:
+          TOOLKIT_BITBUCKET_TOKEN: ${{ secrets.TOOLKIT_BITBUCKET_TOKEN }}
+          TOOLKIT_BITBUCKET_USER: ${{ secrets.TOOLKIT_BITBUCKET_USER }}
+        run: ./.ikaika_scripts_configs/fetch-toolkit.ps1
+
+      # The version commit lands on the branch the run started from, as github-actions[bot], and its build number comes from Bitbucket's tags.
+      - name: Ready the branch for the version commit, with Bitbucket's tags
+        if: env.TAGGING == 'true'
+        env:
+          GIT_CONFIG_COUNT: '3'
+          GIT_CONFIG_KEY_0: ${{ format('url.https://{0}:{1}@bitbucket.org/.insteadOf', secrets.BITBUCKET_REPO_USER || 'x-token-auth', secrets.BITBUCKET_REPO_TOKEN) }}
+          GIT_CONFIG_VALUE_0: https://bitbucket.org/
+          GIT_CONFIG_KEY_1: ${{ format('url.https://x-access-token:{0}@github.com/.insteadOf', github.token) }}
+          GIT_CONFIG_VALUE_1: https://github.com/
+          GIT_CONFIG_KEY_2: credential.helper
+          GIT_CONFIG_VALUE_2: ''
+        run: |
+          git checkout -B $env:GITHUB_REF_NAME
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $source = (Select-String -LiteralPath ikaika_scripts.env -Pattern '^mirror\.source=(.+)$').Matches[0].Groups[1].Value.Trim() -replace '^(https://)[^@/]+@', '$1'
+          git remote set-url origin $source
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --quiet --force --tags origin
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output '::error title=Bitbucket unreachable::Could not read the tags from Bitbucket, which decide the build number. Check that BITBUCKET_REPO_TOKEN can read this repo.'
+            exit 1
+          }
+          # Dry runs ask each remote for write access and change nothing, so a token that cannot push stops the run before anything is built or uploaded.
+          # A branch that moved on past the commit this run checked out is named as that, not as a token problem.
+          $ErrorActionPreference = 'Continue'
+          $remotes = @(
+            @{ Name = 'Bitbucket'; Url = $source; Needs = 'BITBUCKET_REPO_TOKEN needs Repositories: Write' }
+            @{ Name = 'GitHub'; Url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git"; Needs = 'this job''s token needs contents: write' }
+          )
+          foreach ($remote in $remotes) {
+            $said = @(git push --dry-run --porcelain $remote.Url "HEAD:refs/heads/$env:GITHUB_REF_NAME" 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -eq 0) { continue }
+            if ($said -match 'non-fast-forward|fetch first') {
+              $now = "$(git ls-remote $remote.Url "refs/heads/$env:GITHUB_REF_NAME")" -replace '\s.*$', ''
+              $what = "$(git log -1 --format=%s $now 2>$null)"
+              Write-Output "::error title=$env:GITHUB_REF_NAME moved on $($remote.Name)::$env:GITHUB_REF_NAME on $($remote.Name) is at $($now.Substring(0, [Math]::Min(7, $now.Length)))$(if ($what) { " ($what)" }), past $(git rev-parse --short HEAD), the commit this run checked out - pushed since it started, or not synced. Run it again, with the sync from Bitbucket ticked, to build what Bitbucket has now. Nothing has been built or uploaded."
+            } else {
+              Write-Output "::error title=$($remote.Name) refuses the version commit::Cannot push to $env:GITHUB_REF_NAME on $($remote.Name): $($remote.Needs). Nothing has been built or uploaded."
+            }
+            exit 1
+          }
+
+      # Vite builds the CSS and fonts into public/build, which the archive carries; composer runs on the server instead.
+      - name: The Vite build's packages
+        run: |
+          npm ci --no-audit --no-fund
+          exit $LASTEXITCODE
+
+      # Only this target's deploy config leaves the archive, so a staging run never installs production's.
+      - name: Secrets for the upload, from the sealed archive
+        if: env.PURPOSES != ''
+        env:
+          SHARED_FILES_URL: ${{ secrets.SHARED_FILES_URL }}
+          SHARED_FILES_PASSWORD: ${{ secrets.SHARED_FILES_PASSWORD }}
+        run: ./script.ps1 secrets -For $env:PURPOSES -Ci
+
+      # VERSION bumped, the changelog filed under it, committed and tagged: a staging build v<version>, production v<version>-released.
+      - name: ${{ format('Version {0}, committed and tagged on Bitbucket', inputs.version == 'custom' && inputs.custom_version || inputs.version) }}
+        id: version
+        if: env.TAGGING == 'true'
+        env:
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: ${{ format('url.https://{0}:{1}@bitbucket.org/.insteadOf', secrets.BITBUCKET_REPO_USER || 'x-token-auth', secrets.BITBUCKET_REPO_TOKEN) }}
+          GIT_CONFIG_VALUE_0: https://bitbucket.org/
+          GIT_CONFIG_KEY_1: credential.helper
+          GIT_CONFIG_VALUE_1: ''
+        run: |
+          if ($env:BUILD_DEBUG -eq 'true') { ./script.ps1 tag-version -Debug -Bump $env:VERSION_BUMP } else { ./script.ps1 tag-version -Bump $env:VERSION_BUMP }
+          exit $LASTEXITCODE
+
+      # Looked for on Bitbucket itself before anything is packaged or uploaded, so nothing reaches the server that git has no record of.
+      - name: Check the version reached Bitbucket
+        id: bitbucket
+        if: ${{ !cancelled() && env.TAGGING == 'true' && steps.version.outcome == 'success' }}
+        env:
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: ${{ format('url.https://{0}:{1}@bitbucket.org/.insteadOf', secrets.BITBUCKET_REPO_USER || 'x-token-auth', secrets.BITBUCKET_REPO_TOKEN) }}
+          GIT_CONFIG_VALUE_0: https://bitbucket.org/
+          GIT_CONFIG_KEY_1: credential.helper
+          GIT_CONFIG_VALUE_1: ''
+        run: |
+          $version = (Get-Content -LiteralPath VERSION | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1).Trim()
+          $tag = if ($env:BUILD_DEBUG -eq 'true') { "v$version" } else { "v$version-released" }
+          if (-not (git ls-remote --tags origin "refs/tags/$tag")) {
+            Write-Output "::error title=$tag is not on Bitbucket::The version was bumped, but its commit or tag did not reach Bitbucket - see tag-version's output above. BITBUCKET_REPO_TOKEN needs write access, and the branch must not restrict pushes."
+            exit 1
+          }
+          Write-Output "Tagged $tag on Bitbucket."
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "tag=$tag"
+
+      - name: ${{ format('Package the API for {0}', inputs.target) }}
+        id: build
+        if: env.TAGGING != 'true' || steps.bitbucket.outcome == 'success'
+        run: |
+          $plan = Get-Content -LiteralPath $env:BUILD_PLAN -Raw | ConvertFrom-Json -AsHashtable
+          ./script.ps1 build-release @plan
+          exit $LASTEXITCODE
+
+      - name: ${{ format('Upload to {0}{1}', inputs.target, inputs.dry_run && ', a dry run that sends nothing' || ' - composer, the swap, migrations, the health check') }}
+        id: upload
+        if: env.UPLOADING == 'true'
+        run: |
+          $deploy = $env:DEPLOY_PLAN | ConvertFrom-Json -AsHashtable
+          ./script.ps1 server/deploy-release @deploy
+          exit $LASTEXITCODE
+
+      # The same commit and tag, pushed by github-actions[bot], so GitHub matches Bitbucket without waiting for the next sync.
+      - name: Push the version commit and tag to GitHub
+        id: github
+        if: ${{ !cancelled() && steps.bitbucket.outcome == 'success' }}
+        env:
+          TAG: ${{ steps.bitbucket.outputs.tag }}
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: ${{ format('url.https://x-access-token:{0}@github.com/.insteadOf', github.token) }}
+          GIT_CONFIG_VALUE_0: https://github.com/
+          GIT_CONFIG_KEY_1: credential.helper
+          GIT_CONFIG_VALUE_1: ''
+        run: |
+          $github = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git"
+          git push --quiet $github "HEAD:refs/heads/$env:GITHUB_REF_NAME" "refs/tags/$($env:TAG):refs/tags/$($env:TAG)"
+          if ($LASTEXITCODE -ne 0 -or -not (git ls-remote --tags $github "refs/tags/$env:TAG")) {
+            Write-Output "::error title=$env:TAG is not on GitHub::Bitbucket has the version, but pushing it to GitHub failed. The next run's sync from Bitbucket brings it over; GitHub refuses a push that changes a workflow file to this job's token."
+            exit 1
+          }
+          Write-Output "Pushed $env:GITHUB_REF_NAME and $env:TAG to GitHub as github-actions[bot]."
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Tagged **$env:TAG** by github-actions[bot] on Bitbucket, then GitHub ($env:GITHUB_REF_NAME at $(git log -1 --format=%h HEAD))."
+
+      # A release keeps the build where it costs no Actions storage; a staging build is a prerelease, production the latest release.
+      - name: Keep the build as a GitHub release, with this version's changelog
+        id: release
+        if: ${{ !cancelled() && env.RELEASING == 'true' && steps.github.outcome == 'success' && steps.build.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.bitbucket.outputs.tag }}
+        run: ./.ikaika_scripts_configs/ci-github-release.ps1 -DistDir deployment/out
+
+      # Only when no GitHub release has the build - github_release off, a build that kept its version, or a release that failed - and also after a failed upload or push, so a finished build is never thrown away with the run.
+      - name: Keep what was built
+        if: ${{ !cancelled() && hashFiles('deployment/out/*.zip') != '' && steps.release.outcome != 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: deployment/out/*.zip
+          if-no-files-found: error
+          retention-days: 30
