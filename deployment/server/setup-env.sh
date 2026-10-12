@@ -41,6 +41,7 @@ set_key ASSET_URL "$SITE_PATH/central-api"
 set_key SESSION_PATH "$SITE_PATH/central-api"
 set_key API_PATH_PREFIX ""
 set_key PORTAL_AZURE_REDIRECT_URI "$SITE_URL/portal"
+set_key PORTAL_PUBLIC_URL "$SITE_URL/portal"
 
 # Public Azure app IDs, also in the portal's app.json; not secrets.
 echo "== Keys the staging .env predates"
