@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
+use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalNotificationEmails;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
@@ -49,6 +51,7 @@ class PortalShareAccessTest extends TestCase
             'code' => $code,
             'password_hash' => Hash::make($password),
             'email' => $overrides['email'] ?? null,
+            'require_otp' => $overrides['requireOtp'] ?? true,
             'expires_at' => $overrides['expiresAt'] ?? now()->addDays(7),
             'rate_per_minute' => $overrides['ratePerMinute'] ?? 60,
             'revoked_at' => $overrides['revokedAt'] ?? null,
@@ -78,8 +81,10 @@ class PortalShareAccessTest extends TestCase
         $revoked = $this->share(overrides: ['revokedAt' => now()]);
         $this->getJson(self::BASE.'/'.$revoked['code'])->assertNotFound();
 
+        // Expired reads exactly like unknown, and its password step is just as dead.
         $expired = $this->share(overrides: ['expiresAt' => now()->subMinute()]);
-        $this->getJson(self::BASE.'/'.$expired['code'])->assertStatus(410);
+        $this->getJson(self::BASE.'/'.$expired['code'])->assertNotFound()->assertJsonPath('message', 'This link is not active.');
+        $this->postJson(self::BASE.'/'.$expired['code'].'/access', ['password' => $expired['password']])->assertNotFound();
     }
 
     public function test_a_wrong_password_is_refused_and_the_right_one_signs_the_guest_in(): void
@@ -120,7 +125,10 @@ class PortalShareAccessTest extends TestCase
         $this->postJson(self::BASE.'/'.$share['code'].'/access', ['password' => $share['password']])
             ->assertOk()
             ->assertJsonPath('data.otpRequired', true);
-        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com'));
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com')
+            && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
+            && $mail->fromName === PortalNotificationEmails::FROM_NAME
+            && str_starts_with($mail->subjectLine, 'Your code for '));
 
         // The mailed code is hashed; a known one stands in so the checks can be read.
         DB::connection('portal')->table('shared_page_otps')->where('share_id', $share['id'])->update([
@@ -144,6 +152,18 @@ class PortalShareAccessTest extends TestCase
             'issued_at' => now(), 'expires_at' => now()->addMinutes(10),
         ]);
         $this->postJson(self::BASE.'/'.$share['code'].'/verify', ['password' => $share['password'], 'otp' => '123456'])
+            ->assertStatus(422);
+    }
+
+    public function test_an_email_bound_without_a_code_signs_in_with_the_password_alone(): void
+    {
+        $share = $this->share(overrides: ['email' => 'guest@example.com', 'requireOtp' => false]);
+
+        $this->postJson(self::BASE.'/'.$share['code'].'/access', ['password' => $share['password']])
+            ->assertOk()
+            ->assertJsonStructure(['data' => ['token']]);
+        Mail::assertNothingSent();
+        $this->postJson(self::BASE.'/'.$share['code'].'/resend', ['password' => $share['password']])
             ->assertStatus(422);
     }
 

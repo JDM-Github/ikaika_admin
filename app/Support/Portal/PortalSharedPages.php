@@ -23,6 +23,9 @@ use Illuminate\Support\Facades\Mail;
  */
 final class PortalSharedPages
 {
+    // The inline name the password letter's QR is embedded under; the body shows it as cid:<name>.
+    private const QR_IMAGE = 'share-qr';
+
     private const DEFAULT_EXPIRY_DAYS = 7;
 
     private const MAX_EXPIRY_DAYS = 365;
@@ -83,6 +86,7 @@ final class PortalSharedPages
             'password_hash' => Hash::make($password),
             'password_value' => $password,
             'email' => $data['email'],
+            'require_otp' => $data['requireOtp'],
             'expires_at' => $data['expiresAt'],
             'rate_per_minute' => $data['ratePerMinute'],
             'created_by' => (int) $actor->getKey(),
@@ -91,7 +95,7 @@ final class PortalSharedPages
         $this->audit->record($actor, PortalLogAction::INSERT, 'manage.shares', '{UserName|You} created the shared page '.$data['label'], (string) $id, $request);
 
         if ($data['email'] !== null) {
-            $this->mailPassword($code, $data['email'], $data['label'], $password, $data['expiresAt']);
+            $this->mailPassword($code, $data['email'], $data['label'], $data['guestName'] ?? $data['label'], $password, $data['expiresAt'], false);
         }
 
         return ['share' => $this->present($this->row($id), $data['rules']), 'password' => $password];
@@ -109,6 +113,7 @@ final class PortalSharedPages
             'label' => $data['label'],
             'guest_name' => $data['guestName'],
             'email' => $data['email'],
+            'require_otp' => $data['requireOtp'],
             'expires_at' => $data['expiresAt'],
             'rate_per_minute' => $data['ratePerMinute'],
         ];
@@ -151,7 +156,7 @@ final class PortalSharedPages
         $this->audit->record($actor, PortalLogAction::PATCH, 'manage.shares', '{UserName|You} changed the password of '.trim((string) $row->label), (string) $id, $request);
 
         if ($row->email !== null && trim((string) $row->email) !== '') {
-            $this->mailPassword((string) $row->code, trim((string) $row->email), (string) $row->label, $password, $row->expires_at === null ? null : (string) $row->expires_at);
+            $this->mailPassword((string) $row->code, trim((string) $row->email), (string) $row->label, $this->displayName($row), $password, $row->expires_at === null ? null : (string) $row->expires_at, true);
         }
 
         return ['password' => $password];
@@ -178,8 +183,8 @@ final class PortalSharedPages
     }
 
     /**
-     * The password step: right password, then a mailed code when an email is bound, or the token
-     * straight away when none is.
+     * The password step: right password, then a mailed code when the share asks for one, or the
+     * token straight away when it does not.
      *
      * @return array<string, mixed>
      */
@@ -188,7 +193,7 @@ final class PortalSharedPages
         $share = $this->shareByCode($code);
         $this->checkPassword($share, (string) $request->input('password', ''));
 
-        if (! $this->hasEmail($share)) {
+        if (! $this->needsOtp($share)) {
             return $this->issued($request, $share);
         }
 
@@ -198,7 +203,7 @@ final class PortalSharedPages
     }
 
     /**
-     * The code step, or the whole sign-in when no email is bound.
+     * The code step, or the whole sign-in when the share asks for no code.
      *
      * @return array<string, mixed>
      */
@@ -207,7 +212,7 @@ final class PortalSharedPages
         $share = $this->shareByCode($code);
         $this->checkPassword($share, (string) $request->input('password', ''));
 
-        if ($this->hasEmail($share)) {
+        if ($this->needsOtp($share)) {
             $this->checkOtp($share, (string) $request->input('otp', ''));
         }
 
@@ -221,8 +226,8 @@ final class PortalSharedPages
     {
         $share = $this->shareByCode($code);
         $this->checkPassword($share, (string) $request->input('password', ''));
-        if (! $this->hasEmail($share)) {
-            abort(422, 'This shared page has no email to send a code to.');
+        if (! $this->needsOtp($share)) {
+            abort(422, 'This shared page does not ask for a code.');
         }
         $this->sendOtp($share, true);
 
@@ -240,7 +245,7 @@ final class PortalSharedPages
     }
 
     /**
-     * @return array{label: string, guestName: ?string, slug: ?string, email: ?string, expiresAt: ?string, ratePerMinute: int, rules: list<string>}
+     * @return array{label: string, guestName: ?string, slug: ?string, email: ?string, requireOtp: bool, expiresAt: ?string, ratePerMinute: int, rules: list<string>}
      */
     private function validated(Request $request): array
     {
@@ -249,6 +254,7 @@ final class PortalSharedPages
             'guestName' => ['nullable', 'string', 'max:100'],
             'slug' => ['nullable', 'string', 'max:64'],
             'email' => ['nullable', 'email', 'max:255'],
+            'requireOtp' => ['nullable', 'boolean'],
             'expiresInDays' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_EXPIRY_DAYS],
             'expiresAt' => ['nullable', 'date'],
             'neverExpires' => ['nullable', 'boolean'],
@@ -282,6 +288,8 @@ final class PortalSharedPages
             'guestName' => $guestName,
             'slug' => $slug,
             'email' => $email,
+            // Absent means ask, as every share did before the switch existed.
+            'requireOtp' => (bool) ($data['requireOtp'] ?? true),
             'expiresAt' => $this->expiresAt($data),
             'ratePerMinute' => (int) ($data['ratePerMinute'] ?? self::DEFAULT_RATE_PER_MINUTE),
             'rules' => $rules,
@@ -372,6 +380,7 @@ final class PortalSharedPages
             // the value was kept, until its password is regenerated.
             'password' => $row->password_value === null ? null : (string) $row->password_value,
             'email' => $row->email === null ? null : (string) $row->email,
+            'requireOtp' => (bool) $row->require_otp,
             'expiresAt' => $row->expires_at === null ? null : (string) $row->expires_at,
             'ratePerMinute' => (int) $row->rate_per_minute,
             'isRevoked' => $row->revoked_at !== null,
@@ -390,7 +399,8 @@ final class PortalSharedPages
         return $row;
     }
 
-    // The share a link names. A revoked or expired one answers as a dead link, whatever the password.
+    // The share a link names. Unknown, revoked and expired all answer the same 404, so a link cannot be
+    // probed for whether it ever existed.
     private function shareByCode(string $code): object
     {
         $share = $this->connection()->table('shared_pages')->where('code', $code)->first();
@@ -398,7 +408,7 @@ final class PortalSharedPages
             abort(404, 'This link is not active.');
         }
         if ($share->expires_at !== null && strtotime((string) $share->expires_at) <= now()->getTimestamp()) {
-            abort(410, 'This link has expired.');
+            abort(404, 'This link is not active.');
         }
 
         return $share;
@@ -414,6 +424,12 @@ final class PortalSharedPages
     private function hasEmail(object $share): bool
     {
         return $share->email !== null && trim((string) $share->email) !== '';
+    }
+
+    // A code needs somewhere to go, and the developer can choose to mail only the password.
+    private function needsOtp(object $share): bool
+    {
+        return $this->hasEmail($share) && (bool) $share->require_otp;
     }
 
     private function checkOtp(object $share, string $otp): void
@@ -447,11 +463,14 @@ final class PortalSharedPages
             ['share_id' => $share->id],
             ['code_hash' => Hash::make($code), 'attempts' => 0, 'issued_at' => now(), 'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES)],
         );
+        $link = $this->link((string) $share->code);
         $this->mailTo(
             trim((string) $share->email),
             'Your code for '.trim((string) $share->label),
-            'Your code is '.$code.'. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                ."\n\nOpen the shared page: ".$this->link((string) $share->code),
+            'Hi '.$this->displayName($share).','
+                ."\n\nYour code is **".$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
+                ."\n\nOpen the shared page: [".$link.']('.$link.')'
+                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
         );
     }
 
@@ -528,25 +547,50 @@ final class PortalSharedPages
         return $name !== '' ? $name : (string) $share->label;
     }
 
-    private function mailPassword(string $code, string $email, string $label, string $password, ?string $expiresAt): void
+    // The link and password letter, on creation and when the password is replaced.
+    private function mailPassword(string $code, string $email, string $label, string $name, string $password, ?string $expiresAt, bool $isNewPassword): void
     {
         $expiry = $expiresAt === null
             ? 'It does not expire until it is revoked.'
             : 'It is good until '.date('j M Y, g:i a', strtotime($expiresAt)).'.';
+        $link = $this->link($code);
 
         $this->mailTo(
             $email,
-            'Your link and password for '.$label,
-            'A read-only shared page is ready for you: '.$label.'.'
-                ."\n\nLink: ".$this->link($code)
-                ."\nPassword: ".$password
-                ."\n\n".$expiry.' It is read-only: you can look, not change anything.',
+            ($isNewPassword ? 'Your new password for ' : 'Your link and password for ').$label,
+            'Hi '.$name.','
+                ."\n\n".($isNewPassword
+                    ? 'The password for your read-only shared page, **'.$label.'**, was changed. The old one no longer works.'
+                    : 'A read-only shared page is ready for you: **'.$label.'**.')
+                ."\n\nLink: [".$link.']('.$link.')'
+                ."\nPassword: **".$password.'**'
+                ."\n\nOr scan this code with your phone to open the link:"
+                ."\n\n![QR code for the link](cid:".self::QR_IMAGE.')'
+                ."\n\n".$expiry.' It is read-only: you can look, not change anything.'
+                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
+            [['name' => self::QR_IMAGE, 'data' => PortalQrPng::png($link), 'mime' => 'image/png']],
         );
     }
 
-    private function mailTo(string $to, string $subject, string $body): void
+    /**
+     * The same letter the composer and the notification emails send: letter design, Company footer, portal sender.
+     *
+     * @param  list<array{name: string, data: string, mime: string}>  $inlineImages
+     */
+    private function mailTo(string $to, string $subject, string $body, array $inlineImages = []): void
     {
-        Mail::to($to)->send(new PortalEmailMail($subject, $body));
+        [$footerBody, $footerFormat] = PortalNotificationEmails::companyFooter();
+        Mail::to($to)->send(new PortalEmailMail(
+            $subject,
+            $body,
+            $footerBody,
+            PortalEmailMarkup::FORMAT_LETTER,
+            $footerFormat,
+            PortalNotificationEmails::FROM_NAME,
+            null,
+            [],
+            $inlineImages,
+        ));
     }
 
     public function link(string $code): string

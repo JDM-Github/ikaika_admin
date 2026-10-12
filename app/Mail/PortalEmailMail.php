@@ -9,6 +9,7 @@ use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
+use Symfony\Component\Mime\Email;
 
 /**
  * One notice from Send Email: the composed body with the footer that was chosen for it, each in its
@@ -19,7 +20,8 @@ use Illuminate\Mail\Mailables\Envelope;
  * becomes "<Name> via IKAIKA Portal" and Reply-To points at them -- so it passes the domain's own
  * sender checks rather than looking like a spoofed personal address.
  *
- * Attached files come off the private disk under the names they were attached with.
+ * Attached files come off the private disk under the names they were attached with. Inline images
+ * (a share's QR) are embedded under their name, so the body shows them as cid:<name>.
  */
 class PortalEmailMail extends Mailable
 {
@@ -33,7 +35,13 @@ class PortalEmailMail extends Mailable
         public readonly ?string $replyToAddress = null,
         /** @var list<array{path: string, name: string, mime: string}> */
         public readonly array $attachedFiles = [],
-    ) {}
+        /** @var list<array{name: string, data: string, mime: string}> */
+        public readonly array $inlineImages = [],
+    ) {
+        foreach ($this->inlineImages as $image) {
+            $this->withSymfonyMessage(static fn (Email $message): Email => $message->embed($image['data'], $image['name'], $image['mime']));
+        }
+    }
 
     public function envelope(): Envelope
     {

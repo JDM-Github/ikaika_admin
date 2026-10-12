@@ -43,7 +43,8 @@ final class PortalNotificationEmails
         PortalNotificationType::CALENDAR_EVENT_CREATED => true,
     ];
 
-    private const FROM_NAME = 'IKAIKA Portal';
+    // Shared with the shared-page emails, which go out as the same letter from the same sender.
+    public const FROM_NAME = 'IKAIKA Portal';
 
     public function send(Employee|int $employeeId, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
     {
@@ -61,7 +62,7 @@ final class PortalNotificationEmails
         }
 
         try {
-            [$footerBody, $footerFormat] = $this->footer();
+            [$footerBody, $footerFormat] = self::companyFooter();
             Mail::to($email)->send(new PortalEmailMail(
                 $title,
                 $this->body($title, $message, $linkPath, $linkLabel),
@@ -110,7 +111,7 @@ final class PortalNotificationEmails
      *
      * @return array{0: ?string, 1: string}
      */
-    private function footer(): array
+    public static function companyFooter(): array
     {
         $footer = EmailBlock::query()
             ->where('kind', PortalEmail::KIND_FOOTER)
