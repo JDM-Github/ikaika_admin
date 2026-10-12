@@ -1,0 +1,297 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Mail\PortalEmailMail;
+use App\Modules\Portal\Models\Employee;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Testing\TestResponse;
+use Tests\TestCase;
+
+/**
+ * Manage / Shared Pages: guest read-only links, an administrator-tier fine-grained power since
+ * 2026-10-09: `manage.shares` opens and reads (the link, its QR and the kept password),
+ * `manage.shares.manage` creates, changes and revokes, and `manage.shares.password` regenerates.
+ */
+class PortalSharedPagesTest extends TestCase
+{
+    use DatabaseTransactions;
+
+    /**
+     * @var list<string>
+     */
+    protected array $connectionsToTransact = ['portal', 'core'];
+
+    private const BASE = '/api/development/portal/manage/shared-pages';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::flush();
+        $this->withoutMiddleware(ThrottleRequests::class);
+        Mail::fake();
+    }
+
+    private function employee(string $where): Employee
+    {
+        $employee = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw($where)
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->whereNotNull('email')->where('email', '!=', '')
+            ->orderBy('id')
+            ->firstOrFail();
+        $employee->forceFill(['is_developer' => false])->save();
+
+        return $employee;
+    }
+
+    private function token(Employee $employee): string
+    {
+        return (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
+    }
+
+    // The working calls sign in a developer in Developer mode, which holds every key of the page.
+    private function developerToken(): string
+    {
+        $developer = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->where('is_developer', true)
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->orderBy('id')
+            ->firstOrFail();
+
+        return $this->developerModeOn($this->token($developer));
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function payload(array $overrides = []): array
+    {
+        return array_merge([
+            'label' => 'Truebeck walkthrough',
+            'expiresInDays' => 7,
+            'ratePerMinute' => 60,
+            'rules' => ['projects.view', 'finance.envelopes'],
+        ], $overrides);
+    }
+
+    private function createShare(string $token, array $overrides = []): TestResponse
+    {
+        return $this->withToken($token)->postJson(self::BASE, $this->payload($overrides))->assertOk();
+    }
+
+    // The page is an administrator's now: an admin opens it in Default; a member never can.
+    public function test_the_page_follows_its_rule(): void
+    {
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+
+        $this->withToken($this->token($member))->getJson(self::BASE)->assertForbidden();
+        $this->withToken($this->token($admin))->getJson(self::BASE)->assertOk();
+    }
+
+    // The write keys split from the read: an admin limited out of either keeps exactly what is left.
+    public function test_the_manage_and_password_keys_gate_their_own_actions(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $token = $this->token($admin);
+        DB::connection('portal')->table('access_presets')->where('role', 'admin')
+            ->whereIn('permission_key', ['manage.shares.manage', 'manage.shares.password'])->delete();
+
+        $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $this->withToken($token)->postJson(self::BASE, $this->payload())->assertForbidden();
+        $this->withToken($token)->postJson(self::BASE.'/1/regenerate')->assertForbidden();
+
+        // With Create and revoke back, creating works in Default; New passwords still needs its own key.
+        DB::connection('portal')->table('access_presets')->insert([
+            'role' => 'admin', 'permission_key' => 'manage.shares.manage', 'reach' => null, 'include_executives' => 0,
+        ]);
+        $share = $this->createShare($token)->json('data.share');
+        $this->withToken($token)->postJson(self::BASE.'/'.$share['id'].'/regenerate')->assertForbidden();
+        $this->withToken($token)->deleteJson(self::BASE.'/'.$share['id'])->assertOk();
+    }
+
+    public function test_a_share_is_created_with_its_password_kept_in_the_record(): void
+    {
+        $token = $this->developerToken();
+
+        $created = $this->createShare($token)->assertJsonPath('data.share.label', 'Truebeck walkthrough');
+        $share = $created->json('data.share');
+        $password = $created->json('data.password');
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{24}$/', $share['code']);
+        $this->assertStringEndsWith('/share/'.$share['code'], $share['link']);
+        $this->assertIsString($password);
+        $this->assertSame(12, strlen($password));
+        // The record carries the readable password too, so it can be sent again.
+        $this->assertSame($password, $share['password']);
+        $this->assertSame(['projects.view', 'finance.envelopes'], $share['rules']);
+        $this->assertNull($share['email']);
+        $this->assertFalse($share['isRevoked']);
+        $this->assertNotNull($share['expiresAt']);
+
+        $row = DB::connection('portal')->table('shared_pages')->where('id', $share['id'])->first();
+        $this->assertNotNull($row);
+        $this->assertNotSame($password, $row->password_hash);
+        $this->assertTrue(Hash::check($password, (string) $row->password_hash));
+        $this->assertSame($password, $row->password_value);
+        $this->assertNull($row->revoked_at);
+        $this->assertSame(['finance.envelopes', 'projects.view'], DB::connection('portal')->table('shared_page_rules')
+            ->where('share_id', $share['id'])->orderBy('rule_key')->pluck('rule_key')->all());
+
+        // The list carries it back, and the page list carries every shareable page.
+        $listed = $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $listedShare = collect($listed->json('data.shares'))->firstWhere('id', $share['id']);
+        $this->assertSame($share['code'], $listedShare['code']);
+        $this->assertSame($password, $listedShare['password']);
+        $this->assertContains('projects.view', array_column($listed->json('data.pages'), 'key'));
+        $this->assertTrue(collect($listed->json('data.pages'))->firstWhere('key', 'projects.view')['isReady']);
+    }
+
+    public function test_a_typed_slug_becomes_the_link_and_a_guest_name_is_kept(): void
+    {
+        $token = $this->developerToken();
+
+        $created = $this->createShare($token, ['slug' => 'truebeck', 'guestName' => 'Truebeck']);
+        $share = $created->json('data.share');
+
+        $this->assertSame('truebeck', $share['code']);
+        $this->assertStringEndsWith('/share/truebeck', $share['link']);
+        $this->assertSame('Truebeck', $share['guestName']);
+
+        // The guest-facing name is the guest name; the developer's label stays the record's own.
+        $this->getJson('/api/development/portal/share/truebeck')->assertOk()->assertJsonPath('data.label', 'Truebeck');
+
+        // The sign-in answer and the restored session both call the guest by their name.
+        $guestToken = (string) $this->postJson('/api/development/portal/share/truebeck/access', ['password' => $created->json('data.password')])
+            ->assertOk()
+            ->assertJsonPath('data.label', 'Truebeck')
+            ->json('data.token');
+        $this->withToken($guestToken)->getJson('/api/development/portal/share/session')
+            ->assertOk()
+            ->assertJsonPath('data.label', 'Truebeck');
+    }
+
+    public function test_a_blank_slug_still_generates_a_code_and_clears_the_guest_name(): void
+    {
+        $token = $this->developerToken();
+        $share = $this->createShare($token, ['slug' => '   ', 'guestName' => ''])->json('data.share');
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{24}$/', $share['code']);
+        $this->assertNull($share['guestName']);
+        // With no guest name, the label is what the guest sees.
+        $this->getJson('/api/development/portal/share/'.$share['code'])->assertOk()->assertJsonPath('data.label', 'Truebeck walkthrough');
+    }
+
+    public function test_a_taken_or_malformed_slug_is_refused(): void
+    {
+        $token = $this->developerToken();
+        $this->createShare($token, ['slug' => 'truebeck']);
+
+        foreach (['truebeck', 'Truebeck', 'no', 'has_underscore', 'trailing-', 'session'] as $slug) {
+            $this->withToken($token)->postJson(self::BASE, $this->payload(['slug' => $slug]))->assertStatus(422);
+        }
+    }
+
+    public function test_an_edit_can_change_the_slug_and_the_old_link_dies(): void
+    {
+        $token = $this->developerToken();
+        $share = $this->createShare($token)->json('data.share');
+
+        $saved = $this->withToken($token)->patchJson(self::BASE.'/'.$share['id'], $this->payload([
+            'slug' => 'truebeck-2', 'guestName' => 'Truebeck',
+        ]))->assertOk()->json('data.share');
+
+        $this->assertSame('truebeck-2', $saved['code']);
+        $this->assertSame('Truebeck', $saved['guestName']);
+        $this->getJson('/api/development/portal/share/'.$share['code'])->assertStatus(404);
+        $this->getJson('/api/development/portal/share/truebeck-2')->assertOk();
+
+        // A blank slug on the next edit keeps the link the share already has.
+        $kept = $this->withToken($token)->patchJson(self::BASE.'/'.$share['id'], $this->payload(['slug' => '']))->assertOk()->json('data.share');
+        $this->assertSame('truebeck-2', $kept['code']);
+    }
+
+    public function test_a_password_is_mailed_when_an_email_is_bound(): void
+    {
+        $token = $this->developerToken();
+
+        $created = $this->withToken($token)
+            ->postJson(self::BASE, $this->payload(['email' => 'guest@example.com']))
+            ->assertOk();
+        $password = (string) $created->json('data.password');
+
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('guest@example.com')
+            && str_contains($mail->body, $password)
+            && str_contains($mail->body, '/share/'.$created->json('data.share.code')));
+    }
+
+    public function test_a_page_that_is_not_ready_is_refused(): void
+    {
+        $rule = DB::connection('portal')->table('shared_page_shareable')->where('is_ready', 0)->value('rule_key');
+        $this->assertIsString($rule, 'The catalog has no not-ready page left to refuse.');
+
+        $this->withToken($this->developerToken())
+            ->postJson(self::BASE, $this->payload(['rules' => [$rule]]))
+            ->assertStatus(422);
+    }
+
+    public function test_a_share_is_edited_and_revoked(): void
+    {
+        $token = $this->developerToken();
+        $share = $this->createShare($token)->json('data.share');
+
+        $this->withToken($token)
+            ->patchJson(self::BASE.'/'.$share['id'], $this->payload([
+                'label' => 'Truebeck, second look',
+                'ratePerMinute' => 20,
+                'rules' => ['projects.track'],
+            ]))
+            ->assertOk()
+            ->assertJsonPath('data.share.label', 'Truebeck, second look');
+        $this->assertSame(['projects.track'], collect($this->withToken($token)->getJson(self::BASE)->json('data.shares'))->firstWhere('id', $share['id'])['rules']);
+
+        $this->withToken($token)->deleteJson(self::BASE.'/'.$share['id'])
+            ->assertOk()
+            ->assertJsonPath('data.share.isRevoked', true);
+        $this->withToken($token)->patchJson(self::BASE.'/99999999', $this->payload())->assertNotFound();
+        $this->withToken($token)->deleteJson(self::BASE.'/99999999')->assertNotFound();
+    }
+
+    public function test_regenerating_replaces_the_password(): void
+    {
+        $token = $this->developerToken();
+        $created = $this->createShare($token);
+        $share = $created->json('data.share');
+        $oldPassword = (string) $created->json('data.password');
+
+        $regenerated = $this->withToken($token)->postJson(self::BASE.'/'.$share['id'].'/regenerate')->assertOk()->json('data.password');
+        $this->assertIsString($regenerated);
+        $this->assertNotSame($oldPassword, $regenerated);
+        // The record keeps the new one, so the old one is gone from the list as well as the hash.
+        $this->assertSame($regenerated, DB::connection('portal')->table('shared_pages')->where('id', $share['id'])->value('password_value'));
+        $this->assertSame($regenerated, collect($this->withToken($token)->getJson(self::BASE)->json('data.shares'))->firstWhere('id', $share['id'])['password']);
+
+        // The new one signs in; the password it replaced does not.
+        $this->postJson('/api/development/portal/share/'.$share['code'].'/access', ['password' => $regenerated])->assertOk();
+        $this->postJson('/api/development/portal/share/'.$share['code'].'/access', ['password' => $oldPassword])->assertStatus(422);
+    }
+
+    public function test_the_qr_is_an_svg_of_the_link(): void
+    {
+        $token = $this->developerToken();
+        $share = $this->createShare($token)->json('data.share');
+
+        $svg = $this->withToken($token)->getJson(self::BASE.'/'.$share['id'].'/qr')->assertOk()->json('data.svg');
+        $this->assertIsString($svg);
+        $this->assertStringContainsString('<svg', $svg);
+    }
+}

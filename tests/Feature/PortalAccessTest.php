@@ -80,6 +80,16 @@ class PortalAccessTest extends TestCase
         $keys = $this->keys($response);
         $this->assertContains('manage.requests.leave.decide', $keys);
         $this->assertContains('calendar.create', $keys);
+        // References and Shared Pages are administrator-tier powers now (2026-10-09), with their keys.
+        $this->assertContains('projects.references', $keys);
+        $this->assertContains('projects.references.edit', $keys);
+        $this->assertContains('manage.shares', $keys);
+        $this->assertContains('manage.shares.manage', $keys);
+        $this->assertContains('manage.shares.password', $keys);
+        // Onboarding is the same shape (2026-10-09): admins hold its three keys by preset.
+        $this->assertContains('manage.onboarding', $keys);
+        $this->assertContains('manage.onboarding.manage', $keys);
+        $this->assertContains('manage.onboarding.password', $keys);
         $this->assertNotContains('developer', $keys);
         $this->assertNotContains('administration.backup', $keys);
         $this->assertNotContains('administration.actions.sync', $keys);
@@ -121,16 +131,19 @@ class PortalAccessTest extends TestCase
         $everything = [
             'projects' => null, 'projects.view' => 'all', 'projects.edit' => 'all', 'projects.scopes' => 'all',
             'projects.delete' => 'all', 'projects.lead' => 'all', 'projects.create' => 'all', 'projects.create.direct' => null,
+            'projects.created' => null, 'projects.created.export' => null,
             'projects.manager' => 'all', 'projects.track' => 'all', 'projects.track.export' => null,
         ];
-        // Project Settings is Developer mode only, so only the developer preset names it. Admins lead
-        // only their own department; Nathaniel and Steven are given lead at all as a personal default.
-        $developer = [...$everything, 'projects.settings' => null];
+        // References and Shared Pages are administrators' powers now (2026-10-09): admins hold them
+        // by preset, with Edit references, Create and revoke and New passwords beside them.
+        $developer = [...$everything, 'projects.references' => null, 'projects.references.edit' => null];
         // Auto-approve is Nathaniel's and Steven's personal default (2026-10-07), so no preset but developer holds it.
         $executive = $everything;
         unset($executive['projects.create.direct']);
         $admin = $executive;
         $admin['projects.lead'] = 'department';
+        $admin['projects.references'] = null;
+        $admin['projects.references.edit'] = null;
         // An admin approves their own department's projects (and the ones they lead); executives every one.
         $admin['projects.manager'] = 'department';
         ksort($everything);
@@ -145,8 +158,11 @@ class PortalAccessTest extends TestCase
         $this->assertSame($executive, $presets['executive']);
         $this->assertSame($developer, $presets['developer']);
         // Anyone may add a project (2026-10-06); a member's waits for a Project Manager.
+        // Created Projects is every role's own record (2026-10-09): its own rule, no reach.
         $this->assertSame([
-            'projects' => null, 'projects.create' => 'all', 'projects.track' => 'own', 'projects.track.export' => null, 'projects.view' => 'own',
+            'projects' => null, 'projects.create' => 'all', 'projects.created' => null,
+            'projects.created.export' => null,
+            'projects.track' => 'own', 'projects.track.export' => null, 'projects.view' => 'own',
         ], $presets['member']);
     }
 

@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use Tests\Concerns\ActsAsPortalEmployee;
 use Tests\TestCase;
 
@@ -164,6 +165,26 @@ class PortalBitbucketSyncTest extends TestCase
             : Http::response(['values' => [$this->commit(str_repeat('a', 40), '2020-01-05T17:30:00+00:00', 'x <x@x.x>')], 'next' => self::API.'/commits?pagelen=100&page=2']));
 
         $this->assertSame(['listed' => 0, 'counted' => 0], $sync->syncLinked()['ikaika-web/fixture-sync-2020']);
+    }
+
+    // Bitbucket stalling on one request is retried rather than failing the run (2026-10-07).
+    public function test_a_stalled_request_is_retried(): void
+    {
+        Sleep::fake();
+        Http::fakeSequence()
+            ->pushFailedConnection()
+            ->push(['values' => [], 'next' => null]);
+
+        $this->assertSame(['listed' => 0, 'counted' => 0], app(PortalBitbucketSync::class)->syncLinked()['ikaika-web/fixture-sync-2020']);
+    }
+
+    public function test_a_request_that_keeps_stalling_says_so(): void
+    {
+        Sleep::fake();
+        Http::fake(['*' => Http::failedConnection()]);
+        $outcome = app(PortalBitbucketSync::class)->syncLinked()['ikaika-web/fixture-sync-2020'];
+
+        $this->assertStringStartsWith('Bitbucket did not answer in time', $outcome);
     }
 
     public function test_a_failure_is_kept_on_the_repository_without_the_token(): void

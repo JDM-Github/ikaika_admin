@@ -49,7 +49,7 @@ class PortalRulesTest extends TestCase
     {
         $catalog = DB::connection('portal')->table('access_permissions')->get()->keyBy('permission_key');
         $presets = DB::connection('portal')->table('access_presets')->where('role', 'executive')->get()->keyBy('permission_key');
-        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.settings', 'projects.create.direct'];
+        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.references', 'projects.create.direct', 'manage.shares', 'manage.onboarding'];
 
         foreach ($catalog as $key => $rule) {
             $isLeftOut = collect($leftOut)->contains(static fn (string $root): bool => $key === $root || str_starts_with((string) $key, $root.'.'));
@@ -178,11 +178,26 @@ class PortalRulesTest extends TestCase
     {
         $token = $this->login($this->member());
         $this->withToken($token)->getJson('/api/development/portal/projects/track')->assertOk()->assertJsonPath('resource', 'board');
+        $this->assertNotContains('projects.track', $this->switchedOff($token));
 
         $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => 'projects.track', 'on' => false])->assertOk();
 
         $this->withToken($token)->getJson('/api/development/portal/projects/track')->assertForbidden();
         $this->assertArrayNotHasKey('projects.track', $this->rules($token));
+        // The portal names the page in its "you switched this off" notice.
+        $this->assertContains('projects.track', $this->switchedOff($token));
+    }
+
+    // Switching a section off takes its pages with it, and the session says which pages those were.
+    public function test_switching_a_section_off_names_every_page_it_takes_with_it(): void
+    {
+        $token = $this->login($this->member());
+        $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => 'projects', 'on' => false])->assertOk();
+
+        $off = $this->switchedOff($token);
+        $this->assertContains('projects', $off);
+        $this->assertContains('projects.created', $off);
+        $this->assertContains('projects.track', $off);
     }
 
     // Own = the projects they are on; department adds their department's; all is every project.
@@ -497,6 +512,17 @@ class PortalRulesTest extends TestCase
         $this->assertIsArray($rules);
 
         return $rules;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function switchedOff(string $token): array
+    {
+        $keys = $this->withToken($token)->getJson('/api/development/portal/auth/me')->assertOk()->json('employee.switched_off');
+        $this->assertIsArray($keys);
+
+        return $keys;
     }
 
     private function member(): Employee

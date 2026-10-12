@@ -595,9 +595,14 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.lead', 'projects.view', 'Project Lead', 'Be chosen as the lead of {UserName|Your} department''s projects or of any project.', 1, 1, 214),
 ('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project, for {UserName|Your} department or every department.', 1, 1, 220),
 ('projects.create.direct', 'projects.create', 'Auto-approve projects', 'A project {UserName|You} add is approved at once, without waiting for a Project Approver.', 0, 1, 221),
+-- Created Projects is its own power (2026-10-09, user): a person may be barred from adding projects
+-- while still seeing the record of what they already submitted. No reach: it is only ever their own.
+('projects.created', 'projects', 'Created Projects', 'See the projects {UserName|You} added and where their approval stands.', 0, 1, 225),
+('projects.created.export', 'projects.created', 'Export', 'Download the projects {UserName|You} added as PDF, XLSX, Word, CSV or JSON.', 0, 1, 226),
 ('projects.track', 'projects', 'Track Projects', 'Follow projects by status, year, month and department: the projects {UserName|You} work on, plus {UserName|Your} department''s or every department''s.', 1, 1, 230),
 ('projects.track.export', 'projects.track', 'Export', 'Download the tracked projects as PDF, XLSX, Word, CSV or JSON.', 0, 1, 231),
-('projects.settings', 'projects', 'Project Settings', 'Open Manage / Project Settings.', 0, 1, 240),
+('projects.references', 'projects', 'References', 'Open Manage / References.', 0, 1, 240),
+('projects.references.edit', 'projects.references', 'Edit references', 'Add, change and remove the scopes, project types, departments and clients.', 0, 1, 241),
 
 ('reports', NULL, 'Reports', 'Open the Reports section of the sidebar.', 0, 1, 300),
 ('reports.daily', 'reports', 'Daily Report', 'File {UserName|Your} timesheet for today.', 0, 1, 310),
@@ -739,8 +744,9 @@ UPDATE access_permissions SET only_department = 'MIS', min_tier = 'admin' WHERE 
 -- All Backups is parked until Airtable is retired (docs/power/backups-plan.md): developers only, in
 -- Developer mode, and no gift reaches it. Existing databases: make_portal_backup_rules_developer_only.
 UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key LIKE 'administration.backup%';
--- Manage / Project Settings is a work in progress: Developer mode only for now, like Backup.
-UPDATE access_permissions SET min_tier = 'developer' WHERE permission_key = 'projects.settings';
+-- References is an administrator's tool, like the other Manage pages: admins hold it by preset.
+-- Existing databases: open_portal_references_and_shared_pages_rules.
+UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key LIKE 'projects.references%';
 -- Auto-approve is an admin's at most, and only a named one's (2026-10-07, supervisor): being an admin
 -- is not enough, so no role but developer starts with it. Existing databases: split_portal_project_auto_approval.
 UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key = 'projects.create.direct';
@@ -760,7 +766,7 @@ SELECT 'member', permission_key,
 FROM access_permissions
 WHERE permission_key IN (
     'home',
-    'projects', 'projects.view', 'projects.track', 'projects.track.export', 'projects.create',
+    'projects', 'projects.view', 'projects.track', 'projects.track.export', 'projects.create', 'projects.created', 'projects.created.export',
     'reports', 'reports.daily', 'reports.late', 'reports.submitted',
     'reports.submitted.edit', 'reports.submitted.delete', 'reports.submitted.export',
     'requests', 'requests.own', 'requests.own.edit', 'requests.own.cancel', 'requests.own.export',
@@ -791,7 +797,6 @@ WHERE permission_key NOT LIKE 'developer%'
   AND permission_key <> 'manage.users.information'
   AND permission_key <> 'administration.logs.developers'
   AND permission_key <> 'email.images.global'
-  AND permission_key <> 'projects.settings'
   AND permission_key <> 'projects.create.direct'
   AND permission_key NOT LIKE '%.unlisted';
 
@@ -804,7 +809,8 @@ SELECT 'executive', permission_key,
        permission_key = 'administration.logs'
 FROM access_permissions
 WHERE permission_key NOT LIKE 'developer%'
-  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.settings', 'projects.create.direct')
+  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.create.direct')
+  AND permission_key NOT LIKE 'projects.references%'
   AND permission_key NOT LIKE 'reports.%'
   AND permission_key NOT LIKE 'requests.%'
   AND permission_key NOT LIKE 'user.%'
@@ -909,6 +915,24 @@ SELECT DISTINCT department, type_of_job FROM projects
 WHERE department IS NOT NULL AND TRIM(department) <> ''
   AND type_of_job IS NOT NULL AND TRIM(type_of_job) <> '';
 
+-- A sentence on what a department does, shown and edited on Manage / References.
+-- Portal-only: Airtable's Employees table has no such field, and the sync never sends it.
+-- Existing databases: run the ALTER below.
+ALTER TABLE departments
+    ADD COLUMN description VARCHAR(255) NULL AFTER name;
+
+-- A first sentence for the departments the company runs today; a blank one is filled in on the
+-- page. Only rows with nothing in them are touched, so an edited description survives a re-run.
+UPDATE departments
+SET description = CASE LOWER(TRIM(name))
+    WHEN 'engineering' THEN 'Structural and civil engineering work; its projects pick scopes from the WBS tree.'
+    WHEN 'mis'         THEN 'Management information systems: software, data and code-tracked projects.'
+    WHEN 'admin'       THEN 'Company administration and support staff.'
+    WHEN 'general'     THEN 'Shared activity codes every department may report on.'
+    ELSE description
+END
+WHERE description IS NULL OR TRIM(description) = '';
+
 -- ============================================================================
 -- EMPLOYEE SIGNATURES - Manage / Users, the portal's own editable copy
 -- Airtable syncs into the portal one way and overwrites the mapped employees columns on every run,
@@ -930,3 +954,211 @@ CREATE TABLE IF NOT EXISTS employee_signatures (
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
     FOREIGN KEY (footer_id) REFERENCES email_blocks(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- SHARED PAGES - guest read-only links, made on Manage / Shared Pages
+-- A developer picks pages; the server issues a link (/share/<code>) and a
+-- password. The guest signs in with the password, plus a code emailed when a
+-- bound email is set, and browses those pages read-only. Guests are GET-only.
+-- Existing databases: run the CREATEs, the seed and the catalog row below.
+-- Plan: docs/power/shared-pages-plan.md.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS shared_pages (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    label           VARCHAR(100) NOT NULL,
+    -- What the guest is called on their own screens; null falls back to the label.
+    guest_name      VARCHAR(100) NULL,
+    code            VARCHAR(64)  NOT NULL,       -- a typed slug, or a generated 24-hex code
+    password_hash   VARCHAR(255) NOT NULL,
+    -- The generated password, kept readable so the developer can send it again; the hash still verifies.
+    password_value  VARCHAR(32)  NULL,
+    email           VARCHAR(255) NULL,
+    expires_at      TIMESTAMP    NULL,           -- NULL only when the developer clears it
+    rate_per_minute SMALLINT     NOT NULL DEFAULT 60,
+    revoked_at      TIMESTAMP    NULL,
+    created_by      INT          NOT NULL,       -- employees.id, the developer
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at    TIMESTAMP    NULL,
+    UNIQUE KEY shared_pages_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Existing databases: run the ALTERs below (pre-change rows keep a NULL value until regenerated).
+ALTER TABLE shared_pages
+    ADD COLUMN password_value VARCHAR(32) NULL AFTER password_hash;
+
+ALTER TABLE shared_pages
+    MODIFY COLUMN code VARCHAR(64) NOT NULL,
+    ADD COLUMN guest_name VARCHAR(100) NULL AFTER label;
+
+CREATE TABLE IF NOT EXISTS shared_page_rules (
+    share_id INT          NOT NULL,
+    rule_key VARCHAR(100) NOT NULL,
+    PRIMARY KEY (share_id, rule_key),
+    FOREIGN KEY (share_id) REFERENCES shared_pages(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shared_page_otps (
+    share_id   INT          NOT NULL PRIMARY KEY,
+    code_hash  VARCHAR(255) NOT NULL,
+    attempts   TINYINT      NOT NULL DEFAULT 0,
+    issued_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP    NOT NULL,
+    FOREIGN KEY (share_id) REFERENCES shared_pages(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shared_page_visits (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    share_id   INT NOT NULL,
+    visited_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ip         VARCHAR(45) NULL,
+    FOREIGN KEY (share_id) REFERENCES shared_pages(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Which pages a share may grant. Every page-level rule is seeded; is_ready stays 0 until a guest
+-- check is run against that page (a guest has no person, so reach pages read all and own pages read
+-- empty), and the command that flips a key is the one that maps its guest read in
+-- tests/Feature/PortalShareReadinessTest.php. The page keys are the ones RouteRuleConstant maps on
+-- the portal side, plus home.
+CREATE TABLE IF NOT EXISTS shared_page_shareable (
+    rule_key VARCHAR(100) NOT NULL PRIMARY KEY,
+    is_ready TINYINT(1)   NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
+    ('home', 1),
+    ('projects.view', 1),
+    ('projects.track', 1),
+    ('projects.created', 1),
+    ('projects.manager', 1),
+    ('projects.references', 1),
+    ('reports.daily', 0),
+    ('reports.late', 0),
+    ('reports.submitted', 1),
+    ('reports.submitted.edit', 0),
+    ('requests.own', 1),
+    ('requests.leave', 0),
+    ('requests.overtime', 0),
+    ('requests.offset', 0),
+    ('requests.reimbursement', 0),
+    ('requests.own.edit', 0),
+    ('user.logs', 1),
+    ('user.recycle', 1),
+    ('calendar', 1),
+    ('manage.requests', 1),
+    ('manage.reports', 1),
+    ('manage.users', 1),
+    ('finance.overview', 1),
+    ('finance.transactions', 1),
+    ('finance.envelopes', 1),
+    ('finance.accounts', 1),
+    ('administration.recycle', 1),
+    ('administration.logs', 1),
+    ('administration.actions', 1),
+    ('administration.missing', 1),
+    ('administration.emails', 1),
+    -- Held back: the composer is a form, and its own-scope image controls follow the same rule.
+    ('email', 0),
+    ('email.library', 1),
+    ('administration.backup', 0);
+
+-- Manage / Shared Pages: a fine-grained, administrator-tier power. The page opens and reads with
+-- manage.shares (which shows the link, its QR and the kept password); creating, editing and revoking
+-- follow manage.shares.manage, and giving a share a new password follows manage.shares.password.
+-- Existing databases: open_portal_references_and_shared_pages_rules.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.shares', 'manage', 'Shared pages',
+     'Create read-only guest links to portal pages: pick the pages, hand out the link and its password.',
+     0, 1, 'admin', 860),
+    ('manage.shares.manage', 'manage.shares', 'Create and revoke',
+     'Create a guest link, change it, and revoke it.',
+     0, 1, 'admin', 861),
+    ('manage.shares.password', 'manage.shares', 'New passwords',
+     'Give a guest link a new password, whose old one stops working at once.',
+     0, 1, 'admin', 862);
+
+-- The rows are written after the preset SELECTs above, so their holders are seeded here: admins and
+-- developers hold all three, executives none.
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT 'admin', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.shares%';
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT 'developer', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.shares%';
+
+
+-- ============================================================================
+-- ONBOARDING - candidate registration with bound links (docs/power/onboarding-plan.md)
+-- An administrator creates a candidate entry: a link (typed slug or a generated code), a
+-- kept-readable password, and the bound email the OTP is mailed to. The candidate signs in with
+-- password + OTP and fills their details, government numbers and documents; the administrator
+-- promotes a submitted entry into an employees row. The submitted data lands in new_employee_data.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS registrations (
+    id                   INT AUTO_INCREMENT PRIMARY KEY,
+    candidate_name       VARCHAR(150) NOT NULL,
+    email                VARCHAR(255) NOT NULL,     -- the bound address; link, OTP, and the email draft go here
+    code                 VARCHAR(64)  NOT NULL,     -- a typed slug, or a generated 24-hex code
+    password_hash        VARCHAR(255) NOT NULL,
+    password_value       VARCHAR(32)  NULL,         -- readable, so the administrator can send it again
+    expires_at           TIMESTAMP    NULL,
+    revoked_at           TIMESTAMP    NULL,
+    created_by           INT          NOT NULL,     -- employees.id, the administrator
+    created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sent_at              TIMESTAMP    NULL,         -- stamped when Send opens the composer
+    opened_at            TIMESTAMP    NULL,         -- first verified sign-in
+    submitted_at         TIMESTAMP    NULL,
+    promoted_at          TIMESTAMP    NULL,
+    promoted_employee_id INT          NULL,         -- employees.id after promotion
+    employee_data_id     INT          NULL,         -- new_employee_data.id after submit
+    details              JSON         NULL,         -- the step-by-step draft; kept after submit
+    UNIQUE KEY registrations_code (code),
+    INDEX idx_registrations_email (email),
+    FOREIGN KEY (created_by) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS register_otps (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    registration_id INT          NOT NULL,
+    code_hash       VARCHAR(255) NOT NULL,
+    expires_at      TIMESTAMP    NOT NULL,
+    attempts        TINYINT      NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (registration_id) REFERENCES registrations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS register_documents (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    registration_id INT          NOT NULL,
+    kind            VARCHAR(24)  NOT NULL,          -- photo|tin|sss|philhealth|hdmf|bank
+    name            VARCHAR(191) NOT NULL,          -- the candidate's file name
+    mime            VARCHAR(127) NOT NULL,
+    size_bytes      INT          NOT NULL,
+    path            VARCHAR(255) NOT NULL,          -- the private disk, registrations/{id}/
+    uploaded_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_register_documents_registration (registration_id, kind),
+    FOREIGN KEY (registration_id) REFERENCES registrations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The page's powers: an administrator's, split into read, manage and password.
+-- Existing databases: create_portal_onboarding_tables (tables, rows and presets together).
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.onboarding', 'manage', 'Onboarding',
+     'Guest-free candidate registration: send a bound link, collect details and requirements.',
+     0, 1, 'admin', 870),
+    ('manage.onboarding.manage', 'manage.onboarding', 'Create and revoke',
+     'Create a candidate entry, change it, revoke it, and promote a submitted one.',
+     0, 1, 'admin', 871),
+    ('manage.onboarding.password', 'manage.onboarding', 'New passwords',
+     'Give a candidate link a new password, whose old one stops working at once.',
+     0, 1, 'admin', 872);
+
+-- Seeded here because the rows are written after the preset SELECTs above: admins and developers
+-- hold all three, executives none.
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT 'admin', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT 'developer', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';

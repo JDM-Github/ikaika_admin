@@ -4,13 +4,13 @@ namespace App\Http\Controllers\Api\Portal\Manage;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
-use App\Support\Portal\PortalProjectSettings;
+use App\Support\Portal\PortalReferences;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class ProjectSettingsController extends Controller
+class ReferencesController extends Controller
 {
-    public function __construct(private readonly PortalProjectSettings $settings) {}
+    public function __construct(private readonly PortalReferences $settings) {}
 
     public function index(): JsonResponse
     {
@@ -50,6 +50,11 @@ class ProjectSettingsController extends Controller
     public function storeDepartment(Request $request): JsonResponse
     {
         return response()->json($this->settings->addDepartment($this->editor($request), $request));
+    }
+
+    public function updateDepartment(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->updateDepartment($this->editor($request), $request, $id));
     }
 
     public function destroyDepartment(Request $request, int $id): JsonResponse

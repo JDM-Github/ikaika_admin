@@ -1,0 +1,123 @@
+<?php
+
+namespace App\Support\Portal;
+
+use App\Mail\PortalEmailMail;
+use App\Modules\Portal\Models\EmailBlock;
+use App\Modules\Portal\Models\Employee;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Throwable;
+
+/**
+ * The email a mapped inbox notice also sends: the notice's title and message as a letter built by
+ * PortalEmailMarkup, the Company footer under it, from the portal's own address. The
+ * notification_emails setting turns the whole thing off, so a local run that must not reach real
+ * inboxes sends nothing, and the inbox row is written either way: a send that fails is logged and
+ * dropped, never allowed to fail the write it was telling about.
+ */
+final class PortalNotificationEmails
+{
+    // The notices that also go by email; every other type stays in the portal.
+    public const TYPES = [
+        PortalNotificationType::REQUEST_FILED_LEAVE => true,
+        PortalNotificationType::REQUEST_FILED_OVERTIME => true,
+        PortalNotificationType::REQUEST_FILED_OFFSET => true,
+        PortalNotificationType::REQUEST_FILED_REIMBURSEMENT => true,
+        'requests.leave.approved' => true,
+        'requests.leave.rejected' => true,
+        'requests.leave.pending' => true,
+        'requests.overtime.approved' => true,
+        'requests.overtime.rejected' => true,
+        'requests.overtime.pending' => true,
+        'requests.offset.approved' => true,
+        'requests.offset.rejected' => true,
+        'requests.offset.pending' => true,
+        'requests.reimbursement.approved' => true,
+        'requests.reimbursement.rejected' => true,
+        'requests.reimbursement.pending' => true,
+        PortalNotificationType::PROJECT_REQUESTED => true,
+        PortalNotificationType::PROJECT_REQUESTED_MEMBERS => true,
+        PortalNotificationType::PROJECT_APPROVED => true,
+        PortalNotificationType::PROJECT_MODIFIED => true,
+        PortalNotificationType::CALENDAR_EVENT_CREATED => true,
+    ];
+
+    private const FROM_NAME = 'IKAIKA Portal';
+
+    public function send(Employee|int $employeeId, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
+    {
+        if (! PortalAdvancedSettings::notificationEmails()) {
+            return;
+        }
+        if (! (self::TYPES[$type] ?? false)) {
+            return;
+        }
+
+        $employee = $employeeId instanceof Employee ? $employeeId : Employee::query()->find($employeeId);
+        $email = $employee instanceof Employee ? strtolower(trim((string) ($employee->email ?? ''))) : '';
+        if ($employee === null || $email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return;
+        }
+
+        try {
+            [$footerBody, $footerFormat] = $this->footer();
+            Mail::to($email)->send(new PortalEmailMail(
+                $title,
+                $this->body($title, $message, $linkPath, $linkLabel),
+                $footerBody,
+                PortalEmailMarkup::FORMAT_MARKUP,
+                $footerFormat,
+                self::FROM_NAME,
+                null,
+            ));
+        } catch (Throwable) {
+            // The inbox row is already there, so a transport failure is only ever a warning.
+            Log::warning('portal.notification.email.failed', [
+                'employee_id' => (int) $employee->getKey(),
+                'type' => $type,
+            ]);
+        }
+    }
+
+    // The letter's message: the notice's title as a heading, its message under it, and its link last.
+    private function body(string $title, string $message, ?string $linkPath, ?string $linkLabel): string
+    {
+        $lines = ['# '.$title, '', $message];
+        $url = $this->linkUrl($linkPath);
+        if ($url !== null && $linkLabel !== null && trim($linkLabel) !== '') {
+            $lines[] = '';
+            $lines[] = '['.trim($linkLabel).']('.$url.')';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    // The same base PortalSharedPages::link uses; empty locally, so the link stays a path.
+    private function linkUrl(?string $linkPath): ?string
+    {
+        $path = trim((string) $linkPath);
+        if ($path === '') {
+            return null;
+        }
+        $base = rtrim((string) config('products.catalog.portal.public_url', ''), '/');
+
+        return ($base === '' ? '' : $base).'/'.ltrim($path, '/');
+    }
+
+    /**
+     * The Company footer: the first footer block, the one the composer sends under a letter.
+     *
+     * @return array{0: ?string, 1: string}
+     */
+    private function footer(): array
+    {
+        $footer = EmailBlock::query()
+            ->where('kind', PortalEmail::KIND_FOOTER)
+            ->orderBy('id')
+            ->first();
+        $body = $footer instanceof EmailBlock ? trim((string) $footer->body) : null;
+
+        return [$body === null || $body === '' ? null : $body, PortalEmailMarkup::format($footer?->format) ?? PortalEmailMarkup::FORMAT_MARKUP];
+    }
+}

@@ -103,6 +103,24 @@ final class PortalActivityCopy
             : $who.' rejected the project '.$name.($remarks === null ? '.' : ': '.$remarks);
     }
 
+    public static function notifyProjectModified(string $who, string $name): string
+    {
+        return $who.' edited the project '.$name.'.';
+    }
+
+    public static function notifyProjectMembersAdded(string $who, string $name): string
+    {
+        return $who.' added you to the project '.$name.'.';
+    }
+
+    public static function notifyEventCreated(string $who, string $title, string $from, string $to): string
+    {
+        $trimmed = trim($title);
+        $label = $trimmed !== '' ? $trimmed : 'event';
+
+        return $who.' added the event '.$label.' '.self::span($from, $to).'.';
+    }
+
     // Logged under the approver only: the person flagged never sees it.
     public static function flaggedMember(string $memberName): string
     {

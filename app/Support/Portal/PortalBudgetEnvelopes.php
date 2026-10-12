@@ -143,6 +143,9 @@ final class PortalBudgetEnvelopes
         try {
             $rows = $this->connection()
                 ->table('transactions')
+                // A row with no Credit/Expense type is not a money movement; the portal's strict
+                // parser refuses one such row and would lose the whole ledger, so it never travels.
+                ->whereIn('type', [self::TYPE_CREDIT, self::TYPE_EXPENSE])
                 ->orderByDesc('transaction_date')
                 ->orderByDesc('id')
                 ->get(['id', 'transaction_name', 'transaction_date', 'amount', 'type', 'payor_payee', 'description', 'created_by', 'source_key']);

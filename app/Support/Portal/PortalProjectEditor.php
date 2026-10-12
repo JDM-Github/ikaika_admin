@@ -64,7 +64,7 @@ final class PortalProjectEditor
         'cancelled' => 'Cancelled',
     ];
 
-    private const LEVEL_COLUMNS = [
+    public const LEVEL_COLUMNS = [
         'structural' => 'st_lod',
         'architectural' => 'ar_lod',
         'electrical' => 'el_lod',
@@ -73,7 +73,7 @@ final class PortalProjectEditor
         'fire-protection' => 'fp_lod',
     ];
 
-    private const LINK_COLUMNS = [
+    public const LINK_COLUMNS = [
         'forma' => 'forma_link',
         'ms-teams' => 'msteams_project_link',
         'ms-planner' => 'ms_planner_link',
@@ -137,12 +137,18 @@ final class PortalProjectEditor
      */
     public function options(Employee $actor, Request $request): array
     {
-        // Edit projects at own opens the form only for someone who leads a project.
+        /*
+         * Read by the project form (Add projects, or Edit projects at own for a lead) and by
+         * Manage / References, which maps activities onto the same project options. The page's own
+         * power opens it too: limiting Add projects must not break References for an admin
+         * (2026-10-12, reported live).
+         */
         $editReach = PortalRules::reach($actor, $request, PortalProjectPowers::EDIT);
         if (! PortalRules::holds($actor, $request, PortalProjectPowers::CREATE)
+            && ! PortalRules::holds($actor, $request, PortalProjectPowers::REFERENCES)
             && ! in_array($editReach, ['department', 'all'], true)
             && ($editReach === null || ! $this->leadsAnyProject($actor))) {
-            abort(403, 'The project form needs the Add projects or Edit projects power.');
+            abort(403, 'The project options need Add projects, Edit projects or References.');
         }
 
         // Who may lead, and where: Project Lead at all leads anywhere, at department (or own) their own department's.
@@ -286,6 +292,19 @@ final class PortalProjectEditor
         if (! $isApproved) {
             $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), (string) $numbered, false);
         }
+        $memberIds = array_values(array_diff($fields['memberIds'], [$employeeId]));
+        if ($memberIds !== []) {
+            $this->audit->notifyEach(
+                $memberIds,
+                PortalNotificationType::PROJECT_REQUESTED_MEMBERS,
+                'You were added to a project',
+                PortalActivityCopy::notifyProjectMembersAdded(PortalActivityCopy::actorName($actor, $request, true), (string) $numbered),
+                PortalShellPath::VIEW_PROJECTS,
+                'Open projects',
+                ['recordId' => (string) $projectId],
+                $employeeId,
+            );
+        }
         $this->projects->bumpCache();
 
         return $this->response($projectId);
@@ -352,6 +371,16 @@ final class PortalProjectEditor
             (string) $projectId,
             $request,
             ['projectName' => $fields['name'], 'department' => $fields['columns']['department']],
+        );
+        $this->audit->notifyManagers(
+            $actor,
+            PortalProjectApproval::RULE,
+            PortalNotificationType::PROJECT_MODIFIED,
+            'Project updated',
+            PortalActivityCopy::notifyProjectModified(PortalActivityCopy::actorName($actor, $request, true), $fields['name']),
+            PortalShellPath::MANAGE_PROJECTS,
+            'Open Manage / Projects',
+            ['recordId' => (string) $projectId],
         );
         $this->projects->bumpCache();
 

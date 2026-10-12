@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Portal\Developer\DeveloperModeController;
+use App\Http\Controllers\Api\Portal\Settings\AdvancedSettingsController;
 use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
@@ -8,4 +9,10 @@ use Illuminate\Support\Facades\Route;
 Route::middleware([AuthenticatePortalJwt::class, 'throttle:portal-developer'])->group(function (): void {
     Route::patch('developer/mode', [DeveloperModeController::class, 'updateMode']);
     Route::patch('developer/password', [DeveloperModeController::class, 'updatePassword']);
+});
+
+// Settings' Advanced card, read and written only while Developer mode is on.
+Route::middleware([AuthenticatePortalJwt::class, 'throttle:portal-developer'])->group(function (): void {
+    Route::get('settings/advanced', [AdvancedSettingsController::class, 'show']);
+    Route::patch('settings/advanced', [AdvancedSettingsController::class, 'update']);
 });

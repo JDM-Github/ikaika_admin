@@ -80,7 +80,7 @@ Done so far (display only, nothing enforced):
     enforcement and the session both see the narrowed reach. `PATCH /portal/access/reach`.
   - Your own switches and self reach are not logged (2026-09-27): your own choice about powers you
     already hold, which can never gain you a new one.
-  - **Enforced so far: Home, View Projects, Track Projects, Reports, Requests, User, Event Calendar, Manage / Requests, Manage / Reports, Manage / Users, Administration / All Recycle, Administration / All Logs, Administration / All Actions.** The Access page and Access Rule sheet banners
+  - **Enforced so far: Home, View Projects, Track Projects, Reports, Requests, User, Event Calendar, Finance, Manage / Requests, Manage / Reports, Manage / Users, Manage / References, Manage / Shared Pages, Administration / All Recycle, Administration / All Logs, Administration / All Actions.** Manage / References and Manage / Shared Pages are administrator-tier, split into a read key and their write keys (2026-10-09). The Access page and Access Rule sheet banners
     name the enforced pages; the banner goes when every page is done.
   - Track Projects: `projects.track` now has a reach (member preset `own`, everyone else
     `all`, exactly today's lists). Its own read, `GET /portal/projects/track`
@@ -105,6 +105,13 @@ Done so far (display only, nothing enforced):
     developers `all`), covers projects by the project's department. An add it covers is Approved at
     once; any other waits as Pending for a covering manager. The rest of the tree stays planned in
     `docs/power/view-projects-plan.md`.
+  - Created Projects (2026-10-09, user): its own power, `projects.created`, no reach (the page is
+    only ever the person's own list). The page and `GET /portal/projects/mine`
+    (`portal.rule:projects.created`) follow it; every role holds it by preset, so nothing
+    disappears on the day it lands. It used to follow `projects.create`, which took the record of
+    what someone already submitted away when they were barred from adding. The Shared Pages
+    catalogue row and existing shares moved off `projects.create` with it; migration
+    `add_portal_created_projects_rule`.
   - Auto-approve split (2026-10-07, supervisor): `projects.create.direct` is "Auto-approve projects",
     min_tier admin, no preset but developer, personal default for Nathaniel and Steven only; it alone
     approves a new project (and keeps a Rejected one from resending). `projects.manager` is "Project
@@ -401,6 +408,9 @@ Descriptions (what the Access page shows on each row) live in the SQL.
     - `projects.lead` Project Lead [R] — MAED (members department)
   - `projects.create` Add projects [R] — MAED
     - `projects.create.direct` Auto-approve projects — D (Nathaniel, Steven by personal default)
+  - `projects.created` Created Projects — MAED
+    - `projects.created.export` Export — MAED (2026-10-09: the table's export menu follows its own
+      power, the way Track Projects' does; migration `add_portal_created_projects_export_rule`)
   - `projects.track` Track Projects — MAED
     - `projects.track.export` Export — MAED
 - `reports` Reports — MAED

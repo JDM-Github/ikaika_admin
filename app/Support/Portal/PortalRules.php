@@ -43,6 +43,12 @@ final class PortalRules
      */
     public static function active(Employee $employee, Request $request): array
     {
+        // A guest answered from its share alone: the granted pages at all-reach, nothing else.
+        $guest = self::guest($request);
+        if ($guest !== null) {
+            return self::guestRules($guest);
+        }
+
         $cacheKey = $employee->getKey().':'.(PortalDeveloperMode::isOn($employee, $request) ? 'dev' : 'default');
         $cached = $request->attributes->get(self::ATTRIBUTE);
         if (is_array($cached) && ($cached['key'] ?? null) === $cacheKey) {
@@ -62,6 +68,10 @@ final class PortalRules
      */
     public static function activeInDefault(Employee $employee, Request $request): array
     {
+        $guest = self::guest($request);
+        if ($guest !== null) {
+            return self::guestRules($guest);
+        }
         if (! PortalDeveloperMode::isOn($employee, $request)) {
             return self::active($employee, $request);
         }
@@ -142,6 +152,10 @@ final class PortalRules
      */
     public static function listed(Employee $employee, Request $request, string $key): callable
     {
+        // A guest's share carries no lists; it sees everyone the page's reach shows.
+        if (self::guest($request) !== null) {
+            return static fn (): bool => true;
+        }
         if (self::holds($employee, $request, $key.'.'.self::UNLISTED)) {
             return static fn (): bool => true;
         }
@@ -265,6 +279,29 @@ final class PortalRules
         }
     }
 
+    // The guest a shared-page token stands for, when this request carries one.
+    private static function guest(Request $request): ?PortalGuest
+    {
+        $guest = $request->attributes->get('portalShare');
+
+        return $guest instanceof PortalGuest ? $guest : null;
+    }
+
+    /**
+     * A guest's rules: every granted page at reach all, since a guest has no department or person.
+     *
+     * @return array<string, ?string>
+     */
+    private static function guestRules(PortalGuest $guest): array
+    {
+        $rules = [];
+        foreach ($guest->rules as $key) {
+            $rules[$key] = 'all';
+        }
+
+        return $rules;
+    }
+
     // An ignore power, or See developers' activity: given only on its own, never as a tab of its page.
     public static function givenAlone(string $key): bool
     {
@@ -320,6 +357,41 @@ final class PortalRules
             DB::connection('portal')->table('access_toggles')->where('employee_id', $employee->getKey())->pluck('permission_key')->all(),
             true,
         );
+    }
+
+    /**
+     * The rules off because the person switched them off themselves: their own toggles plus every
+     * page under them, since switching a section off takes its pages with it. The portal names the
+     * page a refused link was aiming at, and only this set earns the "you switched this off" notice.
+     *
+     * @return list<string>
+     */
+    public static function switchedOffEffective(Employee $employee): array
+    {
+        $off = array_keys(self::switchedOff($employee));
+        if ($off === []) {
+            return [];
+        }
+
+        $children = [];
+        foreach (DB::connection('portal')->table('access_permissions')->select('permission_key', 'parent_key')->get() as $row) {
+            if ($row->parent_key !== null) {
+                $children[$row->parent_key][] = $row->permission_key;
+            }
+        }
+
+        $all = $off;
+        for ($queue = $off; $queue !== [];) {
+            $key = array_pop($queue);
+            foreach ($children[$key] ?? [] as $child) {
+                if (! in_array($child, $all, true)) {
+                    $all[] = $child;
+                    $queue[] = $child;
+                }
+            }
+        }
+
+        return $all;
     }
 
     /**

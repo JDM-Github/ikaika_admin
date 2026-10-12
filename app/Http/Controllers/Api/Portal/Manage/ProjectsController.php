@@ -17,6 +17,12 @@ class ProjectsController extends Controller
         return response()->json($this->projects->list($this->actor($request), $request));
     }
 
+    // One project, every field the Add / Edit Project form carries, for the details page.
+    public function show(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->projects->show($this->actor($request), $request, $id));
+    }
+
     public function update(Request $request, int $id): JsonResponse
     {
         return response()->json($this->projects->decide($this->actor($request), $request, $id));

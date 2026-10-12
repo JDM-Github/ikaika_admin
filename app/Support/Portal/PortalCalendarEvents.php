@@ -498,6 +498,31 @@ final class PortalCalendarEvents
                 'memberIds' => $memberIds,
             ],
         );
+        // Add events carries no reach of its own, so the manager notice rides the closest reach rule.
+        $copy = PortalActivityCopy::notifyEventCreated(PortalActivityCopy::actorName($actor, $request, true), $title, $startsOn, $endsOn);
+        $this->audit->notifyManagers(
+            $actor,
+            'manage.reports',
+            PortalNotificationType::CALENDAR_EVENT_CREATED,
+            'New event',
+            $copy,
+            null,
+            null,
+            ['recordId' => 'calendar-'.$id],
+        );
+        $inviteeIds = array_values(array_diff($memberIds, [$employeeId]));
+        if ($inviteeIds !== []) {
+            $this->audit->notifyEach(
+                $inviteeIds,
+                PortalNotificationType::CALENDAR_EVENT_CREATED,
+                'New event',
+                $copy,
+                null,
+                null,
+                ['recordId' => 'calendar-'.$id],
+                $employeeId,
+            );
+        }
         $this->bumpCache();
 
         return [

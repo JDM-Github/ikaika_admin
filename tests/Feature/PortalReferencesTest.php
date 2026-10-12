@@ -6,15 +6,16 @@ use App\Modules\Portal\Models\Employee;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
- * Manage / Project Settings: the reference data a project is filed under. The page is a work in
- * progress, so its `projects.settings` rule is Developer-mode-only for now: a developer in Developer
- * mode opens it, an admin in Default does not.
+ * Manage / References: the reference data a project is filed under. An administrator-tier power since
+ * 2026-10-09: `projects.references` opens and reads the page, `projects.references.edit` covers the
+ * four list tabs' writes. Every working call signs in an admin, in Default mode.
  */
-class PortalProjectSettingsTest extends TestCase
+class PortalReferencesTest extends TestCase
 {
     use DatabaseTransactions;
 
@@ -23,7 +24,7 @@ class PortalProjectSettingsTest extends TestCase
      */
     protected array $connectionsToTransact = ['portal', 'core'];
 
-    private const BASE = '/api/development/portal/manage/project-settings';
+    private const BASE = '/api/development/portal/manage/references';
 
     protected function setUp(): void
     {
@@ -51,17 +52,10 @@ class PortalProjectSettingsTest extends TestCase
         return (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
     }
 
-    // The page's rule is Developer mode only, so every working call signs in a developer and turns it on.
-    private function developerToken(): string
+    // The page is an administrator's now: every working call signs in an admin, in Default mode.
+    private function adminToken(): string
     {
-        $developer = Employee::query()
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->where('is_developer', true)
-            ->whereNotNull('id_no')->where('id_no', '!=', '')
-            ->orderBy('id')
-            ->firstOrFail();
-
-        return $this->developerModeOn($this->token($developer));
+        return $this->token($this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'"));
     }
 
     /**
@@ -80,18 +74,32 @@ class PortalProjectSettingsTest extends TestCase
         return $response->json('data.scopes');
     }
 
-    public function test_the_page_is_developer_mode_only(): void
+    public function test_the_page_follows_its_rule(): void
     {
         $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
         $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
 
         $this->withToken($this->token($member))->getJson(self::BASE)->assertForbidden();
-        $this->withToken($this->token($admin))->getJson(self::BASE)->assertForbidden();
+        $this->withToken($this->token($admin))->getJson(self::BASE)->assertOk();
+    }
+
+    // Edit references splits from the page: without it an admin still reads, and every write is refused.
+    public function test_edit_references_gates_every_write_on_its_own(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $token = $this->token($admin);
+        DB::connection('portal')->table('access_presets')->where('role', 'admin')
+            ->where('permission_key', 'projects.references.edit')->delete();
+
+        $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $this->add($token, ['code' => 'MIS-9099', 'name' => 'Refused', 'department' => 'MIS'])->assertForbidden();
+        $this->withToken($token)->patchJson(self::BASE.'/scopes/1', ['code' => 'X', 'name' => 'X', 'department' => 'MIS'])->assertForbidden();
+        $this->withToken($token)->deleteJson(self::BASE.'/scopes/1')->assertForbidden();
     }
 
     public function test_the_list_returns_each_scope_with_its_department(): void
     {
-        $scopes = $this->scopes($this->withToken($this->developerToken())->getJson(self::BASE)->assertOk());
+        $scopes = $this->scopes($this->withToken($this->adminToken())->getJson(self::BASE)->assertOk());
         $first = $scopes[0] ?? null;
 
         $this->assertNotNull($first);
@@ -102,7 +110,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_scope_is_added_edited_and_removed(): void
     {
-        $token = $this->developerToken();
+        $token = $this->adminToken();
 
         $added = $this->add($token, ['code' => 'MIS-9001', 'name' => 'Test drafting', 'department' => 'MIS'])->assertOk();
         $row = collect($this->scopes($added))->firstWhere('code', 'MIS-9001');
@@ -121,7 +129,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_duplicate_code_is_refused(): void
     {
-        $token = $this->developerToken();
+        $token = $this->adminToken();
 
         $this->add($token, ['code' => 'MIS-9002', 'name' => 'First', 'department' => 'MIS'])->assertOk();
         $this->add($token, ['code' => 'mis-9002', 'name' => 'Second', 'department' => 'MIS'])->assertStatus(422);
@@ -129,7 +137,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_missing_scope_cannot_be_changed(): void
     {
-        $token = $this->developerToken();
+        $token = $this->adminToken();
 
         $this->withToken($token)->patchJson(self::BASE.'/scopes/99999999', ['code' => 'X', 'name' => 'X', 'department' => 'MIS'])->assertNotFound();
         $this->withToken($token)->deleteJson(self::BASE.'/scopes/99999999')->assertNotFound();
@@ -137,7 +145,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_project_type_is_added_edited_and_removed(): void
     {
-        $token = $this->developerToken();
+        $token = $this->adminToken();
 
         $added = $this->withToken($token)->postJson(self::BASE.'/job-types', ['department' => 'MIS', 'name' => 'Test type 9901'])->assertOk();
         $row = collect($added->json('data.jobTypes'))->firstWhere('name', 'Test type 9901');
@@ -155,24 +163,46 @@ class PortalProjectSettingsTest extends TestCase
             ->assertJsonPath('data.jobTypes', fn (array $types): bool => collect($types)->doesntContain(fn (array $type): bool => $type['id'] === $row['id']));
     }
 
-    public function test_a_department_is_added_and_removed(): void
+    public function test_a_department_is_added_described_and_removed(): void
     {
-        $token = $this->developerToken();
+        $token = $this->adminToken();
 
-        $added = $this->withToken($token)->postJson(self::BASE.'/departments', ['name' => 'Test Dept'])->assertOk();
+        $added = $this->withToken($token)->postJson(self::BASE.'/departments', ['name' => 'Test Dept', 'description' => '  Drafts the test work.  '])->assertOk();
         $row = collect($added->json('data.departments'))->firstWhere('name', 'Test Dept');
         $this->assertNotNull($row);
+        $this->assertSame('Drafts the test work.', $row['description']);
+        $this->assertSame([], $row['members']);
 
         $this->withToken($token)->postJson(self::BASE.'/departments', ['name' => 'test dept'])->assertStatus(422);
+
+        // Only the description is editable: the name is how projects, people, types and scopes are filed.
+        $this->withToken($token)->patchJson(self::BASE.'/departments/'.$row['id'], ['description' => '   '])
+            ->assertOk()
+            ->assertJsonPath('data.departments', fn (array $departments): bool => collect($departments)->contains(fn (array $department): bool => $department['id'] === $row['id'] && $department['description'] === null));
+        $this->withToken($token)->patchJson(self::BASE.'/departments/'.$row['id'], ['description' => 'Kept.'])->assertOk();
+        $this->withToken($token)->patchJson(self::BASE.'/departments/99999999', ['description' => 'Gone'])->assertNotFound();
 
         $this->withToken($token)->deleteJson(self::BASE.'/departments/'.$row['id'])->assertOk();
         $this->withToken($token)->deleteJson(self::BASE.'/departments/'.$row['id'])->assertNotFound();
     }
 
+    public function test_a_department_carries_its_active_members(): void
+    {
+        $departments = $this->withToken($this->adminToken())->getJson(self::BASE)->assertOk()->json('data.departments');
+        $staffed = collect($departments)->first(fn (array $department): bool => count($department['members']) > 0);
+        $this->assertNotNull($staffed, 'No department with active members to check against.');
+
+        $count = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ?", [mb_strtolower(trim($staffed['name']))])
+            ->count();
+        $this->assertCount($count, $staffed['members']);
+    }
+
     // The reported ask: a new client, with the two-digit code its project numbers carry.
     public function test_a_client_is_added_with_the_next_free_code_and_numbers_its_projects(): void
     {
-        $token = $this->developerToken();
+        $token = $this->adminToken();
         $page = $this->withToken($token)->getJson(self::BASE)->assertOk();
         $next = (string) $page->json('data.nextClientCode');
         $this->assertMatchesRegularExpression('/^\d{2}$/', $next);
@@ -191,7 +221,7 @@ class PortalProjectSettingsTest extends TestCase
 
     public function test_a_client_needs_a_free_name_and_a_free_two_digit_code(): void
     {
-        $token = $this->developerToken();
+        $token = $this->adminToken();
         $taken = collect($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data.clients'))->first();
         $free = (string) $this->withToken($token)->getJson(self::BASE)->json('data.nextClientCode');
 
@@ -207,7 +237,7 @@ class PortalProjectSettingsTest extends TestCase
     // A client's code is in its project numbers: renamed freely, recoded only before any project.
     public function test_a_client_with_projects_keeps_its_code_and_its_place_on_the_list(): void
     {
-        $token = $this->developerToken();
+        $token = $this->adminToken();
         $page = $this->withToken($token)->getJson(self::BASE)->assertOk();
         $used = collect($page->json('data.clients'))->firstWhere('projects', '>', 0);
         $free = (string) $page->json('data.nextClientCode');
@@ -229,10 +259,26 @@ class PortalProjectSettingsTest extends TestCase
         $this->withToken($token)->patchJson(self::BASE.'/clients/'.$new['id'], ['name' => 'Gone', 'code' => $recode])->assertNotFound();
     }
 
-    public function test_clients_are_developer_mode_only_like_the_rest_of_the_page(): void
+    // A member can never hold the page, so a client write is refused before any validation.
+    public function test_a_member_cannot_reach_the_clients_list(): void
+    {
+        $member = $this->employee("LOWER(COALESCE(role, '')) = 'user'");
+
+        $this->withToken($this->token($member))->postJson(self::BASE.'/clients', ['name' => 'Nope Ltd', 'code' => '98'])->assertForbidden();
+    }
+
+    // Reported live 2026-10-12: an admin whose Add projects is switched off (or limited) must
+    // still open References, which reads the same project options the Add Project form does.
+    public function test_the_page_reads_its_project_options_without_add_projects(): void
     {
         $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        DB::connection('portal')->table('access_toggles')->insert([
+            'employee_id' => $admin->getKey(),
+            'permission_key' => 'projects.create',
+        ]);
 
-        $this->withToken($this->token($admin))->postJson(self::BASE.'/clients', ['name' => 'Nope Ltd', 'code' => '98'])->assertForbidden();
+        $this->withToken($this->token($admin))
+            ->getJson('/api/development/portal/projects/options')
+            ->assertOk();
     }
 }

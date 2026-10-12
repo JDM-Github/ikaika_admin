@@ -4,10 +4,12 @@ use App\Http\Controllers\Api\Portal\Manage\AccessController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetAccountsController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
 use App\Http\Controllers\Api\Portal\Manage\FlaggedMembersController;
+use App\Http\Controllers\Api\Portal\Manage\OnboardingController;
 use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
-use App\Http\Controllers\Api\Portal\Manage\ProjectSettingsController;
+use App\Http\Controllers\Api\Portal\Manage\ReferencesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
+use App\Http\Controllers\Api\Portal\Manage\SharedPagesController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
 use App\Http\Middleware\AuthenticatePortalJwt;
 use App\Support\Portal\PortalFlaggedMembers;
@@ -17,33 +19,85 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // Manage / Projects follows Project Manager; which departments it covers is decided in PortalManageProjects.
     Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects'])
         ->get('manage/projects', [ProjectsController::class, 'index']);
+    // One project's full detail, read-only, for the details page its row opens.
+    Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects'])
+        ->get('manage/projects/{id}', [ProjectsController::class, 'show'])
+        ->whereNumber('id');
     Route::middleware(['portal.rule:projects.manager', 'throttle:portal-projects-write'])
         ->patch('manage/projects/{id}', [ProjectsController::class, 'update'])
         ->whereNumber('id');
-    // Manage / Project Settings is a work in progress, so Developer mode only for now: its rule is
-    // held only while a developer is in Developer mode.
-    Route::middleware(['portal.rule:projects.settings', 'throttle:portal-projects'])
-        ->get('manage/project-settings', [ProjectSettingsController::class, 'index']);
-    Route::middleware(['portal.rule:projects.settings', 'throttle:portal-projects-write'])->group(function (): void {
-        Route::post('manage/project-settings/scopes', [ProjectSettingsController::class, 'storeScope']);
-        Route::patch('manage/project-settings/scopes/{id}', [ProjectSettingsController::class, 'updateScope'])
+    // Manage / References: an administrator's power. Opening and reading follows the base rule;
+    // adding, changing and removing the four tabs' rows follows Edit references.
+    Route::middleware(['portal.rule:projects.references', 'throttle:portal-projects'])
+        ->get('manage/references', [ReferencesController::class, 'index']);
+    Route::middleware(['portal.rule:projects.references.edit', 'throttle:portal-projects-write'])->group(function (): void {
+        Route::post('manage/references/scopes', [ReferencesController::class, 'storeScope']);
+        Route::patch('manage/references/scopes/{id}', [ReferencesController::class, 'updateScope'])
             ->whereNumber('id');
-        Route::delete('manage/project-settings/scopes/{id}', [ProjectSettingsController::class, 'destroyScope'])
+        Route::delete('manage/references/scopes/{id}', [ReferencesController::class, 'destroyScope'])
             ->whereNumber('id');
-        Route::post('manage/project-settings/job-types', [ProjectSettingsController::class, 'storeJobType']);
-        Route::patch('manage/project-settings/job-types/{id}', [ProjectSettingsController::class, 'updateJobType'])
+        Route::post('manage/references/job-types', [ReferencesController::class, 'storeJobType']);
+        Route::patch('manage/references/job-types/{id}', [ReferencesController::class, 'updateJobType'])
             ->whereNumber('id');
-        Route::delete('manage/project-settings/job-types/{id}', [ProjectSettingsController::class, 'destroyJobType'])
+        Route::delete('manage/references/job-types/{id}', [ReferencesController::class, 'destroyJobType'])
             ->whereNumber('id');
-        Route::post('manage/project-settings/departments', [ProjectSettingsController::class, 'storeDepartment']);
-        Route::delete('manage/project-settings/departments/{id}', [ProjectSettingsController::class, 'destroyDepartment'])
+        Route::post('manage/references/departments', [ReferencesController::class, 'storeDepartment']);
+        Route::patch('manage/references/departments/{id}', [ReferencesController::class, 'updateDepartment'])
             ->whereNumber('id');
-        Route::post('manage/project-settings/clients', [ProjectSettingsController::class, 'storeClient']);
-        Route::patch('manage/project-settings/clients/{id}', [ProjectSettingsController::class, 'updateClient'])
+        Route::delete('manage/references/departments/{id}', [ReferencesController::class, 'destroyDepartment'])
             ->whereNumber('id');
-        Route::delete('manage/project-settings/clients/{id}', [ProjectSettingsController::class, 'destroyClient'])
+        Route::post('manage/references/clients', [ReferencesController::class, 'storeClient']);
+        Route::patch('manage/references/clients/{id}', [ReferencesController::class, 'updateClient'])
+            ->whereNumber('id');
+        Route::delete('manage/references/clients/{id}', [ReferencesController::class, 'destroyClient'])
             ->whereNumber('id');
     });
+    // Manage / Shared Pages: reading a share (link, QR, kept password) follows the base rule;
+    // creating, changing and revoking follows Create and revoke; a new password follows New passwords.
+    Route::middleware(['portal.rule:manage.shares', 'throttle:portal-projects'])
+        ->get('manage/shared-pages', [SharedPagesController::class, 'index']);
+    Route::middleware(['portal.rule:manage.shares', 'throttle:portal-projects'])
+        ->get('manage/shared-pages/{id}/qr', [SharedPagesController::class, 'qr'])
+        ->whereNumber('id');
+    Route::middleware(['portal.rule:manage.shares.manage', 'throttle:portal-projects-write'])->group(function (): void {
+        Route::post('manage/shared-pages', [SharedPagesController::class, 'store']);
+        Route::patch('manage/shared-pages/{id}', [SharedPagesController::class, 'update'])
+            ->whereNumber('id');
+        Route::delete('manage/shared-pages/{id}', [SharedPagesController::class, 'destroy'])
+            ->whereNumber('id');
+    });
+    Route::middleware(['portal.rule:manage.shares.password', 'throttle:portal-projects-write'])
+        ->post('manage/shared-pages/{id}/regenerate', [SharedPagesController::class, 'regenerate'])
+        ->whereNumber('id');
+    // Manage / Onboarding: candidate registration links. Reading (list, one entry, QR, a document)
+    // follows the base rule; creating, changing, revoking, marking sent and promoting follow
+    // Create and revoke; a new password follows New passwords.
+    Route::middleware(['portal.rule:manage.onboarding', 'throttle:portal-projects'])
+        ->get('manage/registrations', [OnboardingController::class, 'index']);
+    Route::middleware(['portal.rule:manage.onboarding', 'throttle:portal-projects'])
+        ->get('manage/registrations/{id}', [OnboardingController::class, 'show'])
+        ->whereNumber('id');
+    Route::middleware(['portal.rule:manage.onboarding', 'throttle:portal-projects'])
+        ->get('manage/registrations/{id}/qr', [OnboardingController::class, 'qr'])
+        ->whereNumber('id');
+    Route::middleware(['portal.rule:manage.onboarding', 'throttle:portal-projects'])
+        ->get('manage/registrations/{id}/documents/{document}', [OnboardingController::class, 'document'])
+        ->whereNumber('id')
+        ->whereNumber('document');
+    Route::middleware(['portal.rule:manage.onboarding.manage', 'throttle:portal-projects-write'])->group(function (): void {
+        Route::post('manage/registrations', [OnboardingController::class, 'store']);
+        Route::patch('manage/registrations/{id}', [OnboardingController::class, 'update'])
+            ->whereNumber('id');
+        Route::delete('manage/registrations/{id}', [OnboardingController::class, 'destroy'])
+            ->whereNumber('id');
+        Route::post('manage/registrations/{id}/sent', [OnboardingController::class, 'sent'])
+            ->whereNumber('id');
+        Route::post('manage/registrations/{id}/promote', [OnboardingController::class, 'promote'])
+            ->whereNumber('id');
+    });
+    Route::middleware(['portal.rule:manage.onboarding.password', 'throttle:portal-projects-write'])
+        ->post('manage/registrations/{id}/password', [OnboardingController::class, 'regenerate'])
+        ->whereNumber('id');
     // The roster and profiles follow Users and its reach; the private block inside a profile follows Show employee information.
     Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
         ->get('manage/users', [UsersController::class, 'index']);

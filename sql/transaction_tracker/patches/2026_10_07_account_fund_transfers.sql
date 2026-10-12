@@ -1,6 +1,6 @@
--- Existing transaction tracker databases (phpMyAdmin or mysql client), run once.
--- Fresh installs get this from sql/transaction_tracker/schema.sql.
--- Skip if MySQL reports Table 'account_fund_transfers' already exists.
+-- A tracker patch: every Test Server admin deploy runs each file in this folder (deploy-admin.sh), so each must
+-- be safe to run again. Fresh installs get the same table from sql/transaction_tracker/schema.sql.
+-- By hand on another database: run it in phpMyAdmin or the mysql client; the USE line names the local one.
 --
 -- The fund transfers Finance / Accounts lists: one is left pending when an expense is paid from one
 -- account out of an envelope another account owns, and completing it writes the account transfer.
@@ -8,7 +8,7 @@
 
 USE test_tracker_database;
 
-CREATE TABLE account_fund_transfers (
+CREATE TABLE IF NOT EXISTS account_fund_transfers (
     id                         INT AUTO_INCREMENT PRIMARY KEY,
     source_account_id          INT NULL,
     destination_account_id     INT NULL,

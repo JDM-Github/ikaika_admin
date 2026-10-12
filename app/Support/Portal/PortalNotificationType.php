@@ -31,9 +31,15 @@ final class PortalNotificationType
 
     public const PROJECT_REQUESTED = 'projects.requested';
 
+    public const PROJECT_REQUESTED_MEMBERS = 'projects.requested.members';
+
     public const PROJECT_APPROVED = 'projects.approved';
 
     public const PROJECT_REJECTED = 'projects.rejected';
+
+    public const PROJECT_MODIFIED = 'projects.modified';
+
+    public const CALENDAR_EVENT_CREATED = 'calendar.event.created';
 
     public const BIN_RESTORED = 'administration.recycle-bin.restored';
 

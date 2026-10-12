@@ -2,8 +2,8 @@
 
 namespace App\Mail;
 
-use App\Support\Portal\PortalEmailAttachments;
 use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalPrivateFiles;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Attachment;
@@ -55,7 +55,7 @@ class PortalEmailMail extends Mailable
     public function attachments(): array
     {
         return array_map(
-            static fn (array $file): Attachment => Attachment::fromStorageDisk(PortalEmailAttachments::DISK, $file['path'])
+            static fn (array $file): Attachment => Attachment::fromStorageDisk(PortalPrivateFiles::DISK, $file['path'])
                 ->as($file['name'])
                 ->withMime($file['mime']),
             $this->attachedFiles,
