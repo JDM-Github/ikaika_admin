@@ -407,75 +407,37 @@
         "description": "Applies this repository's sql/ folder to the local databases, and runs Laravel's migrations",
         "args": [
           {
-            "flag": "Core",
-            "label": "-Core   [SwitchParameter]",
-            "type": "boolean",
+            "flag": "Product",
+            "label": "-Product   [String[]]",
+            "type": "array",
             "required": false,
-            "description": "The core platform database - the shared action log and recycle bin.",
-            "default": ""
-          },
-          {
-            "flag": "Portal",
-            "label": "-Portal   [SwitchParameter]",
-            "type": "boolean",
-            "required": false,
-            "description": "The employee portal database.",
-            "default": ""
-          },
-          {
-            "flag": "Estimator",
-            "label": "-Estimator   [SwitchParameter]",
-            "type": "boolean",
-            "required": false,
-            "description": "The project estimator database.",
-            "default": ""
+            "description": "The products to apply, by sql/ folder; the folders that hold .sql files are offered.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/update-database Product"
           },
           {
             "flag": "AllProducts",
             "label": "-AllProducts   [SwitchParameter]",
             "type": "boolean",
             "required": false,
-            "description": "All three products.",
+            "description": "Every product.",
             "default": ""
           },
           {
-            "flag": "Schema",
-            "label": "-Schema   [SwitchParameter]",
-            "type": "boolean",
+            "flag": "Step",
+            "label": "-Step   [String[]]",
+            "type": "array",
             "required": false,
-            "description": "schema.sql - the tables. DESTRUCTIVE for portal and estimator; see -DropAndRecreate.",
-            "default": ""
-          },
-          {
-            "flag": "Separate",
-            "label": "-Separate   [SwitchParameter]",
-            "type": "boolean",
-            "required": false,
-            "description": "separate.sql - the tables kept out of the main schema file. Portal only.",
-            "default": ""
-          },
-          {
-            "flag": "Indexes",
-            "label": "-Indexes   [SwitchParameter]",
-            "type": "boolean",
-            "required": false,
-            "description": "indexes.sql - indexes added to a database that already has the tables.",
-            "default": ""
-          },
-          {
-            "flag": "Data",
-            "label": "-Data   [SwitchParameter]",
-            "type": "boolean",
-            "required": false,
-            "description": "data.sql - the rows. Large, and portal's begins with a TRUNCATE.",
-            "default": ""
+            "description": "The steps to apply, by file name without .sql, or patches; the ones the folders hold are offered.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/update-database Step"
           },
           {
             "flag": "DropAndRecreate",
             "label": "-DropAndRecreate   [SwitchParameter]",
             "type": "boolean",
             "required": false,
-            "description": "Allow a file that begins with DROP DATABASE to run. Without this, such a file is listed, named as destructive, and skipped.",
+            "description": "Allow a rebuild - a file that begins with DROP DATABASE - on a database that has tables.",
             "default": ""
           },
           {
@@ -483,7 +445,7 @@
             "label": "-Idempotent   [SwitchParameter]",
             "type": "boolean",
             "required": false,
-            "description": "Bring every database up to date and skip whatever is already there, so running it again does nothing.",
+            "description": "Bring every database up to date and skip what is already applied, so a second run does nothing.",
             "default": ""
           },
           {
@@ -491,12 +453,20 @@
             "label": "-Migrate   [SwitchParameter]",
             "type": "boolean",
             "required": false,
-            "description": "php artisan migrate. Additive, and the supported way to update an existing deployment - the sql/ files are for building a local one.",
+            "description": "php artisan migrate: additive, and the supported way to update an existing deployment.",
+            "default": ""
+          },
+          {
+            "flag": "DryRun",
+            "label": "-DryRun   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "List what would run, in order, and run nothing.",
             "default": ""
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Core ${update-database.args.Core} -Portal ${update-database.args.Portal} -Estimator ${update-database.args.Estimator} -AllProducts ${update-database.args.AllProducts} -Schema ${update-database.args.Schema} -Separate ${update-database.args.Separate} -Indexes ${update-database.args.Indexes} -Data ${update-database.args.Data} -DropAndRecreate ${update-database.args.DropAndRecreate} -Idempotent ${update-database.args.Idempotent} -Migrate ${update-database.args.Migrate}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Product ${update-database.args.Product} -AllProducts ${update-database.args.AllProducts} -Step ${update-database.args.Step} -DropAndRecreate ${update-database.args.DropAndRecreate} -Idempotent ${update-database.args.Idempotent} -Migrate ${update-database.args.Migrate} -DryRun ${update-database.args.DryRun}"
         ]
       }
     },

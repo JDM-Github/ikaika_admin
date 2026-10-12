@@ -1,3 +1,6 @@
+-- update-database: after data.sql
+-- The grants below need the employees data.sql loads, so this runs after it (sql/portal/reset.ps1 does the same).
+
 USE test_portal_database;
 
 -- ============================================================================

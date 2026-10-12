@@ -1,74 +1,68 @@
-# Applies this repository's sql/ folder to the local databases, and runs Laravel's
-# migrations. Which product and which file are switches, so ticking two boxes applies
-# two files in a defined order and nothing else.
+# Applies this repository's sql/ folder to the local databases, and runs Laravel's migrations.
 #
-# READ THIS BEFORE TICKING -Schema. sql/portal/schema.sql and
-# sql/project_estimator/schema.sql each open with a DROP DATABASE. "Apply the schema"
-# therefore means destroy the database and build it again empty - every row, including
-# anything typed in by hand this morning. That is what those files are for, and it is not
-# what most people mean when they tick a box called Schema.
+# WHAT THERE IS TO APPLY IS FOUND, NOT LISTED. The products are config/products.php's catalog, each
+# with the sql/ folder named after its key (project-estimator is sql/project_estimator), and a step
+# is any .sql file in that folder - schema, separate, indexes, data - or the patches/ folder beside
+# them, whose files run in name order. A product or a file added later is picked up without an edit
+# here; that is the whole difference from the version that never learned about the tracker.
 #
-# So -Schema alone is refused on a file that drops. -DropAndRecreate is the second
-# switch that allows it, and it is named after what it does rather than after being a
-# confirmation, because a box called -Yes teaches nobody anything.
+# THE ORDER IS READ FROM THE FILES, never from the order switches are typed. What a file does decides
+# where it goes:
+#     rebuild    drops the database (DROP DATABASE)              first - it is what creates it
+#     structure  creates tables (CREATE TABLE)
+#     retrofit   alters what is there (ALTER TABLE, CREATE INDEX)
+#     data       only inserts rows
+#     patch      anything under patches/                          last, in name order
+# A file that needs something else first says so in its own header, and that line wins:
+#     -- update-database: after data.sql
+# sql/portal/separate.sql carries one, because its grants need the employees data.sql loads.
 #
-# WITH NO SWITCHES NOTHING IS APPLIED. Every file is listed with the database it targets,
-# its size, and whether it destroys anything, and the run stops there. A destructive
-# command with no confirmation prompt - which is what a form full of checkboxes is - has
-# to have a safe thing to do when it is run out of curiosity, and this is it.
+# HOW A FILE RUNS FOLLOWS FROM ITS KIND. mysql stops at its first error, so a retrofit or a patch
+# that meets an index or column already there would never reach the statements after it; those files
+# run past every error, and only an error that is not "already there" counts as a failure. A rebuild
+# or a data file runs strictly - a data file inserts rather than merges, so carrying on past a
+# duplicate would double every table without a unique key.
 #
-# THE FILES NAME THEIR OWN DATABASE and ignore .env. Every one of them carries a literal
-# USE test_portal_database (or ikaika_platform, or test_estimator_database) inside it, so
-# pointing PORTAL_DB_DATABASE somewhere else changes what Laravel reads and changes
-# nothing about where these files write. That disagreement is reported per file, because
-# the failure it causes otherwise is "I updated the database and the app saw nothing".
+# A REBUILD DESTROYS. Every rebuild file opens with DROP DATABASE, so it is refused on a database
+# that has tables unless -DropAndRecreate is given; on one that does not exist yet it only creates it.
+# After a rebuild, that product's rows leave the core database's actions and recycle tables, as
+# sql/portal/reset.ps1 does - they describe rows that are gone.
 #
-# ORDER IS FIXED, not the order the switches are typed: schema, separate, indexes, data.
-# Indexes on a table that does not exist yet is an error, and data before schema is the
-# same error one step earlier.
+# WITH NOTHING PICKED NOTHING IS APPLIED. Every step is listed with its kind, the database it
+# targets, its size and what it would destroy, and the run stops there.
 #
-#     .\script.ps1 update-database                       list everything, change nothing
-#     .\script.ps1 update-database -Portal -Data         load the portal rows
-#     .\script.ps1 update-database -Core -Schema         core is the one schema that is safe
-#     .\script.ps1 update-database -Portal -Schema -DropAndRecreate
-#     .\script.ps1 update-database -Migrate              php artisan migrate
+# THE FILES NAME THEIR OWN DATABASE with a USE line, and ignore .env; a disagreement is reported per
+# file, since otherwise it reads as "I updated the database and the app saw nothing". A file with no
+# USE line runs against the product's .env database.
 #
-# Requires PowerShell 7+, a mysql client on PATH (environment-variables puts one there),
-# and a running database (run-servers starts one).
+#     .\script.ps1 update-database                                        list everything, change nothing
+#     .\script.ps1 update-database -Product portal -Step data             load the portal rows
+#     .\script.ps1 update-database -Product transaction_tracker -Step patches
+#     .\script.ps1 update-database -Product portal -Step schema,indexes,data,separate -DropAndRecreate
+#     .\script.ps1 update-database -Idempotent                            bring every database up to date
+#     .\script.ps1 update-database -Migrate                               php artisan migrate
+#
+# Requires PowerShell 7+, a mysql client on PATH (environment-variables puts one there), and a running
+# database (run-servers starts one).
 
-# ============================[ start: Parameters ]============================
 param(
-    # The core platform database - the shared action log and recycle bin.
-    [switch]$Core,
-    # The employee portal database.
-    [switch]$Portal,
-    # The project estimator database.
-    [switch]$Estimator,
-    # All three products.
+    # The products to apply, by sql/ folder; the folders that hold .sql files are offered.
+    [string[]]$Product = @(),
+    # Every product.
     [switch]$AllProducts,
-
-    # schema.sql - the tables. DESTRUCTIVE for portal and estimator; see -DropAndRecreate.
-    [switch]$Schema,
-    # separate.sql - the tables kept out of the main schema file. Portal only.
-    [switch]$Separate,
-    # indexes.sql - indexes added to a database that already has the tables.
-    [switch]$Indexes,
-    # data.sql - the rows. Large, and portal's begins with a TRUNCATE.
-    [switch]$Data,
-
-    # Allow a file that begins with DROP DATABASE to run. Without this, such a file is
-    # listed, named as destructive, and skipped.
+    # The steps to apply, by file name without .sql, or patches; the ones the folders hold are offered.
+    [string[]]$Step = @(),
+    # Allow a rebuild - a file that begins with DROP DATABASE - on a database that has tables.
     [switch]$DropAndRecreate,
-    # Bring every database up to date and skip whatever is already there, so running it
-    # again does nothing. Picks every product and every file when nothing else is named,
-    # because "make my databases match the repo" is the whole point of it.
+    # Bring every database up to date and skip what is already applied, so a second run does nothing.
+    # Picks every product, every step and the migrations when nothing else is named; never rebuilds.
     [switch]$Idempotent,
-    # php artisan migrate. Additive, and the supported way to update an existing
-    # deployment - the sql/ files are for building a local one.
+    # php artisan migrate: additive, and the supported way to update an existing deployment.
     [switch]$Migrate,
+    # List what would run, in order, and run nothing.
+    [switch]$DryRun,
     [switch]$Help
 )
-# =============================[ end: Parameters ]==============================
 
 $ErrorActionPreference = 'Stop'
 
@@ -82,205 +76,182 @@ $libDir = Join-Path $repoRoot 'decoupled-script\lib'
 . (Join-Path $configsDir 'lib\laravel.ps1')
 
 if ($Help) {
-    Write-Host ''
-    Write-Host '  update-database - apply sql/ to the local databases.'
-    Write-Host ''
-    Write-Host '  Usage'
-    Write-Host '    .\script.ps1 update-database [-Core] [-Portal] [-Estimator] [-AllProducts]'
-    Write-Host '                                 [-Schema] [-Separate] [-Indexes] [-Data]'
-    Write-Host '                                 [-DropAndRecreate] [-Migrate]'
-    Write-Host ''
-    Write-Host '  No switches lists every file and applies none of them.'
-    Write-Host ''
-    Write-Host '  -Idempotent means everything: all three products, all four files, and'
-    Write-Host '  the migrations. It skips what is already applied, so running it twice'
-    Write-Host '  does nothing the second time.'
-    Write-Host ''
-    Write-Host '  -Schema is DESTRUCTIVE for portal and estimator: those files open with'
-    Write-Host '  DROP DATABASE, so applying one empties it. They are skipped unless'
-    Write-Host '  -DropAndRecreate is also given. sql/core/schema.sql does not drop.'
-    Write-Host ''
-    Write-Host '  Files run in a fixed order whatever order the switches are typed:'
-    Write-Host '    schema -> separate -> indexes -> data'
-    Write-Host ''
-    Write-Host '  -Migrate runs php artisan migrate, which is additive and is what an'
-    Write-Host '  existing deployment takes. The sql/ files build a local one.'
-    Write-Host ''
-    Write-Host '  Config: the databases and credentials come from .env, and the product'
-    Write-Host '  list mirrors config/products.php.'
-    Write-Host ''
+    Write-Host @'
+
+  update-database - apply sql/ to the local databases, in the order the files call for.
+
+  Usage
+    .\script.ps1 update-database [-Product <folder>[,...] | -AllProducts] [-Step <name>[,...]]
+                                 [-DropAndRecreate] [-Idempotent] [-Migrate] [-DryRun]
+
+  With nothing picked it lists every product's steps and applies none.
+
+  Products are config/products.php's catalog; a product's steps are the .sql
+  files in sql/<folder>, and patches for the files in sql/<folder>/patches.
+
+  Steps run in the order their contents call for, whatever order they are typed:
+    rebuild -> structure -> retrofit -> data -> patch
+  and a file's own "-- update-database: after <file>" line moves it later.
+
+  A rebuild opens with DROP DATABASE: on a database that has tables it is
+  refused unless -DropAndRecreate is given, and afterwards that product's rows
+  leave the core ledger (actions, recycle).
+
+  -Idempotent means everything - every product, every step, the migrations -
+  skipping what is already applied and never rebuilding. A second run does
+  nothing.
+
+  Examples
+    .\script.ps1 update-database -Product portal -Step data
+    .\script.ps1 update-database -Product transaction_tracker -Step patches
+    .\script.ps1 update-database -Product portal -Step schema,indexes,data,separate -DropAndRecreate
+    .\script.ps1 update-database -AllProducts -Step indexes,patches -DryRun
+
+  The databases and credentials come from .env, as config/products.php reads them.
+
+'@
     exit 0
 }
 
 Start-BuildLog 'update-database'
 
 $sqlRoot = Join-Path $repoRoot 'sql'
-$envPath = Join-Path $repoRoot '.env'
-$products = Get-ProductDatabase $envPath
+$products = Get-ProductDatabase (Join-Path $repoRoot '.env')
 
-if ($AllProducts) { $Core = $Portal = $Estimator = $true }
+# Errors that mean the statement's work is already there, so a retrofit or patch that meets them has
+# nothing left to do on that line: table exists, duplicate column, key or row, primary key defined,
+# nothing to drop, duplicate foreign key.
+$AlreadyThere = @(1050, 1060, 1061, 1062, 1068, 1091, 1826)
+$KindRank = [ordered]@{ rebuild = 0; structure = 1; retrofit = 2; other = 2; data = 3; patch = 4 }
 
-# -Idempotent with nothing else named means everything. Asking somebody to tick eight
-# boxes to say "bring this up to date" is asking them to get it wrong once.
-if ($Idempotent -and -not ($Core -or $Portal -or $Estimator -or $Schema -or $Separate -or $Indexes -or $Data)) {
-    $Core = $Portal = $Estimator = $true
-    $Schema = $Separate = $Indexes = $Data = $true
-    # MIGRATIONS ARE PART OF "UP TO DATE", and leaving them out was a real gap rather
-    # than a scoping decision: the sql/ files build the tables, and every column added
-    # since lives in a migration. A run that applied every file and skipped these left a
-    # schema the application could not use, failing later with "Unknown column" - which
-    # names neither the migration nor the command that should have run it.
-    #
-    # Safe to include because artisan migrate is itself idempotent: it consults its own
-    # migrations table and runs only what is not there.
-    $Migrate = $true
+# ------------------------------------------------------------------------ what a file is
+function Get-SqlFileFacts([string]$Path, [bool]$IsPatch) {
+    $lines = @(Get-Content -LiteralPath $Path)
+    $count = { param($pattern) @($lines | Where-Object { $_ -match $pattern }).Count }
+    $targets = @($lines | Where-Object { $_ -match '^\s*USE\s+`?([A-Za-z0-9_]+)`?\s*;' } | ForEach-Object { [void]($_ -match '^\s*USE\s+`?([A-Za-z0-9_]+)'); $Matches[1] })
+    $after = @($lines | Where-Object { $_ -match '^\s*--\s*update-database:\s*after\s+(.+)$' } |
+            ForEach-Object { [void]($_ -match 'after\s+(.+)$'); $Matches[1] -split '[,\s]+' } | Where-Object { $_ })
+    $facts = [pscustomobject]@{
+        Path         = $Path
+        Bytes        = (Get-Item -LiteralPath $Path).Length
+        Target       = $(if ($targets.Count) { $targets[0] } else { '' })
+        Drops        = & $count '^\s*DROP\s+DATABASE'
+        Truncates    = & $count '^\s*TRUNCATE'
+        CreateTables = & $count '^\s*CREATE\s+TABLE'
+        Alters       = (& $count '^\s*ALTER\s+TABLE') + (& $count '^\s*CREATE\s+(UNIQUE\s+)?INDEX')
+        Inserts      = & $count '^\s*INSERT'
+        After        = $after
+        Kind         = ''
+    }
+    $facts.Kind = if ($IsPatch) { 'patch' }
+    elseif ($facts.Drops) { 'rebuild' }
+    elseif ($facts.CreateTables) { 'structure' }
+    elseif ($facts.Alters) { 'retrofit' }
+    elseif ($facts.Inserts) { 'data' }
+    else { 'other' }
+    return $facts
 }
 
-$wantedFolders = @()
-if ($Core) { $wantedFolders += 'core' }
-if ($Portal) { $wantedFolders += 'portal' }
-if ($Estimator) { $wantedFolders += 'project_estimator' }
+# A product's steps in the order they run: by kind, then name, then each file's own "after" lines.
+function Get-ProductStep([string]$FolderPath) {
+    $steps = [Collections.Generic.List[object]]::new()
+    foreach ($file in @(Get-ChildItem -LiteralPath $FolderPath -Filter '*.sql' -File | Sort-Object Name)) {
+        $facts = Get-SqlFileFacts $file.FullName $false
+        $steps.Add([pscustomobject]@{ Name = $file.BaseName; Label = $file.Name; Facts = $facts })
+    }
+    $patchDir = Join-Path $FolderPath 'patches'
+    if (Test-Path -LiteralPath $patchDir) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $patchDir -Filter '*.sql' -File | Sort-Object Name)) {
+            $steps.Add([pscustomobject]@{ Name = 'patches'; Label = "patches/$($file.Name)"; Facts = (Get-SqlFileFacts $file.FullName $true) })
+        }
+    }
+    $ordered = [Collections.Generic.List[object]]::new()
+    foreach ($s in @($steps | Sort-Object { $KindRank[$_.Facts.Kind] }, Label)) { $ordered.Add($s) }
+    # Each pass moves a file after anything it names that still comes later; a cycle stops at the cap.
+    for ($pass = 0; $pass -lt $ordered.Count; $pass++) {
+        $moved = $false
+        foreach ($s in @($ordered)) {
+            foreach ($dependency in $s.Facts.After) {
+                $at = $ordered.IndexOf($s)
+                $depAt = -1
+                for ($i = 0; $i -lt $ordered.Count; $i++) { if ($ordered[$i].Label -eq $dependency -or $ordered[$i].Name -eq ($dependency -replace '\.sql$', '')) { $depAt = $i } }
+                if ($depAt -gt $at) {
+                    $ordered.RemoveAt($at)
+                    $ordered.Insert($depAt, $s)
+                    $moved = $true
+                }
+            }
+        }
+        if (-not $moved) { break }
+    }
+    return , $ordered
+}
 
-# The fixed order, with each part's switch beside it. A hashtable would not have an
-# order, and the order is the only thing keeping "indexes" from running before the table
-# it indexes exists.
-$Parts = @(
-    [pscustomobject]@{ File = 'schema.sql'; Wanted = [bool]$Schema }
-    [pscustomobject]@{ File = 'separate.sql'; Wanted = [bool]$Separate }
-    [pscustomobject]@{ File = 'indexes.sql'; Wanted = [bool]$Indexes }
-    [pscustomobject]@{ File = 'data.sql'; Wanted = [bool]$Data }
-)
+# ------------------------------------------------------------------------ the server
+function Invoke-MysqlQuery([object]$Product, [string]$Query) {
+    $mysql = Get-Command mysql -ErrorAction SilentlyContinue
+    if (-not $mysql) { return $null }
+    $arguments = (Get-MysqlArgument $Product) + @('--batch', '--skip-column-names', '--execute', $Query)
+    try {
+        $answer = @(& $mysql.Source @arguments 2>$null | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+        if ($LASTEXITCODE -ne 0) { return $null }
+        return , $answer
+    } catch { return $null }
+}
 
-# ============================[ start: The ledger ]============================
-# WHAT MAKES THIS IDEMPOTENT, and why it is not "write the SQL files idempotently".
-#
-# These files cannot be made safely repeatable from the inside: MySQL has no CREATE
-# INDEX IF NOT EXISTS, data.sql inserts rather than merges, and they are generated from
-# Airtable rather than hand-maintained. So repeatability is kept OUTSIDE them - a record
-# of which file, at which content hash, was applied to which database and when.
-#
-# IT IS A LOCAL FILE AND NOT A TABLE. The first version put a bookkeeping table in each
-# product database, which is wrong however convenient it is: those schemas are the
-# product's, they get dumped, diffed, migrated and read in phpMyAdmin, and a table that
-# belongs to a build tool has no business appearing in any of that. The cost of moving
-# it out is that the record is per machine rather than per database - which is why the
-# target database is checked below before the record is believed.
-#
-# THE HASH, NOT THE NAME. A file edited after it was applied is a file that has not been
-# applied; recording only the name would silently skip the new version.
+# Tables in a database, or -1 when the server cannot be asked - which callers read as "assume it has
+# some", since refusing a rebuild is the safe way to be wrong.
+function Get-DatabaseTableCount([object]$Product, [string]$Database) {
+    if (-not $Database) { return -1 }
+    $answer = Invoke-MysqlQuery $Product "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$($Database -replace "'", "''")'"
+    if ($null -eq $answer -or "$($answer[0])" -notmatch '^\d+$') { return -1 }
+    return [int]$answer[0]
+}
+
+function Get-PresentTable([object]$Product, [string]$Database) {
+    $answer = Invoke-MysqlQuery $Product "SELECT table_name FROM information_schema.tables WHERE table_schema = '$($Database -replace "'", "''")'"
+    if ($null -eq $answer) { return @() }
+    return $answer
+}
+
+# Runs one file. Redirected through cmd rather than piped from PowerShell, which re-encodes the file
+# and corrupts every non-ASCII byte of a large dump. Returns the exit code and every ERROR line.
+function Invoke-SqlFile([object]$Product, [object]$Facts, [bool]$Force) {
+    $mysql = (Get-Command mysql).Source
+    $arguments = Get-MysqlArgument $Product
+    if (-not $Facts.Target) { $arguments += $Product.Database }
+    $arguments += '--default-character-set=utf8mb4'
+    if ($Force) { $arguments += '--force' }
+    $quoted = ($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $output = @(& cmd.exe '/c' "`"$mysql`" $quoted < `"$($Facts.Path)`" 2>&1")
+    $exit = $LASTEXITCODE
+    $errors = @($output | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match '^ERROR \d+' })
+    return [pscustomobject]@{ Exit = $exit; Errors = $errors; First = "$(@($output | Where-Object { "$_".Trim() })[0])".Trim() }
+}
+
+function Get-ErrorCode([string]$Line) {
+    if ($Line -match '^ERROR (\d+)') { return [int]$Matches[1] }
+    return 0
+}
+
+# ------------------------------------------------------------------------ the ledger
+# What -Idempotent skips: which file, at which content hash, was applied to which database. A local
+# file rather than a table, so no product schema carries a table that belongs to a build tool; the
+# hash, not the name, so a file edited after it was applied counts as unapplied again; and believed
+# only while the database still has tables, since anything can have happened to it in between.
 $LedgerPath = Join-Path $configsDir '.sql-applied.json'
-
-function Get-FileHashHex([string]$Path) {
-    return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLower()
-}
 
 function Get-Ledger {
     if (-not (Test-Path -LiteralPath $LedgerPath)) { return @{} }
-    try {
-        $raw = Get-Content -LiteralPath $LedgerPath -Raw | ConvertFrom-Json
-    } catch {
-        # A corrupt record is not a reason to refuse to work; it is a reason to act as
-        # though nothing has been applied, which is the safe direction to be wrong in.
-        return @{}
-    }
+    try { $raw = Get-Content -LiteralPath $LedgerPath -Raw | ConvertFrom-Json } catch { return @{} }
     $ledger = @{}
     foreach ($property in $raw.PSObject.Properties) { $ledger[$property.Name] = $property.Value }
     return $ledger
 }
 
 function Save-Ledger([hashtable]$Ledger) {
-    if (-not $Ledger.Count) {
-        Remove-Item -LiteralPath $LedgerPath -Force -ErrorAction SilentlyContinue
-        return
-    }
+    if (-not $Ledger.Count) { Remove-Item -LiteralPath $LedgerPath -Force -ErrorAction SilentlyContinue; return }
     ($Ledger | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $LedgerPath -Encoding utf8
-}
-
-# One key per database AND file, because the same file applied to two databases is two
-# different facts - and because a database rebuilt elsewhere must only invalidate its
-# own rows.
-function Get-LedgerKey([string]$Database, [string]$File) { return "$Database|$File" }
-
-# THE CHECK THAT MAKES A LOCAL RECORD HONEST. The record lives on this machine and the
-# database does not, so anything could have happened to it in between - dropped in
-# phpMyAdmin, rebuilt from a dump, pointed somewhere else in .env. An empty database is
-# treated as nothing having been applied to it, whatever the file says.
-function Test-LedgerStillTrue([object]$Product, [string]$Database) {
-    $tables = Get-DatabaseTableCount $Product $Database
-    if ($tables -lt 0) { return $false }
-    return $tables -gt 0
-}
-# =============================[ end: The ledger ]=============================
-
-# ------------------------------------------------------- what a file will do
-# Read from the file itself, never assumed from its name. schema.sql drops in two
-# products out of three, and a rule based on the filename would be wrong for core - in
-# the direction that loses data.
-function Get-SqlFileFacts([string]$Path) {
-    $lines = @(Get-Content -LiteralPath $Path)
-    $targets = @()
-    foreach ($line in $lines) {
-        if ($line -match '^\s*USE\s+`?([A-Za-z0-9_]+)`?\s*;') { $targets += $Matches[1] }
-    }
-    return [pscustomobject]@{
-        Path      = $Path
-        Bytes     = (Get-Item -LiteralPath $Path).Length
-        Target    = $(if ($targets.Count) { $targets[0] } else { '' })
-        Drops     = @($lines | Where-Object { $_ -match '^\s*DROP\s+DATABASE' }).Count
-        Truncates = @($lines | Where-Object { $_ -match '^\s*TRUNCATE' }).Count
-            }
-}
-
-# WHAT A DROP ACTUALLY COSTS, asked of the server rather than assumed from the file.
-# Every one of these files says DROP DATABASE **IF EXISTS**, so on a machine that has
-# never had the database the drop destroys nothing and the guard was refusing a no-op -
-# which made the first run impossible, because schema.sql is the only thing that creates
-# the database in the first place. Returns -1 when the server cannot be reached, and the
-# caller treats that as "assume it exists", because refusing is the safe way to be wrong.
-function Get-DatabaseTableCount([object]$Product, [string]$Database) {
-    $mysql = Get-Command mysql -ErrorAction SilentlyContinue
-    if (-not $mysql -or -not $Database) { return -1 }
-    $arguments = Get-MysqlArgument $Product
-    $arguments += @('--batch', '--skip-column-names', '--execute',
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$($Database -replace "'", "''")'")
-    try {
-        $answer = & $mysql.Source @arguments 2>$null
-        if ($LASTEXITCODE -ne 0) { return -1 }
-        $text = "$(@($answer)[0])".Trim()
-        if ($text -match '^\d+$') { return [int]$text }
-        return -1
-    } catch { return -1 }
-}
-
-# The tables a file declares, and which of them the server actually has.
-#
-# This exists because of how mysql handles an error: it STOPS. So "Table x already
-# exists" halfway down a file means everything after that line did not run - and calling
-# that outcome "already applied" would be claiming a state nobody verified. Asking which
-# tables are really there is the only way to tell a harmless re-run from a file that
-# stopped a third of the way in.
-function Get-DeclaredTableName([string]$Path) {
-    $names = @()
-    foreach ($line in (Get-Content -LiteralPath $Path)) {
-        if ($line -match '^\s*CREATE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?') {
-            $names += $Matches[2]
-        }
-    }
-    return @($names | Select-Object -Unique)
-}
-
-function Get-MissingTable([object]$Product, [string]$Database, [string[]]$Names) {
-    if (-not $Names.Count) { return @() }
-    $mysql = Get-Command mysql -ErrorAction SilentlyContinue
-    if (-not $mysql -or -not $Database) { return $Names }
-    $arguments = Get-MysqlArgument $Product
-    $arguments += @('--batch', '--skip-column-names', '--execute',
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = '$($Database -replace "'", "''")'")
-    try {
-        $present = @(& $mysql.Source @arguments 2>$null | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
-        if ($LASTEXITCODE -ne 0) { return $Names }
-    } catch { return $Names }
-    return @($Names | Where-Object { $present -notcontains $_ })
 }
 
 function Format-Size([long]$Bytes) {
@@ -289,125 +260,118 @@ function Format-Size([long]$Bytes) {
     return "$Bytes B"
 }
 
-# --------------------------------------------------------------- the listing
+# ------------------------------------------------------------------------ what was picked
+if (-not (Test-Path -LiteralPath $sqlRoot)) {
+    Write-Host "  There is no sql folder at $sqlRoot." -ForegroundColor Red
+    exit 1
+}
+$folders = @($products.Keys | Where-Object { Test-Path -LiteralPath (Join-Path $sqlRoot $_) })
+$orphans = @(Get-ChildItem -LiteralPath $sqlRoot -Directory | Where-Object { $folders -notcontains $_.Name -and (Get-ChildItem -LiteralPath $_.FullName -Filter '*.sql' -Recurse -File) } | ForEach-Object Name)
+
+$wantedFolders = @($Product | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() -replace '-', '_' } | Where-Object { $_ })
+$unknown = @($wantedFolders | Where-Object { $folders -notcontains $_ })
+if ($unknown.Count) {
+    Write-Host "  No product has a sql/ folder called $($unknown -join ', '); there are $($folders -join ', ')." -ForegroundColor Red
+    exit 1
+}
+$wantedSteps = @($Step | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() -replace '\.sql$', '' } | Where-Object { $_ })
+if ($AllProducts) { $wantedFolders = $folders }
+# -Idempotent with nothing else named means everything, migrations included: every column added since
+# the sql/ files were written lives in a migration, and artisan migrate skips what it has already run.
+if ($Idempotent -and -not $wantedFolders.Count -and -not $wantedSteps.Count) {
+    $wantedFolders = $folders
+    $Migrate = $true
+}
+$everyStep = $Idempotent -and -not $wantedSteps.Count
+
+# ------------------------------------------------------------------------ the listing
 Write-Host ''
 Write-Host "  Update database - $(Get-ProjectValue 'app.displayName' 'this project')" -ForegroundColor Cyan
 Write-Host "  $sqlRoot" -ForegroundColor DarkGray
 
-if (-not (Test-Path -LiteralPath $sqlRoot)) {
-    Write-Host ''
-    Write-Host "  There is no sql folder at $sqlRoot." -ForegroundColor Red
-    Write-Host ''
-    exit 1
-}
-
 $ledger = Get-Ledger
 $ledgerTouched = $false
-
 $plan = @()
-foreach ($folder in @('core', 'portal', 'project_estimator')) {
-    $product = $products[$folder]
-    $folderPath = Join-Path $sqlRoot $folder
-    if (-not (Test-Path -LiteralPath $folderPath)) { continue }
-
+$knownSteps = @()
+foreach ($folder in $folders) {
+    $db = $products[$folder]
     Write-Host ''
-    Write-Host "  $($product.Name)  ($folder)" -ForegroundColor Cyan
-    Write-Host "    .env says $($product.Database) on $($product.DbHost):$($product.Port) as $($product.Username)" -ForegroundColor DarkGray
+    Write-Host "  $($db.Name)  (sql/$folder)" -ForegroundColor Cyan
+    Write-Host "    .env says $($db.Database) on $($db.DbHost):$($db.Port) as $($db.Username)" -ForegroundColor DarkGray
 
-    foreach ($part in $Parts) {
-        $path = Join-Path $folderPath $part.File
-        if (-not (Test-Path -LiteralPath $path)) { continue }
-        $facts = Get-SqlFileFacts $path
-
-        # Only asked when it matters, so a listing of files that drop nothing costs no
-        # round trips to a server that may not even be running.
-        $liveTables = $(if ($facts.Drops) { Get-DatabaseTableCount $product $(if ($facts.Target) { $facts.Target } else { $product.Database }) } else { -1 })
+    foreach ($s in (Get-ProductStep (Join-Path $sqlRoot $folder))) {
+        $facts = $s.Facts
+        $knownSteps += $s.Name
+        $target = if ($facts.Target) { $facts.Target } else { $db.Database }
+        $liveTables = if ($facts.Drops) { Get-DatabaseTableCount $db $target } else { -1 }
         $wouldDestroy = $facts.Drops -and $liveTables -ne 0
 
         $notes = @()
-        if ($facts.Drops -and $liveTables -eq 0) {
-            $notes += 'creates the database - nothing there to destroy'
-        } elseif ($facts.Drops -and $liveTables -gt 0) {
-            $notes += "DROPS THE DATABASE ($liveTables table(s) would go)"
-        } elseif ($facts.Drops) {
-            $notes += 'DROPS THE DATABASE (could not reach the server to see what is in it)'
-        }
+        if ($facts.Drops -and $liveTables -eq 0) { $notes += 'creates the database - nothing there to destroy' }
+        elseif ($facts.Drops -and $liveTables -gt 0) { $notes += "DROPS THE DATABASE ($liveTables table(s) would go)" }
+        elseif ($facts.Drops) { $notes += 'DROPS THE DATABASE (could not reach the server to see what is in it)' }
         if ($facts.Truncates) { $notes += "truncates $($facts.Truncates) table(s)" }
-        # The disagreement that otherwise reads as "the update did nothing": the file
-        # writes where its own USE points, and Laravel reads where .env points.
-        if ($facts.Target -and $facts.Target -ne $product.Database) {
-            $notes += "writes to $($facts.Target), but .env reads $($product.Database)"
-        }
-        if (-not $facts.Target) { $notes += 'names no database - runs against the default' }
+        if ($facts.After.Count) { $notes += "after $($facts.After -join ', ')" }
+        if ($facts.Target -and $facts.Target -ne $db.Database) { $notes += "writes to $($facts.Target), but .env reads $($db.Database)" }
+        if (-not $facts.Target) { $notes += "no USE line - runs against $($db.Database)" }
 
-        $picked = ($wantedFolders -contains $folder) -and $part.Wanted
-
-        # Already applied, at exactly this content. The hash is what makes an edited
-        # file count as unapplied rather than being skipped by its name.
-        $fileKey = "$folder/$($part.File)"
-        $fileHash = Get-FileHashHex $path
+        $picked = ($wantedFolders -contains $folder) -and ($everyStep -or ($wantedSteps -contains $s.Name))
+        $key = "$folder/$($s.Label)"
+        $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $facts.Path).Hash.ToLower()
         $applied = $false
         if ($Idempotent -and $picked) {
-            $ledgerTarget = $(if ($facts.Target) { $facts.Target } else { $product.Database })
-            $entry = $ledger[(Get-LedgerKey $ledgerTarget $fileKey)]
-            $applied = $entry -and "$($entry.sha256)" -eq $fileHash -and (Test-LedgerStillTrue $product $ledgerTarget)
+            $entry = $ledger["$target|$key"]
+            $applied = $entry -and "$($entry.sha256)" -eq $hash -and (Get-DatabaseTableCount $db $target) -gt 0
         }
+        # Up to date never means emptied: under -Idempotent a rebuild that would destroy is left alone.
+        $kept = $picked -and $wouldDestroy -and $Idempotent
+        $blocked = $picked -and $wouldDestroy -and -not $Idempotent -and -not $DropAndRecreate
 
-        # Under -Idempotent a destructive schema is KEPT rather than blocked, and the
-        # difference is the whole point: blocked is an error to be argued with,
-        # kept is the correct outcome. "Bring this up to date" must never mean "empty
-        # it"; -DropAndRecreate is still how you ask for that, deliberately and alone.
-        $kept = $picked -and $Idempotent -and $wouldDestroy -and -not $DropAndRecreate
-        $blocked = $picked -and $wouldDestroy -and -not $DropAndRecreate -and -not $Idempotent
-
-        $state = 'listed'
-        if ($applied) { $state = 'applied' }
-        elseif ($kept) { $state = 'kept' }
-        elseif ($blocked) { $state = 'blocked' }
-        elseif ($picked) { $state = 'will run' }
-
-        if ($applied) { $notes = @("already applied, unchanged since") }
-        if ($kept) { $notes += 'left alone - -DropAndRecreate is how you ask for a rebuild' }
-
-        $colour = @{ 'listed' = 'DarkGray'; 'will run' = 'Green'; 'blocked' = 'Yellow'
-            'applied' = 'DarkGray'; 'kept' = 'DarkGray'
-        }
+        $state = if ($applied) { 'applied' } elseif ($kept) { 'kept' } elseif ($blocked) { 'blocked' } elseif ($picked) { 'will run' } else { 'listed' }
+        if ($applied) { $notes = @('already applied, unchanged since') }
+        if ($kept) { $notes += 'left alone - -DropAndRecreate on its own asks for a rebuild' }
+        $colour = @{ 'listed' = 'DarkGray'; 'will run' = 'Green'; 'blocked' = 'Yellow'; 'applied' = 'DarkGray'; 'kept' = 'DarkGray' }
         Write-Host ('    {0,-9}' -f $state) -ForegroundColor $colour[$state] -NoNewline
-        Write-Host ('{0,-14} {1,-8} {2}' -f $part.File, (Format-Size $facts.Bytes), ($notes -join '; '))
-
+        Write-Host ('{0,-38} {1,-10} {2,-8} {3}' -f $s.Label, $facts.Kind, (Format-Size $facts.Bytes), ($notes -join '; '))
+        if ($blocked) { Write-Host '                 add -DropAndRecreate to allow it' -ForegroundColor DarkGray }
         if ($picked -and -not $blocked -and -not $applied -and -not $kept) {
-            $plan += [pscustomobject]@{
-                Product = $product; Folder = $folder; Facts = $facts; File = $part.File
-                Key = $fileKey; Hash = $fileHash
-            }
-        }
-        if ($blocked) {
-            Write-Host '                            add -DropAndRecreate to allow it' -ForegroundColor DarkGray
+            $plan += [pscustomobject]@{ Product = $db; Folder = $folder; Step = $s; Facts = $facts; Target = $target; Key = $key; Hash = $hash }
         }
     }
+}
+foreach ($orphan in $orphans) {
+    Write-Host ''
+    Write-Host "  sql/$orphan has .sql files but no product in config/products.php, so nothing knows its database; it is skipped." -ForegroundColor Yellow
+}
+
+$strayStep = @($wantedSteps | Where-Object { $knownSteps -notcontains $_ })
+if ($strayStep.Count) {
+    Write-Host ''
+    Write-Host "  No product has a step called $($strayStep -join ', '); the steps are $(@($knownSteps | Select-Object -Unique) -join ', ')." -ForegroundColor Red
+    exit 1
 }
 
 if (-not $plan.Count -and -not $Migrate) {
     Write-Host ''
-    if ($Idempotent) {
-        # The point of the whole thing: a second run says this and exits 0.
-        Write-Host '  Everything is already applied - nothing to do.' -ForegroundColor Green
-        Write-Host ''
-        exit 0
-    }
-    if (-not $wantedFolders.Count) {
-        Write-Host '  Nothing applied. Tick a product (-Core, -Portal, -Estimator) and a file' -ForegroundColor Yellow
-        Write-Host '  (-Schema, -Separate, -Indexes, -Data), or use -Migrate.' -ForegroundColor DarkGray
-    } else {
-        Write-Host '  Nothing to apply for what was picked - see the listing above.' -ForegroundColor Yellow
-    }
+    if ($Idempotent) { Write-Host '  Everything is already applied - nothing to do.' -ForegroundColor Green }
+    elseif (-not $wantedFolders.Count -or -not $wantedSteps.Count) {
+        Write-Host '  Nothing applied. Pick a product (-Product, or -AllProducts) and a step (-Step), or use -Migrate or -Idempotent.' -ForegroundColor Yellow
+    } else { Write-Host '  Nothing to apply for what was picked - see the listing above.' -ForegroundColor Yellow }
     Write-Host ''
     exit 0
 }
 
-# ------------------------------------------------------------------ applying
-$mysql = Get-Command mysql -ErrorAction SilentlyContinue
-if ($plan.Count -and -not $mysql) {
+if ($DryRun) {
+    Write-Host ''
+    Write-Host '  -DryRun: nothing ran. In order, this would apply:' -ForegroundColor Yellow
+    foreach ($item in $plan) { Write-Host "    $($item.Folder)/$($item.Step.Label) -> $($item.Target)$(if ($item.Facts.Kind -eq 'rebuild') { ', then clear its core ledger rows' })" }
+    if ($Migrate) { Write-Host '    php artisan migrate' }
+    Write-Host ''
+    exit 0
+}
+
+# ------------------------------------------------------------------------ applying
+if ($plan.Count -and -not (Get-Command mysql -ErrorAction SilentlyContinue)) {
     Write-Host ''
     Write-Host '  No mysql client on PATH, so no file can be applied.' -ForegroundColor Red
     Write-Host '    .\script.ps1 environment-variables     put one there' -ForegroundColor DarkGray
@@ -416,124 +380,67 @@ if ($plan.Count -and -not $mysql) {
 }
 
 $failures = 0
-if ($plan.Count) {
-    Write-Host ''
-    Write-Host '  Applying' -ForegroundColor Cyan
+if ($plan.Count) { Write-Host ''; Write-Host '  Applying' -ForegroundColor Cyan }
+
+function Write-Applied([object]$Item, [string]$Note) {
+    if (-not $Idempotent) { return }
+    $ledger["$($Item.Target)|$($Item.Key)"] = @{ sha256 = $Item.Hash; bytes = $Item.Facts.Bytes; note = $Note; applied_at = (Get-Date).ToString('o') }
+    $script:ledgerTouched = $true
 }
 
-foreach ($step in $plan) {
-    $label = "$($step.Folder)/$($step.File)"
-    Write-Host "    $label"
-    $arguments = Get-MysqlArgument $step.Product
-    # The file's own USE decides the database when it has one; only a file that names
-    # none is given the .env database on the command line.
-    if (-not $step.Facts.Target) { $arguments += $step.Product.Database }
-    $arguments += '--default-character-set=utf8mb4'
+foreach ($item in $plan) {
+    Write-Host "    $($item.Folder)/$($item.Step.Label)  ($($item.Facts.Kind))"
+    $strict = $item.Facts.Kind -in @('rebuild', 'data')
+    $run = Invoke-SqlFile $item.Product $item.Facts (-not $strict)
+    $real = @($run.Errors | Where-Object { $AlreadyThere -notcontains (Get-ErrorCode $_) })
+    $there = @($run.Errors | Where-Object { $AlreadyThere -contains (Get-ErrorCode $_) })
 
-    # Redirected with cmd rather than piped from PowerShell: PowerShell decodes the file
-    # and re-encodes it into the pipe, which corrupts every non-ASCII byte in a 1 MB dump
-    # and fails somewhere in the middle with a syntax error nobody can place.
-    $quoted = ($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
-    $output = & cmd.exe '/c' "`"$($mysql.Source)`" $quoted < `"$($step.Facts.Path)`" 2>&1"
-    # CAPTURED IMMEDIATELY. $LASTEXITCODE belongs to the last native command to run, and
-    # every branch below queries the server to work out what happened - so by the time
-    # the failure was printed it carried the exit code of the diagnostic query instead of
-    # the one that failed. It read "FAILED (exit 0)", which is a sentence that should
-    # never appear.
-    $mysqlExit = $LASTEXITCODE
-    $ledgerTarget = $(if ($step.Facts.Target) { $step.Facts.Target } else { $step.Product.Database })
-    if ($mysqlExit -eq 0) {
-        Write-Host "      applied to $ledgerTarget" -ForegroundColor Green
-        if ($Idempotent) { $ledger[(Get-LedgerKey $ledgerTarget $step.Key)] = @{ sha256 = $step.Hash; bytes = $step.Facts.Bytes; note = 'applied'; applied_at = (Get-Date).ToString('o') }; $ledgerTouched = $true }
-        continue
-    }
-
-    $why = "$(@($output | Where-Object { "$_".Trim() })[0])".Trim()
-
-    # ERROR 1061 is "that index is already there", which is the state this file exists to
-    # produce - so it is the desired outcome arriving by a different route, not a
-    # failure. sql/portal/indexes.sql says exactly this in its own header: it is for
-    # databases that predate the index, and "Skip if MySQL reports Duplicate key name".
-    # Counting it as a failure made a correct first run exit non-zero.
-    # "Table x already exists" is the same question as the index one but a harder
-    # answer, because mysql stopped there and the rest of the file did not run. So the
-    # end state is checked rather than assumed: every table the file declares is either
-    # present - in which case the re-run was a no-op and nothing was lost - or some are
-    # missing, and that is a real failure wearing a reassuring error message.
-    if ($why -match 'already exists') {
-        $declaredTables = @(Get-DeclaredTableName $step.Facts.Path)
-        $target = $(if ($step.Facts.Target) { $step.Facts.Target } else { $step.Product.Database })
-        $missing = @(Get-MissingTable $step.Product $target $declaredTables)
-        if ($declaredTables.Count -and -not $missing.Count) {
-            Write-Host "      already applied - all $($declaredTables.Count) table(s) are present" -ForegroundColor DarkGray
-            if ($Idempotent) { $ledger[(Get-LedgerKey $ledgerTarget $step.Key)] = @{ sha256 = $step.Hash; bytes = $step.Facts.Bytes; note = 'adopted'; applied_at = (Get-Date).ToString('o') }; $ledgerTouched = $true }
+    if (-not $strict) {
+        if ($real.Count) {
+            foreach ($line in @($real | Select-Object -First 5)) { Write-Host "      $line" -ForegroundColor Red }
+            if ($real.Count -gt 5) { Write-Host "      ...and $($real.Count - 5) more" -ForegroundColor Red }
+            if ($real -match '^ERROR 1049') {
+                $creator = @(Get-ProductStep (Join-Path $sqlRoot $item.Folder) | Where-Object { $_.Facts.Kind -eq 'rebuild' } | Select-Object -First 1)
+                if ($creator.Count) { Write-Host "      $($item.Target) does not exist yet; $($creator[0].Label) creates it: -Product $($item.Folder) -Step $($creator[0].Name)" -ForegroundColor Yellow }
+            }
+            $failures++
             continue
         }
-        # PART-APPLIED, and the missing tables are the point. mysql stops at the first
-        # error, so a file that grew new CREATE TABLEs after it was first applied never
-        # reaches them - which is exactly what happens every time somebody adds tables to
-        # separate.sql, and the answer "six tables are missing" helps nobody on its own.
-        #
-        # --force makes mysql carry on past the ones that already exist and create the
-        # ones that do not. It is used ONLY here, on the retry, never on the first
-        # attempt: it also swallows real errors, so the end state is then read back from
-        # the server rather than inferred from an exit code it no longer reports usefully.
-        Write-Host "      $($missing.Count) table(s) missing - retrying past what is already there" -ForegroundColor DarkGray
-        $forced = $arguments + @('--force')
-        $forcedQuoted = ($forced | ForEach-Object { '"' + $_ + '"' }) -join ' '
-        [void](& cmd.exe '/c' "`"$($mysql.Source)`" $forcedQuoted < `"$($step.Facts.Path)`" 2>&1")
+        Write-Host "      applied to $($item.Target)$(if ($there.Count) { " - $($there.Count) statement(s) already there, skipped" })" -ForegroundColor Green
+        Write-Applied $item $(if ($there.Count -and $there.Count -eq $run.Errors.Count) { 'adopted' } else { 'applied' })
+        continue
+    }
 
-        $stillMissing = @(Get-MissingTable $step.Product $target $declaredTables)
-        if (-not $stillMissing.Count) {
-            Write-Host "      applied - $($missing.Count) table(s) added, the rest were already there" -ForegroundColor Green
-            if ($Idempotent) { $ledger[(Get-LedgerKey $ledgerTarget $step.Key)] = @{ sha256 = $step.Hash; bytes = $step.Facts.Bytes; note = 'applied'; applied_at = (Get-Date).ToString('o') }; $ledgerTouched = $true }
-            continue
+    if ($run.Exit -eq 0) {
+        Write-Host "      applied to $($item.Target)" -ForegroundColor Green
+        Write-Applied $item 'applied'
+        if ($item.Facts.Kind -eq 'rebuild' -and $item.Folder -ne 'core') {
+            # The rebuilt product's rows in the core ledger describe records that no longer exist.
+            $core = $products['core']
+            if ($core -and @(Get-PresentTable $core $core.Database) -contains 'actions') {
+                $productKey = $item.Product.Key -replace "'", "''"
+                $cleared = Invoke-MysqlQuery $core "DELETE FROM ``$($core.Database)``.actions WHERE product = '$productKey'; DELETE FROM ``$($core.Database)``.recycle WHERE product = '$productKey'; SELECT 'ok'"
+                if ($null -eq $cleared) { Write-Host "      could not clear $($item.Product.Key)'s rows from the core ledger in $($core.Database)" -ForegroundColor Yellow; $failures++ }
+                else { Write-Host "      cleared $($item.Product.Key)'s rows from the core ledger (actions, recycle)" -ForegroundColor DarkGray }
+            }
         }
-
-        Write-Host "      FAILED (exit $mysqlExit) $why" -ForegroundColor Red
-        Write-Host "      Still missing from ${target} even after a forced retry:" -ForegroundColor Yellow
-        Write-Host "        $($stillMissing -join ', ')" -ForegroundColor Yellow
-        $failures++
         continue
     }
 
-    if ($why -match 'Duplicate key name') {
-        Write-Host "      already there - $why" -ForegroundColor DarkGray
-        Write-Host "      (that file is for databases built before the index; a fresh schema.sql has it)" -ForegroundColor DarkGray
-        if ($Idempotent) { $ledger[(Get-LedgerKey $ledgerTarget $step.Key)] = @{ sha256 = $step.Hash; bytes = $step.Facts.Bytes; note = 'adopted'; applied_at = (Get-Date).ToString('o') }; $ledgerTouched = $true }
-        continue
-    }
-
-    Write-Host "      FAILED (exit $mysqlExit) $why" -ForegroundColor Red
-    # data.sql is NOT re-runnable and that is a property of the file, not a bug here: it
-    # truncates one table and then inserts into fifty, so a second run collides with the
-    # rows the first one wrote. Reported as the failure it is, with the only thing that
-    # actually fixes it - rebuild the schema, then load the rows into an empty database.
-    if ($why -match 'Duplicate entry') {
+    $why = if ($run.Errors.Count) { $run.Errors[0] } else { $run.First }
+    Write-Host "      FAILED (exit $($run.Exit)) $why" -ForegroundColor Red
+    if ((Get-ErrorCode $why) -eq 1062) {
         if ($Idempotent) {
-            # ADOPTION. The database already carries this file's effects but predates the
-            # ledger, which is every database that existed before this switch did. Recorded
-            # rather than re-applied, so the run converges instead of failing forever on the
-            # same rows - and marked 'adopted' so the ledger never claims this command is
-            # the one that put them there.
-            Write-Host "      already loaded - adopted into the ledger" -ForegroundColor DarkGray
-            $ledger[(Get-LedgerKey $ledgerTarget $step.Key)] = @{ sha256 = $step.Hash; bytes = $step.Facts.Bytes; note = 'adopted'; applied_at = (Get-Date).ToString('o') }; $ledgerTouched = $true
+            # Its rows are already there and the database predates the ledger: recorded, not reloaded.
+            Write-Host '      already loaded - adopted into the ledger' -ForegroundColor DarkGray
+            Write-Applied $item 'adopted'
             continue
         }
-        Write-Host "      These rows are already loaded. data.sql inserts rather than merges," -ForegroundColor Yellow
-        Write-Host "      so it only applies to an empty database:" -ForegroundColor Yellow
-        $switch = $(if ($step.Folder -eq 'project_estimator') { 'Estimator' } else { (Get-Culture).TextInfo.ToTitleCase($step.Folder) })
-        Write-Host "        .\script.ps1 update-database -$switch -Schema -DropAndRecreate -Data" -ForegroundColor DarkGray
-        $failures++
-        continue
-    }
-
-    # The one failure worth translating. Every file except schema.sql opens with a USE,
-    # so on a database that was never created they all fail with the same unhelpful
-    # line - and the fix is always the same file.
-    if ($why -match 'Unknown database') {
-        Write-Host "      That database does not exist yet. schema.sql is what creates it:" -ForegroundColor Yellow
-        Write-Host "        .\script.ps1 update-database -$(if ($step.Folder -eq 'project_estimator') { 'Estimator' } else { (Get-Culture).TextInfo.ToTitleCase($step.Folder) }) -Schema" -ForegroundColor DarkGray
+        $creator = @(Get-ProductStep (Join-Path $sqlRoot $item.Folder) | Where-Object { $_.Facts.Kind -eq 'rebuild' } | Select-Object -First 1)
+        Write-Host '      These rows are already loaded; a data file inserts rather than merges, so it only applies to an empty database:' -ForegroundColor Yellow
+        if ($creator.Count) { Write-Host "        .\script.ps1 update-database -Product $($item.Folder) -Step $($creator[0].Name),$($item.Step.Name) -DropAndRecreate" -ForegroundColor DarkGray }
+    } elseif ((Get-ErrorCode $why) -eq 1049) {
+        Write-Host "      $($item.Target) does not exist yet; the product's rebuild step creates it." -ForegroundColor Yellow
     }
     $failures++
 }
@@ -548,33 +455,19 @@ if ($Migrate) {
     } else {
         Push-Location $repoRoot
         try {
-            # Captured rather than streamed, so the one line that explains a failure can
-            # be found in it. Printed either way - a migration's own output is the most
-            # useful thing on screen when it goes wrong.
             $output = & $php.Source 'artisan' 'migrate' '--no-interaction' 2>&1
+            $migrateExit = $LASTEXITCODE
             $output | ForEach-Object { Write-Host "    $_" }
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "    artisan migrate exited with $LASTEXITCODE" -ForegroundColor Red
-                # The failure every fresh WampServer gives, translated. 1071 here is not
-                # a schema problem: it is MyISAM, which caps an index at 1000 bytes,
-                # while Laravel's users_email_unique on a utf8mb4 varchar(255) needs
-                # 1020. Nothing in the error names MyISAM or the file that selected it.
-                # A migration that failed part way leaves what it had already created,
-                # because MySQL does not roll back DDL - so the retry dies on the table
-                # the first attempt made rather than on whatever actually broke. Named,
-                # because "already exists" sends people looking for a duplicate
-                # migration file that does not exist.
+            if ($migrateExit -ne 0) {
+                Write-Host "    artisan migrate exited with $migrateExit" -ForegroundColor Red
+                # MySQL does not roll back DDL, so a migration that stopped part way leaves its tables, and the retry trips on them.
                 if ("$output" -match 'already exists') {
-                    Write-Host '    A previous migration stopped part way and left its tables behind;' -ForegroundColor Yellow
-                    Write-Host '    MySQL does not roll back DDL, so the retry trips over them. Either drop' -ForegroundColor Yellow
-                    Write-Host '    the table the error names, or rebuild from nothing:' -ForegroundColor Yellow
-                    Write-Host '      php artisan migrate:fresh     (DESTROYS every table on that connection)' -ForegroundColor DarkGray
+                    Write-Host '    A previous migration stopped part way and left its tables behind. Drop the table the' -ForegroundColor Yellow
+                    Write-Host '    error names, or rebuild from nothing: php artisan migrate:fresh (DESTROYS every table on that connection)' -ForegroundColor Yellow
                 }
+                # 1071 on a fresh WampServer is MyISAM's 1000-byte index cap, not the schema.
                 if ("$output" -match 'key was too long|1071') {
-                    Write-Host '    That is MyISAM, not your schema: WampServer sets' -ForegroundColor Yellow
-                    Write-Host '    default_storage_engine=MYISAM in my.ini, and MyISAM caps an index at' -ForegroundColor Yellow
-                    Write-Host '    1000 bytes. Switch it to InnoDB and restart MySQL:' -ForegroundColor Yellow
-                    Write-Host '      .\script.ps1 development-setup' -ForegroundColor DarkGray
+                    Write-Host '    That is MyISAM, not your schema: switch WampServer to InnoDB and restart MySQL - .\script.ps1 development-setup' -ForegroundColor Yellow
                 }
                 $failures++
             }
@@ -585,12 +478,28 @@ if ($Migrate) {
 if ($ledgerTouched) { Save-Ledger $ledger }
 
 Write-Host ''
-if ($failures) {
-    Write-Host "  $failures step(s) failed - see above." -ForegroundColor Red
-} else {
-    Write-Host '  Done.' -ForegroundColor Green
-}
-Write-Host '    .\script.ps1 update-database          list every file again' -ForegroundColor DarkGray
+if ($failures) { Write-Host "  $failures step(s) failed - see above." -ForegroundColor Red }
+else { Write-Host '  Done.' -ForegroundColor Green }
+Write-Host '    .\script.ps1 update-database          list every step again' -ForegroundColor DarkGray
 Write-Host '    .\script.ps1 run-servers -PhpMyAdmin  look at the result' -ForegroundColor DarkGray
 Write-Host ''
 exit $failures
+
+# Read by the manifest generator and run alone, so it finds the repo from the working directory itself.
+function Get-DialogChoiceParameters { return , @('Product', 'Step') }
+
+function Get-DialogChoices([string]$Parameter) {
+    $dir = (Get-Location).Path
+    while ($dir -and -not (Test-Path -LiteralPath (Join-Path $dir 'ikaika_scripts.env'))) { $dir = Split-Path $dir -Parent }
+    if (-not $dir -or -not (Test-Path -LiteralPath (Join-Path $dir 'sql'))) { return , @() }
+    $folders = @(Get-ChildItem -LiteralPath (Join-Path $dir 'sql') -Directory | Where-Object { Get-ChildItem -LiteralPath $_.FullName -Filter '*.sql' -Recurse -File })
+    if ($Parameter -eq 'Product') { return , @($folders | ForEach-Object Name) }
+    if ($Parameter -eq 'Step') {
+        $names = foreach ($folder in $folders) {
+            Get-ChildItem -LiteralPath $folder.FullName -Filter '*.sql' -File | ForEach-Object BaseName
+            if (Test-Path -LiteralPath (Join-Path $folder.FullName 'patches')) { 'patches' }
+        }
+        return , @($names | Sort-Object -Unique)
+    }
+    return , @()
+}
