@@ -61,7 +61,7 @@ $COMPOSER install --no-dev --prefer-dist --optimize-autoloader --no-interaction 
 find "$NEW" -type d -exec chmod 755 {} +
 find "$NEW" -type f -exec chmod 644 {} +
 # Where this target serves the API and the portal, written into the release's .env from API_PATH and PORTAL_PATH every
-# deploy, so a folder that moves - production's v2 at the site root, say - never leaves the server's .env naming the
+# deploy, so a folder that moves - production's v2 in website_26e391bd, say - never leaves the server's .env naming the
 # old one; the rest of the .env is the server's own.
 set_release_key() {
     grep -v "^$1=" "$NEW/.env" > "$NEW/.env.paths" || true
@@ -71,7 +71,11 @@ set_release_key() {
 set_release_key APP_URL "$SITE_ORIGIN$API_URL_PATH"
 set_release_key ASSET_URL "$API_URL_PATH"
 set_release_key SESSION_PATH "$API_URL_PATH"
-if [ -n "${PORTAL_PATH:-}" ]; then
+# AZURE_REDIRECT_URI is the address the Azure app registers, the one the portal's build bakes in; without it, the
+# portal's own address stands in.
+if [ -n "${AZURE_REDIRECT_URI:-}" ]; then
+    set_release_key PORTAL_AZURE_REDIRECT_URI "$AZURE_REDIRECT_URI"
+elif [ -n "${PORTAL_PATH:-}" ]; then
     set_release_key PORTAL_AZURE_REDIRECT_URI "$SITE_ORIGIN/${PORTAL_PATH#$SITE_ROOT/}"
 fi
 chmod 600 "$NEW/.env"
