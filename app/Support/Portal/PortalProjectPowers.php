@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\DB;
  * project, department the actor's department's plus the ones they lead, own the ones they are on,
  * lead only the ones they lead. Those three reaches are given, not a member's own, so a lead's own
  * project is theirs until a manager limits it or they switch it off. Whoever asked for a project may
- * still edit it while it is not approved.
+ * still edit it while it is not approved. Whoever View Projects reaches may change the project's members
+ * and support members, and nothing else.
  */
 final class PortalProjectPowers
 {
@@ -28,6 +29,8 @@ final class PortalProjectPowers
     public const DIRECT = 'projects.create.direct';
 
     public const LEAD = 'projects.lead';
+
+    public const VIEW = 'projects.view';
 
     // Not a form power: Manage / References reads the same project options the form does, so its
     // own rule must open that read too.
@@ -50,14 +53,16 @@ final class PortalProjectPowers
      * The three answers for the project board, from reaches read once per request.
      *
      * @param  array<string, ?string>  $reaches
-     * @return array{canEdit: bool, canManageScopes: bool, canDelete: bool}
+     * @return array{canEdit: bool, canEditMembers: bool, canManageScopes: bool, canDelete: bool}
      */
     public static function flags(array $reaches, Employee $actor, object $project): array
     {
         $isRequest = self::isRequester($actor, $project);
+        $canEdit = self::coversProject($reaches[self::EDIT] ?? null, $actor, $project) || $isRequest;
 
         return [
-            'canEdit' => self::coversProject($reaches[self::EDIT] ?? null, $actor, $project) || $isRequest,
+            'canEdit' => $canEdit,
+            'canEditMembers' => $canEdit || self::coversProject($reaches[self::VIEW] ?? null, $actor, $project),
             'canManageScopes' => self::coversProject($reaches[self::SCOPES] ?? null, $actor, $project) || $isRequest,
             'canDelete' => self::coversProject($reaches[self::DELETE] ?? null, $actor, $project),
         ];
@@ -72,8 +77,15 @@ final class PortalProjectPowers
         foreach (self::KEYS as $key) {
             $reaches[$key] = PortalRules::reach($actor, $request, $key);
         }
+        $reaches[self::VIEW] = PortalRules::reach($actor, $request, self::VIEW);
 
         return $reaches;
+    }
+
+    // Members and support members (2026-10-12, user): View Projects' reach is enough, and no approval follows.
+    public static function reachesPeople(Employee $actor, Request $request, object $project): bool
+    {
+        return self::coversProject(PortalRules::reach($actor, $request, self::VIEW), $actor, $project);
     }
 
     // Add projects and Project Lead reach departments: all is any, department (or own) only the person's own.

@@ -347,6 +347,68 @@ class PortalProjectEditorTest extends TestCase
             ->assertJsonPath('data.creationStatus', 'approved');
     }
 
+    // Without Edit projects, whoever View Projects reaches changes only the people, and no approval follows.
+    public function test_a_viewer_changes_only_the_members_and_support_members(): void
+    {
+        $id = $this->liveProjectId();
+        $member = $this->employee('user', 3);
+        $token = $this->token($member);
+        DB::connection('portal')->table('employees_projects')->where('project_id', $id)->delete();
+        $before = DB::connection('portal')->table('projects')->where('id', $id)->first();
+        $payload = $this->payload(['name' => 'Not Theirs To Rename 2020', 'status' => 'closed']);
+        unset($payload['scopeCodes']);
+
+        // Not on the project: own View Projects does not reach it.
+        $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertForbidden();
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, $payload)->assertForbidden();
+
+        DB::connection('portal')->table('employees_projects')->insert(['employee_id' => $member->getKey(), 'project_id' => $id, 'role_on_project' => 'member']);
+        Cache::flush();
+        $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk()->assertJsonPath('data.editsPeopleOnly', true);
+        $this->withToken($token)->getJson(self::BASE)->assertOk()
+            ->assertJsonPath('data', fn (array $projects): bool => collect($projects)->contains(
+                static fn (array $project): bool => $project['id'] === (string) $id && $project['canEdit'] === false && $project['canEditMembers'] === true,
+            ));
+
+        $supportId = (int) $payload['supportMemberIds'][0];
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'memberIds' => [$member->getKey()]])
+            ->assertOk()
+            ->assertJsonPath('data.editsPeopleOnly', true)
+            ->assertJsonPath('data.creationStatus', PortalViewProjectPresenter::creationStatus($before->project_creation_status));
+
+        $after = DB::connection('portal')->table('projects')->where('id', $id)->first();
+        $this->assertSame($before->project_name, $after->project_name);
+        $this->assertSame($before->status, $after->status);
+        $this->assertSame($before->project_creation_status, $after->project_creation_status);
+        $roles = DB::connection('portal')->table('employees_projects')->where('project_id', $id)->get()
+            ->map(static fn (object $row): string => $row->role_on_project.':'.$row->employee_id)->sort()->values()->all();
+        $this->assertSame(['member:'.$member->getKey(), 'support:'.$supportId], $roles);
+        $this->assertSame('Support members changed', DB::connection('portal')->table('projects_action_history')
+            ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
+            ->where('projects_action_history.project_id', $id)->orderByDesc('project_action_history.id')->value('project_action_history.remarks'));
+        $this->assertTrue(DB::connection('core')->table('actions')->where('database_target', 'portal.projects')->where('record_id', (string) $id)->where('action_type', CoreActionType::EDIT)->exists());
+
+        // Scopes are not people: still Edit projects' and Manage scopes'.
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$this->scopeCodes()[0]]])->assertForbidden();
+    }
+
+    // The creator changing only the people of an approved project keeps it approved.
+    public function test_the_creator_changing_only_the_people_keeps_an_approved_project_approved(): void
+    {
+        $member = $this->employee('user', 3);
+        $token = $this->token($member);
+        $this->grant($member, ['projects.create' => 'all']);
+        $payload = $this->payload();
+        $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
+        unset($payload['scopeCodes']);
+        DB::connection('portal')->table('projects')->where('id', $id)->update(['project_creation_status' => 'Approved']);
+
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'memberIds' => [], 'supportMemberIds' => [$member->getKey()]])
+            ->assertOk()
+            ->assertJsonPath('data.editsPeopleOnly', false)
+            ->assertJsonPath('data.creationStatus', 'approved');
+    }
+
     // Closed is its own status (2026-10-12): stored as Airtable's 'Closed', read back as closed, never as completed.
     public function test_a_project_is_closed_as_its_own_status(): void
     {
@@ -413,6 +475,7 @@ class PortalProjectEditorTest extends TestCase
         $member = $this->employee('user', 3);
         $token = $this->token($member);
         $this->grant($member, ['projects.edit' => 'lead']);
+        DB::connection('portal')->table('employees_projects')->where('project_id', $id)->where('employee_id', $member->getKey())->delete();
         $payload = $this->payload();
         unset($payload['scopeCodes']);
 
@@ -442,13 +505,13 @@ class PortalProjectEditorTest extends TestCase
 
         // On it but not leading: "own" reaches it, "lead" does not.
         $this->grant($member, ['projects.edit' => 'own']);
-        $this->withToken($token)->getJson(self::BASE.'/'.$on)->assertOk();
+        $this->withToken($token)->getJson(self::BASE.'/'.$on)->assertOk()->assertJsonPath('data.editsPeopleOnly', false);
         $this->withToken($token)->getJson(self::BASE.'/'.$led)->assertForbidden();
 
-        // Leading it but not on it: "lead" reaches it, "own" does not.
+        // Leading it but not on it: "lead" reaches it; "own" does not, so the one they are on opens for its people only.
         $portal->table('access_grants')->where('employee_id', $member->getKey())->where('permission_key', 'projects.edit')->update(['reach' => 'lead']);
-        $this->withToken($token)->getJson(self::BASE.'/'.$on)->assertForbidden();
-        $this->withToken($token)->getJson(self::BASE.'/'.$led)->assertOk();
+        $this->withToken($token)->getJson(self::BASE.'/'.$on)->assertOk()->assertJsonPath('data.editsPeopleOnly', true);
+        $this->withToken($token)->getJson(self::BASE.'/'.$led)->assertOk()->assertJsonPath('data.editsPeopleOnly', false);
     }
 
     // Switched off, Manage scopes is gone even for an admin who leads nothing, and Edit projects stays.
@@ -473,6 +536,7 @@ class PortalProjectEditorTest extends TestCase
         $member = $this->employee('user', 3);
         DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.edit', 'reach' => 'department']);
         DB::connection('portal')->table('projects')->where('id', $id)->update(['department' => 'Engineering', 'project_lead_email' => null]);
+        DB::connection('portal')->table('employees_projects')->where('project_id', $id)->where('employee_id', $member->getKey())->delete();
 
         $member->forceFill(['department' => 'MIS'])->save();
         $this->withToken($this->token($member))->getJson(self::BASE.'/'.$id)->assertForbidden();
@@ -487,6 +551,7 @@ class PortalProjectEditorTest extends TestCase
         $id = $this->liveProjectId();
         $member = $this->employee('user', 3);
         DB::connection('portal')->table('projects')->where('id', $id)->update(['project_lead_email' => $member->email]);
+        DB::connection('portal')->table('employees_projects')->where('project_id', $id)->where('employee_id', $member->getKey())->delete();
         // A personal default is where they start, so a manager's switch-off records a limit, not a gift to take back.
         DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.edit', 'reach' => 'lead']);
         $this->withToken($this->token($member))->getJson(self::BASE.'/'.$id)->assertOk();
@@ -538,7 +603,11 @@ class PortalProjectEditorTest extends TestCase
         $token = $this->token($member);
         $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
 
-        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => 'projects.create']);
+        // View Projects opens them too, for the members-only edit, so both are switched off to close them.
+        DB::connection('portal')->table('access_toggles')->insert([
+            ['employee_id' => $member->getKey(), 'permission_key' => 'projects.create'],
+            ['employee_id' => $member->getKey(), 'permission_key' => 'projects.view'],
+        ]);
         Cache::flush();
         $this->withToken($token)->getJson(self::BASE.'/options')->assertForbidden();
 

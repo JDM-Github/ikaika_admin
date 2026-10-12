@@ -54,6 +54,24 @@ final class PortalProjectEditor
 
     private const SUPPORT_ROLE = 'support';
 
+    private const PEOPLE_RULES = [
+        'memberIds' => ['nullable', 'array', 'max:'.self::MAX_PEOPLE],
+        'memberIds.*' => ['integer', 'distinct'],
+        'supportMemberIds' => ['nullable', 'array', 'max:'.self::MAX_PEOPLE],
+        'supportMemberIds.*' => ['integer', 'distinct'],
+    ];
+
+    private const PEOPLE_ATTRIBUTES = [
+        'memberIds' => 'members',
+        'memberIds.*' => 'member',
+        'supportMemberIds' => 'support members',
+        'supportMemberIds.*' => 'support member',
+    ];
+
+    // The trail's words for a change of people; an edit of only these never needs approval again.
+    private const PEOPLE_CHANGES = [self::MEMBER_ROLE => 'Members changed', self::SUPPORT_ROLE => 'Support members changed'];
+
+
     /*
      * The portal's status => the word projects.status holds, which is Airtable's Project/s Status:
      * Started, Done and Closed are its only choices. On Hold and Cancelled were dropped (2026-10-12, user);
@@ -151,14 +169,15 @@ final class PortalProjectEditor
          * Read by the project form (Add projects, or Edit projects at own for a lead) and by
          * Manage / References, which maps activities onto the same project options. The page's own
          * power opens it too: limiting Add projects must not break References for an admin
-         * (2026-10-12, reported live).
+         * (2026-10-12, reported live). View Projects opens it for the members-only edit (2026-10-12).
          */
         $editReach = PortalRules::reach($actor, $request, PortalProjectPowers::EDIT);
         if (! PortalRules::holds($actor, $request, PortalProjectPowers::CREATE)
             && ! PortalRules::holds($actor, $request, PortalProjectPowers::REFERENCES)
+            && ! PortalRules::holds($actor, $request, PortalProjectPowers::VIEW)
             && ! in_array($editReach, ['department', 'all'], true)
             && ($editReach === null || ! $this->leadsAnyProject($actor))) {
-            abort(403, 'The project options need Add projects, Edit projects or References.');
+            abort(403, 'The project options need View Projects, Add projects, Edit projects or References.');
         }
 
         // Who may lead, and where: Project Lead at all leads anywhere, at department (or own) their own department's.
@@ -226,9 +245,8 @@ final class PortalProjectEditor
     public function show(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMay($actor, $row, $request, PortalProjectPowers::EDIT);
 
-        return $this->response($projectId);
+        return $this->response($projectId, $this->editsPeopleOnly($actor, $row, $request));
     }
 
     /**
@@ -317,7 +335,7 @@ final class PortalProjectEditor
         }
         $this->projects->bumpCache();
 
-        return $this->response($projectId);
+        return $this->response($projectId, false);
     }
 
     /**
@@ -328,13 +346,16 @@ final class PortalProjectEditor
     public function update(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMay($actor, $row, $request, PortalProjectPowers::EDIT);
+        if ($this->editsPeopleOnly($actor, $row, $request)) {
+            return $this->updatePeople($actor, $request, $projectId, $row);
+        }
 
         $fields = $this->validatedFields($request, $projectId);
         [$number] = self::split($row);
         $fields['columns']['project_name'] = $number === null ? $fields['name'] : $number.' '.$fields['name'];
-        $changes = $this->changes($projectId, $fields);
-        $isResubmitted = $this->sendsBackForApproval($actor, $request, $row);
+        $parts = $this->changes($projectId, $fields);
+        $changes = $parts === [] ? null : implode('; ', $parts);
+        $isResubmitted = $this->sendsBackForApproval($actor, $request, $row, array_diff($parts, self::PEOPLE_CHANGES) !== []);
         $columns = $isResubmitted ? [...$fields['columns'], ...self::PENDING_AGAIN] : $fields['columns'];
 
         $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted): void {
@@ -366,31 +387,79 @@ final class PortalProjectEditor
             $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), $fields['name'], true);
         }
 
+        // A project sent back for approval already told its approvers so; "updated" would be the same news twice.
+        $this->announceEdit($actor, $request, $projectId, $fields['name'], $fields['columns']['department'], ! $isResubmitted);
+
+        return $this->response($projectId, false);
+    }
+
+    /**
+     * Members and support members only, for whoever View Projects reaches without Edit projects
+     * (2026-10-12, user): the rest of the project is not theirs, and a change of people needs no approval.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    private function updatePeople(Employee $actor, Request $request, int $projectId, object $row): array
+    {
+        $data = $request->validate(self::PEOPLE_RULES, [], self::PEOPLE_ATTRIBUTES);
+        $memberIds = $this->validatedPeople($data['memberIds'] ?? [], $projectId, self::MEMBER_ROLE);
+        $supportMemberIds = $this->validatedPeople($data['supportMemberIds'] ?? [], $projectId, self::SUPPORT_ROLE);
+        $changes = $this->peopleChanges($projectId, $memberIds, $supportMemberIds);
+        $name = $this->text(self::split($row)[1]) ?? 'Project';
+
+        $this->ledger->within($this->connection(), function () use ($projectId, $memberIds, $supportMemberIds, $changes, $name, $actor, $request): void {
+            $this->connection()->table('projects')->where('id', $projectId)->update(['date_modified' => now()]);
+            $this->replacePeople($projectId, self::MEMBER_ROLE, $memberIds);
+            $this->replacePeople($projectId, self::SUPPORT_ROLE, $supportMemberIds);
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => (string) $projectId,
+                    'projectName' => $name,
+                    'memberIds' => array_map('strval', $memberIds),
+                    'supportMemberIds' => array_map('strval', $supportMemberIds),
+                ],
+                self::CORE_RESOURCE,
+                (string) $projectId,
+                CoreRecycleKey::project($projectId),
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+            if ($changes !== []) {
+                $this->trail->record($projectId, PortalProjectTrail::EDITED, $actor, $request, implode('; ', $changes));
+            }
+        });
+        $this->announceEdit($actor, $request, $projectId, $name, $this->text($row->department ?? null), true);
+
+        return $this->response($projectId, true);
+    }
+
+    // The activity log row, and the approvers' "updated" notice unless they already heard it was sent again.
+    private function announceEdit(Employee $actor, Request $request, int $projectId, string $name, ?string $department, bool $notifiesUpdate): void
+    {
         $this->audit->record(
             $actor,
             PortalLogAction::PATCH,
             self::CORE_RESOURCE,
-            PortalActivityCopy::editedProject($fields['name']),
+            PortalActivityCopy::editedProject($name),
             (string) $projectId,
             $request,
-            ['projectName' => $fields['name'], 'department' => $fields['columns']['department']],
+            ['projectName' => $name, 'department' => $department],
         );
-        // A project sent back for approval already told its approvers so; "updated" would be the same news twice.
-        if (! $isResubmitted) {
+        if ($notifiesUpdate) {
             $this->audit->notifyManagers(
                 $actor,
                 PortalProjectApproval::RULE,
                 PortalNotificationType::PROJECT_MODIFIED,
                 'Project updated',
-                PortalActivityCopy::notifyProjectModified(PortalActivityCopy::actorName($actor, $request, true), $fields['name']),
+                PortalActivityCopy::notifyProjectModified(PortalActivityCopy::actorName($actor, $request, true), $name),
                 PortalShellPath::MANAGE_PROJECTS,
                 'Open Manage / Projects',
                 ['recordId' => (string) $projectId],
             );
         }
         $this->projects->bumpCache();
-
-        return $this->response($projectId);
     }
 
     /**
@@ -406,7 +475,7 @@ final class PortalProjectEditor
         $scopeCodes = $this->validatedScopeCodes($request, $row->department ?? null);
         $name = $this->text($row->project_name) ?? 'Project';
         // Scopes are an edit too, so the creator cannot change an approved project around its approval.
-        $isResubmitted = $this->sendsBackForApproval($actor, $request, $row);
+        $isResubmitted = $this->sendsBackForApproval($actor, $request, $row, true);
 
         $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request, $isResubmitted): void {
             $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->delete();
@@ -446,7 +515,7 @@ final class PortalProjectEditor
         );
         $this->projects->bumpCache();
 
-        return $this->response($projectId);
+        return $this->response($projectId, false);
     }
 
     /**
@@ -470,10 +539,7 @@ final class PortalProjectEditor
             'type' => ['nullable', 'string', 'max:100'],
             'area' => ['nullable', 'numeric', 'min:0', 'max:9999999999'],
             'status' => ['required', 'string', Rule::in(array_keys(self::STATUSES))],
-            'memberIds' => ['nullable', 'array', 'max:'.self::MAX_PEOPLE],
-            'memberIds.*' => ['integer', 'distinct'],
-            'supportMemberIds' => ['nullable', 'array', 'max:'.self::MAX_PEOPLE],
-            'supportMemberIds.*' => ['integer', 'distinct'],
+            ...self::PEOPLE_RULES,
             'levels' => ['nullable', 'array'],
             'levels.*' => ['nullable', 'string', Rule::in(self::LEVELS)],
             'links' => ['nullable', 'array'],
@@ -484,10 +550,7 @@ final class PortalProjectEditor
             'leadId' => 'project lead',
             'clientId' => 'client',
             'type' => 'type of project',
-            'memberIds' => 'members',
-            'memberIds.*' => 'member',
-            'supportMemberIds' => 'support members',
-            'supportMemberIds.*' => 'support member',
+            ...self::PEOPLE_ATTRIBUTES,
             'levels.*' => 'level of detail',
             'links.*' => 'link',
             'repositories.*' => 'repository',
@@ -592,16 +655,17 @@ final class PortalProjectEditor
     }
 
     /**
-     * What an edit changes, read before the write, as the Trail history row's remarks; null when
+     * What an edit changes, read before the write, as the Trail history row's remarks; empty when
      * nothing changed. Plain values show old to new; people, levels and links only say they changed.
      *
      * @param  array{clientId: int, memberIds: list<int>, supportMemberIds: list<int>, repositories: list<string>, columns: array<string, mixed>}  $fields
+     * @return list<string>
      */
-    private function changes(int $projectId, array $fields): ?string
+    private function changes(int $projectId, array $fields): array
     {
         $before = $this->connection()->table('projects')->where('id', $projectId)->first();
         if ($before === null) {
-            return null;
+            return [];
         }
         $after = $fields['columns'];
         $parts = [];
@@ -632,14 +696,7 @@ final class PortalProjectEditor
         if ($clientIds !== [$fields['clientId']]) {
             $parts[] = 'Client changed';
         }
-        foreach ([self::MEMBER_ROLE => ['memberIds', 'Members changed'], self::SUPPORT_ROLE => ['supportMemberIds', 'Support members changed']] as $role => [$key, $message]) {
-            $old = $this->connection()->table('employees_projects')->where('project_id', $projectId)->where('role_on_project', $role)->pluck('employee_id')->map(static fn (mixed $id): int => (int) $id)->sort()->values()->all();
-            $new = $fields[$key];
-            sort($new);
-            if ($old !== $new) {
-                $parts[] = $message;
-            }
-        }
+        $parts = [...$parts, ...$this->peopleChanges($projectId, $fields['memberIds'], $fields['supportMemberIds'])];
         $oldRepositories = $this->repositories->forProject($projectId);
         $newRepositories = $fields['repositories'];
         sort($oldRepositories);
@@ -656,7 +713,26 @@ final class PortalProjectEditor
             }
         }
 
-        return $parts === [] ? null : implode('; ', $parts);
+        return $parts;
+    }
+
+    /**
+     * @param  list<int>  $memberIds
+     * @param  list<int>  $supportMemberIds
+     * @return list<string>
+     */
+    private function peopleChanges(int $projectId, array $memberIds, array $supportMemberIds): array
+    {
+        $parts = [];
+        foreach ([self::MEMBER_ROLE => $memberIds, self::SUPPORT_ROLE => $supportMemberIds] as $role => $new) {
+            $old = $this->connection()->table('employees_projects')->where('project_id', $projectId)->where('role_on_project', $role)->pluck('employee_id')->map(static fn (mixed $id): int => (int) $id)->sort()->values()->all();
+            sort($new);
+            if ($old !== $new) {
+                $parts[] = self::PEOPLE_CHANGES[$role];
+            }
+        }
+
+        return $parts;
     }
 
     // An active employee with an email whose Project Lead reaches the department, or on an edit the lead the project already has.
@@ -833,7 +909,7 @@ final class PortalProjectEditor
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    private function response(int $projectId): array
+    private function response(int $projectId, bool $editsPeopleOnly): array
     {
         $row = $this->connection()->table('projects')->where('id', $projectId)->first();
         if ($row === null) {
@@ -894,6 +970,8 @@ final class PortalProjectEditor
                 'links' => $links,
                 'repositories' => $this->repositories->forProject($projectId),
                 'scopeCodes' => $this->projects->scopeCodesForProject($projectId),
+                // The form locks every field but the people for whoever only View Projects reaches.
+                'editsPeopleOnly' => $editsPeopleOnly,
             ],
         ];
     }
@@ -914,9 +992,10 @@ final class PortalProjectEditor
      * Whether a save sends the project back to the approvers (2026-10-12, user): a rejected project saved
      * by anyone without Auto-approve, as before, and now also an approved one edited by its own creator --
      * unless that creator may approve it themselves (Auto-approve, or a Project Approver reach that covers
-     * it). Anyone else holding Edit projects saves an approved project straight through.
+     * it), or changed only its members and support members. Anyone else holding Edit projects saves an
+     * approved project straight through.
      */
-    private function sendsBackForApproval(Employee $actor, Request $request, object $row): bool
+    private function sendsBackForApproval(Employee $actor, Request $request, object $row, bool $touchesProject): bool
     {
         if (PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT)) {
             return false;
@@ -927,8 +1006,21 @@ final class PortalProjectEditor
         }
 
         return $status === PortalProjectApproval::APPROVED
+            && $touchesProject
             && (int) ($row->requested_by ?? 0) === (int) $actor->getKey()
             && ! $this->approval->covers($actor, $request, $row);
+    }
+
+    // Edit projects opens the whole project, View Projects alone only its people; anyone else is refused.
+    private function editsPeopleOnly(Employee $actor, object $row, Request $request): bool
+    {
+        if (PortalProjectPowers::allows($actor, $request, PortalProjectPowers::EDIT, $row)) {
+            return false;
+        }
+        if (PortalProjectPowers::reachesPeople($actor, $request, $row)) {
+            return true;
+        }
+        abort(403, 'Your Edit projects power does not reach this project.');
     }
 
     // Edit projects and Manage scopes reach this project, or the actor is the one who asked for it.
