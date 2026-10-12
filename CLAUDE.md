@@ -184,3 +184,7 @@ Read `deployment/README.md` before touching anything deploy-related. The Test Se
 - Scripts in `deployment/server/` must stay LF; bash on the server breaks on CRLF.
 - Laravel's dotenv keeps the **last** value of a repeated key; the server's `.env` is `test-server/.env` followed by `db.env`. Apply edits with `scripts/apply-env.sh`, never by copying into `app/`.
 - Staging (`ikaikabim.com/staging/central-api`, `~/apps/central-platform`, `INSTALLATION.md`) is a separate, older setup.
+
+# Emails
+
+`docs/plan/emails.md` is the one list of every email the system sends: trigger, recipients, subject, body, code. Any change that adds, removes or rewords an email updates it in the same commit. System letters go through `PortalLetters::send()` (letter design, Company footer, sent after the response). When the user asks to "apply docs/plan/emails.md", read its Requested changes and each edited section, and make the code match.
