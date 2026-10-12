@@ -22,7 +22,8 @@ esac
 PUBLIC_DIR=$HOME_DIR/${API_PATH:-public_html/$SITE_DIR/central-api}
 # The URL path the API answers at - its folder under the one the domain serves, SITE_ROOT, as test.ikaikabim.com
 # serves public_html/website_a85fbf18 - and the scheme and host it answers on.
-SITE_ROOT=${SITE_ROOT:-public_html}
+# Without a deploy config (deployment\deploy.ps1), the Test Server: test.ikaikabim.com serves the site folder itself.
+SITE_ROOT=${SITE_ROOT:-public_html/$SITE_DIR}
 API_URL_PATH=/${PUBLIC_DIR#$HOME_DIR/$SITE_ROOT/}
 SITE_ORIGIN=$(printf '%s' "$SITE_URL" | sed -E 's#^(https?://[^/]+).*#\1#')
 COMPOSER="php $HOME_DIR/bin/composer"
