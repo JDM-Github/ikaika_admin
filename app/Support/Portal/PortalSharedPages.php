@@ -2,7 +2,6 @@
 
 namespace App\Support\Portal;
 
-use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
@@ -12,7 +11,6 @@ use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
 
 /**
  * Shared pages: the guest read-only links a developer makes on Manage / Shared Pages. A share is a
@@ -464,7 +462,7 @@ final class PortalSharedPages
             ['code_hash' => Hash::make($code), 'attempts' => 0, 'issued_at' => now(), 'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES)],
         );
         $link = $this->link((string) $share->code);
-        $this->mailTo(
+        PortalLetters::send(
             trim((string) $share->email),
             'Your code for '.trim((string) $share->label),
             'Hi '.$this->displayName($share).','
@@ -555,7 +553,7 @@ final class PortalSharedPages
             : 'It is good until '.date('j M Y, g:i a', strtotime($expiresAt)).'.';
         $link = $this->link($code);
 
-        $this->mailTo(
+        PortalLetters::send(
             $email,
             ($isNewPassword ? 'Your new password for ' : 'Your link and password for ').$label,
             'Hi '.$name.','
@@ -570,27 +568,6 @@ final class PortalSharedPages
                 ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
             [['name' => self::QR_IMAGE, 'data' => PortalQrPng::png($link), 'mime' => 'image/png']],
         );
-    }
-
-    /**
-     * The same letter the composer and the notification emails send: letter design, Company footer, portal sender.
-     *
-     * @param  list<array{name: string, data: string, mime: string}>  $inlineImages
-     */
-    private function mailTo(string $to, string $subject, string $body, array $inlineImages = []): void
-    {
-        [$footerBody, $footerFormat] = PortalNotificationEmails::companyFooter();
-        Mail::to($to)->send(new PortalEmailMail(
-            $subject,
-            $body,
-            $footerBody,
-            PortalEmailMarkup::FORMAT_LETTER,
-            $footerFormat,
-            PortalNotificationEmails::FROM_NAME,
-            null,
-            [],
-            $inlineImages,
-        ));
     }
 
     public function link(string $code): string

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalActivityCopy;
 use App\Support\Portal\PortalAudit;
+use App\Support\Portal\PortalEmailLogin;
 use App\Support\Portal\PortalEmployeePresenter;
 use App\Support\Portal\PortalJwt;
 use App\Support\Portal\PortalLogAction;
@@ -23,8 +24,13 @@ class PortalAuthController extends Controller
         private readonly PortalMicrosoftIdToken $microsoftIdToken,
     ) {}
 
+    // ID-number sign-in is a development aid (2026-10-12, user): local and the test suite only.
     public function login(Request $request): JsonResponse
     {
+        if (! app()->environment(['local', 'testing'])) {
+            abort(404);
+        }
+
         $validated = $request->validate([
             'id_no' => ['required', 'string', 'max:64'],
         ]);
@@ -131,6 +137,26 @@ class PortalAuthController extends Controller
         }
 
         return 'No portal account matches that Microsoft account. Checked first/last: '.implode('; ', $checked).'.';
+    }
+
+    // Email sign-in, step one: a code to each address on record, and where they went (masked).
+    public function emailStart(Request $request, PortalEmailLogin $login): JsonResponse
+    {
+        $validated = $request->validate(['email' => ['required', 'string', 'max:255']]);
+
+        return response()->json(['targets' => $login->start($validated['email'])]);
+    }
+
+    // Email sign-in, step two: every code back, then the same session the other sign-ins issue.
+    public function emailVerify(Request $request, PortalEmailLogin $login): JsonResponse
+    {
+        $validated = $request->validate([
+            'email' => ['required', 'string', 'max:255'],
+            'codes' => ['required', 'array'],
+            'codes.*' => ['nullable', 'string', 'max:12'],
+        ]);
+
+        return $this->issueSession($login->verify($validated['email'], $validated['codes']), $request);
     }
 
     public function me(Request $request): JsonResponse
