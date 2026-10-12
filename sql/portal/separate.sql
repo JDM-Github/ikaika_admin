@@ -917,7 +917,7 @@ WHERE department IS NOT NULL AND TRIM(department) <> ''
 
 -- A sentence on what a department does, shown and edited on Manage / References.
 -- Portal-only: Airtable's Employees table has no such field, and the sync never sends it.
--- Existing databases: run the ALTER below.
+-- Existing databases: migration add_description_to_portal_departments adds it (and the first sentences).
 ALTER TABLE departments
     ADD COLUMN description VARCHAR(255) NULL AFTER name;
 
