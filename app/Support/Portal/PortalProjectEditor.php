@@ -54,12 +54,15 @@ final class PortalProjectEditor
 
     private const SUPPORT_ROLE = 'support';
 
-    /** The portal's status => the word projects.status holds, which is Airtable's. */
+    /*
+     * The portal's status => the word projects.status holds, which is Airtable's Project/s Status:
+     * Started, Done and Closed are its only choices. On Hold and Cancelled were dropped (2026-10-12, user);
+     * Airtable never had them, so a project saved with either could not sync.
+     */
     private const STATUSES = [
         'ongoing' => 'Started',
         'completed' => 'Done',
-        'on-hold' => 'On Hold',
-        'cancelled' => 'Cancelled',
+        'closed' => 'Closed',
     ];
 
     /** Stored as 'LOD 300'; 'N/A' is stored as it is. */
@@ -68,8 +71,7 @@ final class PortalProjectEditor
     private const STATUS_LABELS = [
         'ongoing' => 'Ongoing',
         'completed' => 'Completed',
-        'on-hold' => 'On Hold',
-        'cancelled' => 'Cancelled',
+        'closed' => 'Closed',
     ];
 
     public const LEVEL_COLUMNS = [

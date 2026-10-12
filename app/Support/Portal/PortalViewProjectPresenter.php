@@ -127,16 +127,15 @@ final class PortalViewProjectPresenter
         if ($value === '' || $value === 'started' || $value === 'ongoing' || $value === 'in progress') {
             return 'ongoing';
         }
-        if (in_array($value, ['done', 'completed', 'complete', 'closed'], true)) {
+        if (in_array($value, ['done', 'completed', 'complete'], true)) {
             return 'completed';
         }
-        if (in_array($value, ['on hold', 'on-hold', 'hold'], true)) {
-            return 'on-hold';
-        }
-        if (in_array($value, ['cancelled', 'canceled'], true)) {
-            return 'cancelled';
+        // Its own status since 2026-10-12; it used to read as Completed.
+        if ($value === 'closed') {
+            return 'closed';
         }
 
+        // On Hold and Cancelled are gone (2026-10-12); an old row still saying one reads as ongoing.
         return 'ongoing';
     }
 

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalViewProjectPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
@@ -109,7 +110,7 @@ class PortalProjectEditorTest extends TestCase
             'department' => 'Engineering',
             'type' => 'Scan-to-BIM',
             'area' => 1250,
-            'status' => 'on-hold',
+            'status' => 'completed',
             'memberIds' => [$this->employee('user', 1)->id],
             'supportMemberIds' => [$this->employee('user', 2)->id],
             // An Engineering project needs every level of detail and every link.
@@ -162,7 +163,7 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame($row->project_number.' '.$payload['name'], $row->project_name);
         $this->assertSame('Approved', $row->project_creation_status);
         $this->assertSame($admin->email, $row->project_approver_email);
-        $this->assertSame('On Hold', $row->status);
+        $this->assertSame('Done', $row->status);
         $this->assertSame('LOD 300', $row->st_lod);
         $this->assertSame('N/A', $row->ar_lod);
         $this->assertSame('LOD 200', $row->el_lod);
@@ -172,7 +173,7 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame($payload['clientId'], (int) DB::connection('portal')->table('projects_clients')->where('project_id', $id)->value('client_id'));
         $this->assertEqualsCanonicalizing($payload['scopeCodes'], DB::connection('portal')->table('projects_wbs_scopes')->where('project_id', $id)->pluck('wbs_code')->all());
 
-        $response->assertJsonPath('data.status', 'on-hold')
+        $response->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.levels.structural', '300')
             ->assertJsonPath('data.leadId', (string) $payload['leadId']);
         $this->assertTrue(DB::connection('core')->table('actions')->where('database_target', 'portal.projects')->where('record_id', (string) $id)->where('action_type', CoreActionType::ADD)->exists());
@@ -202,14 +203,14 @@ class PortalProjectEditorTest extends TestCase
         $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
         unset($payload['scopeCodes']);
 
-        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'name' => 'Trail Renamed 2020', 'status' => 'on-hold', 'area' => 1300])->assertOk();
-        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'name' => 'Trail Renamed 2020', 'status' => 'on-hold', 'area' => 1300])->assertOk();
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'name' => 'Trail Renamed 2020', 'status' => 'completed', 'area' => 1300])->assertOk();
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'name' => 'Trail Renamed 2020', 'status' => 'completed', 'area' => 1300])->assertOk();
         $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$this->scopeCodes()[1]]])->assertOk();
 
         $name = trim($admin->first_name.' '.$admin->last_name);
         $this->assertSame([
             ['action_name' => 'Project Creation', 'created_by' => $name, 'remarks' => null],
-            ['action_name' => 'Project Edited', 'created_by' => $name, 'remarks' => 'Name: '.$payload['name'].' to Trail Renamed 2020; Status: Ongoing to On Hold; Area: 1,250 to 1,300 sq ft'],
+            ['action_name' => 'Project Edited', 'created_by' => $name, 'remarks' => 'Name: '.$payload['name'].' to Trail Renamed 2020; Status: Ongoing to Completed; Area: 1,250 to 1,300 sq ft'],
             ['action_name' => 'Scopes Changed', 'created_by' => $name, 'remarks' => '1 scope'],
         ], $this->trail($id));
 
@@ -344,6 +345,27 @@ class PortalProjectEditorTest extends TestCase
         $this->withToken($this->token($admin))->patchJson(self::BASE.'/'.$ownProject, [...$payload, 'name' => 'Admin Own Again 2020'])
             ->assertOk()
             ->assertJsonPath('data.creationStatus', 'approved');
+    }
+
+    // Closed is its own status (2026-10-12): stored as Airtable's 'Closed', read back as closed, never as completed.
+    public function test_a_project_is_closed_as_its_own_status(): void
+    {
+        $token = $this->token($this->employee('admin'));
+        $payload = $this->payload();
+        $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
+        unset($payload['scopeCodes']);
+
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'closed'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'closed');
+        $this->assertSame('Closed', DB::connection('portal')->table('projects')->where('id', $id)->value('status'));
+        $this->assertSame('closed', PortalViewProjectPresenter::status('Closed'));
+        $this->assertSame('completed', PortalViewProjectPresenter::status('Done'));
+
+        // Only Ongoing, Completed and Closed remain; On Hold and Cancelled are refused, and an old row saying one reads as ongoing.
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'on-hold'])->assertStatus(422);
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'cancelled'])->assertStatus(422);
+        $this->assertSame('ongoing', PortalViewProjectPresenter::status('On Hold'));
     }
 
     public function test_adding_refuses_what_is_not_on_the_lists(): void
