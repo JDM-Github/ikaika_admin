@@ -1004,8 +1004,8 @@ CREATE TABLE IF NOT EXISTS shared_page_rules (
     FOREIGN KEY (share_id) REFERENCES shared_pages(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Email sign-in (2026-10-12): one code per address the employee has, work and personal; both must
--- be typed. Existing databases: migration create_portal_login_otps runs this.
+-- Email sign-in (2026-10-12): one code to the work email (work only, per the supervisor; personal_code_hash
+-- is left from the two-inbox version and stays empty). Existing databases: migration create_portal_login_otps.
 CREATE TABLE IF NOT EXISTS login_otps (
     employee_id        INT          NOT NULL PRIMARY KEY,
     work_code_hash     VARCHAR(255) NULL,
