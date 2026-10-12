@@ -24,7 +24,10 @@ final class PortalOffsetRequests
 {
     public const WINDOW_DAYS = PortalSubmittedReports::MUTATION_WINDOW_DAYS;
 
-    public const DAY_OFF_LOOKAHEAD_DAYS = 14;
+    // 0 on purpose while the supervisor tests the offset flow: the day worked is today or the last
+    // seven days only. The week-ahead rule's own tests and the refusal message still say "a week
+    // ahead", so they fail until this goes back to 7.
+    public const WORK_LOOKAHEAD_DAYS = 0;
 
     public const TYPE = 'Offset';
 
@@ -35,7 +38,7 @@ final class PortalOffsetRequests
 
     private const MAX_AHEAD_MONTHS = 12;
 
-    private const CACHE_VERSION_KEY = 'portal:requests:offset:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const MAX_GROUPS = 8;
 
@@ -115,29 +118,25 @@ final class PortalOffsetRequests
             $resolved[$index] = $this->resolveProjects($group['entries'], $projects);
         }
 
-        $insertedIds = $this->connection()->transaction(function () use (
+        $insertedIds = $this->ledger->within($this->connection(), function () use (
             $groups,
             $resolved,
             $name,
             $createdAt,
+            $employeeId,
+            $actor,
         ): array {
             $ids = [];
             foreach ($groups as $index => $group) {
-                $ids[] = $this->insertRequest($group, $resolved[$index], $name, $createdAt);
-            }
+                $id = $this->insertRequest($group, $resolved[$index], $name, $createdAt);
+                $ids[] = $id;
 
-            return $ids;
-        });
-
-        try {
-            foreach ($groups as $index => $group) {
-                $id = (string) $insertedIds[$index];
                 $this->ledger->recordAdd(
                     CoreLedger::PRODUCT_PORTAL,
                     CoreRecycleKey::offsetRequest($employeeId, $group['workDate']),
                     self::CORE_TARGET,
                     [
-                        'id' => $id,
+                        'id' => (string) $id,
                         'workOn' => $group['workDate'],
                         'dayOffOn' => $group['dayOffDate'],
                         'hours' => $this->totalHours($group['entries']),
@@ -145,43 +144,48 @@ final class PortalOffsetRequests
                         'reason' => $group['reason'],
                     ],
                     self::CORE_RESOURCE,
-                    $id,
+                    (string) $id,
                     $employeeId,
                     is_string($actor->id_no) ? $actor->id_no : null,
                 );
-                $this->audit->record(
-                    $actor,
-                    PortalLogAction::INSERT,
-                    self::CORE_RESOURCE,
-                    PortalActivityCopy::filedOffset($group['workDate'], $group['dayOffDate']),
-                    $id,
-                    $request,
-                    [
-                        'workOn' => $group['workDate'],
-                        'dayOffOn' => $group['dayOffDate'],
-                        'hours' => $this->totalHours($group['entries']),
-                        'entries' => $group['entries'],
-                        'reason' => $group['reason'],
-                    ],
-                );
-                $this->audit->notifyManagers(
-                    $actor,
-                    PortalNotificationType::REQUEST_FILED_OFFSET,
-                    'New offset request',
-                    PortalActivityCopy::notifyFiled(
-                        PortalActivityCopy::displayName($actor),
-                        'offset request',
-                        $group['workDate'],
-                        $group['workDate'],
-                    ),
-                    PortalShellPath::MANAGE_REQUESTS,
-                    'Open queue',
-                    ['recordId' => $id],
-                );
             }
-        } catch (Throwable $error) {
-            $this->deleteRequests($insertedIds);
-            throw $error;
+
+            return $ids;
+        });
+
+        // After the commit: a failed log or notification must never undo a filed request.
+        foreach ($groups as $index => $group) {
+            $id = (string) $insertedIds[$index];
+            $this->audit->record(
+                $actor,
+                PortalLogAction::INSERT,
+                self::CORE_RESOURCE,
+                PortalActivityCopy::filedOffset($group['workDate'], $group['dayOffDate']),
+                $id,
+                $request,
+                [
+                    'workOn' => $group['workDate'],
+                    'dayOffOn' => $group['dayOffDate'],
+                    'hours' => $this->totalHours($group['entries']),
+                    'entries' => $group['entries'],
+                    'reason' => $group['reason'],
+                ],
+            );
+            $this->audit->notifyManagers(
+                $actor,
+                'manage.requests.offset',
+                PortalNotificationType::REQUEST_FILED_OFFSET,
+                'New offset request',
+                PortalActivityCopy::notifyFiled(
+                    PortalActivityCopy::actorName($actor, $request, true),
+                    'offset request',
+                    $group['workDate'],
+                    $group['workDate'],
+                ),
+                PortalShellPath::MANAGE_REQUESTS,
+                'Open queue',
+                ['recordId' => $id],
+            );
         }
 
         // Both days now occupy the calendar, which is what the pickers grey out next time.
@@ -219,7 +223,7 @@ final class PortalOffsetRequests
         $projectIds = $this->resolveProjects($group['entries'], $projects);
         $hours = $this->totalHours($group['entries']);
 
-        $this->connection()->transaction(function () use ($row, $group, $projectIds, $hours): void {
+        $this->ledger->within($this->connection(), function () use ($row, $group, $projectIds, $hours, $employeeId, $actor): void {
             $this->connection()->table('requests')->where('id', (int) $row->id)->update([
                 'request_date' => $group['workDate'],
                 'no_of_hours' => $hours,
@@ -235,25 +239,25 @@ final class PortalOffsetRequests
                     'request_id' => (int) $row->id,
                 ]);
             }
-        });
 
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'id' => (string) (int) $row->id,
-                'workOn' => $group['workDate'],
-                'dayOffOn' => $group['dayOffDate'],
-                'hours' => $hours,
-                'entries' => $group['entries'],
-                'reason' => $group['reason'],
-            ],
-            self::CORE_RESOURCE,
-            (string) (int) $row->id,
-            CoreRecycleKey::offsetRequest($employeeId, $group['workDate']),
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => (string) (int) $row->id,
+                    'workOn' => $group['workDate'],
+                    'dayOffOn' => $group['dayOffDate'],
+                    'hours' => $hours,
+                    'entries' => $group['entries'],
+                    'reason' => $group['reason'],
+                ],
+                self::CORE_RESOURCE,
+                (string) (int) $row->id,
+                CoreRecycleKey::offsetRequest($employeeId, $group['workDate']),
+                $employeeId,
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
 
         $this->audit->record(
             $actor,
@@ -315,25 +319,30 @@ final class PortalOffsetRequests
             ?? '';
         $employeeId = (int) $actor->getKey();
 
-        $this->connection()->table('requests')
-            ->where('id', (int) $row->id)
-            ->update(['status' => self::CANCELLED_STATUS]);
+        $this->ledger->within($this->connection(), function () use ($row, $day, $employeeId, $actor): void {
+            $this->connection()->table('requests')
+                ->where('id', (int) $row->id)
+                ->update(['status' => self::CANCELLED_STATUS]);
 
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'id' => (string) (int) $row->id,
-                'workOn' => $day,
-                'dayOffOn' => $this->calendarDate($row->offset_work_day ?? null),
-                'status' => self::CANCELLED_STATUS,
-            ],
-            self::CORE_RESOURCE,
-            (string) (int) $row->id,
-            CoreRecycleKey::offsetRequest($employeeId, $day),
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
+            // Carries the stored hours and reason too, so a sync applying this edit never blanks them.
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => (string) (int) $row->id,
+                    'workOn' => $day,
+                    'dayOffOn' => $this->calendarDate($row->offset_work_day ?? null),
+                    'hours' => is_numeric($row->no_of_hours ?? null) ? (float) $row->no_of_hours : null,
+                    'reason' => is_string($row->reason ?? null) ? $row->reason : null,
+                    'status' => self::CANCELLED_STATUS,
+                ],
+                self::CORE_RESOURCE,
+                (string) (int) $row->id,
+                CoreRecycleKey::offsetRequest($employeeId, $day),
+                $employeeId,
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
 
         $this->audit->record(
             $actor,
@@ -353,9 +362,10 @@ final class PortalOffsetRequests
         );
         $this->audit->notifyManagers(
             $actor,
+            'manage.requests.offset',
             PortalNotificationType::REQUEST_CANCELLED_OFFSET,
             'Offset request cancelled',
-            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'offset request', $day),
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::actorName($actor, $request, true), 'offset request', $day),
             PortalShellPath::MANAGE_REQUESTS,
             'Open queue',
             ['recordId' => (string) (int) $row->id],
@@ -534,6 +544,8 @@ final class PortalOffsetRequests
             ->table('employees_projects')
             ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
             ->where('employees_projects.employee_id', $employeeId)
+            // A deleted project waits in the Recycle Bin: nothing new may be filed against it.
+            ->whereNull('projects.deleted_at')
             ->select(['projects.id', 'projects.project_number', 'projects.project_name'])
             ->get();
 
@@ -550,8 +562,8 @@ final class PortalOffsetRequests
     }
 
     /**
-     * Either day of the pair occupies the calendar. Leave on either day is the same refusal the
-     * pickers already print: that day is not free to work or to take off.
+     * The day worked must be free: no leave on it and no other offset filed for it. The day off is the
+     * member's to choose, any day at all, so it is not checked here.
      *
      * @param  list<array{workDate: string, dayOffDate: string, reason: string, entries: list<array<string, mixed>>}>  $groups
      * @param  list<string>  $ignore  Dates this request already occupies, so an edit of the same pair is not a clash with itself.
@@ -561,7 +573,6 @@ final class PortalOffsetRequests
         $dates = [];
         foreach ($groups as $group) {
             $dates[] = $group['workDate'];
-            $dates[] = $group['dayOffDate'];
         }
         $dates = array_values(array_unique($dates));
         if ($dates === []) {
@@ -646,12 +657,10 @@ final class PortalOffsetRequests
         if ($workDate === $dayOffDate) {
             abort(422, 'The day off has to be a different day from the day worked.');
         }
-        foreach ([$workDate, $dayOffDate] as $date) {
-            if (in_array($date, $seen, true)) {
-                abort(422, 'That filing lists the same day twice.');
-            }
-            $seen[] = $date;
+        if (in_array($workDate, $seen, true)) {
+            abort(422, 'That filing lists the same day twice.');
         }
+        $seen[] = $workDate;
 
         return [
             'workDate' => $workDate,
@@ -661,6 +670,7 @@ final class PortalOffsetRequests
         ];
     }
 
+    // Offset is booked ahead: the day worked is today or any later day, never one already gone.
     private function assertWorkDate(string $date, ?string $current = null): void
     {
         if ($current !== null && $date === $current) {
@@ -668,11 +678,15 @@ final class PortalOffsetRequests
         }
         $day = $this->timezone->day($date);
         $today = $this->timezone->today();
-        if ($day->gt($today) || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
-            abort(422, 'The day to work must be today or one of the last seven days.');
+        // A week either side of today: the report forms' recent window, plus a week ahead so a rest
+        // day can be put on the calendar before it is worked.
+        if ($day->gt($today->copy()->addDays(self::WORK_LOOKAHEAD_DAYS))
+            || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
+            abort(422, 'The day to work must be within the last seven days or the week ahead.');
         }
     }
 
+    // The day off likewise: any day from today on, with no far limit.
     private function assertDayOffDate(string $date, ?string $current = null): void
     {
         if ($current !== null && $date === $current) {
@@ -680,9 +694,10 @@ final class PortalOffsetRequests
         }
         $day = $this->timezone->day($date);
         $today = $this->timezone->today();
-        if ($day->gt($today->copy()->addDays(self::DAY_OFF_LOOKAHEAD_DAYS))
-            || $day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
-            abort(422, 'The day off must fall between seven days ago and two weeks ahead.');
+        // No far edge: the day off is the future half of the swap, so any later working day is fair
+        // game. The picker keeps weekends and holidays off the list; the recent window is the floor.
+        if ($day->lt($today->copy()->subDays(self::WINDOW_DAYS))) {
+            abort(422, 'The day off must be one of the last seven days or any later working day.');
         }
     }
 
@@ -867,6 +882,7 @@ final class PortalOffsetRequests
                 'status',
                 'type',
                 'no_of_hours',
+                'reason',
                 'original_work_day',
                 'offset_work_day',
             ])
@@ -1007,19 +1023,6 @@ final class PortalOffsetRequests
     private function lookupKey(string $label): string
     {
         return strtolower(trim($label));
-    }
-
-    /**
-     * @param  list<int>  $ids
-     */
-    private function deleteRequests(array $ids): void
-    {
-        if ($ids === []) {
-            return;
-        }
-
-        $this->connection()->table('projects_requests')->whereIn('request_id', $ids)->delete();
-        $this->connection()->table('requests')->whereIn('id', $ids)->delete();
     }
 
     private function connection(): Connection

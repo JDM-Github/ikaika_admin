@@ -19,7 +19,6 @@ final class PortalViewProjectPresenter
      *     project_name: mixed,
      *     department: mixed,
      *     status: mixed,
-     *     progress_pct: mixed,
      *     type_of_job: mixed,
      *     area_sqft: mixed,
      *     project_lead_email: mixed,
@@ -29,25 +28,25 @@ final class PortalViewProjectPresenter
      *     panoramic_link: mixed,
      *     ms_loop_link: mixed,
      *     google_drive_folder_path: mixed,
-     *     is_assigned: mixed
+     *     is_assigned: mixed,
+     *     is_lead?: mixed
      * }  $row
      * @param  list<string>  $memberNames
      * @param  array<string, string>  $leadsByEmail
      * @param  list<string>  $clientNames
      * @param  array{
      *     tierLabel: string,
-     *     total: int,
-     *     completed: int,
-     *     inProgress: int,
-     *     overallCompletion: float
+     *     total: int
      * }|null  $scopeSummary
      * @param  list<array{
      *     id: string,
      *     changedOn: string,
      *     actorName: string,
-     *     summary: string
+     *     summary: string,
+     *     actorPhotoUrl: string|null
      * }>  $trail
      * @param  list<string>  $scopeCodes
+     * @param  array<string, string>  $memberPhotos
      * @return array<string, mixed>
      */
     public static function item(
@@ -58,17 +57,12 @@ final class PortalViewProjectPresenter
         ?array $scopeSummary,
         array $trail,
         array $scopeCodes = [],
+        array $memberPhotos = [],
     ): array {
         $id = (string) (int) $row->id;
-        $code = trim((string) ($row->project_number ?? ''));
-        $name = trim((string) ($row->project_name ?? ''));
-        if ($code === '' && preg_match('/^(\d+)\s+(.+)$/', $name, $match) === 1) {
-            $code = $match[1];
-            $name = trim($match[2]);
-        }
-        if ($code === '') {
-            $code = $id;
-        }
+        [$number, $name] = PortalProjectEditor::split($row);
+        // A project with no number is listed by its id, and sorts after the numbered ones.
+        $code = $number ?? $id;
         if ($name === '') {
             $name = 'Project';
         }
@@ -77,7 +71,6 @@ final class PortalViewProjectPresenter
         $type = trim((string) ($row->type_of_job ?? ''));
         $leadEmail = strtolower(trim((string) ($row->project_lead_email ?? '')));
         $leadName = $leadEmail !== '' ? ($leadsByEmail[$leadEmail] ?? $leadEmail) : 'Unassigned';
-        $completion = self::completionRatio($row->progress_pct ?? null);
 
         return [
             'id' => $id,
@@ -88,20 +81,44 @@ final class PortalViewProjectPresenter
             'departmentName' => $department !== '' ? $department : 'Unassigned',
             'typeLabel' => $type,
             'status' => self::status($row->status ?? null),
+            'creationStatus' => self::creationStatus($row->project_creation_status ?? null),
             'areaSquareFeet' => self::area($row->area_sqft ?? null),
             'memberNames' => $memberNames,
+            'memberPhotos' => $memberPhotos,
             'isAssigned' => (bool) ($row->is_assigned ?? false),
+            // The person reading the board leads this project, so the list can say so.
+            'isLeading' => (bool) ($row->is_lead ?? false),
             'scopeSummary' => $scopeSummary ?? [
                 'tierLabel' => '',
                 'total' => 0,
-                'completed' => 0,
-                'inProgress' => 0,
-                'overallCompletion' => $completion,
             ],
             'scopeCodes' => $scopeCodes,
             'trail' => $trail,
             'links' => self::links($row),
+            'numbered' => $number !== null,
         ];
+    }
+
+    /**
+     * Project Team: the lead first, then the members, then the support members; the lead once, even
+     * when they are a member too.
+     *
+     * @param  list<array{id: int, name: string, role?: string}>  $members
+     * @return list<array{name: string, role: string}>
+     */
+    public static function team(?string $leadName, array $members): array
+    {
+        $team = $leadName === null ? [] : [['name' => $leadName, 'role' => 'lead']];
+        foreach (['member', 'support'] as $role) {
+            foreach ($members as $member) {
+                if (($member['role'] ?? 'member') !== $role || in_array($member['name'], array_column($team, 'name'), true)) {
+                    continue;
+                }
+                $team[] = ['name' => $member['name'], 'role' => $role];
+            }
+        }
+
+        return $team;
     }
 
     public static function status(mixed $status): string
@@ -123,20 +140,14 @@ final class PortalViewProjectPresenter
         return 'ongoing';
     }
 
-    public static function completionRatio(mixed $progressPct): float
+    // Airtable's own rows all say Approved, Pending or Rejected; anything else reads as approved.
+    public static function creationStatus(mixed $status): string
     {
-        if ($progressPct === null || $progressPct === '') {
-            return 0.0;
-        }
-        $value = (float) $progressPct;
-        if ($value < 0) {
-            return 0.0;
-        }
-        if ($value > 1) {
-            $value = $value / 100;
-        }
-
-        return round(min(1.0, $value), 4);
+        return match (strtolower(trim((string) $status))) {
+            'pending' => 'pending',
+            'rejected' => 'rejected',
+            default => 'approved',
+        };
     }
 
     public static function instant(mixed $value): string
@@ -161,6 +172,8 @@ final class PortalViewProjectPresenter
     /**
      * @return list<array{label: string, url: string}>
      */
+    private const NO_LINK = ['n/a', 'na', 'none', 'nil', '-', '--', 'tbd', 'tba', 'null'];
+
     private static function links(object $row): array
     {
         $candidates = [
@@ -174,7 +187,8 @@ final class PortalViewProjectPresenter
         $links = [];
         foreach ($candidates as $label => $raw) {
             $url = trim((string) $raw);
-            if ($url === '') {
+            // Airtable fills a missing link with a placeholder such as N/A; that is no link to show.
+            if ($url === '' || in_array(strtolower($url), self::NO_LINK, true)) {
                 continue;
             }
             $links[] = ['label' => $label, 'url' => $url];

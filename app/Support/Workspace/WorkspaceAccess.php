@@ -4,20 +4,24 @@ namespace App\Support\Workspace;
 
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalRole;
+use App\Support\Portal\PortalRules;
+use Illuminate\Http\Request;
 
 /**
  * Who may open the workspace, and what it lets them do once they are in.
  *
  * The workspace points at every table in all three databases, so "any signed-in
  * employee" was never the right audience -- the portal is the tool for a member.
- * Three tiers, each a superset of the one below:
+ * Each grant is a power (2026-10-01), read once from the session's active rules:
  *
- *   Executive / Admin  browse, read private columns, edit, save shared views
- *   ProjectAdmin       browse, no private columns, no edits
- *   User               no workspace at all
+ *   workspace          browse
+ *   workspace.private  read private columns
+ *   workspace.edit     edit cells
+ *   workspace.views    save views everyone sees
  *
- * A tier is a set of grants rather than a role check scattered through callers, so
- * the page can state what the signed-in employee has instead of failing silently.
+ * Admins and executives hold all four by preset and Developer mode holds every rule;
+ * a member holds none unless given one (the retired ProjectAdmin role reads as a
+ * member). The tier is kept only for the badge's label; it decides nothing.
  */
 final class WorkspaceAccess
 {
@@ -29,18 +33,31 @@ final class WorkspaceAccess
 
     public const TIER_MEMBER = 'member';
 
+    public const RULE = 'workspace';
+
+    public const RULE_PRIVATE = 'workspace.private';
+
+    public const RULE_EDIT = 'workspace.edit';
+
+    public const RULE_VIEWS = 'workspace.views';
+
+    /**
+     * @param  array<string, ?string>  $rules
+     */
     private function __construct(
         private readonly string $tier,
         private readonly int $actorId,
         private readonly string $actorIdNo,
+        private readonly array $rules,
     ) {}
 
-    public static function of(Employee $actor): self
+    public static function of(Employee $actor, Request $request): self
     {
         return new self(
             self::tierOf($actor->role, $actor->role_level),
             (int) $actor->id,
             (string) $actor->id_no,
+            PortalRules::active($actor, $request),
         );
     }
 
@@ -78,7 +95,7 @@ final class WorkspaceAccess
 
     public function canBrowse(): bool
     {
-        return $this->tier !== self::TIER_MEMBER;
+        return array_key_exists(self::RULE, $this->rules);
     }
 
     /**
@@ -86,12 +103,12 @@ final class WorkspaceAccess
      */
     public function canReadPrivate(): bool
     {
-        return $this->tier === self::TIER_EXECUTIVE || $this->tier === self::TIER_ADMIN;
+        return $this->canBrowse() && array_key_exists(self::RULE_PRIVATE, $this->rules);
     }
 
     public function canEdit(): bool
     {
-        return $this->canReadPrivate();
+        return $this->canBrowse() && array_key_exists(self::RULE_EDIT, $this->rules);
     }
 
     /**
@@ -99,7 +116,7 @@ final class WorkspaceAccess
      */
     public function canShareViews(): bool
     {
-        return $this->canReadPrivate();
+        return $this->canBrowse() && array_key_exists(self::RULE_VIEWS, $this->rules);
     }
 
     /**
@@ -109,7 +126,7 @@ final class WorkspaceAccess
     public function assertCanBrowse(): void
     {
         if (! $this->canBrowse()) {
-            abort(403, 'The data workspace is for administrators. Your work lives in the portal.');
+            abort(403, 'The data workspace needs the Data Workspace power. Your work lives in the portal.');
         }
     }
 
@@ -118,7 +135,7 @@ final class WorkspaceAccess
         $this->assertCanBrowse();
 
         if (! $this->canEdit()) {
-            abort(403, 'Editing the databases directly is limited to administrators.');
+            abort(403, 'Editing the databases directly needs the Edit cells power.');
         }
     }
 

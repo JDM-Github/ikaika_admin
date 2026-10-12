@@ -15,6 +15,8 @@ final class PortalNotificationType
 
     public const REQUEST_FILED_REIMBURSEMENT = 'requests.reimbursement.filed';
 
+    public const REPORT_FILED_LATE = 'reports.late.filed';
+
     public const REQUEST_CANCELLED_LEAVE = 'requests.leave.cancelled';
 
     public const REQUEST_CANCELLED_OVERTIME = 'requests.overtime.cancelled';
@@ -24,6 +26,14 @@ final class PortalNotificationType
     public const REQUEST_CANCELLED_REIMBURSEMENT = 'requests.reimbursement.cancelled';
 
     public const ROLE_CHANGED = 'manage.users.role';
+
+    public const DEPARTMENT_CHANGED = 'manage.users.department';
+
+    public const PROJECT_REQUESTED = 'projects.requested';
+
+    public const PROJECT_APPROVED = 'projects.approved';
+
+    public const PROJECT_REJECTED = 'projects.rejected';
 
     public const BIN_RESTORED = 'administration.recycle-bin.restored';
 

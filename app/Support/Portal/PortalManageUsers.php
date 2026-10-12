@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -22,7 +23,18 @@ final class PortalManageUsers
      */
     public const PAGE_SIZES = [10, 25, 50, 100];
 
-    private const CACHE_VERSION_KEY = 'portal:manage:users:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
+
+    private const RULE = 'manage.users';
+
+    private const INFORMATION_RULE = 'manage.users.information';
+
+    private const ADD_RULE = 'manage.users.add';
+
+    private const DEPARTMENT_RULE = 'manage.users.department';
+
+    // An ID No. is the start date and a running number: 260701-0019.
+    private const ID_NO = '/^\d{6}-\d{4}$/';
 
     /**
      * Table column key => SQL columns. Unknown keys fall back to the default rank order.
@@ -38,7 +50,12 @@ final class PortalManageUsers
         'access' => null,
     ];
 
-    public function __construct(private readonly PortalAudit $audit) {}
+    public function __construct(
+        private readonly PortalAudit $audit,
+        private readonly CoreLedger $ledger,
+        private readonly PortalEmployeeSignature $signatures,
+        private readonly PortalSignature $signature,
+    ) {}
 
     /**
      * @return array{
@@ -54,24 +71,41 @@ final class PortalManageUsers
         $perPage = $this->perPage($request);
         $page = max(1, $request->integer('page', 1));
         $search = trim((string) $request->query('q', ''));
+        $department = mb_substr(PortalPreview::department($request->query('department', '')), 0, 100);
         $sort = trim((string) $request->query('sort', ''));
         $dir = strtolower(trim((string) $request->query('dir', 'asc'))) === 'desc' ? 'desc' : 'asc';
 
-        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:manage:users:'.$version.':'.$page.':'.$perPage.':'.md5($search).':'.$sort.':'.$dir;
+        $viewer = $request->attributes->get('portalEmployee');
+        if (! $viewer instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+        $viewerId = (int) $viewer->getKey();
+        $live = PortalDeveloperMode::isOn($viewer, $request) ? $viewerId : null;
+        $reach = PortalRules::reach($viewer, $request, self::RULE);
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($perPage, $page, $search, $sort, $dir): array {
+        // The viewer, their Developer mode and their reach are part of the key: who they see and may open differ.
+        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+        $key = 'portal:manage:users:'.$version.':'.$viewerId.':'.($live === null ? 'd' : 'dev').':'.($reach ?? '-').':'.md5(PortalPreview::department($viewer->department))
+            .':'.$page.':'.$perPage.':'.md5($search).':'.md5($department).':'.$sort.':'.$dir;
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($viewer, $viewerId, $live, $reach, $perPage, $page, $search, $department, $sort, $dir): array {
             $query = $this->rosterQuery();
+            $this->applyReach($query, $viewer, $reach);
+            $this->applyDepartment($query, $department);
             $this->applySearch($query, $search);
             $this->applyOrder($query, $sort, $dir);
 
             $pageResult = $query
                 ->paginate($perPage, PortalManageUserPresenter::rosterColumns(), 'page', $page);
 
+            $graph = PortalAccessGraph::load($live);
             $rows = [];
             foreach ($pageResult->items() as $employee) {
                 if ($employee instanceof Employee) {
-                    $rows[] = PortalManageUserPresenter::rosterItem($employee);
+                    $rows[] = [
+                        ...PortalManageUserPresenter::rosterItem($employee),
+                        'canEditAccess' => $graph->canManage($viewerId, (int) $employee->getKey()),
+                    ];
                 }
             }
 
@@ -79,7 +113,8 @@ final class PortalManageUsers
                 'section' => 'manage',
                 'resource' => 'users',
                 'data' => $rows,
-                'counts' => $this->counts(),
+                'counts' => $this->counts($department, $viewer, $reach),
+                'departments' => $this->departments($viewer, $reach),
                 'meta' => [
                     'current_page' => $pageResult->currentPage(),
                     'per_page' => $pageResult->perPage(),
@@ -104,7 +139,10 @@ final class PortalManageUsers
             abort(422, 'Role must be Admin, User, or ProjectAdmin.');
         }
 
-        $target = $this->rosterQuery()->find($id);
+        // Someone outside the viewer's Users reach answers exactly like someone who does not exist.
+        $inReach = $this->rosterQuery();
+        $this->applyReach($inReach, $actor, PortalRules::reach($actor, $request, self::RULE));
+        $target = $inReach->find($id);
         if (! $target instanceof Employee) {
             abort(404, 'Unknown member.');
         }
@@ -116,7 +154,26 @@ final class PortalManageUsers
             // place, so the log's "what changed from" would otherwise already be gone.
             $previousRole = $target->role;
             $target->role = $role;
-            $target->save();
+            // Same target, resource and payload shape as a grid edit of this column, so one
+            // sync rule covers the role no matter which screen changed it.
+            $this->ledger->within($target->getConnection(), function () use ($target, $actor, $previousRole, $role): void {
+                $target->save();
+                $this->ledger->recordEdit(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreLedger::PRODUCT_PORTAL.'.employees',
+                    [
+                        'table' => 'employees',
+                        'key' => 'id',
+                        'fields' => ['role' => $role],
+                        'changes' => ['role' => ['from' => $previousRole, 'to' => $role]],
+                    ],
+                    'employees',
+                    (string) $target->getKey(),
+                    null,
+                    (int) $actor->getKey(),
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            });
             $this->bumpCache();
             $this->audit->record(
                 $actor,
@@ -131,7 +188,7 @@ final class PortalManageUsers
                 $target,
                 PortalLogAction::PATCH,
                 'manage.users',
-                PortalActivityCopy::ownRoleChanged($actor, $role),
+                PortalActivityCopy::ownRoleChanged($actor, $role, $request),
                 (string) $target->getKey(),
                 $request,
                 ['previousRole' => $previousRole, 'newRole' => $role],
@@ -141,7 +198,7 @@ final class PortalManageUsers
                 $actor,
                 PortalNotificationType::ROLE_CHANGED,
                 'Role changed',
-                PortalActivityCopy::notifyRoleChanged($role, PortalActivityCopy::displayName($actor)),
+                PortalActivityCopy::notifyRoleChanged($role, PortalActivityCopy::actorName($actor, $request)),
                 PortalShellPath::USER_MANAGEMENT,
                 'Open users',
                 ['recordId' => (string) $target->getKey()],
@@ -153,7 +210,164 @@ final class PortalManageUsers
             'section' => 'manage',
             'resource' => 'users',
             'data' => PortalManageUserPresenter::rosterItem($target),
-            'counts' => $this->counts(),
+            'counts' => $this->counts('', $actor, PortalRules::reach($actor, $request, self::RULE)),
+        ];
+    }
+
+    /**
+     * What Add user offers: the next ID No. -- today's date in Manila and the next running number --
+     * and the departments the actor may add someone to.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function newUserOptions(Employee $actor, Request $request): array
+    {
+        return [
+            'section' => 'manage',
+            'resource' => 'users',
+            'data' => [
+                'nextIdNo' => $this->nextIdNo(),
+                'departments' => $this->departmentChoices($actor, PortalRules::reach($actor, $request, self::RULE)),
+            ],
+        ];
+    }
+
+    /**
+     * Someone new, in the portal before Airtable has them: active, as a User (the role can change
+     * after, under its own power and checks), in a department the actor's Users reach covers.
+     * Airtable is HR's list, so the sync does not create them there; HR adds them in Airtable.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function addUser(Employee $actor, Request $request): array
+    {
+        $data = $request->validate([
+            'firstName' => ['required', 'string', 'max:100'],
+            'middleName' => ['nullable', 'string', 'max:100'],
+            'lastName' => ['required', 'string', 'max:100'],
+            'idNo' => ['required', 'string', 'max:20'],
+            'email' => ['required', 'string', 'email', 'max:255'],
+            'jobTitle' => ['nullable', 'string', 'max:255'],
+            'department' => ['required', 'string', 'max:100'],
+        ], [], ['firstName' => 'first name', 'lastName' => 'last name', 'idNo' => 'ID No.', 'jobTitle' => 'job title']);
+
+        $reach = PortalRules::reach($actor, $request, self::RULE);
+        if ($reach !== 'all' && $reach !== 'department') {
+            abort(403, 'Adding someone needs Users at your department or every department.');
+        }
+        $firstName = self::text($data['firstName']);
+        $lastName = self::text($data['lastName']);
+        if ($firstName === null || $lastName === null) {
+            abort(422, 'Give the first and last name.');
+        }
+        $idNo = trim($data['idNo']);
+        if (preg_match(self::ID_NO, $idNo) !== 1) {
+            abort(422, 'An ID No. is the start date and a number, like 261006-0021.');
+        }
+        $email = strtolower(trim($data['email']));
+        $department = $this->chosenDepartment($data['department'], $this->departmentChoices($actor, $reach));
+        if (Employee::query()->where('id_no', $idNo)->exists()) {
+            abort(422, 'Someone already has the ID No. '.$idNo.'.');
+        }
+        if (Employee::query()->whereRaw('LOWER(TRIM(email)) = ?', [$email])->exists()) {
+            abort(422, 'Someone already has that email address.');
+        }
+
+        $employee = new Employee;
+        $employee->forceFill([
+            'id_no' => $idNo,
+            'first_name' => $firstName,
+            'middle_name' => self::text($data['middleName'] ?? null),
+            'last_name' => $lastName,
+            'email' => $email,
+            'job_title' => self::text($data['jobTitle'] ?? null),
+            'department' => $department,
+            'status' => 'Active',
+            'role' => 'User',
+        ])->save();
+        $this->bumpCache();
+        PortalCache::bump();
+        $this->audit->record(
+            $actor,
+            PortalLogAction::INSERT,
+            'manage.users',
+            PortalActivityCopy::addedUser($employee),
+            (string) $employee->getKey(),
+            $request,
+            ['idNo' => $idNo, 'department' => $department],
+        );
+
+        return [
+            'section' => 'manage',
+            'resource' => 'users',
+            'data' => $this->profileData($actor, $employee, $request, $this->seesPrivate($actor, $employee, $request)),
+        ];
+    }
+
+    /**
+     * The department the portal files someone under: their reaches, the projects they may lead and
+     * the department filters all follow it. Anyone the actor's Users reach covers may be moved to any
+     * department. Synced to Airtable like a role change, since Airtable has the person.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function changeDepartment(Employee $actor, int $id, Request $request): array
+    {
+        $target = $this->inReach($actor, $id, $request);
+        if (! $this->mayChangeDepartment($actor, $target, $request)) {
+            abort(403, 'An executive\'s department cannot be changed here.');
+        }
+        $data = $request->validate(['department' => ['required', 'string', 'max:100']]);
+        $department = $this->chosenDepartment($data['department'], $this->departmentChoices($actor, 'all'));
+
+        $previous = self::text($target->department);
+        if ($previous === null || strcasecmp($previous, $department) !== 0) {
+            $target->department = $department;
+            $this->ledger->within($target->getConnection(), function () use ($target, $actor, $previous, $department): void {
+                $target->save();
+                $this->ledger->recordEdit(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreLedger::PRODUCT_PORTAL.'.employees',
+                    [
+                        'table' => 'employees',
+                        'key' => 'id',
+                        'fields' => ['department' => $department],
+                        'changes' => ['department' => ['from' => $previous, 'to' => $department]],
+                    ],
+                    'employees',
+                    (string) $target->getKey(),
+                    null,
+                    (int) $actor->getKey(),
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            });
+            $this->bumpCache();
+            PortalCache::bump();
+            $this->audit->record(
+                $actor,
+                PortalLogAction::PATCH,
+                'manage.users',
+                PortalActivityCopy::changedSomeoneDepartment($target, $department),
+                (string) $target->getKey(),
+                $request,
+                ['previousDepartment' => $previous, 'newDepartment' => $department],
+            );
+            $this->audit->notifyIfOther(
+                $target,
+                $actor,
+                PortalNotificationType::DEPARTMENT_CHANGED,
+                'Department changed',
+                PortalActivityCopy::notifyDepartmentChanged($department, PortalActivityCopy::actorName($actor, $request)),
+                PortalShellPath::USER_MANAGEMENT,
+                'Open users',
+                ['recordId' => (string) $target->getKey()],
+            );
+        }
+
+        return [
+            'section' => 'manage',
+            'resource' => 'users',
+            'data' => $this->profileData($actor, $target, $request, $this->seesPrivate($actor, $target, $request)),
         ];
     }
 
@@ -166,9 +380,14 @@ final class PortalManageUsers
     /**
      * @return array{admins: int, members: int, active: int, inactive: int, total: int}
      */
-    public function counts(): array
+    public function counts(string $department = '', ?Employee $viewer = null, ?string $reach = 'all'): array
     {
-        $row = Employee::query()
+        $query = Employee::query();
+        if ($viewer !== null) {
+            $this->applyReach($query, $viewer, $reach);
+        }
+        $this->applyDepartment($query, $department);
+        $row = $query
             ->toBase()
             ->selectRaw('COUNT(*) as total')
             ->selectRaw("SUM(CASE WHEN LOWER(COALESCE(role_level, '')) = 'executive' OR LOWER(COALESCE(role, '')) = 'admin' THEN 1 ELSE 0 END) as admins")
@@ -194,6 +413,215 @@ final class PortalManageUsers
     private function rosterQuery(): Builder
     {
         return Employee::query()->select(PortalManageUserPresenter::rosterColumns());
+    }
+
+    /**
+     * One person's profile, when they are in the viewer's Users reach (404 otherwise, as if they did
+     * not exist). Their private details come only with Show employee information reaching them, and
+     * an executive's only to an executive or in Developer mode; each such look is logged.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function profile(Employee $viewer, int $id, Request $request): array
+    {
+        $target = $this->inReach($viewer, $id, $request);
+        $withPrivate = $this->seesPrivate($viewer, $target, $request);
+        if ($withPrivate && ! $target->is($viewer)) {
+            $this->audit->record(
+                $viewer,
+                PortalLogAction::VIEW,
+                self::INFORMATION_RULE,
+                '{UserName|You} viewed the employee information of '.PortalAccessGraph::name($target),
+                (string) $target->getKey(),
+                $request,
+                ['employeeId' => (int) $target->getKey()],
+            );
+        }
+
+        return [
+            'section' => 'manage',
+            'resource' => 'users',
+            'data' => $this->profileData($viewer, $target, $request, $withPrivate),
+        ];
+    }
+
+    /**
+     * Edit one person's signature profile (the portal's own copy). Their private details are not
+     * touched; only the fields a signature shows. The Edit profiles power gates the route.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function updateProfile(Employee $actor, int $id, array $fields, Request $request): array
+    {
+        $target = $this->inReach($actor, $id, $request);
+        $this->signatures->update($actor, $target, $fields, $request);
+        $this->bumpCache();
+
+        return [
+            'section' => 'manage',
+            'resource' => 'users',
+            'data' => $this->profileData($actor, $target, $request, $this->seesPrivate($actor, $target, $request)),
+        ];
+    }
+
+    // The person, when they are inside the viewer's Users reach; 404 otherwise, as if they did not exist.
+    private function inReach(Employee $viewer, int $id, Request $request): Employee
+    {
+        $query = Employee::query();
+        $this->applyReach($query, $viewer, PortalRules::reach($viewer, $request, self::RULE));
+        $target = $query->find($id);
+        if (! $target instanceof Employee) {
+            abort(404, 'Unknown member.');
+        }
+
+        return $target;
+    }
+
+    private function seesPrivate(Employee $viewer, Employee $target, Request $request): bool
+    {
+        $seesExecutives = PortalRole::isExecutive($viewer->role, $viewer->role_level) || PortalDeveloperMode::isOn($viewer, $request);
+
+        return PortalRules::covers(PortalRules::reach($viewer, $request, self::INFORMATION_RULE), $viewer, $target, $seesExecutives);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function profileData(Employee $viewer, Employee $target, Request $request, bool $withPrivate): array
+    {
+        return [
+            ...PortalManageUserPresenter::profile($target, PortalEmployeePresenter::photoUrl($target), $withPrivate),
+            // The signature block the portal curates, and whether this viewer may edit it.
+            'canEditProfile' => PortalRules::holds($viewer, $request, PortalEmployeeSignature::RULE),
+            'signature' => $this->signatures->values($target),
+            // The signature footers (those carrying $SIGNATURE) an editor may assign.
+            'signatureFooters' => $this->signature->footers(),
+            // The department the portal files them under, and where it may move them.
+            'canChangeDepartment' => $this->mayChangeDepartment($viewer, $target, $request),
+            'departmentOptions' => $this->mayChangeDepartment($viewer, $target, $request) ? $this->departmentChoices($viewer, 'all') : [],
+        ];
+    }
+
+    // The route checks the power; the person is already inside the viewer's Users reach to be here.
+    private function mayChangeDepartment(Employee $viewer, Employee $target, Request $request): bool
+    {
+        return PortalRules::holds($viewer, $request, self::DEPARTMENT_RULE)
+            && ! PortalRole::isLocked($target->role, $target->role_level);
+    }
+
+    /**
+     * Every department the portal knows -- the Project Settings list, and any a person or project is
+     * in -- cut to the actor's own at department reach.
+     *
+     * @return list<string>
+     */
+    private function departmentChoices(Employee $actor, ?string $reach): array
+    {
+        if ($reach !== 'all' && $reach !== 'department') {
+            return [];
+        }
+        $portal = Employee::query()->getConnection();
+        $values = [
+            ...($portal->getSchemaBuilder()->hasTable('departments') ? $portal->table('departments')->pluck('name')->all() : []),
+            ...Employee::query()->whereNotNull('department')->distinct()->pluck('department')->all(),
+            ...$portal->table('projects')->whereNotNull('department')->distinct()->pluck('department')->all(),
+        ];
+        $names = [];
+        foreach ($values as $value) {
+            $name = self::text(is_string($value) ? $value : null);
+            if ($name !== null) {
+                $names[PortalPreview::department($name)] ??= $name;
+            }
+        }
+        if ($reach === 'department') {
+            $own = PortalPreview::department($actor->department);
+            $names = array_intersect_key($names, [$own => true]);
+        }
+        natcasesort($names);
+
+        return array_values($names);
+    }
+
+    /**
+     * @param  list<string>  $choices
+     */
+    private function chosenDepartment(string $value, array $choices): string
+    {
+        foreach ($choices as $choice) {
+            if (strcasecmp($choice, trim($value)) === 0) {
+                return $choice;
+            }
+        }
+        abort(422, 'Choose a department from the list.');
+    }
+
+    // Today's date in Manila, then the running number after the highest anyone has.
+    private function nextIdNo(): string
+    {
+        $highest = 0;
+        foreach (Employee::query()->whereNotNull('id_no')->pluck('id_no') as $value) {
+            if (preg_match(self::ID_NO, trim((string) $value)) === 1) {
+                $highest = max($highest, (int) substr(trim((string) $value), 7));
+            }
+        }
+
+        return now('Asia/Manila')->format('ymd').'-'.sprintf('%04d', $highest + 1);
+    }
+
+    private static function text(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+        $trimmed = trim((string) preg_replace('/\s+/u', ' ', $value));
+
+        return $trimmed === '' ? null : $trimmed;
+    }
+
+    /**
+     * Who the viewer's Users reach covers: everyone, their department, or only themselves. Executives
+     * are listed like anyone (their role stays locked); only their private details are guarded.
+     */
+    private function applyReach(Builder $query, Employee $viewer, ?string $reach): void
+    {
+        $department = PortalPreview::department($viewer->department);
+        match (true) {
+            $reach === 'all' => null,
+            $reach === 'department' && $department !== '' => $query->where(static fn (Builder $scoped): Builder => $scoped
+                ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ?", [$department])
+                ->orWhere('id', $viewer->getKey())),
+            default => $query->where('id', $viewer->getKey()),
+        };
+    }
+
+    // The figures and rows narrow together, so a department's tiles describe the rows under them.
+    private function applyDepartment(Builder $query, string $department): void
+    {
+        if ($department !== '') {
+            $query->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ?", [$department]);
+        }
+    }
+
+    /**
+     * Every department on the roster, for the filter; spelled as the roster mostly spells it.
+     *
+     * @return list<string>
+     */
+    private function departments(Employee $viewer, ?string $reach): array
+    {
+        $names = [];
+        $query = Employee::query()->whereNotNull('department');
+        $this->applyReach($query, $viewer, $reach);
+        foreach ($query->pluck('department') as $value) {
+            $name = trim((string) $value);
+            if ($name !== '') {
+                $names[PortalPreview::department($name)] ??= $name;
+            }
+        }
+        natcasesort($names);
+
+        return array_values($names);
     }
 
     private function applySearch(Builder $query, string $search): void
@@ -262,6 +690,7 @@ final class PortalManageUsers
             PortalRole::isAdmin($target->role, $target->role_level),
             PortalRole::isRemovingAdminRights($target->role, $target->role_level, $newRole),
             $this->adminCount(),
+            PortalDeveloperMode::isOn($actor, $request),
         );
         if ($block !== null) {
             abort(403, $block);

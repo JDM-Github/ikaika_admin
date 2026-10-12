@@ -4,8 +4,12 @@ namespace App\Providers;
 
 use App\Modules\Portal\Models\Employee;
 use App\Support\ApiPath;
+use App\Support\Core\CoreDeveloperActs;
+use App\Support\Portal\PortalCoreDeveloperActs;
+use App\Support\Portal\PortalMailRelayTransport;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -16,7 +20,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(CoreDeveloperActs::class, PortalCoreDeveloperActs::class);
     }
 
     /**
@@ -24,6 +28,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Mail::extend('wprelay', fn (array $config): PortalMailRelayTransport => new PortalMailRelayTransport(
+            (string) ($config['endpoint'] ?? ''),
+            (string) ($config['key'] ?? ''),
+        ));
+
         $directory = ApiPath::directory();
         if ($directory !== '' && blank(config('app.asset_url'))) {
             config(['app.asset_url' => '/'.$directory]);
@@ -59,8 +68,37 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(30)->by('user-notifications-write:'.$this->portalLimiterKey($request));
         });
 
+        // A password is checked here, so guesses are held to a handful a minute.
+        RateLimiter::for('portal-developer', function (Request $request) {
+            return Limit::perMinute(5)->by('developer:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-access', function (Request $request) {
+            return Limit::perMinute(60)->by('access:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-access-write', function (Request $request) {
+            return Limit::perMinute(60)->by('access-write:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-manage-access', function (Request $request) {
+            return Limit::perMinute(60)->by('manage-access:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-manage-access-write', function (Request $request) {
+            return Limit::perMinute(60)->by('manage-access-write:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('bitbucket-webhook', function (Request $request) {
+            return Limit::perMinute(60)->by('bitbucket-webhook:'.$request->ip());
+        });
+
         RateLimiter::for('portal-projects', function (Request $request) {
             return Limit::perMinute(60)->by('projects:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-projects-write', function (Request $request) {
+            return Limit::perMinute(20)->by('projects-write:'.$this->portalLimiterKey($request));
         });
 
         RateLimiter::for('portal-manage-users', function (Request $request) {
@@ -77,6 +115,10 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('portal-manage-requests-write', function (Request $request) {
             return Limit::perMinute(20)->by('manage-requests-write:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-manage-budget-write', function (Request $request) {
+            return Limit::perMinute(20)->by('manage-budget-write:'.$this->portalLimiterKey($request));
         });
 
         RateLimiter::for('portal-manage-reports', function (Request $request) {
@@ -122,6 +164,10 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('portal-administration-all-logs', function (Request $request) {
             return Limit::perMinute(60)->by('administration-all-logs:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-administration-all-actions', function (Request $request) {
+            return Limit::perMinute(60)->by('administration-all-actions:'.$this->portalLimiterKey($request));
         });
 
         RateLimiter::for('portal-administration-recycle-bin', function (Request $request) {

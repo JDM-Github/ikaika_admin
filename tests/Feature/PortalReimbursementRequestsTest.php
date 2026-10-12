@@ -28,6 +28,8 @@ class PortalReimbursementRequestsTest extends TestCase
     {
         parent::setUp();
         Cache::flush();
+        // Envelope charging is PortalBudgetEnvelopesTest's; with the tracker off an approval needs no envelope.
+        config(['products.catalog.transaction-tracker.enabled' => false]);
     }
 
     public function test_catalog_lists_reimbursement_under_portal_sections(): void
@@ -89,11 +91,21 @@ class PortalReimbursementRequestsTest extends TestCase
                 ->exists());
         }
 
-        $this->assertTrue(Action::query()
-            ->where('resource', 'requests.reimbursement')
-            ->where('record_id', $response->json('data.id'))
-            ->where('action_type', CoreActionType::ADD)
-            ->exists());
+        // One add per item, each carrying that row's own fields, so every item reaches Airtable.
+        $labels = [];
+        foreach ($ids as $itemId) {
+            $action = Action::query()
+                ->where('resource', 'requests.reimbursement')
+                ->where('record_id', (string) $itemId)
+                ->where('action_type', CoreActionType::ADD)
+                ->first();
+            $this->assertNotNull($action);
+            $parameters = $action->parameters['parameters'];
+            $this->assertSame('Angeles Pampanga Office', $parameters['team']);
+            $this->assertSame('Pending', $parameters['status']);
+            $labels[] = $parameters['item'];
+        }
+        $this->assertEqualsCanonicalizing(['Office Grocery', 'Water Refill'], $labels);
 
         $log = PortalLog::query()
             ->where('employee_id', $actor->getKey())
@@ -240,6 +252,11 @@ class PortalReimbursementRequestsTest extends TestCase
             ['item' => 'Paper Towel', 'cost' => 178, 'qty' => 1],
             ['item' => 'Toilet Paper', 'cost' => 416, 'qty' => 1],
         ]);
+        $droppedId = (int) DB::connection('portal')->table('reimbursements')
+            ->where('employee_name_input', $this->memberName($actor))
+            ->where('item', 'Toilet Paper')
+            ->where('reimb_date', $date)
+            ->value('id');
         Cache::flush();
         $token = $this->loginToken($actor);
 
@@ -262,6 +279,13 @@ class PortalReimbursementRequestsTest extends TestCase
             ->where('resource', 'requests.reimbursement')
             ->where('record_id', $id)
             ->where('action_type', CoreActionType::EDIT)
+            ->exists());
+        // The item the edit dropped leaves a delete, so the sync can archive its Airtable record.
+        $this->assertFalse(DB::connection('portal')->table('reimbursements')->where('id', $droppedId)->exists());
+        $this->assertTrue(Action::query()
+            ->where('resource', 'requests.reimbursement')
+            ->where('record_id', (string) $droppedId)
+            ->where('action_type', CoreActionType::DELETE)
             ->exists());
 
         $log = PortalLog::query()
@@ -308,6 +332,16 @@ class PortalReimbursementRequestsTest extends TestCase
             $this->assertSame('Cancelled', DB::connection('portal')->table('reimbursements')
                 ->where('id', $itemId)
                 ->value('status'));
+
+            // Every item is cancelled in the ledger too, not just the one the claim is named by.
+            $action = Action::query()
+                ->where('resource', 'requests.reimbursement')
+                ->where('record_id', (string) $itemId)
+                ->where('action_type', CoreActionType::EDIT)
+                ->first();
+            $this->assertNotNull($action);
+            $this->assertSame('Cancelled', $action->parameters['parameters']['status']);
+            $this->assertNotNull($action->parameters['parameters']['item']);
         }
 
         $log = PortalLog::query()
@@ -392,6 +426,108 @@ class PortalReimbursementRequestsTest extends TestCase
             ->where('record_id', $itemId)
             ->where('field_name', 'receipts')
             ->exists());
+    }
+
+    public function test_the_payout_receipt_an_admin_attaches_shows_on_the_members_own_list(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::response([
+                'secure_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/payout.jpg',
+                'original_filename' => 'payout',
+                'bytes' => 900,
+            ], 200),
+        ]);
+
+        $actor = $this->activeMember();
+        $date = Carbon::today()->toDateString();
+        $itemId = (int) $this->insertClaim($actor, $date, 'Approved', [
+            ['item' => 'Site visit transport', 'cost' => 850, 'qty' => 2],
+        ]);
+        Cache::flush();
+        $file = UploadedFile::fake()->create('payout.jpg', 12, 'image/jpeg');
+
+        $this->withToken($this->tokenForAdmin())->post(
+            "/api/development/portal/manage/requests/reimbursement/{$itemId}/payout-receipt",
+            ['file' => $file],
+        )->assertCreated();
+
+        $list = $this->withToken($this->loginToken($actor))->getJson(
+            '/api/development/portal/requests/reimbursement?from='.$date.'&to='.$date,
+        )->assertOk();
+
+        $this->assertSame('payout.jpg', $list->json('data.0.items.0.payoutReceiptName'));
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/payout.jpg',
+            $list->json('data.0.items.0.payoutReceiptUrl'),
+        );
+    }
+
+    /*
+     * The bug this guards: a decision used to be written across every row sharing the claim's
+     * created stamp, so settling one item silently settled its siblings.
+     */
+    public function test_deciding_one_item_leaves_the_rest_of_the_claim_alone(): void
+    {
+        $actor = $this->activeMember();
+        $date = Carbon::today()->toDateString();
+        $firstId = (int) $this->insertClaim($actor, $date, 'Pending', [
+            ['item' => 'Second monitor cable', 'cost' => 179, 'qty' => 1],
+            ['item' => 'Monitor stand', 'cost' => 239, 'qty' => 1],
+        ]);
+        Cache::flush();
+
+        $this->withToken($this->tokenForAdmin())->patchJson(
+            '/api/development/portal/manage/requests',
+            ['changes' => [[
+                'id' => (string) $firstId,
+                'kind' => 'reimbursement',
+                'status' => 'approved',
+                'approverRemarks' => 'Paid with the October batch.',
+            ]]],
+        )->assertOk();
+
+        $rows = DB::connection('portal')->table('reimbursements')
+            ->where('date_created', $date.' 10:00:00')
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(2, $rows);
+        $this->assertSame($firstId, (int) $rows[0]->id);
+        $this->assertSame('Approved', $rows[0]->status);
+        $this->assertSame('Paid with the October batch.', $rows[0]->approver_remarks);
+        $this->assertSame('Pending', $rows[1]->status);
+        $this->assertNull($rows[1]->approver_remarks);
+    }
+
+    // Both items stay one claim while their statuses disagree, and each reports its own.
+    public function test_a_part_decided_claim_stays_one_claim_carrying_both_statuses(): void
+    {
+        $actor = $this->activeMember();
+        $date = Carbon::today()->toDateString();
+        $firstId = (int) $this->insertClaim($actor, $date, 'Pending', [
+            ['item' => 'Second monitor cable', 'cost' => 179, 'qty' => 1],
+            ['item' => 'Monitor stand', 'cost' => 239, 'qty' => 1],
+        ]);
+        DB::connection('portal')->table('reimbursements')
+            ->where('id', $firstId)
+            ->update(['status' => 'Approved']);
+        Cache::flush();
+
+        $list = $this->withToken($this->loginToken($actor))->getJson(
+            '/api/development/portal/requests/reimbursement?from='.$date.'&to='.$date,
+        )->assertOk();
+
+        $this->assertCount(1, $list->json('data'));
+        $items = collect($list->json('data.0.items'));
+        $this->assertCount(2, $items);
+        $this->assertSame('approved', $items->firstWhere('id', (string) $firstId)['status']);
+        $this->assertSame(
+            'pending',
+            $items->first(fn (array $item): bool => $item['id'] !== (string) $firstId)['status'],
+        );
+        // Anything still pending holds the claim there, so a withdraw stays offered.
+        $this->assertSame('pending', $list->json('data.0.status'));
     }
 
     public function test_a_receipt_url_from_somewhere_else_is_refused(): void
@@ -501,6 +637,23 @@ class PortalReimbursementRequestsTest extends TestCase
         $this->assertNotNull($employee);
 
         return $employee;
+    }
+
+    private function tokenForAdmin(): string
+    {
+        $employee = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role, '')) = 'admin'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->first();
+        $this->assertNotNull($employee);
+
+        // A developer in Developer mode reaches every department, whoever owns the claim.
+        $employee->forceFill(['is_developer' => true])->save();
+
+        return $this->developerModeOn($this->loginToken($employee));
     }
 
     private function otherActiveMember(Employee $actor): Employee

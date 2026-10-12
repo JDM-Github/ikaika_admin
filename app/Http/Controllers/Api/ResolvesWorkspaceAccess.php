@@ -22,7 +22,7 @@ trait ResolvesWorkspaceAccess
             abort(401, 'Authentication is required.');
         }
 
-        $access = WorkspaceAccess::of($actor);
+        $access = WorkspaceAccess::of($actor, $request);
         $access->assertCanBrowse();
 
         return $access;

@@ -82,12 +82,14 @@ class PortalHomeTest extends TestCase
         $this->assertGreaterThanOrEqual(12, (float) $payload['monthHours']);
         $this->assertGreaterThanOrEqual(2, (int) $payload['monthReportCount']);
         $this->assertArrayHasKey('activeProjectCount', $payload);
-        $this->assertArrayHasKey('portfolioCompletion', $payload);
+        $this->assertArrayNotHasKey('portfolioCompletion', $payload);
         $this->assertArrayHasKey('reportTrend', $payload);
         $this->assertArrayHasKey('projectMix', $payload);
         $this->assertArrayHasKey('recentReports', $payload);
         $this->assertArrayHasKey('trackedProjects', $payload);
         $this->assertGreaterThanOrEqual(1, (int) $payload['activeProjectCount']);
+        $this->assertArrayHasKey('hoursTotal', $payload['trackedProjects'][0]);
+        $this->assertArrayHasKey('lastReportOn', $payload['trackedProjects'][0]);
         $this->assertNotEmpty($payload['recentReports']);
         $dates = array_map(
             static fn (array $report): string => substr((string) ($report['submittedOn'] ?? ''), 0, 10),
@@ -109,7 +111,8 @@ class PortalHomeTest extends TestCase
 
         app(PortalSubmittedReports::class)->bumpCache();
 
-        $this->assertSame(2, (int) Cache::get(PortalHome::CACHE_VERSION_KEY, 1));
+        // Home shares the portal-wide generation, so any bump invalidates it, possibly by more than one step.
+        $this->assertGreaterThan(1, (int) Cache::get(PortalHome::CACHE_VERSION_KEY, 1));
     }
 
     private function activeMember(): Employee

@@ -5,6 +5,7 @@ namespace App\Support\Portal;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Core\CorePayloadFilter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -16,6 +17,8 @@ use InvalidArgumentException;
  */
 final class PortalAudit
 {
+    public const ALERTS_RULE = 'manage.requests.notified';
+
     public const LOG_CACHE_VERSION_KEY = 'portal:user:logs:version';
 
     public const NOTIFICATION_CACHE_VERSION_KEY = 'portal:user:notifications:version';
@@ -43,6 +46,7 @@ final class PortalAudit
         ?string $locationSource = null,
         ?float $locationLat = null,
         ?float $locationLng = null,
+        bool $asDeveloper = false,
     ): int {
         $action = trim($action);
         $resource = trim($resource);
@@ -62,7 +66,8 @@ final class PortalAudit
         $log->location_source = $locationSource;
         $log->location_lat = $locationLat;
         $log->location_lng = $locationLng;
-        $log->payload = $this->sanitizePayload($payload);
+        $log->as_developer = $asDeveloper;
+        $log->payload = CorePayloadFilter::clean($payload);
         $log->created_at = Carbon::now();
         $log->save();
         $this->bumpLogCache();
@@ -81,6 +86,7 @@ final class PortalAudit
         ?string $recordId = null,
         ?Request $request = null,
         array $payload = [],
+        ?bool $asDeveloper = null,
     ): int {
         $location = $this->locationResolver->resolve($request);
 
@@ -97,6 +103,8 @@ final class PortalAudit
             $location['source'],
             $location['lat'],
             $location['lng'],
+            // Only the signed-in person's own row can be in Developer mode: another's session never matches.
+            $asDeveloper ?? ($request !== null && PortalDeveloperMode::isOn($owner, $request) && PortalRules::isDevelopersAct($request)),
         );
     }
 
@@ -116,7 +124,7 @@ final class PortalAudit
         array $payload = [],
     ): void {
         $verb = $approved ? 'approved' : 'rejected';
-        $approverName = PortalActivityCopy::displayName($approver);
+        $approverName = PortalActivityCopy::actorName($approver, $request);
         $requesterName = PortalActivityCopy::displayName($requester);
 
         $this->record(
@@ -182,12 +190,14 @@ final class PortalAudit
     }
 
     /**
-     * Inbox rows for every active Admin and Executive except the actor.
+     * Inbox rows for everyone, the actor aside, who holds Request alerts and whose rule for this
+     * kind of request ($kindRule, e.g. manage.requests.leave) reaches the actor.
      *
      * @param  array<string, mixed>  $payload
      */
     public function notifyManagers(
         Employee $actor,
+        string $kindRule,
         string $type,
         string $title,
         string $message,
@@ -195,17 +205,12 @@ final class PortalAudit
         ?string $linkLabel = null,
         array $payload = [],
     ): void {
-        $recipients = Employee::query()
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->where(function ($query): void {
-                $query->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
-                    ->orWhereRaw("LOWER(COALESCE(role, '')) = 'admin'");
-            })
-            ->get();
-
-        foreach ($recipients as $recipient) {
+        foreach (PortalRules::holders([self::ALERTS_RULE, $kindRule]) as $holder) {
+            if (! PortalRules::covers($holder['reaches'][$kindRule], $holder['employee'], $actor)) {
+                continue;
+            }
             $this->notifyIfOther(
-                $recipient,
+                $holder['employee'],
                 $actor,
                 $type,
                 $title,
@@ -250,7 +255,7 @@ final class PortalAudit
         $notification->message = $message;
         $notification->link_path = $linkPath;
         $notification->link_label = $linkLabel === null || trim($linkLabel) === '' ? null : trim($linkLabel);
-        $notification->payload = $this->sanitizePayload($payload);
+        $notification->payload = CorePayloadFilter::clean($payload);
         $notification->read_at = null;
         $notification->created_at = Carbon::now();
         $notification->save();
@@ -265,7 +270,6 @@ final class PortalAudit
      *
      * @param  list<int>  $employeeIds
      * @param  array<string, mixed>  $payload
-     * @return int
      */
     public function notifyEach(
         array $employeeIds,
@@ -300,7 +304,7 @@ final class PortalAudit
             $linkPath = null;
         }
         $linkLabel = $linkLabel === null || trim($linkLabel) === '' ? null : trim($linkLabel);
-        $clean = $this->sanitizePayload($payload);
+        $clean = CorePayloadFilter::clean($payload);
         $createdAt = Carbon::now()->toDateTimeString();
 
         $rows = [];
@@ -353,29 +357,6 @@ final class PortalAudit
     {
         $current = (int) Cache::get(self::NOTIFICATION_CACHE_VERSION_KEY, 1);
         Cache::forever(self::NOTIFICATION_CACHE_VERSION_KEY, $current + 1);
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     * @return array<string, mixed>
-     */
-    private function sanitizePayload(array $payload): array
-    {
-        $blocked = [
-            'password', 'token', 'authorization', 'secret', 'api_key', 'apikey',
-            'access_token', 'refresh_token', 'jwt', 'bank_account_number',
-            'tax_identification_no', 'sss_no', 'philhealth_no', 'hdmf_no',
-        ];
-
-        $clean = [];
-        foreach ($payload as $key => $value) {
-            if (in_array(strtolower((string) $key), $blocked, true)) {
-                continue;
-            }
-            $clean[$key] = $value;
-        }
-
-        return $clean;
     }
 
     private function truncateUserAgent(?string $userAgent): ?string

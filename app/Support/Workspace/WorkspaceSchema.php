@@ -111,7 +111,10 @@ final class WorkspaceSchema
         $title = $this->titleColumn($product, $table);
         $references = $this->links->parentColumns($product, $table);
         $key = $this->introspector->surrogateKey($product, $table);
-        $writable = $key !== null && $access->canEdit() && WorkspaceWriter::isWritable($product);
+        // Only Airtable-mirrored tables: an edit is ledgered for the sync, and a portal-only table
+        // (logs, notifications, email) has no Airtable record for that edit to land on.
+        $mirrored = in_array('airtable_record_id', array_column($columns, 'name'), true);
+        $writable = $key !== null && $mirrored && $access->canEdit() && WorkspaceWriter::isWritable($product);
 
         $fields = [];
         foreach ($readable as $column) {
@@ -142,7 +145,8 @@ final class WorkspaceSchema
                 'numeric' => WorkspaceFieldType::isNumericType($type),
                 'filled' => $locked ? null : ($probes[$column['name']]['nonnull'] ?? null),
                 'locked' => $locked,
-                'editable' => $writable && ! $locked && WorkspaceFieldType::isEditable($type),
+                'editable' => $writable && ! $locked && WorkspaceFieldType::isEditable($type)
+                    && ! in_array($column['name'], (array) config('workspace.readonly_columns.'.$product.'.'.$table, []), true),
             ];
 
             if ($type === WorkspaceFieldType::SELECT) {

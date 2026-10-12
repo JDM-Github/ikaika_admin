@@ -9,3 +9,9 @@
 /.github export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore
+
+# The ikaika_scripts entry points are Windows launchers. The eol=lf above is right
+# for everything this repo deploys to Linux and wrong for these two: cmd reads a
+# batch file line by line off disk, and an LF-only one mis-parses.
+*.bat text eol=crlf
+*.ps1 text eol=crlf

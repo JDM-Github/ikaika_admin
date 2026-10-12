@@ -14,9 +14,18 @@ use Illuminate\Support\Facades\Cache;
  *
  * Restore puts a submitted report back and records an add. The original
  * delete action stays on core.actions.
+ *
+ * Everyone sees their own trash. The "all" view (All Recycle) follows administration.recycle: whoever
+ * its reach covers and its white and black lists leave in, never an executive's rows but to the
+ * executive. It is view only: people restore their own items, since restoring someone else's could
+ * backfire on them.
  */
 final class PortalRecycleBin
 {
+    public const ALL_RULE = 'administration.recycle';
+
+    public const VIEW_ONLY = 'All Recycle is view only: people restore their own items.';
+
     public const CACHE_TTL_SECONDS = 30;
 
     public const DEFAULT_PAGE_SIZE = 25;
@@ -30,7 +39,11 @@ final class PortalRecycleBin
      */
     public const PAGE_SIZES = [10, 25, 50, 100];
 
-    private const CACHE_VERSION_KEY = 'portal:administration:recycle-bin:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
+
+    public function __construct(
+        private readonly PortalViewProjects $projects,
+    ) {}
 
     /**
      * Table column key => SQL columns. Unknown keys fall back to newest first.
@@ -58,8 +71,13 @@ final class PortalRecycleBin
      */
     public function list(Employee $actor, Request $request): array
     {
-        $canViewAll = PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null);
+        $canViewAll = $this->canViewAll($actor, $request);
         $scope = $this->scope($request, $canViewAll);
+        // Their own bin follows User / Recycle Bin; All Recycle follows its own rule, reach and lists.
+        if ($scope === self::SCOPE_OWN) {
+            PortalRules::require($actor, $request, 'user.recycle');
+        }
+        $visible = $canViewAll && $scope === self::SCOPE_ALL ? $this->visible($actor, $request) : null;
         $employeeId = $this->employeeId($request, $canViewAll, $scope);
         $perPage = $this->perPage($request);
         $page = max(1, $request->integer('page', 1));
@@ -68,8 +86,8 @@ final class PortalRecycleBin
         $dir = strtolower(trim((string) $request->query('dir', 'desc'))) === 'asc' ? 'asc' : 'desc';
         $type = $this->type($request);
 
-        $view = $canViewAll && $scope === self::SCOPE_ALL
-            ? 'all:'.($employeeId ?? 0)
+        $view = $visible !== null
+            ? 'all:'.md5((string) json_encode($visible)).':'.($employeeId ?? 0)
             : 'own:'.$actor->getKey();
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         $key = 'portal:administration:recycle-bin:'.$version.':'.$view.':'.($type ?? 'all').':'.$page.':'.$perPage.':'.md5($search).':'.$sort.':'.$dir;
@@ -77,6 +95,7 @@ final class PortalRecycleBin
         return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use (
             $actor,
             $canViewAll,
+            $visible,
             $scope,
             $employeeId,
             $perPage,
@@ -86,7 +105,7 @@ final class PortalRecycleBin
             $dir,
             $type,
         ): array {
-            return $this->build($actor, $canViewAll, $scope, $employeeId, $type, $perPage, $page, $search, $sort, $dir);
+            return $this->build($actor, $canViewAll, $visible, $scope, $employeeId, $type, $perPage, $page, $search, $sort, $dir);
         });
     }
 
@@ -101,9 +120,10 @@ final class PortalRecycleBin
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function show(Employee $actor, int $id): array
+    public function show(Employee $actor, int $id, Request $request): array
     {
-        $row = $this->itemForActor($actor, $id);
+        $row = $this->itemForActor($actor, $id, $request);
+        $this->requireOwn($actor, $row, $request, 'user.recycle');
         $employeeId = is_numeric($row->deleted_by) ? (int) $row->deleted_by : 0;
         $names = $this->employeeDirectory($employeeId > 0 ? [$employeeId] : []);
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
@@ -113,28 +133,57 @@ final class PortalRecycleBin
             return [
                 'section' => 'administration',
                 'resource' => 'recycle-bin',
-                'data' => PortalRecycleBinPresenter::detail($row, $names),
+                'data' => [
+                    ...PortalRecycleBinPresenter::detail($row, $names),
+                    // A deleted project is only stamped, so its details and reported work are still there to show.
+                    'project' => PortalProjectDeletion::owns($row) ? $this->projects->binSummary((int) $row->record_id) : null,
+                ],
             ];
         });
     }
 
+    // Their own item follows their User / Recycle Bin rules; someone else's follows All Recycle's reach.
+    public function requireOwn(Employee $actor, Recycle $row, Request $request, string $key): void
+    {
+        if ($this->isOwn($actor, $row)) {
+            PortalRules::requireOwn($actor, $request, $key);
+        }
+    }
+
+    // Only their own item comes back: All Recycle only looks.
+    public function requireRestorable(Employee $actor, Recycle $row, Request $request): void
+    {
+        if (! $this->isOwn($actor, $row)) {
+            abort(403, self::VIEW_ONLY);
+        }
+        PortalRules::requireOwn($actor, $request, 'user.recycle.restore');
+    }
+
+    private function isOwn(Employee $actor, Recycle $row): bool
+    {
+        return is_numeric($row->deleted_by) && (int) $row->deleted_by === (int) $actor->getKey();
+    }
+
     /**
-     * One portal recycle row the actor may restore. Members only see their own
-     * `deleted_by`. Admin and Executive may restore anyone's portal row.
+     * One portal recycle row the actor may open: their own, or one All Recycle lets them see.
      */
-    public function itemForActor(Employee $actor, int $id): Recycle
+    public function itemForActor(Employee $actor, int $id, Request $request): Recycle
     {
         if ($id <= 0) {
             abort(404, 'That item was not found.');
         }
 
-        $canViewAll = PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null);
+        $canViewAll = $this->canViewAll($actor, $request);
         $query = Recycle::query()
             ->select(PortalRecycleBinPresenter::restoreColumns())
             ->where('product', CoreLedger::PRODUCT_PORTAL)
             ->where('id', $id);
         if (! $canViewAll) {
             $query->where('deleted_by', (int) $actor->getKey());
+        } else {
+            $query->where(fn (Builder $inner) => $inner
+                ->where('deleted_by', (int) $actor->getKey())
+                ->orWhere(fn (Builder $managed) => PortalVisibleActors::apply($managed, $this->visible($actor, $request), 'deleted_by')));
         }
 
         $row = $query->first();
@@ -160,6 +209,7 @@ final class PortalRecycleBin
     private function build(
         Employee $actor,
         bool $canViewAll,
+        ?array $visible,
         string $scope,
         ?int $employeeId,
         ?string $type,
@@ -169,8 +219,13 @@ final class PortalRecycleBin
         string $sort,
         string $dir,
     ): array {
-        $scoped = $this->scopedQuery($actor, $canViewAll, $scope, $employeeId, $type);
+        $scoped = $this->scopedQuery($actor, $visible, $employeeId, $type);
         $totalInBin = (clone $scoped)->toBase()->count();
+        // Each type tab's count, before search and whatever tab is open (2026-10-07), so the tabs read as a legend.
+        $byType = ['all' => $this->scopedQuery($actor, $visible, $employeeId, null)->toBase()->count()];
+        foreach (PortalRecycleBinPresenter::TYPES as $each) {
+            $byType[$each] = $this->scopedQuery($actor, $visible, $employeeId, $each)->toBase()->count();
+        }
 
         $this->applySearch($scoped, $search, $canViewAll);
         $this->applyOrder($scoped, $sort, $dir);
@@ -184,7 +239,7 @@ final class PortalRecycleBin
             }
         }
 
-        $filterIds = $canViewAll ? $this->deletedByIds() : [];
+        $filterIds = $visible !== null ? $this->deletedByIds($visible) : [];
         $names = $this->employeeDirectory(array_values(array_unique([...$pageEmployeeIds, ...$filterIds])));
 
         $rows = [];
@@ -219,7 +274,7 @@ final class PortalRecycleBin
             'canViewAll' => $canViewAll,
             'data' => $rows,
             'employees' => $employees,
-            'counts' => PortalRecycleBinPresenter::counts($totalInBin),
+            'counts' => PortalRecycleBinPresenter::counts($totalInBin, $byType),
             'meta' => [
                 'current_page' => $pageResult->currentPage(),
                 'per_page' => $pageResult->perPage(),
@@ -229,7 +284,7 @@ final class PortalRecycleBin
         ];
     }
 
-    private function scopedQuery(Employee $actor, bool $canViewAll, string $scope, ?int $employeeId, ?string $type): Builder
+    private function scopedQuery(Employee $actor, ?array $visible, ?int $employeeId, ?string $type): Builder
     {
         $query = Recycle::query()
             ->select(PortalRecycleBinPresenter::listColumns())
@@ -237,17 +292,53 @@ final class PortalRecycleBin
 
         $this->applyType($query, $type);
 
-        if (! $canViewAll || $scope === self::SCOPE_OWN) {
+        if ($visible === null) {
             $query->where('deleted_by', (int) $actor->getKey());
 
             return $query;
         }
 
+        PortalVisibleActors::apply($query, $visible, 'deleted_by');
         if ($employeeId !== null) {
             $query->where('deleted_by', $employeeId);
         }
 
         return $query;
+    }
+
+    private function canViewAll(Employee $actor, Request $request): bool
+    {
+        return PortalRules::holds($actor, $request, self::ALL_RULE);
+    }
+
+    /**
+     * Whose deleted items All Recycle shows: whoever its reach covers and its lists leave in, and the
+     * viewer, never an executive. Former staff count too, since their items outlive them for a while.
+     * Rows whose deleter matches no employee show only at every-department reach with no list in
+     * the way, since no list can name them.
+     *
+     * @return array{ids: list<int>, unknownToo: bool, everyone: list<int>}
+     */
+    private function visible(Employee $actor, Request $request): array
+    {
+        $reach = PortalRules::reach($actor, $request, self::ALL_RULE);
+        $listed = PortalRules::listed($actor, $request, self::ALL_RULE);
+        $employees = Employee::query()->get(['id', 'department', 'role', 'role_level']);
+        $ids = $employees
+            ->filter(static fn (Employee $person): bool => ! PortalRole::isExecutive($person->role, $person->role_level)
+                && ((int) $person->getKey() === (int) $actor->getKey() || (PortalRules::covers($reach, $actor, $person) && $listed($person))))
+            ->map(static fn (Employee $person): int => (int) $person->getKey())
+            ->values()
+            ->all();
+        $lists = PortalRules::holds($actor, $request, self::ALL_RULE.'.'.PortalRules::UNLISTED)
+            ? []
+            : PortalAccessGraph::forViewer($actor, $request)->listsOn((int) $actor->getKey(), self::ALL_RULE);
+
+        return [
+            'ids' => $ids,
+            'unknownToo' => $reach === 'all' && $lists === [],
+            'everyone' => $employees->map(static fn (Employee $person): int => (int) $person->getKey())->values()->all(),
+        ];
     }
 
     private function applyType(Builder $query, ?string $type): void
@@ -316,11 +407,13 @@ final class PortalRecycleBin
     /**
      * @return list<int>
      */
-    private function deletedByIds(): array
+    private function deletedByIds(array $visible): array
     {
-        return Recycle::query()
+        $query = Recycle::query()->where('product', CoreLedger::PRODUCT_PORTAL);
+        PortalVisibleActors::apply($query, $visible, 'deleted_by');
+
+        return $query
             ->toBase()
-            ->where('product', CoreLedger::PRODUCT_PORTAL)
             ->whereNotNull('deleted_by')
             ->distinct()
             ->orderBy('deleted_by')

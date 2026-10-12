@@ -15,6 +15,8 @@ class PortalJwt
         $now = now()->getTimestamp();
         $ttl = $this->ttlSeconds();
         $payload = array_merge($claims, [
+            // One id per sign-in: Developer mode is tied to it, so a new sign-in starts in Default.
+            'sid' => bin2hex(random_bytes(16)),
             'iss' => 'ikaika-platform',
             'aud' => 'portal',
             'iat' => $now,

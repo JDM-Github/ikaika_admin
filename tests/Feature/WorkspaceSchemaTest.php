@@ -31,7 +31,7 @@ class WorkspaceSchemaTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('product', 'portal')
-            ->assertJsonPath('database', 'test_portal_database');
+            ->assertJsonPath('database', config('products.catalog.portal.database'));
 
         $names = array_column($response->json('tables'), 'name');
         $this->assertContains('employees', $names);
@@ -119,6 +119,18 @@ class WorkspaceSchemaTest extends TestCase
         $names = array_column($employees->json('fields'), 'name');
         $this->assertNotContains('password', $names);
         $this->assertNotContains('remember_token', $names);
+    }
+
+    // A grid edit is ledgered for the Airtable sync; a table Airtable does not mirror has nowhere to land it.
+    public function test_only_airtable_mirrored_tables_are_editable(): void
+    {
+        $this->getJson('/api/development/portal/_schema/projects', $this->authHeaders())
+            ->assertOk()
+            ->assertJsonPath('editable', true);
+
+        $this->getJson('/api/development/portal/_schema/logs', $this->authHeaders())
+            ->assertOk()
+            ->assertJsonPath('editable', false);
     }
 
     public function test_the_schema_requires_a_session(): void

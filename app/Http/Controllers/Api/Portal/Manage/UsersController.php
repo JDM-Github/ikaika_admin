@@ -17,6 +17,16 @@ class UsersController extends Controller
         return response()->json($this->users->list($request));
     }
 
+    public function show(Request $request, int $id): JsonResponse
+    {
+        $viewer = $request->attributes->get('portalEmployee');
+        if (! $viewer instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->users->profile($viewer, $id, $request));
+    }
+
     public function updateRole(Request $request, int $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');
@@ -30,5 +40,50 @@ class UsersController extends Controller
             PortalManageUsers::validatedRole($request),
             $request,
         ));
+    }
+
+    // What Add user offers: the next ID No. and the departments the actor's Users reach covers.
+    public function newUser(Request $request): JsonResponse
+    {
+        return response()->json($this->users->newUserOptions($this->actor($request), $request));
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        return response()->json($this->users->addUser($this->actor($request), $request), 201);
+    }
+
+    public function updateDepartment(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->users->changeDepartment($this->actor($request), $id, $request));
+    }
+
+    public function updateProfile(Request $request, int $id): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        $validated = $request->validate([
+            'title' => ['nullable', 'string', 'max:255'],
+            'email' => ['nullable', 'email', 'max:255'],
+            'phoneNumber' => ['nullable', 'string', 'max:50'],
+            'department' => ['nullable', 'string', 'max:100'],
+            'location' => ['nullable', 'string', 'max:100'],
+            'footerId' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        return response()->json($this->users->updateProfile($actor, $id, $validated, $request));
+    }
+
+    private function actor(Request $request): Employee
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return $actor;
     }
 }

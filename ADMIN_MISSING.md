@@ -159,25 +159,22 @@ Verified by comparing every write site against every `CoreLedger` call site.
 
 | Write path | Evidence | Consequence if unbuilt |
 | --- | --- | --- |
-| **Approve / reject a request** (leave, overtime, offset, reimbursement) | `PortalManageRequests.php:217` and `:261` write `status` + `approver_remarks` by direct `->update()`. The class defines **no `CORE_TARGET` constant** — every ledger-writing class does. | **Airtable shows every request as forever pending.** The single most important business event in the portal never syncs. |
-| **Create a calendar event** | `PortalCalendarEvents.php:453` `insertGetId` plus two junction inserts. Defines `CORE_RESOURCE` but **no `CORE_TARGET`**, and passes `CORE_RESOURCE` only to `audit->record()`. | Events never reach Airtable. |
-| **Change a user's role** | `PortalManageUsers.php:116` `$target->save()` | Role changes diverge. |
-| **Save / delete a workspace view** | `WorkspaceViews.php:114, :122, :160` | Saved views diverge. |
-| Mark a notification read | `PortalInbox.php:120` | Ephemeral — **probably correct to skip**. |
+| ~~Approve / reject a request~~ | **Done 2026-09-23** — `PortalManageRequests::recordDecision` ledgers every decision (leave, overtime, offset, reimbursement, flag) as an `edit` carrying the status. | — |
+| ~~Change a user's role~~ | **Done 2026-09-23** — `PortalManageUsers::updateRole` ledgers it with the grid's target and payload shape. | — |
+| Create a calendar event | `PortalCalendarEvents.php:453` | **Leave unledgered.** `calendar_events` lives in `sql/portal/separate.sql`, has no `airtable_record_id`, and has no Airtable table. |
+| Save / delete a workspace view | `WorkspaceViews.php:114, :122, :160` | **Leave unledgered.** `core.workspace_views` is admin-app UI state with no Airtable table. |
+| Mark a notification read | `PortalInbox.php:120` | Leave unledgered — portal-only table. |
 
-The missing `CORE_TARGET` constant on `PortalManageRequests` and
-`PortalCalendarEvents` is the tell: every class that ledgers has one, these two do not,
-so the ledger call was intended and never written.
+**Correction (2026-09-23):** an earlier version of this list made ledgering
+`PortalCalendarEvents` and `WorkspaceViews` a P0. That was wrong. A ledger row for a
+table Airtable does not mirror can never be pushed; it fails on every run and blocks the
+oldest-first queue behind it. Only tables carrying `airtable_record_id` are ledgered, and
+the grid now refuses to edit the others (`WorkspaceSchema::table`). See
+`SYNC_LOOPHOLES.md` L-13.
 
-- [ ] **P0, and a prerequisite for everything else in §3.** Add ledger calls to
-      `PortalManageRequests` (approve and reject), `PortalCalendarEvents` (create),
-      `PortalManageUsers` (role change) and `WorkspaceViews` (save/delete), following
-      the existing pattern exactly.
-- [ ] Approvals need a new action type or a distinguishable resource. `add` / `edit` /
-      `delete` does not express "approved". Decide whether `CoreActionType` grows a
-      `decision` member or whether the approval rides as an `edit` of
-      `requests.leave` carrying the status. **Decide before writing it** — this shapes
-      the Airtable contract.
+- [x] Approvals ride as an `edit` of their own resource (`requests.leave`,
+      `requests.overtime`, `requests.offset`, `requests.reimbursement`,
+      `reports.flagged`) carrying the stored status. No new action type.
 
 ### 3.4 Phase A — close the ledger gaps
 

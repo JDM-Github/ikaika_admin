@@ -33,7 +33,7 @@ final class PortalOvertimeRequests
 
     private const MAX_AHEAD_MONTHS = 12;
 
-    private const CACHE_VERSION_KEY = 'portal:requests:overtime:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     private const MAX_GROUPS = 8;
 
@@ -119,71 +119,72 @@ final class PortalOvertimeRequests
             $resolved[$index] = $this->resolveProjects($group['entries'], $projects);
         }
 
-        $insertedIds = $this->connection()->transaction(function () use (
+        $insertedIds = $this->ledger->within($this->connection(), function () use (
             $groups,
             $resolved,
             $name,
             $createdAt,
+            $employeeId,
+            $actor,
         ): array {
             $ids = [];
             foreach ($groups as $index => $group) {
-                $ids[] = $this->insertRequest($group, $resolved[$index], $name, $createdAt);
-            }
+                $id = $this->insertRequest($group, $resolved[$index], $name, $createdAt);
+                $ids[] = $id;
 
-            return $ids;
-        });
-
-        try {
-            foreach ($groups as $index => $group) {
-                $id = (string) $insertedIds[$index];
                 $this->ledger->recordAdd(
                     CoreLedger::PRODUCT_PORTAL,
                     CoreRecycleKey::overtimeRequest($employeeId, $group['date']),
                     self::CORE_TARGET,
                     [
-                        'id' => $id,
+                        'id' => (string) $id,
                         'requestedFor' => $group['date'],
                         'hours' => $this->totalHours($group['entries']),
                         'entries' => $group['entries'],
                         'reason' => $group['reason'],
                     ],
                     self::CORE_RESOURCE,
-                    $id,
+                    (string) $id,
                     $employeeId,
                     is_string($actor->id_no) ? $actor->id_no : null,
                 );
-                $this->audit->record(
-                    $actor,
-                    PortalLogAction::INSERT,
-                    self::CORE_RESOURCE,
-                    PortalActivityCopy::filedOvertime($group['date']),
-                    $id,
-                    $request,
-                    [
-                        'requestedFor' => $group['date'],
-                        'hours' => $this->totalHours($group['entries']),
-                        'entries' => $group['entries'],
-                        'reason' => $group['reason'],
-                    ],
-                );
-                $this->audit->notifyManagers(
-                    $actor,
-                    PortalNotificationType::REQUEST_FILED_OVERTIME,
-                    'New overtime request',
-                    PortalActivityCopy::notifyFiled(
-                        PortalActivityCopy::displayName($actor),
-                        'overtime request',
-                        $group['date'],
-                        $group['date'],
-                    ),
-                    PortalShellPath::MANAGE_REQUESTS,
-                    'Open queue',
-                    ['recordId' => $id],
-                );
             }
-        } catch (Throwable $error) {
-            $this->deleteRequests($insertedIds);
-            throw $error;
+
+            return $ids;
+        });
+
+        // After the commit: a failed log or notification must never undo a filed request.
+        foreach ($groups as $index => $group) {
+            $id = (string) $insertedIds[$index];
+            $this->audit->record(
+                $actor,
+                PortalLogAction::INSERT,
+                self::CORE_RESOURCE,
+                PortalActivityCopy::filedOvertime($group['date']),
+                $id,
+                $request,
+                [
+                    'requestedFor' => $group['date'],
+                    'hours' => $this->totalHours($group['entries']),
+                    'entries' => $group['entries'],
+                    'reason' => $group['reason'],
+                ],
+            );
+            $this->audit->notifyManagers(
+                $actor,
+                'manage.requests.overtime',
+                PortalNotificationType::REQUEST_FILED_OVERTIME,
+                'New overtime request',
+                PortalActivityCopy::notifyFiled(
+                    PortalActivityCopy::actorName($actor, $request, true),
+                    'overtime request',
+                    $group['date'],
+                    $group['date'],
+                ),
+                PortalShellPath::MANAGE_REQUESTS,
+                'Open queue',
+                ['recordId' => $id],
+            );
         }
 
         // The day now carries an overtime request, which is what the strip greys out next time.
@@ -220,7 +221,7 @@ final class PortalOvertimeRequests
         $projectIds = $this->resolveProjects($group['entries'], $projects);
         $hours = $this->totalHours($group['entries']);
 
-        $this->connection()->transaction(function () use ($row, $group, $projectIds, $hours): void {
+        $this->ledger->within($this->connection(), function () use ($row, $group, $projectIds, $hours, $employeeId, $actor): void {
             $this->connection()->table('requests')->where('id', (int) $row->id)->update([
                 'request_date' => $group['date'],
                 'no_of_hours' => $hours,
@@ -233,24 +234,24 @@ final class PortalOvertimeRequests
                     'request_id' => (int) $row->id,
                 ]);
             }
-        });
 
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'id' => (string) (int) $row->id,
-                'requestedFor' => $group['date'],
-                'hours' => $hours,
-                'entries' => $group['entries'],
-                'reason' => $group['reason'],
-            ],
-            self::CORE_RESOURCE,
-            (string) (int) $row->id,
-            CoreRecycleKey::overtimeRequest($employeeId, $group['date']),
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => (string) (int) $row->id,
+                    'requestedFor' => $group['date'],
+                    'hours' => $hours,
+                    'entries' => $group['entries'],
+                    'reason' => $group['reason'],
+                ],
+                self::CORE_RESOURCE,
+                (string) (int) $row->id,
+                CoreRecycleKey::overtimeRequest($employeeId, $group['date']),
+                $employeeId,
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
 
         $this->audit->record(
             $actor,
@@ -309,24 +310,29 @@ final class PortalOvertimeRequests
         $day = $this->calendarDate($row->request_date ?? null) ?? '';
         $employeeId = (int) $actor->getKey();
 
-        $this->connection()->table('requests')
-            ->where('id', (int) $row->id)
-            ->update(['status' => self::CANCELLED_STATUS]);
+        $this->ledger->within($this->connection(), function () use ($row, $day, $employeeId, $actor): void {
+            $this->connection()->table('requests')
+                ->where('id', (int) $row->id)
+                ->update(['status' => self::CANCELLED_STATUS]);
 
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            self::CORE_TARGET,
-            [
-                'id' => (string) (int) $row->id,
-                'requestedFor' => $day,
-                'status' => self::CANCELLED_STATUS,
-            ],
-            self::CORE_RESOURCE,
-            (string) (int) $row->id,
-            CoreRecycleKey::overtimeRequest($employeeId, $day),
-            $employeeId,
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
+            // Carries the stored hours and reason too, so a sync applying this edit never blanks them.
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => (string) (int) $row->id,
+                    'requestedFor' => $day,
+                    'hours' => is_numeric($row->no_of_hours ?? null) ? (float) $row->no_of_hours : null,
+                    'reason' => is_string($row->reason ?? null) ? $row->reason : null,
+                    'status' => self::CANCELLED_STATUS,
+                ],
+                self::CORE_RESOURCE,
+                (string) (int) $row->id,
+                CoreRecycleKey::overtimeRequest($employeeId, $day),
+                $employeeId,
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
 
         $this->audit->record(
             $actor,
@@ -342,9 +348,10 @@ final class PortalOvertimeRequests
         );
         $this->audit->notifyManagers(
             $actor,
+            'manage.requests.overtime',
             PortalNotificationType::REQUEST_CANCELLED_OVERTIME,
             'Overtime request cancelled',
-            PortalActivityCopy::notifyCancelled(PortalActivityCopy::displayName($actor), 'overtime request', $day),
+            PortalActivityCopy::notifyCancelled(PortalActivityCopy::actorName($actor, $request, true), 'overtime request', $day),
             PortalShellPath::MANAGE_REQUESTS,
             'Open queue',
             ['recordId' => (string) (int) $row->id],
@@ -506,6 +513,8 @@ final class PortalOvertimeRequests
             ->table('employees_projects')
             ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
             ->where('employees_projects.employee_id', $employeeId)
+            // A deleted project waits in the Recycle Bin: nothing new may be filed against it.
+            ->whereNull('projects.deleted_at')
             ->select(['projects.id', 'projects.project_number', 'projects.project_name'])
             ->get();
 
@@ -819,6 +828,7 @@ final class PortalOvertimeRequests
                 'status',
                 'type',
                 'no_of_hours',
+                'reason',
                 'original_work_day',
                 'offset_work_day',
             ])
@@ -956,19 +966,6 @@ final class PortalOvertimeRequests
     private function lookupKey(string $label): string
     {
         return strtolower(trim($label));
-    }
-
-    /**
-     * @param  list<int>  $ids
-     */
-    private function deleteRequests(array $ids): void
-    {
-        if ($ids === []) {
-            return;
-        }
-
-        $this->connection()->table('projects_requests')->whereIn('request_id', $ids)->delete();
-        $this->connection()->table('requests')->whereIn('id', $ids)->delete();
     }
 
     private function connection(): Connection

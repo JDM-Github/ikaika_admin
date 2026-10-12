@@ -208,15 +208,16 @@ class WorkspaceGridTest extends TestCase
 
         $this->getJson('/api/development/portal/_schema', $headers)
             ->assertForbidden()
-            ->assertJsonPath('message', 'The data workspace is for administrators. Your work lives in the portal.');
+            ->assertJsonPath('message', 'The data workspace needs the Data Workspace power. Your work lives in the portal.');
 
         $this->getJson('/api/development/portal/_grid/employees', $headers)->assertForbidden();
     }
 
-    public function test_a_project_admin_sees_private_columns_locked_rather_than_missing(): void
+    public function test_a_browse_only_member_sees_private_columns_locked_rather_than_missing(): void
     {
         $member = $this->member();
-        DB::connection('portal')->table('employees')->where('id', $member->id)->update(['role' => 'ProjectAdmin']);
+        // Given only the Workspace power: browse, nothing private, no edits, no shared views.
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->id, 'permission_key' => 'workspace', 'reach' => null]);
         $headers = $this->headersFor($member->fresh());
 
         $response = $this->getJson('/api/development/portal/_grid/employees?per_page=5&cols=all', $headers);
@@ -244,7 +245,8 @@ class WorkspaceGridTest extends TestCase
     public function test_a_locked_column_cannot_be_filtered_or_sorted_back_into_view(): void
     {
         $member = $this->member();
-        DB::connection('portal')->table('employees')->where('id', $member->id)->update(['role' => 'ProjectAdmin']);
+        // Given only the Workspace power: browse, nothing private, no edits, no shared views.
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $member->id, 'permission_key' => 'workspace', 'reach' => null]);
         $headers = $this->headersFor($member->fresh());
 
         $response = $this->getJson(

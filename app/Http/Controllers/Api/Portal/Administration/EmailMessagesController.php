@@ -8,6 +8,7 @@ use App\Support\Portal\PortalEmailAudience;
 use App\Support\Portal\PortalEmailMessages;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class EmailMessagesController extends Controller
 {
@@ -44,6 +45,27 @@ class EmailMessagesController extends Controller
         }
 
         return response()->json($this->messages->show($id));
+    }
+
+    // One file a sent email carried, as a download.
+    public function attachment(Request $request, int $id, string $token): StreamedResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return $this->messages->attachment($actor, $request, $id, $token);
+    }
+
+    public function preview(Request $request): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->messages->preview($request));
     }
 
     public function store(Request $request): JsonResponse

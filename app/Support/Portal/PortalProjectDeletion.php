@@ -30,11 +30,13 @@ final class PortalProjectDeletion
 
     private const CORE_RESOURCE = 'projects';
 
+
     public function __construct(
         private readonly CoreLedger $ledger,
         private readonly PortalRecycleBin $recycleBin,
         private readonly PortalViewProjects $projects,
         private readonly PortalAudit $audit,
+        private readonly PortalProjectTrail $trail,
     ) {}
 
     public function destroy(Employee $actor, int $projectId, Request $request): void
@@ -56,7 +58,9 @@ final class PortalProjectDeletion
             abort(404, 'That project was not found.');
         }
 
-        $this->assertMayManage($actor, $row->project_lead_email ?? null);
+        if (! PortalProjectPowers::allows($actor, $request, PortalProjectPowers::DELETE, $row)) {
+            abort(403, 'Your Delete projects power does not reach this project.');
+        }
 
         $name = $this->text($row->project_name) ?? $this->text($row->project_number) ?? 'Project';
         $employeeId = (int) $actor->getKey();
@@ -90,6 +94,7 @@ final class PortalProjectDeletion
             $this->ledger->revert($written['recycle_id'], $written['action_id']);
             throw $error;
         }
+        $this->trail->record($projectId, PortalProjectTrail::DELETED, $actor, $request);
 
         $this->audit->record(
             $actor,
@@ -136,6 +141,7 @@ final class PortalProjectDeletion
             ->table('projects')
             ->where('id', $projectId)
             ->update(['deleted_at' => null]);
+        $this->trail->record($projectId, PortalProjectTrail::RESTORED, $actor, $request);
 
         // recordAdd, not revert: it drops the bin row and logs the restore as its own action, so the
         // original delete stays in the ledger. revert is for rolling back a delete that failed.
@@ -162,26 +168,6 @@ final class PortalProjectDeletion
 
         $this->projects->bumpCache();
         $this->recycleBin->bumpCache();
-    }
-
-    /*
-     * The same rule the Projects screen draws its button from -- an admin, or the project's own
-     * lead. Repeated here rather than trusted from there, because a hidden button is not a
-     * permission and this endpoint is reachable without one.
-     */
-    private function assertMayManage(Employee $actor, mixed $leadEmail): void
-    {
-        if (PortalRole::isAdmin($actor->role ?? null, $actor->role_level ?? null)) {
-            return;
-        }
-
-        $lead = $this->text($leadEmail);
-        $own = $this->text($actor->email ?? null);
-        if ($lead !== null && $own !== null && strcasecmp($lead, $own) === 0) {
-            return;
-        }
-
-        abort(403, 'Only an admin or the project lead may delete this project.');
     }
 
     /** Whether this bin row is a project, so the Recycle Bin can route a restore to the right hand. */

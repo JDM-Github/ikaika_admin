@@ -35,6 +35,20 @@ return [
         ],
     ],
 
+    // A token scoped to the TEST base only, so the portal sync cannot write to production.
+    'airtable' => [
+        'token' => env('AIRTABLE_TOKEN'),
+        'base' => env('AIRTABLE_BASE_ID'),
+    ],
+
+    // A read-only Bitbucket access token for MIS projects' code activity; it lives in .env alone.
+    'bitbucket' => [
+        'token' => env('BITBUCKET_TOKEN'),
+        // Signs each push webhook delivery; unset, every delivery is refused.
+        'webhook_secret' => env('BITBUCKET_WEBHOOK_SECRET'),
+        'base_url' => 'https://api.bitbucket.org/2.0',
+    ],
+
     'cloudinary' => [
         'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
         'api_key' => env('CLOUDINARY_API_KEY'),

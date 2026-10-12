@@ -31,6 +31,7 @@
             <input class="search" id="search" placeholder="Search this table" spellcheck="false" autocomplete="off">
             <button type="button" class="ghost" id="add-filter" title="Narrow this table by a column or a relationship">Filter</button>
             <button type="button" class="ghost" id="open-views" title="Saved questions about this table">Views</button>
+            <button type="button" class="ghost" id="sync-airtable" title="Not built yet -- pushes nothing" hidden>Sync to Airtable</button>
             <div class="seg" id="preset">
                 <button type="button" data-cols="key" class="active">Key</button>
                 <button type="button" data-cols="all">All</button>

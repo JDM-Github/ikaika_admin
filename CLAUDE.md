@@ -1,3 +1,12 @@
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
 <laravel-boost-guidelines>
 === foundation rules ===
 
@@ -165,3 +174,13 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - Run `vendor/bin/phpunit` to call the test runner directly. It accepts the same file path and `--filter=testName` arguments.
 
 </laravel-boost-guidelines>
+
+# Deployment (Bluehost Test Server)
+
+Read `deployment/README.md` before touching anything deploy-related. The Test Server is live at `https://test.ikaikabim.com/central-api/` (the admin workspace UI) and is deployed with `deployment\deploy.ps1` (build, upload, deploy over SSH alias `bluehost`). Local data is copied with `deployment\copy-databases.ps1`.
+
+- Everything server-side lives in `/home2/eoxvhumy/apps/test-server/` (`app/`, `.env`, `db.env`, `scripts/`, `upload/`, `backups/`). Never add folders to the server's home directory.
+- Do not run `route:cache` (or `optimize`) on the server: cached routes answer 405 for `/central-api/` when Laravel sits in a subfolder. The scripts run `config:cache`, `event:cache` and `view:cache` only.
+- Scripts in `deployment/server/` must stay LF; bash on the server breaks on CRLF.
+- Laravel's dotenv keeps the **last** value of a repeated key; the server's `.env` is `test-server/.env` followed by `db.env`. Apply edits with `scripts/apply-env.sh`, never by copying into `app/`.
+- Staging (`ikaikabim.com/staging/central-api`, `~/apps/central-platform`, `INSTALLATION.md`) is a separate, older setup.

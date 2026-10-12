@@ -10,10 +10,14 @@ use Illuminate\Support\Facades\Cache;
 /**
  * Who a Send Email reaches, and who the composer may choose from.
  *
- * An audience is everyone, a department, a role, or hand-picked members. The picker is fed
- * from the same active roster the send resolves against, so a name on the form is a name that
- * receives the mail. A member with no usable address is not a recipient and not a pick: the
- * send only counts people it can actually reach.
+ * An audience is everyone, a department, a role, hand-picked members, or custom addresses typed
+ * into the composer. The picker is fed from the same active roster the send resolves against, so a
+ * name on the form is a name that receives the mail. A member with no usable address is not a
+ * recipient and not a pick: the send only counts people it can actually reach.
+ *
+ * A custom address is anyone's, member or not, so it carries no member id and no bell notice.
+ * Each member carries their work address too, so the composer can suggest it as an address is
+ * typed; a personal address never leaves the server.
  */
 final class PortalEmailAudience
 {
@@ -25,14 +29,20 @@ final class PortalEmailAudience
 
     public const MEMBERS = 'members';
 
+    public const CUSTOM = 'custom';
+
     /**
      * @var list<string>
      */
-    public const AUDIENCES = [self::EVERYONE, self::DEPARTMENT, self::ROLE, self::MEMBERS];
+    public const AUDIENCES = [self::EVERYONE, self::DEPARTMENT, self::ROLE, self::MEMBERS, self::CUSTOM];
+
+    public const MAX_CUSTOM = 50;
+
+    public const MAX_COPIES = 20;
 
     public const CACHE_TTL_SECONDS = 30;
 
-    private const CACHE_VERSION_KEY = 'portal:administration:email:audience:version';
+    private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
     /**
      * @return array{
@@ -43,7 +53,7 @@ final class PortalEmailAudience
      *         categories: list<string>,
      *         departments: list<array{value: string, label: string, count: int}>,
      *         roles: list<array{value: string, label: string, count: int}>,
-     *         members: list<array{id: int, name: string, department: ?string}>,
+     *         members: list<array{id: int, name: string, department: ?string, email: string}>,
      *         total: int
      *     }
      * }
@@ -76,34 +86,68 @@ final class PortalEmailAudience
      * The filter a send should store: only the picks that audience actually uses, each one
      * checked against the roster the form was built from.
      *
-     * @return array{departments: list<string>, roles: list<string>, memberIds: list<int>}
+     * @return array{departments: list<string>, roles: list<string>, memberIds: list<int>, emails: list<string>}
      */
     public function validatedFilter(string $audience, Request $request): array
     {
-        if ($audience === self::DEPARTMENT) {
-            return ['departments' => $this->validatedDepartments($request->input('departments', [])), 'roles' => [], 'memberIds' => []];
+        $none = ['departments' => [], 'roles' => [], 'memberIds' => [], 'emails' => []];
+
+        return match ($audience) {
+            self::DEPARTMENT => [...$none, 'departments' => $this->validatedDepartments($request->input('departments', []))],
+            self::ROLE => [...$none, 'roles' => $this->validatedRoles($request->input('roles', []))],
+            self::MEMBERS => [...$none, 'memberIds' => $this->validatedMemberIds($request->input('memberIds', []))],
+            self::CUSTOM => [...$none, 'emails' => self::validatedAddresses($request->input('emails', []), self::MAX_CUSTOM, 'custom', true)],
+            default => $none,
+        };
+    }
+
+    /**
+     * Typed addresses: trimmed, lowercased, each a real address, no repeats, and no more than $max.
+     * Used for a custom audience and for CC and BCC, so all three hold to the same rule.
+     *
+     * @return list<string>
+     */
+    public static function validatedAddresses(mixed $value, int $max, string $label, bool $required): array
+    {
+        $addresses = [];
+        foreach (is_array($value) ? $value : [] as $entry) {
+            $address = strtolower(trim(is_string($entry) ? $entry : ''));
+            if ($address === '') {
+                continue;
+            }
+            if (filter_var($address, FILTER_VALIDATE_EMAIL) === false) {
+                abort(422, 'Every '.$label.' address must be a valid email address.');
+            }
+            $addresses[$address] = true;
         }
 
-        if ($audience === self::ROLE) {
-            return ['departments' => [], 'roles' => $this->validatedRoles($request->input('roles', [])), 'memberIds' => []];
+        if ($required && $addresses === []) {
+            abort(422, 'Add at least one '.$label.' address.');
+        }
+        if (count($addresses) > $max) {
+            abort(422, 'A send can carry at most '.$max.' '.$label.' addresses.');
         }
 
-        if ($audience === self::MEMBERS) {
-            return ['departments' => [], 'roles' => [], 'memberIds' => $this->validatedMemberIds($request->input('memberIds', []))];
-        }
-
-        return ['departments' => [], 'roles' => [], 'memberIds' => []];
+        return array_keys($addresses);
     }
 
     /**
      * Everyone the audience reaches, in roster order. Addresses stay in this list and never
      * leave it: nothing a caller stores or logs comes from here but the count.
      *
-     * @param  array{departments: list<string>, roles: list<string>, memberIds: list<int>}  $filter
-     * @return list<array{id: int, name: string, email: string}>
+     * @param  array{departments: list<string>, roles: list<string>, memberIds: list<int>, emails: list<string>}  $filter
+     * @return list<array{id: ?int, name: string, email: string}>
      */
     public function recipients(string $audience, array $filter): array
     {
+        // A typed address has no name on the roster, so the address is what a failure is filed under.
+        if ($audience === self::CUSTOM) {
+            return array_map(
+                static fn (string $email): array => ['id' => null, 'name' => $email, 'email' => $email],
+                $filter['emails'],
+            );
+        }
+
         $query = Employee::query()
             ->select(['id', 'first_name', 'last_name', 'email'])
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
@@ -149,7 +193,7 @@ final class PortalEmailAudience
      *         categories: list<string>,
      *         departments: list<array{value: string, label: string, count: int}>,
      *         roles: list<array{value: string, label: string, count: int}>,
-     *         members: list<array{id: int, name: string, department: ?string}>,
+     *         members: list<array{id: int, name: string, department: ?string, email: string}>,
      *         total: int
      *     }
      * }
@@ -197,6 +241,7 @@ final class PortalEmailAudience
                 'id' => (int) $row->id,
                 'name' => $name,
                 'department' => $department === '' ? null : $department,
+                'email' => $email,
             ];
         }
 
@@ -328,7 +373,8 @@ final class PortalEmailAudience
      */
     private function matchAny(Builder $query, string $column, array $values): void
     {
-        $query->where(function (Builder $builder) use ($column, $values): void {            foreach ($values as $value) {
+        $query->where(function (Builder $builder) use ($column, $values): void {
+            foreach ($values as $value) {
                 $builder->orWhereRaw('LOWER(TRIM('.$column.')) = ?', [strtolower($value)]);
             }
         });

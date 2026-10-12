@@ -522,6 +522,7 @@
     .peek .row .k .count { color: var(--muted); font-variant-numeric: tabular-nums; }
     .ghost.mini { padding: 0 6px; font-size: 11px; margin-left: 2px; vertical-align: middle; }
     .peek .row .v { word-break: break-word; white-space: pre-wrap; }
+    .peek .row .v .json-detail { margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 
     /* Command palette -------------------------------------------------- */
 

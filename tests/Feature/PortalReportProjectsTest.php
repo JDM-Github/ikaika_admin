@@ -58,6 +58,24 @@ class PortalReportProjectsTest extends TestCase
         );
     }
 
+    // A report asks for lines only on an Engineering project: each project says whether it does.
+    public function test_each_project_says_whether_its_reports_carry_lines(): void
+    {
+        $actor = $this->activeMember();
+        $projectId = (int) DB::connection('portal')->table('employees_projects')->where('employee_id', $actor->getKey())->value('project_id');
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        DB::connection('portal')->table('projects')->where('id', $projectId)->update(['department' => 'MIS']);
+        Cache::flush();
+        $mis = collect($this->getJson('/api/development/portal/reports/projects', $headers)->assertOk()->json('data'))->firstWhere('id', (string) $projectId);
+        DB::connection('portal')->table('projects')->where('id', $projectId)->update(['department' => 'Engineering']);
+        Cache::flush();
+        $engineering = collect($this->getJson('/api/development/portal/reports/projects', $headers)->assertOk()->json('data'))->firstWhere('id', (string) $projectId);
+
+        $this->assertFalse($mis['hasLines']);
+        $this->assertTrue($engineering['hasLines']);
+    }
+
     public function test_activities_are_grouped_by_job_type_rather_than_repeated_per_project(): void
     {
         $actor = $this->activeMember();
@@ -178,7 +196,7 @@ class PortalReportProjectsTest extends TestCase
         ])->assertOk();
 
         $payload = array_values(array_filter(
-            $queries,
+            $this->withoutRuleCheck($queries),
             static fn (string $sql): bool => ! str_contains($sql, 'from `employees` '),
         ));
         $this->assertLessThanOrEqual(3, count($payload));

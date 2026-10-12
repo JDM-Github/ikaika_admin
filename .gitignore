@@ -1,3 +1,11 @@
+# BEGIN: ai-tools-gitignore (managed by setup-ai-tools-global.ps1 - do not hand-edit between markers)
+# serena (LSP agent) - local cache and memories, regenerate with activate_project/onboarding
+.serena/
+
+# graphify knowledge graph - fully regenerable via `graphify extract .` / `graphify update .`
+graphify-out/
+# END: ai-tools-gitignore
+.claude/settings.json
 *.log
 .DS_Store
 .env
@@ -28,3 +36,52 @@ Thumbs.db
 
 graphify-out/
 msal_test/
+
+# ikaika_scripts toolkit (decoupled-script/). Credentials live in
+# .ikaika_scripts_configs/ as *.env, and the broad rule catches a stray copy
+# anywhere too. Trust anchors (*.sha256, *.pin, *.known_hosts) and *.env.template
+# stay COMMITTED - they are not secrets, and are only useful when every machine
+# verifies the same value.
+*.env
+!ikaika_scripts.env
+.ikaika_scripts_configs/logs/
+.ikaika_scripts_configs/.toolkit-update-check
+.ikaika_scripts_configs/.toolkit-update-skip
+.ikaika_scripts_configs/.readiness-check
+
+# The dependency fingerprint development-setup writes, so a pull that changes
+# nothing in composer.lock does not reinstall vendor/.
+.ikaika-install
+
+# Which servers run-servers started, and their pids. Machine state, not a
+# project fact - it is meaningless on any other machine.
+.ikaika_scripts_configs/.servers.json
+
+# Which sql/ files update-database -Idempotent has already applied, and to which
+# database. Machine state, not a project fact - another machine's databases are
+# in a different state and must be judged on their own.
+.ikaika_scripts_configs/.sql-applied.json
+*.private.*
+__pycache__/
+*.pyc
+# Generated exports: raw Airtable JSON, downloaded bank certificates, SSS/PhilHealth/TIN
+# scans and employee photos, plus the SQL built from them. Never commit any of it. The
+# Airtable token authenticates to the live base.
+migrations/outputs/
+migrations/export_*/
+migrations/*.sql
+/migrations/.token*
+/migrations/generate/__pycache__/
+# Local copies of other systems' code, kept for reference while working on email.
+email-test/
+
+/deployment/out/
+
+# The Build release workflow's secrets, for ci-local when GitHub Actions is down; the .template beside it is committed.
+.local.actions-secret.env
+
+# certificates -Collect: private keys gathered for the shared folder, never committed.
+/share-upload/
+
+# The sealed secrets archive kept in the repo for secrets -Import and -Export; every secret is in it.
+/.ikaika_scripts_configs/*.7z
