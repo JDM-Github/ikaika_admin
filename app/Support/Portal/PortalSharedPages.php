@@ -23,6 +23,9 @@ use Illuminate\Support\Facades\Mail;
  */
 final class PortalSharedPages
 {
+    // The inline name the password letter's QR is embedded under; the body shows it as cid:<name>.
+    private const QR_IMAGE = 'share-qr';
+
     private const DEFAULT_EXPIRY_DAYS = 7;
 
     private const MAX_EXPIRY_DAYS = 365;
@@ -561,13 +564,20 @@ final class PortalSharedPages
                     : 'A read-only shared page is ready for you: **'.$label.'**.')
                 ."\n\nLink: [".$link.']('.$link.')'
                 ."\nPassword: **".$password.'**'
+                ."\n\nOr scan this code with your phone to open the link:"
+                ."\n\n![QR code for the link](cid:".self::QR_IMAGE.')'
                 ."\n\n".$expiry.' It is read-only: you can look, not change anything.'
                 ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
+            [['name' => self::QR_IMAGE, 'data' => PortalQrPng::png($link), 'mime' => 'image/png']],
         );
     }
 
-    // The same letter the composer and the notification emails send: letter design, Company footer, portal sender.
-    private function mailTo(string $to, string $subject, string $body): void
+    /**
+     * The same letter the composer and the notification emails send: letter design, Company footer, portal sender.
+     *
+     * @param  list<array{name: string, data: string, mime: string}>  $inlineImages
+     */
+    private function mailTo(string $to, string $subject, string $body, array $inlineImages = []): void
     {
         [$footerBody, $footerFormat] = PortalNotificationEmails::companyFooter();
         Mail::to($to)->send(new PortalEmailMail(
@@ -577,6 +587,9 @@ final class PortalSharedPages
             PortalEmailMarkup::FORMAT_LETTER,
             $footerFormat,
             PortalNotificationEmails::FROM_NAME,
+            null,
+            [],
+            $inlineImages,
         ));
     }
 

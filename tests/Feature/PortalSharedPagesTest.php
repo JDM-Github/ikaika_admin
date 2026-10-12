@@ -6,6 +6,7 @@ use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalNotificationEmails;
+use App\Support\Portal\PortalQrPng;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
@@ -243,6 +244,13 @@ class PortalSharedPagesTest extends TestCase
             && $mail->footerBody === $footerBody
             && str_starts_with($mail->body, 'Hi ')
             && str_starts_with($mail->subjectLine, 'Your link and password for '));
+
+        // The QR rides inline as a PNG, shown in the letter where the body names it.
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => str_contains($mail->body, '](cid:share-qr)')
+            && count($mail->inlineImages) === 1
+            && $mail->inlineImages[0]['name'] === 'share-qr'
+            && $mail->inlineImages[0]['mime'] === 'image/png'
+            && $mail->inlineImages[0]['data'] === PortalQrPng::png((string) $created->json('data.share.link')));
 
         // A new password says so in its own subject.
         $this->withToken($token)->postJson(self::BASE.'/'.$created->json('data.share.id').'/regenerate')->assertOk();
