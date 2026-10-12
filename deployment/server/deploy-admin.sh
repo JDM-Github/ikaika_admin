@@ -83,9 +83,10 @@ fi
 chmod 600 "$NEW/.env"
 chmod -R 775 "$NEW/storage" "$NEW/bootstrap/cache"
 
-# A value from the release's .env, last one winning as Laravel reads it, without surrounding quotes.
+# A value from the release's .env, last one winning as Laravel reads it, without surrounding quotes. The server's
+# .env can carry Windows line endings, so the carriage return goes first or it rides along into the value.
 env_value() {
-    grep -E "^$1=" "$NEW/.env" | tail -n 1 | cut -d= -f2- | sed -E 's/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/' || true
+    tr -d '\r' < "$NEW/.env" | grep -E "^$1=" | tail -n 1 | cut -d= -f2- | sed -E 's/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/' || true
 }
 
 # A connection's setting the way config/products.php resolves it: <PREFIX>_DB_<FIELD>, else DB_<FIELD>.
@@ -113,7 +114,7 @@ for prefix in DEFAULT PORTAL TRACKER; do
     fi
     [ -n "$db" ] || { echo "   $prefix: no database named, skipped"; continue; }
     case " ${DUMPED[*]:-} " in *" $db "*) continue ;; esac
-    MYSQL_PWD=$pass mysqldump -h "${host:-127.0.0.1}" -P "${port:-3306}" -u "$user" --single-transaction --routines \
+    MYSQL_PWD=$pass mysqldump -h "${host:-127.0.0.1}" -P "${port:-3306}" -u "$user" --single-transaction --no-tablespaces \
         --default-character-set=utf8mb4 "$db" | gzip > "$DUMP_DIR/$db.sql.gz"
     DUMPED+=("$db")
     echo "   $db -> $DUMP_DIR/$db.sql.gz"
