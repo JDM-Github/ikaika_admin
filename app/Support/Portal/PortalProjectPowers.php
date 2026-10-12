@@ -29,6 +29,10 @@ final class PortalProjectPowers
 
     public const LEAD = 'projects.lead';
 
+    // Not a form power: Manage / References reads the same project options the form does, so its
+    // own rule must open that read too.
+    public const REFERENCES = 'projects.references';
+
     // Only these reach a project row, so only they offer the "the projects you lead" reach.
     public static function supportsLeadReach(string $key): bool
     {

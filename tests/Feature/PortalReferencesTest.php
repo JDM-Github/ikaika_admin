@@ -266,4 +266,19 @@ class PortalReferencesTest extends TestCase
 
         $this->withToken($this->token($member))->postJson(self::BASE.'/clients', ['name' => 'Nope Ltd', 'code' => '98'])->assertForbidden();
     }
+
+    // Reported live 2026-10-12: an admin whose Add projects is switched off (or limited) must
+    // still open References, which reads the same project options the Add Project form does.
+    public function test_the_page_reads_its_project_options_without_add_projects(): void
+    {
+        $admin = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        DB::connection('portal')->table('access_toggles')->insert([
+            'employee_id' => $admin->getKey(),
+            'permission_key' => 'projects.create',
+        ]);
+
+        $this->withToken($this->token($admin))
+            ->getJson('/api/development/portal/projects/options')
+            ->assertOk();
+    }
 }

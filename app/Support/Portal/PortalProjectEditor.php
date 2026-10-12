@@ -137,12 +137,18 @@ final class PortalProjectEditor
      */
     public function options(Employee $actor, Request $request): array
     {
-        // Edit projects at own opens the form only for someone who leads a project.
+        /*
+         * Read by the project form (Add projects, or Edit projects at own for a lead) and by
+         * Manage / References, which maps activities onto the same project options. The page's own
+         * power opens it too: limiting Add projects must not break References for an admin
+         * (2026-10-12, reported live).
+         */
         $editReach = PortalRules::reach($actor, $request, PortalProjectPowers::EDIT);
         if (! PortalRules::holds($actor, $request, PortalProjectPowers::CREATE)
+            && ! PortalRules::holds($actor, $request, PortalProjectPowers::REFERENCES)
             && ! in_array($editReach, ['department', 'all'], true)
             && ($editReach === null || ! $this->leadsAnyProject($actor))) {
-            abort(403, 'The project form needs the Add projects or Edit projects power.');
+            abort(403, 'The project options need Add projects, Edit projects or References.');
         }
 
         // Who may lead, and where: Project Lead at all leads anywhere, at department (or own) their own department's.
