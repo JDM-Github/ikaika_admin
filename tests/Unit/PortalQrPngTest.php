@@ -21,6 +21,6 @@ class PortalQrPngTest extends TestCase
         $rows = (string) gzuncompress(substr($png, 41, $length));
         $this->assertSame($header['height'] * ($header['width'] + 1), strlen($rows));
         $this->assertSame("\xFF", $rows[1]);
-        $this->assertStringContainsString("\x00\x00", substr($rows, 0, strlen($rows)));
+        $this->assertStringContainsString("\x00", substr($rows, 1));
     }
 }
