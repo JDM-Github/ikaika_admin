@@ -90,7 +90,7 @@ class PortalProjectNumbersTest extends TestCase
         $this->assertStringStartsWith($second.' Gamma ', DB::connection('portal')->table('projects')->where('id', $id)->value('project_name'));
     }
 
-    // The reported ask: no duplicate project names.
+    // The reported ask: no duplicate project names within a department (nj, 2026-10-07: two departments may share one).
     public function test_a_name_already_used_is_refused_whatever_its_case_spacing_or_number(): void
     {
         $admin = $this->engineeringAdmin();
@@ -98,9 +98,10 @@ class PortalProjectNumbersTest extends TestCase
         $id = $this->create($admin, ['name' => $name])->assertCreated()->json('data.id');
 
         $this->create($admin, ['name' => '  '.strtoupper(str_replace(' ', '   ', $name))])->assertStatus(422)
-            ->assertJsonPath('message', fn (string $message): bool => str_starts_with($message, 'A project named "'));
-        // A project from Airtable, its number leading the name.
+            ->assertJsonPath('message', fn (string $message): bool => str_starts_with($message, 'Engineering already has a project named "'));
+        // A project from Airtable, its number leading the name, in the same department.
         $legacy = (string) DB::connection('portal')->table('projects')->whereNull('deleted_at')->whereNull('project_number')
+            ->where('department', 'Engineering')
             ->where('project_name', 'regexp', '^[0-9]{5,6} [A-Za-z]')->value('project_name');
         $this->create($admin, ['name' => preg_replace('/^\d+\s+/', '', $legacy)])->assertStatus(422);
         $this->create($admin, ['name' => '260299 Epsilon'])->assertStatus(422)

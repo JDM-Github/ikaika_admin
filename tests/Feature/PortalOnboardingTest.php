@@ -137,9 +137,9 @@ class PortalOnboardingTest extends TestCase
             'emergencyContactNumber' => '09170000002',
             'emergencyContactAddress' => '2 Test Street, Manila',
             'taxIdentificationNo' => '123-456-789',
-            'philhealthNo' => 'PH-0001',
-            'sssNo' => 'SS-0001',
-            'hdmfNo' => 'HD-0001',
+            'philhealthNo' => '12-345678901-2',
+            'sssNo' => '12-3456789-0',
+            'hdmfNo' => '1234-5678-9012',
             'bankName' => 'BDO',
             'bankAccountNumber' => '001234567890',
             'bankSwiftCode' => 'BNORPHMM',
@@ -322,11 +322,39 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame('Reyes', $data->last_name);
         $this->assertSame('liza.reyes@example.test', $data->email);
         $this->assertSame('2026-11-03', $data->start_date);
-        $this->assertSame('PH-0001', $data->philhealth_no);
+        $this->assertSame('12-345678901-2', $data->philhealth_no);
         $this->assertSame('Pending', $data->data_approval);
 
         $listed = collect($this->withToken($admin)->getJson(self::BASE)->json('data.registrations'))->firstWhere('code', 'liza');
         $this->assertSame('submitted', $listed['status']);
+    }
+
+    // The reported ask (2026-10-12): the candidate's details are sanitized on save, and again at submit.
+    public function test_details_are_sanitized_on_save_and_at_submit(): void
+    {
+        $admin = $this->adminToken();
+        $created = $this->createRegistration($admin, ['slug' => 'clean', 'candidateName' => ' <b>Liza</b>  Reyes ']);
+        $this->assertSame('Liza Reyes', $created['registration']['candidateName']);
+        $session = $this->signIn('clean', $created['password']);
+
+        $saved = $this->withToken($session)->patchJson(self::REGISTER.'/details', ['firstName' => ' <b>Liza</b>  Mae ', 'bankSwiftCode' => 'bnor phmm'])
+            ->assertOk()->json('data.details');
+        $this->assertSame('Liza Mae', $saved['firstName']);
+        $this->assertSame('BNORPHMM', $saved['bankSwiftCode']);
+
+        // A refused save changes nothing.
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', ['firstName' => 'Liza2'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'First name can only have letters, spaces, periods, apostrophes and hyphens.');
+        $this->withToken($session)->getJson(self::REGISTER.'/session')->assertOk()->assertJsonPath('data.details.firstName', 'Liza Mae');
+
+        // A draft saved before the sanitizing is held to the same shapes when it is submitted.
+        DB::connection('portal')->table('registrations')->where('code', 'clean')
+            ->update(['details' => json_encode(['sssNo' => 'SS-0001'] + $this->details())]);
+        $this->uploadAll($session);
+        $this->withToken($session)->postJson(self::REGISTER.'/submit')
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Enter your SSS No.: 10 digits, numbers and dashes only.');
     }
 
     public function test_documents_are_checked_and_kept_privately(): void

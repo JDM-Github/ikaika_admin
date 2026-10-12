@@ -36,6 +36,14 @@ final class PortalBudgetLedger
 
     public const ENVELOPE_TRANSFER_IN = 'Credit - Envelope Transfer';
 
+    // Money in an account given to one of its envelopes: out of what is unallocated, into the envelope.
+    public const ALLOCATION_OUT = 'Expense - Allocation';
+
+    public const ALLOCATION_IN = 'Credit - Allocation';
+
+    // Both rows of an allocation: money moving inside one account, so neither is received or spent.
+    public const ALLOCATIONS = [self::ALLOCATION_OUT, self::ALLOCATION_IN];
+
     private const CONNECTION = 'tracker';
 
     public function __construct(
@@ -122,6 +130,19 @@ final class PortalBudgetLedger
         }
     }
 
+    // The budget code an envelope sits under -- the first by name when it sits under more -- or null for none.
+    public function codeIdOf(int $envelopeId): ?int
+    {
+        $id = $this->connection()
+            ->table('envelopes_budget_codes as ebc')
+            ->join('budget_codes as c', 'c.id', '=', 'ebc.budget_code_id')
+            ->where('ebc.envelope_id', $envelopeId)
+            ->orderBy('c.name')
+            ->value('c.id');
+
+        return $id === null ? null : (int) $id;
+    }
+
     public function assertBudgetCode(?int $codeId): void
     {
         if ($codeId !== null && ! $this->connection()->table('budget_codes')->where('id', $codeId)->exists()) {
@@ -169,6 +190,52 @@ final class PortalBudgetLedger
     }
 
     /**
+     * What an account holds that no envelope has been given (2026-10-08): its rows tied to no envelope.
+     * The rest of its balance is allocated, in the envelopes its rows name.
+     */
+    public function accountUnallocatedCents(int $accountId): int
+    {
+        $row = $this->connection()
+            ->table('transactions_accounts as ta')
+            ->join('transactions as t', 't.id', '=', 'ta.transaction_id')
+            ->where('ta.account_id', $accountId)
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('transactions_envelopes as te')->whereColumn('te.transaction_id', 't.id'))
+            ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS received', [self::TYPE_CREDIT])
+            ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS spent', [self::TYPE_EXPENSE])
+            ->first();
+
+        return $this->input->cents($row->received ?? 0) - $this->input->cents($row->spent ?? 0);
+    }
+
+    /**
+     * Gives an envelope money its account already holds (2026-10-08): an Expense out of the account's
+     * unallocated money and a Credit into the envelope, both in the same account, so its balance stays.
+     * More than is unallocated only once that is confirmed.
+     *
+     * @return list<int>
+     */
+    public function allocate(Employee $actor, int $accountId, int $envelopeId, ?int $codeId, int $cents, string $date, ?string $notes, bool $isConfirmed): array
+    {
+        return $this->transaction(function () use ($actor, $accountId, $envelopeId, $codeId, $cents, $date, $notes, $isConfirmed): array {
+            $account = $this->lockAccount($accountId);
+            $this->assertOpenAccount($account);
+            $unallocated = $this->accountUnallocatedCents($accountId);
+            if ($cents > $unallocated && ! $isConfirmed) {
+                abort(422, $this->accountName($account).' has only '.$this->input->peso($unallocated).' unallocated. Confirm to go past it.');
+            }
+
+            return [
+                $this->record($actor, self::ALLOCATION_OUT, self::TYPE_EXPENSE, $cents, $date, $notes, ['accountId' => $accountId]),
+                $this->record($actor, self::ALLOCATION_IN, self::TYPE_CREDIT, $cents, $date, $notes, [
+                    'envelopeId' => $envelopeId,
+                    'budgetCodeId' => $codeId,
+                    'accountId' => $accountId,
+                ]),
+            ];
+        });
+    }
+
+    /**
      * Refuses to take more than an envelope or account holds, unless the person was shown the
      * shortfall and confirmed it.
      */
@@ -196,7 +263,19 @@ final class PortalBudgetLedger
     }
 
     /**
-     * Writes one ledger row and its links, described the way Record Funds describes its own.
+     * The note a row was written with, as the person wrote it. Rows the portal wrote before 2026-10-07
+     * also end with "Recorded in the Ikaika portal by ...", which created_by already says; it is left off.
+     */
+    public static function noteOf(mixed $description): ?string
+    {
+        $note = trim((string) preg_replace('/\s*Recorded in the Ikaika portal by .*\.$/su', '', (string) ($description ?? '')));
+
+        return $note === '' ? null : $note;
+    }
+
+    /**
+     * Writes one ledger row and its links, its description only the note it was given: who recorded it
+     * is created_by's to say.
      *
      * @param  array{envelopeId?: ?int, accountId?: ?int, budgetCodeId?: ?int, transferSourceId?: ?int, transferDestinationId?: ?int, payorPayee?: ?string}  $links
      */
@@ -210,7 +289,7 @@ final class PortalBudgetLedger
             'amount' => $this->input->decimal($cents),
             'type' => $type,
             'payor_payee' => $links['payorPayee'] ?? null,
-            'description' => ($notes === null ? '' : $notes.' ').'Recorded in the Ikaika portal by '.$actorName.'.',
+            'description' => $notes,
             'reviewed_by_email' => is_string($actor->email ?? null) ? $actor->email : null,
             'approval_date' => $now,
             'created_by' => $actorName,

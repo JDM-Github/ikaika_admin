@@ -26,7 +26,7 @@ final class PortalCloudinary
     /**
      * @return array{fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}
      */
-    public function uploadReceipt(UploadedFile $file): array
+    public function uploadReceipt(UploadedFile $file, string $folder = self::FOLDER): array
     {
         $cloud = $this->cloudName();
         $key = $this->apiKey();
@@ -36,7 +36,6 @@ final class PortalCloudinary
         }
 
         $timestamp = time();
-        $folder = self::FOLDER;
         $signature = sha1('folder='.$folder.'&timestamp='.$timestamp.$secret);
         $path = $file->getRealPath();
         if (! is_string($path) || $path === '') {

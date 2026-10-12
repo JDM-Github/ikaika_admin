@@ -124,12 +124,13 @@ final class PortalSubmittedReports
     /**
      * Every report flagged at filing time (employees_user_reports.is_flag), for the given window.
      * Grouped by (employee, date, kind) -- the exact unit create() flagged together and the unit a
-     * decision must land on as one, the same way build() groups one member's own lines. Only the
-     * approver queue PortalManageRequests bundles reads this; a member never sees their own.
+     * decision must land on as one, the same way build() groups one member's own lines. The
+     * approver queue PortalManageRequests bundles reads everyone's; ownReviews() one member's,
+     * with memberName null as every own list has it.
      *
      * @return list<array<string, mixed>>
      */
-    public function flaggedReports(string $from, string $to): array
+    public function flaggedReports(string $from, string $to, ?int $employeeId = null): array
     {
         $query = $this->connection()
             ->table('user_reports')
@@ -138,9 +139,11 @@ final class PortalSubmittedReports
             ->where('employees_user_reports.is_flag', 1)
             ->whereNotNull('user_reports.report_date')
             ->whereBetween('user_reports.report_date', [$from, $to])
+            ->when($employeeId !== null, fn ($query) => $query->where('employees_user_reports.employee_id', $employeeId))
             ->select([
                 'user_reports.id',
                 'user_reports.report_date',
+                'user_reports.date_created',
                 'user_reports.hours_rendered',
                 'user_reports.change_in_elements',
                 'user_reports.remarks',
@@ -172,8 +175,8 @@ final class PortalSubmittedReports
                 continue;
             }
             $kind = PortalSubmittedReportPresenter::kind($row->late_submission ?? null);
-            $employeeId = (int) $row->employee_id;
-            $key = $employeeId.'|'.$date.'|'.$kind;
+            $owner = (int) $row->employee_id;
+            $key = $owner.'|'.$date.'|'.$kind;
             if (! isset($groups[$key])) {
                 $groups[$key] = [
                     'ids' => [],
@@ -183,14 +186,18 @@ final class PortalSubmittedReports
                     'entries' => [],
                     'flagStatus' => $this->text($row->flag_status ?? null) ?? 'Pending',
                     'flagRemarks' => $this->text($row->flag_remarks ?? null),
+                    // Older imported rows may carry no creation stamp; the day itself stands in.
+                    'createdOn' => $this->calendarDate($row->date_created ?? null) ?? $date,
                     'referenceCode' => PortalSubmittedReportPresenter::referenceCode(
                         $row->id_no ?? null,
-                        $employeeId,
+                        $owner,
                     ),
-                    'memberName' => PortalSubmittedReportPresenter::memberName(
-                        is_string($row->first_name ?? null) ? $row->first_name : null,
-                        is_string($row->last_name ?? null) ? $row->last_name : null,
-                    ),
+                    'memberName' => $employeeId === null
+                        ? PortalSubmittedReportPresenter::memberName(
+                            is_string($row->first_name ?? null) ? $row->first_name : null,
+                            is_string($row->last_name ?? null) ? $row->last_name : null,
+                        )
+                        : null,
                 ];
             }
             $reason = PortalSubmittedReportPresenter::reason($row->remarks ?? null);
@@ -216,6 +223,7 @@ final class PortalSubmittedReports
                 'referenceCode' => $group['referenceCode'],
                 'memberName' => $group['memberName'],
                 'kind' => $group['kind'],
+                'createdOn' => $group['createdOn'],
                 'submittedOn' => $group['submittedOn'],
                 'reason' => $group['reason'],
                 'status' => PortalSubmittedReportPresenter::requestStatus($group['flagStatus']),
@@ -289,6 +297,34 @@ final class PortalSubmittedReports
                 'section' => 'reports',
                 'resource' => 'late',
                 'data' => $this->lateReports((int) $actor->getKey(), $from, $to),
+                'range' => ['from' => $from, 'to' => $to],
+            ];
+        });
+    }
+
+    /**
+     * User Requests' Daily Reports: the signed-in member's own daily reports that waited for review
+     * (every Engineering member's, see PortalReportReview), and the decisions on them.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>, range: array{from: string, to: string}}
+     */
+    public function ownReviews(Employee $actor, Request $request): array
+    {
+        [$from, $to] = $this->dateRange($request);
+
+        $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+        $key = 'portal:reports:reviews:'.$version.':'.$actor->getKey().':'.$from.':'.$to;
+
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($actor, $from, $to): array {
+            $daily = array_filter(
+                $this->flaggedReports($from, $to, (int) $actor->getKey()),
+                static fn (array $report): bool => $report['kind'] === PortalSubmittedReportPresenter::KIND_DAILY,
+            );
+
+            return [
+                'section' => 'reports',
+                'resource' => 'reviews',
+                'data' => array_values($daily),
                 'range' => ['from' => $from, 'to' => $to],
             ];
         });
@@ -449,9 +485,10 @@ final class PortalSubmittedReports
         $created = $first->date_created ?? null;
         // Carried over, not recomputed: a flag is set once at filing time, and editing a report's
         // entries must not silently re-derive it from whatever the employee's warning status
-        // happens to be today, nor reset a reviewer's already-recorded flag_status back to Pending.
+        // happens to be today. A report that waits for review goes back to its reviewer once
+        // edited, as a late report's approval does: what was approved or rejected is not this.
         $isFlagged = (bool) ($first->is_flag ?? false);
-        $flagStatus = (string) ($first->flag_status ?? 'Pending');
+        $flagStatus = $isFlagged ? self::NEW_FLAG_STATUS : (string) ($first->flag_status ?? self::NEW_FLAG_STATUS);
 
         $this->ledger->within($this->connection(), function () use (
             $employeeId,
@@ -632,7 +669,7 @@ final class PortalSubmittedReports
         }
 
         // One check per filing, not per line: every group in this request is the same employee.
-        $isFlagged = $this->hasActiveWarning($employeeId);
+        $isFlagged = PortalReportReview::waits($kind, $actor->department, $this->hasActiveWarning($employeeId));
 
         $this->ledger->within($this->connection(), function () use (
             $employeeId,
@@ -952,6 +989,12 @@ final class PortalSubmittedReports
                     'submittedOn' => $date,
                     'reason' => null,
                     'entries' => [],
+                    'reviewStatus' => PortalReportReview::status(
+                        $kind,
+                        $line->is_flag ?? false,
+                        $line->flag_status ?? null,
+                        $line->late_submission_approval ?? null,
+                    ),
                 ];
             }
             $reason = PortalSubmittedReportPresenter::reason($line->remarks ?? null);
@@ -984,6 +1027,7 @@ final class PortalSubmittedReports
                 $group['submittedOn'],
                 $group['reason'],
                 $group['entries'],
+                $group['reviewStatus'],
             );
             $dates[$group['submittedOn']] = true;
             if ($group['kind'] === PortalSubmittedReportPresenter::KIND_LATE) {
@@ -1158,6 +1202,9 @@ final class PortalSubmittedReports
                 'user_reports.change_in_elements',
                 'user_reports.remarks',
                 'user_reports.late_submission',
+                'user_reports.late_submission_approval',
+                'employees_user_reports.is_flag',
+                'employees_user_reports.flag_status',
             ])
             ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
             ->where('employees_user_reports.employee_id', $employeeId)
@@ -2032,6 +2079,8 @@ final class PortalSubmittedReports
             ->where('employees_projects.employee_id', $employeeId)
             // A deleted project waits in the Recycle Bin: nothing new may be filed against it.
             ->whereNull('projects.deleted_at')
+            // Nor against one that is not approved yet.
+            ->tap(PortalProjectApproval::openForWork(...))
             ->select(['projects.id', 'projects.project_number', 'projects.project_name'])
             ->get();
 

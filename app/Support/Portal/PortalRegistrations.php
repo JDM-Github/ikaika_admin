@@ -52,8 +52,8 @@ final class PortalRegistrations
         'middleName' => 'max:100',
         'lastName' => 'max:100',
         'nickname' => 'max:100',
-        'startDate' => 'date',
-        'dateOfBirth' => 'date',
+        'startDate' => 'date_format:Y-m-d',
+        'dateOfBirth' => 'date_format:Y-m-d',
         'address' => 'max:500',
         'phoneNumber' => 'max:50',
         'emergencyContactPersonName' => 'max:255',
@@ -80,6 +80,7 @@ final class PortalRegistrations
         private readonly PortalAudit $audit,
         private readonly PortalJwt $jwt,
         private readonly PortalRegistrationDocuments $documents,
+        private readonly PortalRegistrationInput $input,
     ) {}
 
     /**
@@ -394,9 +395,8 @@ final class PortalRegistrations
         $data = $request->validate($rules);
 
         $details = $this->detailsOf($row);
-        foreach ($data as $field => $value) {
-            $clean = is_string($value) ? trim($value) : $value;
-            $details[$field] = $clean === '' ? null : $clean;
+        foreach ($this->input->cleaned($data) as $field => $value) {
+            $details[$field] = $value;
         }
         $this->connection()->table('registrations')->where('id', (int) $row->id)
             ->update(['details' => json_encode($details)]);
@@ -442,7 +442,8 @@ final class PortalRegistrations
             abort(422, 'This registration was already submitted.');
         }
 
-        $details = $this->detailsOf($row);
+        // Cleaned again, so a draft saved before the details were sanitized is held to the same shapes.
+        $details = $this->input->cleaned(array_intersect_key($this->detailsOf($row), self::DETAIL_RULES));
         $missing = [];
         foreach (self::REQUIRED_DETAILS as $field) {
             $value = $details[$field] ?? null;
@@ -512,7 +513,7 @@ final class PortalRegistrations
             'neverExpires' => ['nullable', 'boolean'],
         ], [], ['candidateName' => 'candidate name']);
 
-        $candidateName = trim($data['candidateName']);
+        $candidateName = $this->input->candidateName($data['candidateName']);
         if ($candidateName === '') {
             abort(422, 'Give the candidate a name.');
         }

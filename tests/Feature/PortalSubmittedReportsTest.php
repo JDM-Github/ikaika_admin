@@ -8,6 +8,7 @@ use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreRecycleKey;
+use App\Support\Portal\PortalProjectApproval;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use App\Support\Portal\PortalTimezone;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -556,6 +557,8 @@ class PortalSubmittedReportsTest extends TestCase
     public function test_a_daily_report_is_flagged_when_the_filer_has_an_active_warning(): void
     {
         $actor = $this->activeMember();
+        // Outside Engineering and MIS, whose daily reports follow their department (PortalReportReview).
+        $actor->forceFill(['department' => 'Operations'])->save();
         $this->insertWarning($actor, 'Active');
         $project = $this->firstOwnProject($actor);
         $activity = $this->firstActivity();
@@ -595,6 +598,8 @@ class PortalSubmittedReportsTest extends TestCase
     public function test_a_daily_report_is_not_flagged_by_an_inactive_warning(): void
     {
         $actor = $this->activeMember();
+        // Outside Engineering and MIS, whose daily reports follow their department (PortalReportReview).
+        $actor->forceFill(['department' => 'Operations'])->save();
         // The seeded roster already carries real Active warnings on some members -- activeMember()
         // itself resolves to one -- so this test cannot assume a clean slate; it makes one.
         DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
@@ -730,6 +735,8 @@ class PortalSubmittedReportsTest extends TestCase
     public function test_editing_a_flagged_report_keeps_its_flag_without_recomputing_it(): void
     {
         $actor = $this->activeMember();
+        // Outside Engineering and MIS, whose daily reports follow their department (PortalReportReview).
+        $actor->forceFill(['department' => 'Operations'])->save();
         // Deactivating only this warning has to be enough to prove the point below, so the actor
         // must start with none of the seeded roster's own Active warnings still attached.
         DB::connection('portal')->table('employees_warnings')->where('employee_id', $actor->getKey())->delete();
@@ -780,10 +787,12 @@ class PortalSubmittedReportsTest extends TestCase
             ->first();
         $this->assertNotNull($junction);
         $this->assertSame(1, (int) $junction->is_flag);
+        // Edited, it waits for its reviewer again.
+        $this->assertSame('Pending', $junction->flag_status);
     }
 
-    // The member's own Flag Reports read is gone: a flagged member must never learn they are flagged.
-    public function test_a_member_cannot_read_their_own_flagged_reports(): void
+    // The old read stays gone; a member follows their reviews on reports/reviews (PortalReportReviewTest).
+    public function test_the_old_flagged_reports_read_stays_gone(): void
     {
         $actor = $this->activeMember();
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
@@ -908,6 +917,41 @@ class PortalSubmittedReportsTest extends TestCase
             'kind' => 'weekly',
             'reports' => [['reportDate' => Carbon::today()->toDateString(), 'entries' => $entries]],
         ], $headers)->assertStatus(422);
+    }
+
+    // A project waiting for approval is not one to file against yet, though the member is already on it.
+    public function test_filing_against_a_project_not_yet_approved_is_refused(): void
+    {
+        $actor = $this->activeMember();
+        $activity = $this->firstActivity();
+        $name = 'Waiting '.uniqid();
+        $projectId = DB::connection('portal')->table('projects')->insertGetId([
+            'project_name' => $name,
+            'project_creation_status' => PortalProjectApproval::PENDING,
+        ]);
+        DB::connection('portal')->table('employees_projects')->insert([
+            'employee_id' => $actor->getKey(),
+            'project_id' => $projectId,
+            'role_on_project' => 'member',
+        ]);
+
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [[
+                'reportDate' => $this->freeDate($actor, 0),
+                'entries' => [[
+                    'projectLabel' => $name,
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel(
+                        $activity->name ?? null,
+                        $activity->id_no ?? null,
+                    ),
+                    'hoursRendered' => 4,
+                    'elementChange' => 0,
+                ]],
+            ]],
+        ], ['Authorization' => 'Bearer '.$this->loginToken($actor)])
+            ->assertStatus(422)
+            ->assertJsonPath('message', '"'.$name.'" is not one of your projects.');
     }
 
     public function test_filing_names_the_label_the_database_does_not_have(): void

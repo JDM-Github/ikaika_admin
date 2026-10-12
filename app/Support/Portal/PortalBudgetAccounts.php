@@ -16,11 +16,16 @@ use Illuminate\Http\Request;
  * from its Expense, as completed. A settled owed transfer wrote such rows too, so those are skipped.
  *
  * An account's balance is computed like an envelope's: every Credit linked to it less every Expense.
+ * The part of it on rows tied to no envelope is unallocated; the rest is allocated (2026-10-08). An
+ * allocation moves money inside the account, so neither of its rows is received or spent.
  * Its team is its holder's department, found through the holder's email the way the reimbursement
  * charges find it.
  */
 final class PortalBudgetAccounts
 {
+    // accounts.account_type is VARCHAR(100).
+    private const MAX_TYPE = 100;
+
     public function __construct(
         private readonly PortalBudgetEnvelopes $envelopes,
         private readonly PortalBudgetLedger $ledger,
@@ -38,14 +43,21 @@ final class PortalBudgetAccounts
             return $page + ['available' => false, 'data' => [], 'transfers' => []];
         }
 
+        // Read fresh: an account added since this list was last read is on it.
+        $this->envelopes->forgetAccounts();
         try {
             $balances = $this->ledger->connection()
                 ->table('transactions_accounts as ta')
                 ->join('transactions as t', 't.id', '=', 'ta.transaction_id')
                 ->groupBy('ta.account_id')
                 ->select('ta.account_id')
-                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS received', [PortalBudgetLedger::TYPE_CREDIT])
-                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? THEN t.amount END), 0) AS spent', [PortalBudgetLedger::TYPE_EXPENSE])
+                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? AND t.transaction_name NOT IN (?, ?) THEN t.amount END), 0) AS received', [PortalBudgetLedger::TYPE_CREDIT, ...PortalBudgetLedger::ALLOCATIONS])
+                ->selectRaw('COALESCE(SUM(CASE WHEN t.type = ? AND t.transaction_name NOT IN (?, ?) THEN t.amount END), 0) AS spent', [PortalBudgetLedger::TYPE_EXPENSE, ...PortalBudgetLedger::ALLOCATIONS])
+                ->selectRaw(
+                    'COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM transactions_envelopes te WHERE te.transaction_id = t.id) '
+                    .'THEN (CASE WHEN t.type = ? THEN t.amount WHEN t.type = ? THEN -t.amount ELSE 0 END) END), 0) AS unallocated',
+                    [PortalBudgetLedger::TYPE_CREDIT, PortalBudgetLedger::TYPE_EXPENSE],
+                )
                 ->get()
                 ->keyBy('account_id');
             $details = $this->ledger->connection()->table('accounts')->get(['id', 'account_type', 'institution'])->keyBy('id');
@@ -75,6 +87,7 @@ final class PortalBudgetAccounts
             $balance = $balances->get($account['id']);
             $received = $this->input->cents($balance->received ?? 0);
             $spent = $this->input->cents($balance->spent ?? 0);
+            $unallocated = $this->input->cents($balance->unallocated ?? 0);
             $detail = $details->get($account['id']);
             $data[] = [
                 'id' => (string) $account['id'],
@@ -86,6 +99,8 @@ final class PortalBudgetAccounts
                 'received' => $this->input->amount($received),
                 'spent' => $this->input->amount($spent),
                 'remaining' => $this->input->amount($received - $spent),
+                'allocated' => $this->input->amount($received - $spent - $unallocated),
+                'unallocated' => $this->input->amount($unallocated),
                 'isOwn' => $ownEmail !== '' && $account['email'] === $ownEmail,
             ];
         }
@@ -101,7 +116,117 @@ final class PortalBudgetAccounts
             'available' => true,
             'data' => $data,
             'transfers' => $transfers,
+            'holders' => $this->holders($accounts),
         ];
+    }
+
+    /**
+     * A new account in the tracker, open from the start (2026-10-07). Its holder is a person: their email
+     * is how the tracker ties an account to someone, and so to their team. A name is one account's, and
+     * a person holds one open account, since the paid-from account is found by email.
+     *
+     * @return array{section: string, resource: string, data: array{id: string, name: string}}
+     */
+    public function create(Employee $actor, Request $request): array
+    {
+        $this->ledger->assertAvailable();
+        $name = $this->input->validatedName($request, 'An account needs a name.', 'The account name');
+        $holderId = $this->input->validatedId($request, 'holderId', 'That person does not exist.');
+        $accountType = $this->input->validatedText($request, 'accountType', 'The account type', self::MAX_TYPE);
+        $institution = $this->input->validatedText($request, 'institution', 'The bank', PortalBudgetInput::MAX_NAME);
+        $holder = $holderId === null ? null : Employee::query()->whereKey($holderId)->first();
+        if ($holderId !== null && $holder === null) {
+            abort(422, 'That person does not exist.');
+        }
+        $holderName = $holder === null ? null : PortalSubmittedReportPresenter::memberName(
+            is_string($holder->first_name) ? $holder->first_name : null,
+            is_string($holder->last_name) ? $holder->last_name : null,
+        );
+        $email = $holder === null ? null : strtolower(trim((string) ($holder->email ?? '')));
+        if ($email === '') {
+            abort(422, $holderName.' has no email address, so the account cannot be tied to them.');
+        }
+
+        $id = $this->ledger->transaction(function () use ($name, $email, $holderName, $accountType, $institution): int {
+            $tracker = $this->ledger->connection();
+            if ($tracker->table('accounts')->whereRaw('LOWER(TRIM(account_name)) = ?', [mb_strtolower($name)])->lockForUpdate()->exists()) {
+                abort(422, 'An account named '.$name.' already exists.');
+            }
+            if ($email !== null) {
+                $held = $tracker->table('accounts')->whereRaw('LOWER(TRIM(email)) = ?', [$email])->where('active', true)->lockForUpdate()->first(['account_name']);
+                if ($held !== null) {
+                    abort(422, $holderName.' already holds the open account '.$this->input->nameOr($held->account_name, 'on file').'.');
+                }
+            }
+            $now = now('UTC')->format('Y-m-d H:i:s');
+
+            return (int) $tracker->table('accounts')->insertGetId([
+                'account_name' => $name,
+                'account_type' => $accountType,
+                'email' => $email,
+                'institution' => $institution,
+                // Open from the start, so it can take money and hold envelopes at once.
+                'active' => true,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        });
+
+        $this->audit->record(
+            $actor,
+            PortalLogAction::INSERT,
+            'manage.budget-accounts',
+            PortalActivityCopy::addedAccount($name),
+            (string) $id,
+            $request,
+            ['name' => $name, 'holder' => $holderName, 'accountType' => $accountType, 'institution' => $institution],
+        );
+
+        return [
+            'section' => 'manage',
+            'resource' => 'budget-accounts',
+            'data' => ['id' => (string) $id, 'name' => $name],
+        ];
+    }
+
+    /**
+     * Who a new account can be opened for: active people with an email address who hold no open account.
+     *
+     * @param  list<array{id: int, name: string, team: ?string, active: bool, email: string}>  $accounts
+     * @return list<array{employeeId: string, name: string, department: ?string}>
+     */
+    private function holders(array $accounts): array
+    {
+        $holding = [];
+        foreach ($accounts as $account) {
+            if ($account['active'] && $account['email'] !== '') {
+                $holding[$account['email']] = true;
+            }
+        }
+
+        $holders = [];
+        $people = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereNotNull('email')
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get(['id', 'first_name', 'last_name', 'email', 'department']);
+        foreach ($people as $person) {
+            $email = strtolower(trim((string) $person->email));
+            if ($email === '' || isset($holding[$email])) {
+                continue;
+            }
+            $holders[] = [
+                'employeeId' => (string) $person->getKey(),
+                'name' => PortalSubmittedReportPresenter::memberName(
+                    is_string($person->first_name) ? $person->first_name : null,
+                    is_string($person->last_name) ? $person->last_name : null,
+                ),
+                'department' => $this->text($person->department ?? null),
+            ];
+        }
+
+        return $holders;
     }
 
     /**
@@ -198,7 +323,7 @@ final class PortalBudgetAccounts
     // The note a move was written with, without the line every portal row ends with; else what it was.
     private function reasonOf(object $row): string
     {
-        $note = trim((string) preg_replace('/\s*Recorded in the Ikaika portal by .*\.$/su', '', (string) ($row->description ?? '')));
+        $note = PortalBudgetLedger::noteOf($row->description ?? null) ?? '';
 
         // "Expense - Account Transfer" names the row, not the move: the move is the account transfer.
         $name = preg_replace('/^Expense\s*-\s*/i', '', (string) ($row->transaction_name ?? ''));

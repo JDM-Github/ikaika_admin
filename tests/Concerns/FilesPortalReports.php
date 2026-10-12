@@ -3,6 +3,7 @@
 namespace Tests\Concerns;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalProjectApproval;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -69,6 +70,9 @@ trait FilesPortalReports
             ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
             ->where('employees_projects.employee_id', $employee->getKey())
             ->whereNotNull('projects.project_name')
+            // Only a project open for work takes a report: not deleted, not waiting for approval.
+            ->whereNull('projects.deleted_at')
+            ->tap(PortalProjectApproval::openForWork(...))
             ->select(['projects.project_number', 'projects.project_name'])
             ->first();
         $activity = DB::connection('portal')->table('activity_codes')->first();

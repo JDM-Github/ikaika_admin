@@ -146,11 +146,16 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->whereNumber('id');
     Route::middleware(['portal.rule:finance.envelopes.transfer', 'throttle:portal-manage-budget-write'])
         ->post('manage/budget-envelopes/transfers', [BudgetEnvelopesController::class, 'storeTransfer']);
-    Route::middleware(['portal.rule:finance.transactions.add', 'throttle:portal-manage-budget-write'])
-        ->post('manage/budget-transactions', [BudgetEnvelopesController::class, 'storeTransaction']);
+    Route::middleware(['portal.rule:finance.transactions.add', 'throttle:portal-manage-budget-write'])->group(function (): void {
+        Route::post('manage/budget-transactions', [BudgetEnvelopesController::class, 'storeTransaction']);
+        // A receipt photo is uploaded first and named by the transaction it goes with.
+        Route::post('manage/budget-transactions/receipts', [BudgetEnvelopesController::class, 'storeTransactionReceipt']);
+    });
     // Finance / Accounts: reading them is one power; adding, moving and settling money between them another.
     Route::middleware(['portal.rule:finance.accounts', 'throttle:portal-manage-requests'])
         ->get('manage/budget-accounts', [BudgetAccountsController::class, 'index']);
+    Route::middleware(['portal.rule:finance.accounts.add', 'throttle:portal-manage-budget-write'])
+        ->post('manage/budget-accounts', [BudgetAccountsController::class, 'store']);
     Route::middleware(['portal.rule:finance.accounts.funds', 'throttle:portal-manage-budget-write'])->group(function (): void {
         Route::post('manage/budget-accounts/{id}/funds', [BudgetAccountsController::class, 'storeFunds'])
             ->whereNumber('id');

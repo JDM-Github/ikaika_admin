@@ -157,10 +157,10 @@ class PortalAccessTest extends TestCase
         $this->assertSame($admin, $presets['admin']);
         $this->assertSame($executive, $presets['executive']);
         $this->assertSame($developer, $presets['developer']);
-        // Anyone may add a project (2026-10-06); a member's waits for a Project Manager.
-        // Created Projects is every role's own record (2026-10-09): its own rule, no reach.
+        // Anyone may add a project (2026-10-06); a member's waits for a Project Manager, and only for
+        // their own department (2026-10-07, nj). Created Projects is every role's own record (2026-10-09).
         $this->assertSame([
-            'projects' => null, 'projects.create' => 'all', 'projects.created' => null,
+            'projects' => null, 'projects.create' => 'department', 'projects.created' => null,
             'projects.created.export' => null,
             'projects.track' => 'own', 'projects.track.export' => null, 'projects.view' => 'own',
         ], $presets['member']);

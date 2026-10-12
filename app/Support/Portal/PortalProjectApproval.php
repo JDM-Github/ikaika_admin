@@ -32,6 +32,16 @@ final class PortalProjectApproval
         return self::reachCovers(PortalRules::reach($actor, $request, self::RULE), $actor, $project);
     }
 
+    // Narrows a projects query to the ones work is filed against: one still waiting for approval, or
+    // turned down, takes no reports or requests. Projects from before approvals hold no status at all.
+    public static function openForWork(Builder $query): Builder
+    {
+        return $query->where(function (Builder $q): void {
+            $q->whereNull('projects.project_creation_status')
+                ->orWhereNotIn('projects.project_creation_status', [self::PENDING, self::REJECTED]);
+        });
+    }
+
     // Narrows a projects query to the rows a reach covers, matching reachCovers.
     public static function scope(Builder $query, Employee $actor, ?string $reach): Builder
     {

@@ -322,7 +322,7 @@ class PortalRulesTest extends TestCase
     // Finance keeps who opened it before it had rules: admins, executives and developers, never a member.
     public function test_finance_presets_match_today(): void
     {
-        $keys = ['finance', 'finance.overview', 'finance.transactions', 'finance.transactions.export', 'finance.transactions.add', 'finance.envelopes', 'finance.envelopes.export', 'finance.envelopes.edit', 'finance.envelopes.funds', 'finance.envelopes.transfer', 'finance.accounts', 'finance.accounts.funds'];
+        $keys = ['finance', 'finance.overview', 'finance.transactions', 'finance.transactions.export', 'finance.transactions.add', 'finance.envelopes', 'finance.envelopes.export', 'finance.envelopes.edit', 'finance.envelopes.funds', 'finance.envelopes.transfer', 'finance.accounts', 'finance.accounts.funds', 'finance.accounts.add'];
         foreach (['admin', 'executive', 'developer'] as $role) {
             $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
             $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing a finance rule.");

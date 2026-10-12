@@ -656,6 +656,8 @@ class PortalBudgetEnvelopesTest extends TestCase
         $this->assertEqualsWithDelta(5000.00, $team['received'], 0.001);
         $this->assertEqualsWithDelta(1250.50, $team['spent'], 0.001);
         $this->assertEqualsWithDelta(3749.50, $team['remaining'], 0.001);
+        // Tied to no envelope, all of it is unallocated.
+        $this->assertEqualsWithDelta(3749.50, $team['unallocated'], 0.001);
         $this->assertFalse($teams->has((string) $closed));
     }
 

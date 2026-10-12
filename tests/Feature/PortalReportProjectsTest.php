@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalProjectApproval;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class PortalReportProjectsTest extends TestCase
@@ -56,6 +58,50 @@ class PortalReportProjectsTest extends TestCase
             ),
             array_column($response->json('data'), 'label'),
         );
+    }
+
+    // The reported bug: a project still waiting for approval, or turned down, was offered to report on.
+    public function test_a_project_is_offered_only_once_it_is_approved(): void
+    {
+        $actor = $this->activeMember();
+        $ids = [];
+        foreach ([PortalProjectApproval::APPROVED, PortalProjectApproval::PENDING, PortalProjectApproval::REJECTED, null] as $status) {
+            $ids[$status ?? 'none'] = (string) $this->assignedProject($actor, [
+                'project_name' => 'Approval '.Str::random(8),
+                'project_creation_status' => $status,
+            ]);
+        }
+
+        $offered = array_column($this->getJson('/api/development/portal/reports/projects', [
+            'Authorization' => 'Bearer '.$this->loginToken($actor),
+        ])->assertOk()->json('data'), 'id');
+
+        $this->assertContains($ids[PortalProjectApproval::APPROVED], $offered);
+        $this->assertContains($ids['none'], $offered);
+        $this->assertNotContains($ids[PortalProjectApproval::PENDING], $offered);
+        $this->assertNotContains($ids[PortalProjectApproval::REJECTED], $offered);
+    }
+
+    // The reported bug: a project added in the portal keeps its number in its name, so it read "260007 260007 Test".
+    public function test_a_project_number_is_said_once_even_when_the_name_leads_with_it(): void
+    {
+        $actor = $this->activeMember();
+        $id = $this->assignedProject($actor, [
+            'project_number' => '269907',
+            'project_name' => '269907 Doubled '.Str::random(6),
+            'project_creation_status' => PortalProjectApproval::APPROVED,
+        ]);
+        $name = (string) DB::connection('portal')->table('projects')->where('id', $id)->value('project_name');
+
+        $labels = array_column($this->getJson('/api/development/portal/reports/projects', [
+            'Authorization' => 'Bearer '.$this->loginToken($actor),
+        ])->assertOk()->json('data'), 'label', 'id');
+
+        $this->assertSame($name, $labels[(string) $id]);
+        $this->assertSame('22204 Morrow', PortalSubmittedReportPresenter::projectLabel('22204', 'Morrow'));
+        $this->assertSame('26 260007 Test', PortalSubmittedReportPresenter::projectLabel('26', '260007 Test'));
+        $this->assertSame('260007', PortalSubmittedReportPresenter::projectLabel('260007', '260007'));
+        $this->assertSame('Unassigned', PortalSubmittedReportPresenter::projectLabel(null, ' '));
     }
 
     // A report asks for lines only on an Engineering project: each project says whether it does.
@@ -225,6 +271,21 @@ class PortalReportProjectsTest extends TestCase
         $this->assertIsString($token);
 
         return $token;
+    }
+
+    /**
+     * @param  array<string, mixed>  $columns
+     */
+    private function assignedProject(Employee $employee, array $columns): int
+    {
+        $projectId = (int) DB::connection('portal')->table('projects')->insertGetId($columns);
+        DB::connection('portal')->table('employees_projects')->insert([
+            'employee_id' => $employee->getKey(),
+            'project_id' => $projectId,
+            'role_on_project' => 'member',
+        ]);
+
+        return $projectId;
     }
 
     /**

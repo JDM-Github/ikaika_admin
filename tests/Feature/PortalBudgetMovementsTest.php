@@ -5,9 +5,11 @@ namespace Tests\Feature;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -55,6 +57,41 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertEqualsWithDelta(250.00, $listed[(string) $other]['received'], 0.001);
         $this->assertEqualsWithDelta(150.00, $listed[(string) $other]['remaining'], 0.001);
         $this->assertFalse($listed[(string) $other]['isOwn']);
+    }
+
+    // The reported ask (2026-10-08): a new envelope's money given from its owner's unallocated funds.
+    public function test_a_new_envelope_can_be_given_its_owners_unallocated_funds_keeping_the_balance(): void
+    {
+        $owner = $this->account('Seeded Allocating Account', 'allocating.seeded@example.test', 900.00);
+        $add = fn (array $body): TestResponse => $this->postJson(self::BASE.'budget-envelopes', $body + [
+            'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'planAmount' => 5000, 'ownerAccountId' => $owner,
+            'fundsReceivedOn' => '2026-10-08',
+        ], $this->admin());
+        $listed = fn (): array => collect($this->getJson(self::BASE.'budget-accounts', $this->admin())->assertOk()->json('data'))
+            ->keyBy('id')->get((string) $owner);
+
+        $first = $listed();
+        $this->assertEqualsWithDelta(900.00, $first['unallocated'], 0.001);
+        $this->assertEqualsWithDelta(0.00, $first['allocated'], 0.001);
+
+        $id = (int) $add(['name' => 'Seeded Allocated Envelope', 'fundsAmount' => 300])->assertCreated()->assertJsonPath('data.funded', 300)->json('data.id');
+        $after = $listed();
+        $this->assertEqualsWithDelta(900.00, $after['remaining'], 0.001);
+        $this->assertEqualsWithDelta(600.00, $after['unallocated'], 0.001);
+        $this->assertEqualsWithDelta(300.00, $after['allocated'], 0.001);
+        $this->assertEqualsWithDelta(300.00, $this->envelopeRemaining($id), 0.001);
+
+        // More than is unallocated is asked about first, and nothing is added.
+        $add(['name' => 'Seeded Allocated Too Far', 'fundsAmount' => 700])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Seeded Allocating Account has only ₱600.00 unallocated. Confirm to go past it.');
+        $this->assertNull(DB::connection('tracker')->table('envelopes_budget')->where('envelope_name', 'Seeded Allocated Too Far')->value('id'));
+        $add(['name' => 'Seeded Allocated Too Far', 'fundsAmount' => 700, 'allowOverspend' => true])->assertCreated();
+        $this->assertEqualsWithDelta(-100.00, $listed()['unallocated'], 0.001);
+        $this->assertEqualsWithDelta(900.00, $listed()['remaining'], 0.001);
+        // Moved inside the account, it is neither received nor spent.
+        $this->assertEqualsWithDelta(900.00, $listed()['received'], 0.001);
+        $this->assertEqualsWithDelta(0.00, $listed()['spent'], 0.001);
     }
 
     public function test_adding_funds_credits_the_account_and_logs_it(): void
@@ -154,7 +191,7 @@ class PortalBudgetMovementsTest extends TestCase
         $owner = $this->account('Seeded Owner Account', 'owner.seeded@example.test', 0.00);
 
         $id = (int) $this->postJson(self::BASE.'budget-envelopes', [
-            'name' => 'Seeded Owned Envelope', 'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'ownerAccountId' => $owner,
+            'name' => 'Seeded Owned Envelope', 'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'planAmount' => 1000, 'ownerAccountId' => $owner,
         ], $this->admin())->assertCreated()->assertJsonPath('data.ownerAccountId', (string) $owner)->json('data.id');
 
         $this->assertSame('Seeded Owner Account', $this->listedEnvelope($id)['ownerName']);
@@ -168,14 +205,14 @@ class PortalBudgetMovementsTest extends TestCase
         $closed = $this->account('Seeded Closed Owner', 'closed.owner@example.test', 0.00, active: false);
 
         $this->postJson(self::BASE.'budget-envelopes', [
-            'name' => 'Seeded Unowned Envelope', 'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'ownerAccountId' => $closed,
+            'name' => 'Seeded Unowned Envelope', 'group' => 'Maintenance', 'timePeriod' => 'Monthly', 'planAmount' => 1000, 'ownerAccountId' => $closed,
         ], $this->admin())->assertStatus(422)->assertJsonPath('message', 'Seeded Closed Owner is closed, so it takes no new money.');
     }
 
     // The reported gap: funds recorded into an owned envelope land in its owner's account, never another's.
     public function test_funds_recorded_into_an_owned_envelope_are_held_in_its_owners_account(): void
     {
-        $nat = $this->account('Seeded Funds Owner', 'funds.owner@example.test', 0.00);
+        $nat = $this->account('Seeded Funds Owner', 'funds.owner@example.test', 2000.00);
         $steven = $this->account('Seeded Funds Other', 'funds.other@example.test', 0.00);
         $envelope = $this->envelope('Seeded Owned Testing', 0.00, $nat);
         $fund = fn (array $body): TestResponse => $this->postJson(self::BASE.'budget-envelopes/'.$envelope.'/funds', $body + [
@@ -187,7 +224,7 @@ class PortalBudgetMovementsTest extends TestCase
             ->assertJsonPath('message', 'Seeded Owned Testing belongs to Seeded Funds Owner, so its funds are held in that account.');
         $this->assertEqualsWithDelta(0.00, $this->accountRemaining($steven), 0.001);
 
-        // Sent with no account, or with the owner's, it is held in the owner's.
+        // Sent with no account, or with the owner's, it is allocated from the owner's, whose balance stays.
         $fund([])->assertCreated();
         $fund(['accountId' => $nat])->assertCreated();
         $this->assertEqualsWithDelta(2000.00, $this->accountRemaining($nat), 0.001);
@@ -289,6 +326,31 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertSame('Seeded Client', $this->lastRowOf($account)->payor_payee);
     }
 
+    // The reported ask: a description reads as it was written, without the portal's own sentence on it.
+    public function test_a_description_is_the_note_alone_and_an_older_one_reads_without_the_portal_line(): void
+    {
+        $account = $this->account('Seeded Note Account', 'note.seeded@example.test', 0.00);
+        $envelope = $this->envelope('Seeded Note Envelope', 0.00);
+
+        $this->addTransaction(['type' => 'Income', 'name' => 'Client deposit', 'amount' => 50, 'envelopeId' => $envelope, 'accountId' => $account, 'notes' => 'dasdsad'])
+            ->assertCreated();
+        $row = $this->lastRowOf($account);
+        $this->assertSame('dasdsad', $row->description);
+        $this->assertNotEmpty($row->created_by);
+
+        $this->addTransaction(['type' => 'Income', 'name' => 'No note', 'amount' => 5, 'envelopeId' => $envelope, 'accountId' => $account])
+            ->assertCreated();
+        $this->assertNull($this->lastRowOf($account)->description);
+
+        // A row written before the change still carries the sentence; the list leaves it off.
+        DB::connection('tracker')->table('transactions')->where('id', $row->id)
+            ->update(['description' => 'dasdsad Recorded in the Ikaika portal by Jhon Noriel Malabanan.']);
+        Cache::flush();
+        $listed = collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->assertOk()->json('data'))
+            ->firstWhere('id', (string) $row->id);
+        $this->assertSame('dasdsad', $listed['description']);
+    }
+
     public function test_an_expense_on_the_payers_own_envelope_leaves_nothing_pending(): void
     {
         $nat = $this->account('Seeded Own Payer', 'own.payer@example.test', 500.00);
@@ -342,7 +404,8 @@ class PortalBudgetMovementsTest extends TestCase
         $this->postJson(self::BASE.'budget-accounts/transfers', [
             'sourceAccountId' => $ben, 'destinationAccountId' => $nat, 'amount' => 10, 'transferredOn' => '2026-10-09',
         ], $this->admin())->assertCreated();
-        $plain = collect($this->getJson(self::BASE.'budget-accounts', $this->admin())->json('transfers'))->firstWhere('settledOn', '2026-10-09');
+        $plain = collect($this->getJson(self::BASE.'budget-accounts', $this->admin())->json('transfers'))
+            ->where('sourceAccountId', (string) $ben)->firstWhere('settledOn', '2026-10-09');
         $this->assertSame('Account Transfer', $plain['reason']);
 
         $this->postJson(self::BASE.'budget-accounts/transfers/'.$pending->id.'/complete', [], $this->admin())
@@ -364,14 +427,45 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertEqualsWithDelta(300.00, $this->accountRemaining($ben), 0.001);
     }
 
-    public function test_a_transaction_needs_a_type_and_an_envelope_or_account(): void
+    public function test_a_transaction_needs_a_type_and_an_envelope(): void
     {
         $this->addTransaction(['type' => 'Transfer', 'name' => 'Odd', 'amount' => 10, 'occurredOn' => '2026-10-07'])
             ->assertStatus(422)
             ->assertJsonPath('message', 'Choose Income or Expense for the type.');
         $this->addTransaction(['type' => 'Expense', 'name' => 'Loose', 'amount' => 10])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Choose the envelope or the account this transaction touches.');
+            ->assertJsonPath('message', 'Choose the envelope this transaction comes out of or goes into.');
+
+        // The reported ask (2026-10-09): an account alone is not enough; it is funded from Accounts instead.
+        $account = $this->account('Seeded Loose Account', 'loose.seeded@example.test', 500.00);
+        $before = DB::connection('tracker')->table('transactions')->count();
+        $this->addTransaction(['type' => 'Income', 'name' => 'Loose deposit', 'amount' => 100, 'accountId' => $account])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Choose the envelope this transaction comes out of or goes into.');
+        $this->assertSame($before, DB::connection('tracker')->table('transactions')->count());
+    }
+
+    // The reported ask (2026-10-08): no money is recorded against a budget code without its envelope.
+    public function test_a_budget_code_comes_only_from_the_envelope(): void
+    {
+        $tracker = DB::connection('tracker');
+        $account = $this->account('Seeded Code Account', 'code.seeded@example.test', 500.00);
+        $own = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-MOVE-OWN']);
+        $other = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-MOVE-OTHER']);
+        $envelope = $this->envelope('Seeded Coded Envelope', 0.00);
+        $tracker->table('envelopes_budget_codes')->insert(['envelope_id' => $envelope, 'budget_code_id' => $own]);
+
+        // Sent with another code, it is recorded against the envelope's own.
+        $id = (int) $this->addTransaction([
+            'type' => 'Income', 'name' => 'Coded deposit', 'amount' => 100, 'envelopeId' => $envelope, 'accountId' => $account, 'budgetCodeId' => $other,
+        ])->assertCreated()->json('data.id');
+        $this->assertSame([$own], $tracker->table('transactions_budget_codes')->where('transaction_id', $id)->pluck('budget_code_id')->map(fn ($code) => (int) $code)->all());
+
+        // An envelope under no code records none.
+        $loose = $this->envelope('Seeded Uncoded Envelope', 0.00);
+        $plain = (int) $this->addTransaction(['type' => 'Income', 'name' => 'Plain deposit', 'amount' => 10, 'envelopeId' => $loose, 'accountId' => $account])
+            ->assertCreated()->json('data.id');
+        $this->assertSame(0, $tracker->table('transactions_budget_codes')->where('transaction_id', $plain)->count());
     }
 
     public function test_a_member_reaches_none_of_the_money_routes(): void
@@ -384,6 +478,88 @@ class PortalBudgetMovementsTest extends TestCase
         $this->postJson(self::BASE.'budget-accounts/transfers/1/complete', [], $headers)->assertForbidden();
         $this->postJson(self::BASE.'budget-envelopes/transfers', [], $headers)->assertForbidden();
         $this->postJson(self::BASE.'budget-transactions', [], $headers)->assertForbidden();
+        $this->postJson(self::BASE.'budget-transactions/receipts', [], $headers)->assertForbidden();
+        $this->postJson(self::BASE.'budget-accounts', [], $headers)->assertForbidden();
+    }
+
+    // The reported ask: Finance / Accounts opens a new account, held by a person and open at once.
+    public function test_an_account_is_added_open_and_held_by_one_person(): void
+    {
+        $holders = collect($this->getJson(self::BASE.'budget-accounts', $this->admin())->assertOk()->json('holders'));
+        $holder = $holders->first();
+        $this->assertNotNull($holder, 'Somebody without an open account was needed.');
+        $person = Employee::query()->findOrFail((int) $holder['employeeId']);
+
+        $id = (int) $this->postJson(self::BASE.'budget-accounts', [
+            'name' => 'Seeded New Account',
+            'holderId' => $holder['employeeId'],
+            'accountType' => 'Savings',
+            'institution' => 'BDO',
+        ], $this->admin())->assertCreated()->assertJsonPath('data.name', 'Seeded New Account')->json('data.id');
+
+        $row = DB::connection('tracker')->table('accounts')->where('id', $id)->first();
+        $this->assertSame(strtolower(trim((string) $person->email)), $row->email);
+        $this->assertSame(1, (int) $row->active);
+        $this->assertSame('Savings', $row->account_type);
+        $this->assertSame('BDO', $row->institution);
+        $this->assertTrue($this->logged('manage.budget-accounts', 'added the account Seeded New Account'));
+
+        $page = $this->getJson(self::BASE.'budget-accounts', $this->admin())->assertOk();
+        $listed = collect($page->json('data'))->firstWhere('id', (string) $id);
+        $this->assertSame($person->department, $listed['team']);
+        $this->assertNotContains($holder['employeeId'], array_column($page->json('holders'), 'employeeId'));
+
+        // One name is one account's, and a person holds one open account.
+        $this->postJson(self::BASE.'budget-accounts', ['name' => 'seeded new account'], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'An account named seeded new account already exists.');
+        $this->postJson(self::BASE.'budget-accounts', ['name' => 'Seeded Second Account', 'holderId' => $holder['employeeId']], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn (string $message): bool => str_ends_with($message, 'already holds the open account Seeded New Account.'));
+        $this->postJson(self::BASE.'budget-accounts', ['holderId' => $holder['employeeId']], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'An account needs a name.');
+    }
+
+    // The reported ask: a transaction takes an optional receipt photo, shown with it in the ledger.
+    public function test_a_receipt_photo_uploads_then_lands_on_the_added_transaction(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::response([
+                'secure_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/transactions/fare.jpg',
+                'original_filename' => 'fare',
+                'bytes' => 1200,
+            ], 200),
+        ]);
+        $account = $this->account('Seeded Receipt Account', 'receipt.seeded@example.test', 0.00);
+        $envelope = $this->envelope('Seeded Receipt Envelope', 0.00);
+
+        $uploaded = $this->post(self::BASE.'budget-transactions/receipts', ['file' => UploadedFile::fake()->create('fare.jpg', 12, 'image/jpeg')], $this->admin())
+            ->assertCreated();
+        $receiptId = $uploaded->json('data.receiptId');
+        $this->assertIsString($receiptId);
+        Http::assertSent(fn ($request): bool => str_contains((string) $request->body(), 'ikaika-portal/transactions'));
+
+        $this->addTransaction(['type' => 'Income', 'name' => 'Fare refund', 'amount' => 20, 'envelopeId' => $envelope, 'accountId' => $account, 'receiptId' => $receiptId])
+            ->assertCreated();
+        $row = $this->lastRowOf($account);
+        $stored = DB::connection('tracker')->table('attachments')->where(['table_name' => 'transactions', 'record_id' => $row->id, 'field_name' => 'receipt'])->first();
+        $this->assertNotNull($stored);
+        $this->assertSame('image/jpeg', $stored->mime_type);
+
+        Cache::flush();
+        $listed = collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->assertOk()->json('data'))->firstWhere('id', (string) $row->id);
+        $this->assertSame('https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/transactions/fare.jpg', $listed['receipts'][0]['fileUrl']);
+        $this->assertSame('https://res.cloudinary.com/test-cloud/image/upload/c_fill,h_96,w_96,f_auto,q_auto/v1/ikaika-portal/transactions/fare.jpg', $listed['receipts'][0]['thumbUrl']);
+
+        // An upload is named once; a second use, or a made-up id, finds nothing.
+        $this->addTransaction(['type' => 'Income', 'name' => 'Again', 'amount' => 5, 'envelopeId' => $envelope, 'accountId' => $account, 'receiptId' => $receiptId])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'That receipt upload has expired. Choose the photo again.');
+        $this->postJson(self::BASE.'budget-transactions/receipts', [], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Choose an image or PDF receipt.');
     }
 
     public function test_with_the_tracker_switched_off_nothing_moves(): void

@@ -209,9 +209,14 @@ final class PortalActivityCopy
         return self::YOU.' reopened the envelope '.$name;
     }
 
-    public static function recordedEnvelopeFunds(string $envelopeName, string $amount): string
+    public static function allocatedEnvelopeFunds(string $envelopeName, string $amount, string $accountName): string
     {
-        return self::YOU.' recorded '.$amount.' received into '.$envelopeName;
+        return self::YOU.' allocated '.$amount.' to '.$envelopeName.' from '.$accountName.'\'s unallocated funds';
+    }
+
+    public static function addedAccount(string $accountName): string
+    {
+        return self::YOU.' added the account '.$accountName;
     }
 
     public static function addedAccountFunds(string $accountName, string $amount): string

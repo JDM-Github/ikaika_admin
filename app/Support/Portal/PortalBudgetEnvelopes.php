@@ -36,6 +36,9 @@ use Illuminate\Support\Collection;
  */
 final class PortalBudgetEnvelopes
 {
+    // What an allocation reads as on the ledger: neither money received nor money spent.
+    private const ALLOCATED_NAME = 'Funds Allocated';
+
     private const CONNECTION = 'tracker';
 
     private const PRODUCT = 'transaction-tracker';
@@ -53,6 +56,8 @@ final class PortalBudgetEnvelopes
      * @var list<array{id: int, name: string, team: ?string, active: bool}>|null
      */
     private ?array $accounts = null;
+
+    public function __construct(private readonly PortalCloudinary $cloudinary) {}
 
     /** The tracker is switched on for this environment. Off, reimbursement approvals charge nothing. */
     public function isAvailable(): bool
@@ -155,7 +160,21 @@ final class PortalBudgetEnvelopes
                 ->orderBy('account_id')
                 ->get(['transaction_id', 'account_id'])
                 ->groupBy('transaction_id');
+            // The budget codes a line is recorded against, so a page can narrow the ledger to one code.
+            $codeLinks = $this->connection()
+                ->table('transactions_budget_codes')
+                ->orderBy('budget_code_id')
+                ->get(['transaction_id', 'budget_code_id'])
+                ->groupBy('transaction_id');
             $accounts = collect($this->teamAccounts())->keyBy('id');
+            // Each transaction's receipts: the ones migrated from Airtable and the ones added here since.
+            $receipts = $this->connection()
+                ->table('attachments')
+                ->where('table_name', PortalBudgetTransactions::RECEIPT_TABLE)
+                ->where('field_name', PortalBudgetTransactions::RECEIPT_FIELD)
+                ->orderBy('id')
+                ->get(['record_id', 'file_url', 'file_name', 'mime_type'])
+                ->groupBy('record_id');
         } catch (QueryException) {
             abort(503, 'Budget transactions are unavailable right now.');
         }
@@ -163,32 +182,61 @@ final class PortalBudgetEnvelopes
         $data = [];
         $received = [];
         $spent = [];
+        // What each account holds on rows tied to no envelope: money not yet given to one.
+        $unallocated = [];
         foreach ($rows as $row) {
+            // Money moved inside one account: kept on the ledger, but neither received nor spent.
+            $isAllocation = in_array((string) $row->transaction_name, PortalBudgetLedger::ALLOCATIONS, true);
             foreach ($links->get($row->id) ?? [] as $linked) {
                 $accountId = (int) $linked->account_id;
+                $sign = 0;
                 if ((string) $row->type === self::TYPE_CREDIT) {
-                    $received[$accountId] = ($received[$accountId] ?? 0) + $this->cents($row->amount);
+                    $received[$accountId] = ($received[$accountId] ?? 0) + ($isAllocation ? 0 : $this->cents($row->amount));
+                    $sign = 1;
                 } elseif ((string) $row->type === self::TYPE_EXPENSE) {
-                    $spent[$accountId] = ($spent[$accountId] ?? 0) + $this->cents($row->amount);
+                    $spent[$accountId] = ($spent[$accountId] ?? 0) + ($isAllocation ? 0 : $this->cents($row->amount));
+                    $sign = -1;
                 }
+                if (! $envelopes->has($row->id)) {
+                    $unallocated[$accountId] = ($unallocated[$accountId] ?? 0) + $sign * $this->cents($row->amount);
+                }
+            }
+            // An allocation lists once (2026-10-08), as the money given to its envelope: the row out of
+            // the account's unallocated funds is its mirror, counted above but not shown.
+            if ((string) $row->transaction_name === PortalBudgetLedger::ALLOCATION_OUT) {
+                continue;
             }
             $link = $links->get($row->id)?->first();
             $account = $link === null ? null : $accounts->get((int) $link->account_id);
             $date = substr((string) ($row->transaction_date ?? ''), 0, 10);
             $data[] = [
                 'id' => (string) $row->id,
-                'name' => $this->text($row->transaction_name) ?? (string) $row->type,
+                'name' => $isAllocation ? self::ALLOCATED_NAME : ($this->text($row->transaction_name) ?? (string) $row->type),
                 'date' => preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1 ? $date : null,
                 'type' => (string) $row->type,
                 'amount' => $this->amount($this->cents($row->amount)),
                 'payorPayee' => $this->text($row->payor_payee),
-                'description' => $this->text($row->description),
+                // What the person wrote, without the line older portal rows carry (PortalBudgetLedger::noteOf).
+                'description' => PortalBudgetLedger::noteOf($row->description),
                 'envelopes' => $envelopes->get($row->id)?->map(fn (object $envelope): string => $this->text($envelope->envelope_name) ?? 'Envelope')->values()->all() ?? [],
+                'budgetCodeIds' => $codeLinks->get($row->id)?->map(fn (object $link): string => (string) $link->budget_code_id)->values()->all() ?? [],
                 'accountName' => $account['name'] ?? null,
                 'team' => $account['team'] ?? null,
                 'recordedBy' => $this->text($row->created_by),
+                'receipts' => ($receipts->get($row->id) ?? collect())
+                    ->filter(fn (object $receipt): bool => $this->text($receipt->file_url) !== null)
+                    ->map(fn (object $receipt): array => [
+                        'fileName' => $this->text($receipt->file_name) ?? 'Receipt',
+                        'fileUrl' => (string) $receipt->file_url,
+                        'mimeType' => $this->text($receipt->mime_type),
+                        'thumbUrl' => $this->cloudinary->thumbUrl((string) $receipt->file_url, (string) ($receipt->mime_type ?? '')),
+                    ])
+                    ->values()
+                    ->all(),
                 // Charged by an approval in the portal, rather than entered in the tracker itself.
                 'isPortalCharge' => str_starts_with((string) ($row->source_key ?? ''), self::SOURCE_PREFIX),
+                // Half of an allocation: listed with its envelope, never as money in or out (2026-10-08).
+                'isAllocation' => $isAllocation,
             ];
         }
 
@@ -207,6 +255,7 @@ final class PortalBudgetEnvelopes
                 'received' => $this->amount($in),
                 'spent' => $this->amount($out),
                 'remaining' => $this->amount($in - $out),
+                'unallocated' => $this->amount($unallocated[$account['id']] ?? 0),
                 // The reader's own account, which a transaction they add is paid from by default.
                 'isOwn' => $ownEmail !== '' && $account['email'] === $ownEmail,
             ];
@@ -632,6 +681,12 @@ final class PortalBudgetEnvelopes
         }
 
         return $this->accounts = $accounts;
+    }
+
+    // Reads the accounts again on the next ask, so a list read after an account was added includes it.
+    public function forgetAccounts(): void
+    {
+        $this->accounts = null;
     }
 
     // Departments match loosely: "MIS" and "mis " are one team.
