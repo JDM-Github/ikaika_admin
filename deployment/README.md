@@ -28,8 +28,9 @@ Each command asks for the SSH key passphrase twice, once for the upload and once
 **What `deploy.ps1` does:**
 1. Runs `build.ps1`: builds CSS and fonts for the subfolder and packs `out/central-platform.zip`.
 2. Uploads the zip and the server scripts.
-3. On the server, `deploy-admin.sh` unpacks the zip, runs `composer install`, and swaps in the new release.
-4. It then migrates, applies the tracker patches (`sql/transaction_tracker/patches/*.sql`, safe to rerun), adds the every-minute scheduler cron if it is missing, republishes the public folder, prunes old backups, and prints the health check.
+3. On the server, `deploy-admin.sh` unpacks the zip, runs `composer install`, dumps the default, portal and tracker databases to `backups/databases-<stamp>/` (a failed dump stops the deploy before anything changes), and swaps in the new release.
+4. It then migrates, applies the tracker patches (`sql/transaction_tracker/patches/*.sql`, safe to rerun), adds the every-minute scheduler cron if it is missing, republishes the public folder, and prunes old backups.
+5. **Migration health checks** fail the deploy, printing the exact rollback commands (code, public folder, and each database dump): `migrate:status --pending` must show nothing left, and `/health` must answer 200 (the portal database reachable). `deploy.ps1` then stops with "Deploy failed on the server".
 
 Expected last lines:
 
@@ -157,7 +158,13 @@ rm -rf ~/public_html/website_a85fbf18/central-api
 mv backups/admin-public-<stamp> ~/public_html/website_a85fbf18/central-api
 ```
 
-If the failed release ran migrations, read them before `migrate:rollback`.
+If the failed release ran migrations, restore the dumps the deploy took just before it (a failed check prints these lines with the real paths):
+
+```bash
+gunzip -c ~/apps/test-server/backups/databases-<stamp>/<database>.sql.gz | mysql -u <user> -p <database>
+```
+
+`migrate:rollback` also works for a migration with a sound `down()`; read it first.
 
 ---
 
