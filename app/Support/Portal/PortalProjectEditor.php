@@ -71,7 +71,6 @@ final class PortalProjectEditor
     // The trail's words for a change of people; an edit of only these never needs approval again.
     private const PEOPLE_CHANGES = [self::MEMBER_ROLE => 'Members changed', self::SUPPORT_ROLE => 'Support members changed'];
 
-
     /*
      * The portal's status => the word projects.status holds, which is Airtable's Project/s Status:
      * Started, Done and Closed are its only choices. On Hold and Cancelled were dropped (2026-10-12, user);
@@ -1014,6 +1013,7 @@ final class PortalProjectEditor
     // Edit projects opens the whole project, View Projects alone only its people; anyone else is refused.
     private function editsPeopleOnly(Employee $actor, object $row, Request $request): bool
     {
+        $this->assertNotLocked($actor, $row, $request);
         if (PortalProjectPowers::allows($actor, $request, PortalProjectPowers::EDIT, $row)) {
             return false;
         }
@@ -1023,9 +1023,17 @@ final class PortalProjectEditor
         abort(403, 'Your Edit projects power does not reach this project.');
     }
 
+    private function assertNotLocked(Employee $actor, object $row, Request $request): void
+    {
+        if (PortalProjectPowers::isLocked($actor, $request, $row)) {
+            abort(403, 'This project is completed or closed. Only its department head can change it.');
+        }
+    }
+
     // Edit projects and Manage scopes reach this project, or the actor is the one who asked for it.
     private function assertMay(Employee $actor, object $row, Request $request, string $key): void
     {
+        $this->assertNotLocked($actor, $row, $request);
         if (! PortalProjectPowers::allows($actor, $request, $key, $row)) {
             abort(403, $key === PortalProjectPowers::SCOPES
                 ? 'Your Manage scopes power does not reach this project.'
@@ -1050,7 +1058,7 @@ final class PortalProjectEditor
             ->table('projects')
             ->where('id', $projectId)
             ->whereNull('deleted_at')
-            ->first(['id', 'project_number', 'project_name', 'department', 'project_lead_email', 'project_creation_status', 'requested_by']);
+            ->first(['id', 'project_number', 'project_name', 'department', 'project_lead_email', 'project_creation_status', 'requested_by', 'status']);
         if ($row === null) {
             abort(404, 'That project was not found.');
         }

@@ -110,7 +110,7 @@ class PortalProjectEditorTest extends TestCase
             'department' => 'Engineering',
             'type' => 'Scan-to-BIM',
             'area' => 1250,
-            'status' => 'completed',
+            'status' => 'ongoing',
             'memberIds' => [$this->employee('user', 1)->id],
             'supportMemberIds' => [$this->employee('user', 2)->id],
             // An Engineering project needs every level of detail and every link.
@@ -138,10 +138,20 @@ class PortalProjectEditorTest extends TestCase
         return $this->withToken($token)->postJson(self::BASE, $payload);
     }
 
+    // Edit closed projects at every department, so a test may go on editing after Completed or Closed.
+    private function headOfEveryDepartment(Employee $employee): void
+    {
+        DB::connection('portal')->table('access_personal')->updateOrInsert(
+            ['employee_id' => $employee->getKey(), 'permission_key' => 'projects.edit.closed'],
+            ['reach' => 'all'],
+        );
+        Cache::flush();
+    }
+
     private function liveProjectId(): int
     {
         $id = (int) DB::connection('portal')->table('projects')->whereNull('deleted_at')->orderBy('id')->value('id');
-        DB::connection('portal')->table('projects')->where('id', $id)->update(['project_lead_email' => 'nobody@ikaika.test']);
+        DB::connection('portal')->table('projects')->where('id', $id)->update(['project_lead_email' => 'nobody@ikaika.test', 'status' => 'Started']);
 
         return $id;
     }
@@ -151,7 +161,7 @@ class PortalProjectEditorTest extends TestCase
         $admin = $this->employee('admin');
         // A personal default, as Nathaniel and Steven hold it: no preset gives it, so no gift can either.
         DB::connection('portal')->table('access_personal')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'projects.create.direct', 'reach' => null]);
-        $payload = $this->payload();
+        $payload = $this->payload(['status' => 'completed']);
 
         $response = $this->create($this->token($admin), $payload)->assertCreated();
         $id = (int) $response->json('data.id');
@@ -198,6 +208,7 @@ class PortalProjectEditorTest extends TestCase
     public function test_every_save_writes_the_trail_history(): void
     {
         $admin = $this->employee('admin');
+        $this->headOfEveryDepartment($admin);
         $token = $this->token($admin);
         $payload = $this->payload(['status' => 'ongoing']);
         $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
@@ -347,6 +358,54 @@ class PortalProjectEditorTest extends TestCase
             ->assertJsonPath('data.creationStatus', 'approved');
     }
 
+    // Completed or Closed, approved or pending: only Edit closed projects (the department heads) changes it.
+    public function test_a_completed_or_closed_project_is_its_department_heads_alone(): void
+    {
+        $id = $this->liveProjectId();
+        $admin = $this->employee('admin');
+        $member = $this->employee('user', 3);
+        $department = (string) $admin->department;
+        DB::connection('portal')->table('projects')->where('id', $id)->update([
+            'status' => 'Closed', 'project_creation_status' => 'Pending', 'requested_by' => $member->getKey(), 'department' => $department,
+        ]);
+        DB::connection('portal')->table('employees_projects')->where('project_id', $id)->delete();
+        DB::connection('portal')->table('employees_projects')->insert(['employee_id' => $member->getKey(), 'project_id' => $id, 'role_on_project' => 'member']);
+        $payload = $this->payload(['status' => 'ongoing']);
+        unset($payload['scopeCodes']);
+        $locked = 'This project is completed or closed. Only its department head can change it.';
+        // The seeded admin may be a department head already; start them without it.
+        DB::connection('portal')->table('access_personal')->where('employee_id', $admin->getKey())->where('permission_key', 'projects.edit.closed')->delete();
+        Cache::flush();
+
+        // Edit projects at All, the creator, and a member on it are all refused, for the people too.
+        $adminToken = $this->token($admin);
+        $this->withToken($adminToken)->getJson(self::BASE.'/'.$id)->assertForbidden()->assertJsonPath('message', $locked);
+        $this->withToken($adminToken)->patchJson(self::BASE.'/'.$id, $payload)->assertForbidden()->assertJsonPath('message', $locked);
+        $this->withToken($adminToken)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$this->scopeCodes()[0]]])->assertForbidden();
+        $this->withToken($this->token($member))->patchJson(self::BASE.'/'.$id, [...$payload, 'memberIds' => []])->assertForbidden();
+        $board = collect($this->withToken($adminToken)->getJson(self::BASE)->assertOk()->json('data'))->firstWhere('id', (string) $id);
+        $this->assertSame([false, false, false], [$board['canEdit'], $board['canEditMembers'], $board['canManageScopes']]);
+        // The Manage / Projects sheet hides its Edit button the same way.
+        $this->withToken($adminToken)->getJson(str_replace('/projects', '/manage/projects', self::BASE).'/'.$id)->assertOk()->assertJsonPath('data.canEdit', false);
+
+        // Done locks it the same way, approved or not.
+        DB::connection('portal')->table('projects')->where('id', $id)->update(['status' => 'Done', 'project_creation_status' => 'Approved']);
+        $this->withToken($adminToken)->getJson(self::BASE.'/'.$id)->assertForbidden();
+
+        // The department head reaches their own department's finished projects, and no other department's.
+        DB::connection('portal')->table('access_personal')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'projects.edit.closed', 'reach' => 'department']);
+        Cache::flush();
+        $this->withToken($adminToken)->getJson(self::BASE.'/'.$id)->assertOk()->assertJsonPath('data.editsPeopleOnly', false);
+        DB::connection('portal')->table('projects')->where('id', $id)->update(['department' => 'Engineering']);
+        if (strcasecmp($department, 'Engineering') !== 0) {
+            $this->withToken($adminToken)->getJson(self::BASE.'/'.$id)->assertForbidden();
+        }
+
+        // At every department, they may reopen it.
+        $this->headOfEveryDepartment($admin);
+        $this->withToken($adminToken)->patchJson(self::BASE.'/'.$id, $payload)->assertOk()->assertJsonPath('data.status', 'ongoing');
+    }
+
     // Without Edit projects, whoever View Projects reaches changes only the people, and no approval follows.
     public function test_a_viewer_changes_only_the_members_and_support_members(): void
     {
@@ -412,7 +471,9 @@ class PortalProjectEditorTest extends TestCase
     // Closed is its own status (2026-10-12): stored as Airtable's 'Closed', read back as closed, never as completed.
     public function test_a_project_is_closed_as_its_own_status(): void
     {
-        $token = $this->token($this->employee('admin'));
+        $admin = $this->employee('admin');
+        $this->headOfEveryDepartment($admin);
+        $token = $this->token($admin);
         $payload = $this->payload();
         $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
         unset($payload['scopeCodes']);
@@ -497,7 +558,7 @@ class PortalProjectEditorTest extends TestCase
         $portal = DB::connection('portal');
         $on = $this->liveProjectId();
         $led = (int) $portal->table('projects')->whereNull('deleted_at')->where('id', '!=', $on)->orderByDesc('id')->value('id');
-        $portal->table('projects')->whereIn('id', [$on, $led])->update(['project_creation_status' => 'Approved', 'requested_by' => null]);
+        $portal->table('projects')->whereIn('id', [$on, $led])->update(['project_creation_status' => 'Approved', 'requested_by' => null, 'status' => 'Started']);
         $portal->table('projects')->where('id', $on)->update(['project_lead_email' => 'nobody@ikaika.test']);
         $portal->table('projects')->where('id', $led)->update(['project_lead_email' => $member->email]);
         $portal->table('employees_projects')->where('employee_id', $member->getKey())->whereIn('project_id', [$on, $led])->delete();

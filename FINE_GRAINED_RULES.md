@@ -403,6 +403,9 @@ Descriptions (what the Access page shows on each row) live in the SQL.
 - `projects` Projects — MAED
   - `projects.view` View Projects [R] — MAED
     - `projects.edit` Edit projects [R] — MAED (members own)
+      - `projects.edit.closed` Edit closed projects [R] — D (Nathaniel, Steven at department by personal default;
+        2026-10-12, supervisor: a Completed or Closed project, approved or pending, is locked for everyone
+        else -- edit, members-only edit and Manage scopes; migration `add_portal_edit_closed_projects_rule`)
     - `projects.scopes` Manage scopes [R] — MAED (members own)
     - `projects.delete` Delete projects [R] — MAED (members own)
     - `projects.lead` Project Lead [R] — MAED (members department)

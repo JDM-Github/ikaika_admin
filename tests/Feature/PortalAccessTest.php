@@ -138,6 +138,8 @@ class PortalAccessTest extends TestCase
         // by preset, with Edit references, Create and revoke and New passwords beside them.
         $developer = [...$everything, 'projects.references' => null, 'projects.references.edit' => null];
         // Auto-approve is Nathaniel's and Steven's personal default (2026-10-07), so no preset but developer holds it.
+        // Edit closed projects is the department heads' personal default (2026-10-12): likewise developer only.
+        $developer['projects.edit.closed'] = 'all';
         $executive = $everything;
         unset($executive['projects.create.direct']);
         $admin = $executive;

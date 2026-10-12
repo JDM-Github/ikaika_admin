@@ -199,7 +199,8 @@ final class PortalManageProjects
         return [
             'section' => 'manage',
             'resource' => 'projects',
-            'data' => $this->detail($row),
+            // The sheet's Edit button: a completed or closed project stays shut to all but its department head.
+            'data' => [...$this->detail($row), 'canEdit' => PortalProjectPowers::opensEditor($actor, $request, $row)],
         ];
     }
 

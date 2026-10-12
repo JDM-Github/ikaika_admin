@@ -592,6 +592,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.edit', 'projects.view', 'Edit projects', 'Edit the details of {UserName|Your} department''s projects or every project. On Only your own, the projects {UserName|You} lead.', 1, 1, 211),
 ('projects.scopes', 'projects.view', 'Manage scopes', 'Choose the WBS scopes of {UserName|Your} department''s projects or every project. On Only your own, the projects {UserName|You} lead.', 1, 1, 212),
 ('projects.delete', 'projects.view', 'Delete projects', 'Move {UserName|Your} department''s projects or any project to the recycle bin. On Only your own, the projects {UserName|You} lead.', 1, 1, 213),
+('projects.edit.closed', 'projects.edit', 'Edit closed projects', 'Change a Completed or Closed project, approved or not: {UserName|Your} department''s or every one. Nobody else can.', 1, 1, 215),
 ('projects.lead', 'projects.view', 'Project Lead', 'Be chosen as the lead of {UserName|Your} department''s projects or of any project.', 1, 1, 214),
 ('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project, for {UserName|Your} department or every department.', 1, 1, 220),
 ('projects.create.direct', 'projects.create', 'Auto-approve projects', 'A project {UserName|You} add is approved at once, without waiting for a Project Approver.', 0, 1, 221),
@@ -750,6 +751,9 @@ UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key LIKE 'proj
 -- Auto-approve is an admin's at most, and only a named one's (2026-10-07, supervisor): being an admin
 -- is not enough, so no role but developer starts with it. Existing databases: split_portal_project_auto_approval.
 UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key = 'projects.create.direct';
+-- A Completed or Closed project is its department head's alone (2026-10-12, supervisor): no role but
+-- developer starts with Edit closed projects. Existing databases: add_portal_edit_closed_projects_rule.
+UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key = 'projects.edit.closed';
 
 -- Members: their own work only. View Projects and Track Projects show only the projects they are on.
 -- Leading, editing, scoping and deleting projects are powers an admin (or a lead) gives, not a
@@ -798,6 +802,7 @@ WHERE permission_key NOT LIKE 'developer%'
   AND permission_key <> 'administration.logs.developers'
   AND permission_key <> 'email.images.global'
   AND permission_key <> 'projects.create.direct'
+  AND permission_key <> 'projects.edit.closed'
   AND permission_key NOT LIKE '%.unlisted';
 
 -- Executives: every department and executives' logs, without the developer tools and without the
@@ -809,7 +814,7 @@ SELECT 'executive', permission_key,
        permission_key = 'administration.logs'
 FROM access_permissions
 WHERE permission_key NOT LIKE 'developer%'
-  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.create.direct')
+  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.create.direct', 'projects.edit.closed')
   AND permission_key NOT LIKE 'projects.references%'
   AND permission_key NOT LIKE 'reports.%'
   AND permission_key NOT LIKE 'requests.%'
@@ -851,6 +856,14 @@ SELECT id, 'projects.lead', 'all' FROM employees WHERE id_no IN (
 -- admin's new project waits for a Project Approver like anyone's.
 INSERT INTO access_personal (employee_id, permission_key, reach)
 SELECT id, 'projects.create.direct', NULL FROM employees WHERE id_no IN (
+    '220202-0002', -- Nathaniel Tanglao
+    '220302-0003'  -- Steven Gaurano
+);
+
+-- The department heads, Nathaniel (MIS) and Steven (Engineering), alone change a Completed or Closed
+-- project, each in their own department (2026-10-12, supervisor).
+INSERT INTO access_personal (employee_id, permission_key, reach)
+SELECT id, 'projects.edit.closed', 'department' FROM employees WHERE id_no IN (
     '220202-0002', -- Nathaniel Tanglao
     '220302-0003'  -- Steven Gaurano
 );
