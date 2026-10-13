@@ -73,12 +73,17 @@ final class PortalManageProjects
         $query = $tab === 'pending'
             ? $query->orderByRaw('requested_at IS NULL')->orderBy('requested_at')->orderBy('id')
             : $query->orderByDesc('date_modified')->orderByDesc('id')->limit(self::DECIDED_LIMIT);
-        $rows = $query->get();
+        $rows = $query->get()->values();
+        // A completed or closed project's approval is its department head's alone (2026-10-13, user).
+        $items = $this->items($rows->all());
+        foreach ($rows as $index => $row) {
+            $items[$index]['canDecide'] = ! PortalProjectPowers::isLocked($actor, $request, $row);
+        }
 
         return [
             'section' => 'manage',
             'resource' => 'projects',
-            'data' => $this->items($rows->all()),
+            'data' => $items,
             'counts' => $counts,
             // An administrator may change a project's approval after it was decided (2026-10-13, user).
             'canChangeDecided' => PortalRole::isAdmin($actor->role, $actor->role_level),
@@ -134,6 +139,9 @@ final class PortalManageProjects
         }
         if (! $this->approval->covers($actor, $request, $row)) {
             abort(403, 'Deciding on this project needs Project Approver over it.');
+        }
+        if (PortalProjectPowers::isLocked($actor, $request, $row)) {
+            abort(403, 'This project is completed or closed. Only its department head can change its approval.');
         }
         // Only an administrator changes a project that was already decided; anyone else decides waiting ones.
         if ($row->project_creation_status !== PortalProjectApproval::PENDING && ! PortalRole::isAdmin($actor->role, $actor->role_level)) {
