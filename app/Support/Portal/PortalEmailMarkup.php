@@ -51,17 +51,41 @@ final class PortalEmailMarkup
     // Where a whole document wants the footer; kept, unseen, when there is none, so the HTML stays a design.
     public const FOOTER_SLOT = '<!-- portal:footer -->';
 
-    private const BRAND_COLOR = '#1f4e8c';
+    private const BRAND_COLOR = '#174d87';
 
     // The company mark the Company footer carries.
-    private const LETTER_LOGO = 'https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png';
+    private const LETTER_LOGO = 'https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_116,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png';
+
+    /*
+     * The letterhead's diagonal stripes and the bottom bar's accent, drawn from the approved mockup's CSS
+     * at twice their size: mail clients drop skewed and gradient CSS, so the design travels as pictures.
+     * Sources: database/seeders/email/design/, kept in Cloudinary under email-design/.
+     */
+    private const LETTER_HEADER_ACCENT = 'https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865756/email-design/letter-header-accent.png';
+
+    private const LETTER_BOTTOM_ACCENT = 'https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865830/email-design/letter-bottom-accent.png';
+
+    // A phone stacks the letter and drops the stripes; clients without media queries keep the desktop layout.
+    private const LETTER_STYLE = '<style>@media only screen and (max-width:620px){'
+        .'.pl-pad{padding-left:20px !important;padding-right:20px !important;}'
+        .'.pl-accent{display:none !important;}'
+        .'.pl-brand{font-size:21px !important;line-height:24px !important;}'
+        .'.pl-product{font-size:9px !important;letter-spacing:2px !important;}'
+        .'.pl-logo{width:47px !important;}'
+        .'.pl-foot-col{display:block !important;width:100% !important;padding-right:0 !important;}'
+        .'.pl-foot-address{border-left:0 !important;border-top:1px solid #d3dfed !important;padding:13px 0 0 !important;}'
+        .'.pl-outer{padding:12px 6px !important;}'
+        .'.pl-foot-logo{width:55px !important;max-width:55px !important;}'
+        .'.pl-foot-logo-cell{padding-right:12px !important;}'
+        .'.pl-foot-text{padding-left:12px !important;}'
+        .'}</style>';
 
     private const MAX_MARKUP = 20000;
 
     // A hand-written HTML layout runs long; TEXT holds 65535 bytes.
     private const MAX_HTML = 60000;
 
-    private const TEXT_COLOR = '#111827';
+    private const TEXT_COLOR = '#1c3557';
 
     // Inter where the mail client loads web fonts (Apple Mail, iOS, Thunderbird); elsewhere the stack.
     public const FONT_STACK = "Inter,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
@@ -75,7 +99,7 @@ final class PortalEmailMarkup
 
     private const MUTED_COLOR = '#4b5563';
 
-    private const RULE_COLOR = '#d1d5db';
+    private const RULE_COLOR = '#d5e0ee';
 
     private const LINK_COLOR = '#2563eb';
 
@@ -112,15 +136,15 @@ final class PortalEmailMarkup
      * @var array<string, string>
      */
     private const TAG_STYLES = [
-        'p' => 'margin:0 0 12px',
-        'h1' => 'margin:0 0 12px;font-size:20px;line-height:1.3',
-        'h2' => 'margin:0 0 12px;font-size:17px;line-height:1.35',
-        'h3' => 'margin:0 0 10px;font-size:15px;line-height:1.4',
+        'p' => 'margin:0 0 10px',
+        'h1' => 'margin:0 0 10px;font-size:18px;line-height:1.3',
+        'h2' => 'margin:0 0 10px;font-size:16px;line-height:1.35',
+        'h3' => 'margin:0 0 8px;font-size:15px;line-height:1.4',
         'ul' => 'margin:0 0 12px;padding-left:22px',
         'ol' => 'margin:0 0 12px;padding-left:22px',
         'li' => 'margin:0 0 4px',
         // A panel for details set apart from the message: who, what, when.
-        'blockquote' => 'margin:4px 0 16px;padding:12px 16px 0;background-color:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid '.self::BRAND_COLOR.';border-radius:8px;color:#374151',
+        'blockquote' => 'margin:2px 0 12px;padding:10px 14px 0;background-color:#f8fafc;border:1px solid #e0e7f0;border-left:3px solid '.self::BRAND_COLOR.';border-radius:8px;color:#2c4566',
         'code' => 'font-family:monospace;background:#f3f4f6;padding:1px 4px;border-radius:4px',
         'hr' => 'border:none;border-top:1px solid '.self::RULE_COLOR.';margin:16px 0',
     ];
@@ -177,7 +201,7 @@ final class PortalEmailMarkup
     ): string {
         $footerHtml = $footer === null || trim($footer) === ''
             ? ''
-            : '<hr style="border:none;border-top:1px solid '.self::RULE_COLOR.';margin:16px 0 12px">'
+            : '<hr style="border:none;border-top:1px solid '.self::RULE_COLOR.';margin:12px 0">'
                 .'<div style="color:'.self::MUTED_COLOR.';font-size:13px">'.self::fragment($footer, $footerFormat).'</div>';
 
         if ($bodyFormat === self::FORMAT_LETTER) {
@@ -201,7 +225,7 @@ final class PortalEmailMarkup
         }
 
         return self::FONT_HEAD
-            .'<div style="font-family:'.self::FONT_STACK.';font-size:'.self::TEXT_SIZE.';line-height:1.6;color:'.self::TEXT_COLOR.'">'
+            .'<div style="font-family:'.self::FONT_STACK.';font-size:'.self::TEXT_SIZE.';line-height:1.55;color:'.self::TEXT_COLOR.'">'
             .self::fragment($body, $bodyFormat)
             .$footerHtml
             .'</div>';
@@ -213,12 +237,15 @@ final class PortalEmailMarkup
     }
 
     /**
-     * The letter design around a message already in HTML. Tables and inline styles, as mail clients
-     * need; laid out line by line, since a writer who takes the HTML changes the design here.
+     * The letter design around a message already in HTML, as the approved mockup draws it: a navy rule,
+     * the letterhead (logo, divider, IKAIKA BIM over IKAIKA PORTAL, the stripes on the right), the
+     * message, the footer, and a navy bar with its accent at the foot. Tables and inline styles, as mail
+     * clients need; laid out line by line, since a writer who takes the HTML changes the design here.
      */
     public static function letter(string $content): string
     {
         $font = 'font-family:'.self::FONT_STACK;
+        $navy = self::BRAND_COLOR;
 
         return implode("\n", [
             '<!DOCTYPE html>',
@@ -228,26 +255,38 @@ final class PortalEmailMarkup
             '<meta name="viewport" content="width=device-width,initial-scale=1">',
             self::FONT_HEAD,
             self::DETECTION_HEAD,
+            self::LETTER_STYLE,
             '</head>',
-            '<body style="margin:0;padding:0;background-color:#f3f4f6;">',
-            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6;border-collapse:collapse;">',
+            '<body style="margin:0;padding:0;background-color:#f2f5f9;">',
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5f9;border-collapse:collapse;">',
             '  <tr>',
-            '    <td align="center" style="padding:24px 12px;">',
-            '      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;border-collapse:separate;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:12px;">',
-            '        <!-- Letterhead -->',
+            '    <td class="pl-outer" align="center" style="padding:24px 12px;">',
+            '      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:720px;border-collapse:separate;background-color:#ffffff;border:1px solid #dfe6ef;border-radius:12px;">',
+            '        <!-- Top rule -->',
             '        <tr>',
-            '          <td style="height:6px;line-height:6px;font-size:0;background-color:'.self::BRAND_COLOR.';border-radius:12px 12px 0 0;">&nbsp;</td>',
+            '          <td style="height:6px;line-height:6px;font-size:0;background-color:'.$navy.';border-radius:11px 11px 0 0;">&nbsp;</td>',
             '        </tr>',
+            '        <!-- Letterhead: the brand on the left, the stripes on the right -->',
             '        <tr>',
-            '          <td style="padding:22px 32px 18px;border-bottom:1px solid #e5e7eb;">',
-            '            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+            '          <td style="padding:0;border-bottom:1px solid #e0e7f0;background-color:#ffffff;">',
+            '            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
             '              <tr>',
-            '                <td width="44" valign="middle" style="width:44px;padding:0 12px 0 0;">',
-            '                  <img src="'.self::LETTER_LOGO.'" alt="IKAIKA BIM" width="44" style="display:block;width:44px;height:auto;border:0;">',
+            '                <td class="pl-pad" valign="middle" style="padding:20px 0 20px 30px;">',
+            '                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
+            '                    <tr>',
+            '                      <td valign="middle" style="padding:0 18px 0 0;">',
+            '                        <img class="pl-logo" src="'.self::LETTER_LOGO.'" alt="IKAIKA BIM" width="58" style="display:block;width:58px;height:auto;border:0;">',
+            '                      </td>',
+            '                      <td valign="middle" width="1" height="58" style="width:1px;height:58px;background-color:#45719f;font-size:0;line-height:0;">&nbsp;</td>',
+            '                      <td valign="middle" style="padding:0 0 0 18px;'.$font.';">',
+            '                        <div class="pl-brand" style="font-size:27px;line-height:30px;font-weight:700;letter-spacing:0.7px;color:'.$navy.';white-space:nowrap;">IKAIKA BIM</div>',
+            '                        <div class="pl-product" style="margin-top:7px;font-size:12px;line-height:14px;font-weight:700;letter-spacing:3.2px;color:#658bbd;white-space:nowrap;">IKAIKA PORTAL</div>',
+            '                      </td>',
+            '                    </tr>',
+            '                  </table>',
             '                </td>',
-            '                <td valign="middle" style="'.$font.';">',
-            '                  <div style="font-size:15px;line-height:20px;font-weight:700;letter-spacing:0.3px;color:'.self::BRAND_COLOR.';">IKAIKA BIM</div>',
-            '                  <div style="font-size:12px;line-height:18px;color:#6b7280;"><a href="https://ikaikabim.com" target="_blank" rel="noopener" style="color:#6b7280;text-decoration:none;">ikaikabim.com</a></div>',
+            '                <td class="pl-accent" align="right" valign="top" width="281" style="width:281px;padding:0;font-size:0;line-height:0;">',
+            '                  <img src="'.self::LETTER_HEADER_ACCENT.'" alt="" width="281" height="122" style="display:block;width:281px;height:122px;border:0;">',
             '                </td>',
             '              </tr>',
             '            </table>',
@@ -255,14 +294,20 @@ final class PortalEmailMarkup
             '        </tr>',
             '        <!-- Letter -->',
             '        <tr>',
-            '          <td style="padding:28px 32px 4px;'.$font.';font-size:'.self::TEXT_SIZE.';line-height:1.6;color:'.self::TEXT_COLOR.';">',
+            '          <td class="pl-pad" style="padding:24px 36px 2px;'.$font.';font-size:'.self::TEXT_SIZE.';line-height:1.55;color:'.self::TEXT_COLOR.';">',
             $content,
             '          </td>',
             '        </tr>',
             '        <!-- Footer: the one picked under the message goes in at portal:footer. -->',
             '        <tr>',
-            '          <td style="padding:0 32px 28px;'.$font.';">',
+            '          <td class="pl-pad" style="padding:0 36px 4px;'.$font.';">',
             '            '.self::FOOTER_SLOT,
+            '          </td>',
+            '        </tr>',
+            '        <!-- Bottom bar, its accent short of the rounded corner -->',
+            '        <tr>',
+            '          <td align="right" style="padding:0 12px 0 0;height:14px;background-color:'.$navy.';border-radius:0 0 11px 11px;font-size:0;line-height:0;">',
+            '            <img src="'.self::LETTER_BOTTOM_ACCENT.'" alt="" width="128" height="14" style="display:block;width:128px;height:14px;border:0;">',
             '          </td>',
             '        </tr>',
             '      </table>',
@@ -290,12 +335,12 @@ final class PortalEmailMarkup
         $html = '';
         if ($known !== null) {
             [$label, $color, $background] = $known;
-            $html .= '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 12px;border-collapse:separate;"><tr>'
+            $html .= '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 8px;border-collapse:separate;"><tr>'
                 .'<td style="padding:3px 10px;border-radius:999px;background-color:'.$background.';color:'.$color.';font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">'
                 .e($label).'</td></tr></table>';
         }
         if ($title !== '') {
-            $html .= '<h1 style="margin:0 0 18px;font-size:20px;line-height:1.3;font-weight:700;color:'.self::TEXT_COLOR.';">'.e($title).'</h1>';
+            $html .= '<h1 style="margin:0 0 12px;font-size:18px;line-height:1.3;font-weight:700;color:'.self::BRAND_COLOR.';">'.e($title).'</h1>';
         }
 
         return $html;
@@ -309,10 +354,10 @@ final class PortalEmailMarkup
             return null;
         }
         // A short code reads best spaced wide; a long password must still fit a phone.
-        $size = strlen($value) <= 8 ? 'font-size:30px;line-height:38px;letter-spacing:8px' : 'font-size:22px;line-height:30px;letter-spacing:3px';
+        $size = strlen($value) <= 8 ? 'font-size:26px;line-height:32px;letter-spacing:7px' : 'font-size:20px;line-height:26px;letter-spacing:2px';
 
-        return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:4px 0 18px;border-collapse:separate;"><tr>'
-            .'<td align="center" style="padding:16px 12px;background-color:#f3f6fb;border:1px solid #dbe4f0;border-radius:10px;'
+        return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:2px 0 12px;border-collapse:separate;"><tr>'
+            .'<td align="center" style="padding:12px;background-color:#f3f6fb;border:1px solid #d5e0ee;border-radius:10px;'
             ."font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;".$size.';font-weight:700;color:'.self::BRAND_COLOR.';">'
             .e($value).'</td></tr></table>';
     }
@@ -324,9 +369,9 @@ final class PortalEmailMarkup
             return null;
         }
 
-        return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 18px;border-collapse:separate;"><tr>'
+        return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:2px 0 12px;border-collapse:separate;"><tr>'
             .'<td style="border-radius:8px;background-color:'.self::BRAND_COLOR.';">'
-            .'<a href="'.e($match[2]).'" target="_blank" rel="noopener" style="display:inline-block;padding:11px 22px;font-family:'.self::FONT_STACK.';font-size:14px;line-height:20px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">'
+            .'<a href="'.e($match[2]).'" target="_blank" rel="noopener" style="display:inline-block;padding:10px 20px;font-family:'.self::FONT_STACK.';font-size:14px;line-height:20px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">'
             .e($match[1]).'</a></td></tr></table>';
     }
 

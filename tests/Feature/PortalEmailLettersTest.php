@@ -26,9 +26,10 @@ class PortalEmailLettersTest extends TestCase
      */
     protected array $connectionsToTransact = ['portal'];
 
-    public function test_every_letter_opens_and_closes_the_same_way(): void
+    // A greeting, then the message; no sign-off, since the footer says who it is from.
+    public function test_every_letter_opens_the_same_way_and_has_no_sign_off(): void
     {
-        $this->assertSame("Hi Dave,\n\nYour code is 1.\n\nBest Regards,\nIKAIKA Portal", PortalLetters::body(' Dave ', ' Your code is 1. '));
+        $this->assertSame("Hi Dave,\n\nYour code is 1.", PortalLetters::body(' Dave ', ' Your code is 1. '));
         $this->assertStringStartsWith('Hi there,', PortalLetters::body(null, 'x'));
         $this->assertStringStartsWith('Hi there,', PortalLetters::body('  ', 'x'));
     }
@@ -37,12 +38,13 @@ class PortalEmailLettersTest extends TestCase
     {
         $html = PortalEmailMarkup::document('Hi, see [the queue](https://example.test/q).', '<p>Footer</p>', PortalEmailMarkup::FORMAT_LETTER, PortalEmailMarkup::FORMAT_HTML);
 
-        $this->assertStringContainsString('font-size:14px;line-height:1.6', $html);
-        $this->assertStringNotContainsString('font-size:15px;line-height:1.6', $html);
+        $this->assertStringContainsString('font-size:14px;line-height:1.55', $html);
         $this->assertStringNotContainsString('text-decoration:underline', $html);
         $this->assertStringContainsString('<a href="https://example.test/q" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:none">the queue</a>', $html);
-        // The letterhead's domain is a link of its own, so no client turns it into a blue, underlined one.
-        $this->assertStringContainsString('<a href="https://ikaikabim.com" target="_blank" rel="noopener" style="color:#6b7280;text-decoration:none;">ikaikabim.com</a>', $html);
+        // The letterhead names the company and the portal; no bare domain is left for a client to underline.
+        $this->assertStringContainsString('>IKAIKA BIM</div>', $html);
+        $this->assertStringContainsString('>IKAIKA PORTAL</div>', $html);
+        $this->assertStringNotContainsString('>ikaikabim.com<', $html);
         $this->assertStringContainsString('<meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">', $html);
         $this->assertStringContainsString('a[x-apple-data-detectors]', $html);
         // A formatted email reads at the same size as a letter.
@@ -72,26 +74,32 @@ class PortalEmailLettersTest extends TestCase
 
         $this->assertStringNotContainsString('::code', $html);
         $this->assertStringNotContainsString('::button', $html);
-        $this->assertStringContainsString('letter-spacing:8px;font-weight:700;color:#1f4e8c;">655991</td>', $html);
+        $this->assertStringContainsString('letter-spacing:7px;font-weight:700;color:#174d87;">655991</td>', $html);
         $this->assertStringContainsString('<a href="https://example.test/q?a=1&amp;b=2" target="_blank" rel="noopener" style="display:inline-block;', $html);
         $this->assertStringContainsString('>Open the queue</a>', $html);
         // A block never sits inside a paragraph, and the text around it stays its own.
-        $this->assertStringNotContainsString('<p style="margin:0 0 12px"><table', $html);
-        $this->assertStringContainsString('<p style="margin:0 0 12px">Thanks.</p>', $html);
+        $this->assertStringNotContainsString('<p style="margin:0 0 10px"><table', $html);
+        $this->assertStringContainsString('<p style="margin:0 0 10px">Thanks.</p>', $html);
 
         // A long password still fits a phone; a value is text, never markup.
-        $this->assertStringContainsString('letter-spacing:3px;font-weight:700;color:#1f4e8c;">Kp7mQ2xR&lt;b&gt;9Ls</td>', PortalEmailMarkup::html('::code Kp7mQ2xR<b>9Ls'));
+        $this->assertStringContainsString('letter-spacing:2px;font-weight:700;color:#174d87;">Kp7mQ2xR&lt;b&gt;9Ls</td>', PortalEmailMarkup::html('::code Kp7mQ2xR<b>9Ls'));
         // A button to anything but a web address is not a button.
         $this->assertStringNotContainsString('display:inline-block', PortalEmailMarkup::html('::button[Run](javascript:alert)'));
     }
 
-    // The sign-off sits close to the footer, not a screen away.
-    public function test_the_footer_sits_close_under_the_message(): void
+    // The approved design: navy rule, letterhead with its stripes, compact message, footer close under it, navy bar.
+    public function test_the_letter_is_the_approved_design_and_compact(): void
     {
         $html = PortalEmailMarkup::document('Hi.', '<p>Footer</p>', PortalEmailMarkup::FORMAT_LETTER, PortalEmailMarkup::FORMAT_HTML);
 
-        $this->assertStringContainsString('padding:28px 32px 4px;', $html);
-        $this->assertStringContainsString('margin:16px 0 12px', $html);
+        $this->assertStringContainsString('max-width:720px', $html);
+        $this->assertStringContainsString('/email-design/letter-header-accent.png" alt="" width="281" height="122"', $html);
+        $this->assertStringContainsString('/email-design/letter-bottom-accent.png" alt="" width="128" height="14"', $html);
+        $this->assertStringContainsString('padding:24px 36px 2px;', $html);
+        $this->assertStringContainsString('margin:12px 0">', $html);
+        // A phone drops the stripes and stacks the footer.
+        $this->assertStringContainsString('@media only screen and (max-width:620px)', $html);
+        $this->assertStringContainsString('.pl-accent{display:none !important;}', $html);
     }
 
     public function test_people_text_set_in_a_letter_stays_text(): void
@@ -118,7 +126,7 @@ class PortalEmailLettersTest extends TestCase
         $this->assertSame($footerBody, $mail->footerBody);
         $this->assertSame(PortalNotificationEmails::FROM_NAME, $mail->fromName);
         $this->assertStringStartsWith('Hi there,', $mail->body);
-        $this->assertStringEndsWith("Best Regards,\nIKAIKA Portal", $mail->body);
+        $this->assertStringNotContainsString('Best Regards', $mail->body);
     }
 
     public function test_a_filed_request_reads_with_for_and_the_right_article(): void
@@ -135,7 +143,8 @@ class PortalEmailLettersTest extends TestCase
     public function test_the_footer_migration_links_the_address_in_an_unedited_footer_only(): void
     {
         $migration = require database_path('migrations/2026_10_13_090000_link_company_footer_address.php');
-        $footer = (string) file_get_contents(database_path('seeders/email/company-footer.html'));
+        // The footer as it stood when this migration ran; the redesign after it keeps that version as its OLD.
+        $footer = (require database_path('migrations/2026_10_13_120000_redesign_company_footer.php'))::OLD;
         $this->assertStringContainsString($migration::NEW, str_replace("\r\n", "\n", $footer));
 
         $portal = DB::connection('portal');

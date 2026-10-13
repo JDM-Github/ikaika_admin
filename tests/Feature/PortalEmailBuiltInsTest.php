@@ -72,9 +72,32 @@ class PortalEmailBuiltInsTest extends TestCase
     {
         $footer = $this->migration()::body('company-footer.html');
 
-        $this->assertStringContainsString('/c_limit,w_112,f_auto,q_auto/', $footer);
+        // The logo at 72px, fetched at twice that for sharp screens.
+        $this->assertStringContainsString('/c_limit,w_144,f_auto,q_auto/', $footer);
         $this->assertStringContainsString('/email-upload/global/', $footer);
-        $this->assertStringContainsString('width="82"', $footer);
+        $this->assertStringContainsString('width="72"', $footer);
         $this->assertDoesNotMatchRegularExpression('#email-upload/\d+/#', $footer.$this->migration()::body('portal-email-test.html'));
+        // The icons are pictures from email-design/, never SVG, which mail clients drop.
+        foreach (['icon-globe', 'icon-mail', 'icon-pin'] as $icon) {
+            $this->assertStringContainsString('/email-design/'.$icon.'.png', $footer);
+        }
+        $this->assertStringNotContainsString('<svg', $footer);
+    }
+
+    // A footer still the previous built-in becomes the new design; one someone rewrote is left alone.
+    public function test_the_redesign_migration_replaces_only_an_unedited_footer(): void
+    {
+        $redesign = require database_path('migrations/2026_10_13_120000_redesign_company_footer.php');
+        $this->assertSame($this->migration()::body('company-footer.html'), $redesign::NEW);
+
+        $portal = DB::connection('portal');
+        $creator = (int) $portal->table('employees')->value('id');
+        $stale = $portal->table('email_blocks')->insertGetId(['kind' => 'footer', 'name' => 'Old built-in', 'body' => str_replace("\n", "\r\n", $redesign::OLD), 'format' => 'html', 'created_by' => $creator]);
+        $own = $portal->table('email_blocks')->insertGetId(['kind' => 'footer', 'name' => 'Own footer', 'body' => '<p>Ours</p>', 'format' => 'html', 'created_by' => $creator]);
+
+        $redesign->up();
+
+        $this->assertSame($redesign::NEW, $portal->table('email_blocks')->where('id', $stale)->value('body'));
+        $this->assertSame('<p>Ours</p>', $portal->table('email_blocks')->where('id', $own)->value('body'));
     }
 }

@@ -63,14 +63,13 @@ final class PortalLetters
         });
     }
 
-    // The words every letter shares: a greeting by first name, the message, and the portal's sign-off.
+    // The words every letter shares: a greeting by first name, then the message. No sign-off: the footer says who it is from.
     public static function body(?string $name, string $message): string
     {
         $name = trim((string) $name);
 
         return 'Hi '.($name !== '' ? $name : self::NO_NAME).','
-            ."\n\n".trim($message)
-            ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME;
+            ."\n\n".trim($message);
     }
 
     /**

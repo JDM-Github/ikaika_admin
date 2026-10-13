@@ -21,16 +21,38 @@ Last checked against the code: 2026-10-13.
 | Transport | `MAIL_MAILER=wprelay`: each email is a POST to the WordPress plugin on ikaikabim.com, which sends it with `wp_mail`. A few seconds per email. See `docs/deploy/wordpress/`. |
 | Local | The same relay, or `MAIL_MAILER=log` (emails land in `storage/logs/laravel.log`). |
 | HTML builder | `PortalEmailMarkup::document()` -- one builder for every design below, the same one Send Email's preview uses. |
-| One sender for system letters | `PortalLetters::send()`: Letter design + Company footer + IKAIKA Portal, through the **mail queue**. Every system email's words go through `PortalLetters::body($firstName, $message)`: "Hi {first name}," (or "Hi there,"), the message, then "Best Regards, / IKAIKA Portal" -- so no two can drift apart. People's own text set in a letter (names, titles, reasons) goes through `PortalEmailMarkup::escape()` so a `*` or `[` stays text. A one-time code uses `PortalLetters::sendAfterResponse()` instead: same letter, sent right **after the response** (`defer()`), so it never waits for the queue. A failure is logged as `portal.letter.failed`. |
+| One sender for system letters | `PortalLetters::send()`: Letter design + Company footer + IKAIKA Portal, through the **mail queue**. Every system email's words go through `PortalLetters::body($firstName, $message)`: "Hi {first name}," (or "Hi there,") and the message, no sign-off -- so no two can drift apart. People's own text set in a letter (names, titles, reasons) goes through `PortalEmailMarkup::escape()` so a `*` or `[` stays text. A one-time code uses `PortalLetters::sendAfterResponse()` instead: same letter, sent right **after the response** (`defer()`), so it never waits for the queue. A failure is logged as `portal.letter.failed`. |
 | Mail queue | The database queue (`jobs` table). The server has no always-on worker: the scheduler's every-minute cron starts `queue:work --stop-when-empty --max-time=55`, so a queued email leaves within about a minute. Each email gets 3 tries (now, +1 min, +5 min); then a system email is logged under its own failure event and a Send Email copy is counted failed on its row. `deploy-admin.sh` sets `QUEUE_CONNECTION=database` on the server; locally `.env` keeps `sync`, which sends inside the request as before. Jobs: `App\Jobs\SendPortalMail` (system emails), `App\Jobs\DeliverPortalEmail` (Send Email copies). |
 | Test | `php artisan portal:mail-test [to]` sends a test and prints the relay's answer. |
 
 ## The designs
 
-**Every email the system writes by itself is a Letter with the Company footer.** Formatted and HTML are
-only for Send Email. The **Company footer** is the first footer block in Send Email -> Footers (logo,
-IKAIKA BIM, ikaikabim.com, info@, "IKAIKA Portal - Automated communication", the office address, and the
-confidentiality note).
+**Every email the system writes by itself is a Letter with the Company footer, and none has a sign-off**
+("Best Regards" was dropped 2026-10-13): it opens "Hi {first name}," and ends with its message; the footer
+says who it is from. Formatted and HTML are only for Send Email. The **Company footer** is the first footer
+block in Send Email -> Footers.
+
+**The approved design (2026-10-13, from the user's mockup).** Card max 720px, white, 1px `#dfe6ef` border,
+12px corners, on a `#f2f5f9` page. Colours: navy `#174d87`, blue `#245b99`, mid-blue `#658bbd`, muted
+`#6682a8`, lines `#d5e0ee`, message text `#1c3557`.
+
+- **Letterhead** (`PortalEmailMarkup::letter()`): a 6px navy rule; the logo (58px), a 1px navy divider,
+  **IKAIKA BIM** (27px bold navy) over **IKAIKA PORTAL** (12px bold mid-blue, wide letter-spacing); the
+  diagonal stripes on the right (281x122 picture).
+- **Message**: compact -- 24px top, 36px sides, 14px text, 1.55 line height, 10px between paragraphs; the
+  category pill and an 18px navy title on top.
+- **Company footer** (`database/seeders/email/company-footer.html`): under a thin rule, the logo (72px),
+  divider, IKAIKA BIM / IKAIKA PORTAL / Automated communication, then the globe icon + ikaikabim.com | mail
+  icon + info@ikaikabim.com; on the right, behind a pale divider, the pin icon and the office address on
+  four lines (a link to the map); under another rule the confidentiality notice.
+- **Bottom bar**: a 14px navy bar with the light diagonal accent near the right corner (picture).
+- **Phones** (`max-width:620px`, where the client honours it): the stripes drop, the brand shrinks, the
+  footer stacks (address under the brand, its divider on top), the margins narrow.
+
+Mail clients drop SVG and skewed or gradient CSS, so the stripes, the bottom accent and the three icons
+are **pictures** drawn from the mockup's CSS at 2x: sources in `database/seeders/email/design/`, hosted in
+Cloudinary under `email-design/` (outside the composer's image picker). To change one, redraw it, upload it
+to the same public id, and update the versioned URL in `PortalEmailMarkup` or the footer.
 
 Links are **never underlined**: they read by their blue colour alone. Anything a mail client would find
 by itself and underline (the letterhead's ikaikabim.com, the footer's office address, which links to the
@@ -65,7 +87,7 @@ A link is a button, never a long address to read or copy. The footer sits 16px u
 
 | Design | What the reader sees | Builder |
 | --- | --- | --- |
-| **Letter** | A white card with rounded corners on a light grey page, max 640px wide. At the top the **letterhead**: a blue bar, the IKAIKA BIM logo, "IKAIKA BIM" and "ikaikabim.com". The message below, in Inter 14px. The footer, when there is one, inside the card under a thin rule. | `FORMAT_LETTER` -> `PortalEmailMarkup::letter()` |
+| **Letter** | The approved design above: navy rule, letterhead with the stripes, category pill and title, the message in Inter 14px, the footer under a thin rule, the navy bar at the foot. | `FORMAT_LETTER` -> `PortalEmailMarkup::letter()` |
 | **Formatted** | No card, no letterhead: the message as styled text (Inter 14px, bold, headings, links), then the footer under a thin rule when there is one. Send Email only. | `FORMAT_MARKUP` |
 | **HTML** | Whatever HTML was written, sent as is; the footer goes before `</body>` (or at a `portal:footer` marker). Send Email only. | `FORMAT_HTML` |
 
@@ -91,8 +113,8 @@ one line break stays a line break.
 **Drafts that open Send Email (#8) pre-filled** -- nothing is sent until the admin presses Send, and
 the admin can change everything. All three open as the same letter as the system emails: **Letter**
 design, category Notice, the **Company footer** (by name, `SendEmailConstant.companyFooterName`), a
-greeting by first name, the link as a `::button`, a password in a `::code` box, signed "Best Regards," +
-the signed-in admin's name. The composer's preview shows the category pill and the subject as the title.
+greeting by first name, the link as a `::button`, a password in a `::code` box, and no sign-off. The
+composer's preview shows the category pill and the subject as the title.
 
 | Draft | Opened from | Greets | Code (portal) |
 | --- | --- | --- | --- |
@@ -105,9 +127,6 @@ Missing report reminder:
 > Hi {first name | everyone},
 >
 > We have no report from you for {day}. Please file it as a Late Report when you can.
->
-> Best Regards,
-> {admin}
 
 Onboarding requirements:
 
@@ -122,9 +141,6 @@ Onboarding requirements:
 > Your password:
 >
 > [ {password} ]   *(password box)*
->
-> Best Regards,
-> {admin}
 
 ---
 
@@ -147,9 +163,6 @@ Onboarding requirements:
 > [ {code} ]   *(code box)*
 >
 > If you did not try to sign in, you can ignore this email; nobody can sign in without the code.
->
-> Best Regards,
-> IKAIKA Portal
 
 ## 2. Shared page: link and password
 
@@ -177,9 +190,6 @@ Onboarding requirements:
 > [QR code of the link]
 >
 > It is good until {12 Oct 2026, 3:24 pm}. *(Never-expiring: "It does not expire until it is revoked.")* It is read-only: you can look, not change anything.
->
-> Best Regards,
-> IKAIKA Portal
 
 ## 3. Shared page: new password
 
@@ -215,9 +225,6 @@ Body as #2, with the second paragraph:
 > [ {code} ]   *(code box)*
 >
 > [ Open the shared page ]   *(button)*
->
-> Best Regards,
-> IKAIKA Portal
 
 ## 5. Registration code
 
@@ -238,9 +245,6 @@ Body as #2, with the second paragraph:
 > [ {code} ]   *(code box)*
 >
 > [ Open your registration ]   *(button)*
->
-> Best Regards,
-> IKAIKA Portal
 
 ## 6. Notification emails
 
@@ -249,7 +253,7 @@ Every in-portal notice of the kinds below is also emailed.
 | | |
 | --- | --- |
 | Design | Letter, letterhead, Company footer, from IKAIKA Portal, through the mail queue (one email per recipient) |
-| Body | "Hi {first name},", the message, then the link (when the notice has one) as a button `::button[{link label}]({portal}/{page})`, then "Best Regards, IKAIKA Portal". Category: Request for `requests.*`, Project for `projects.*`, Event for `calendar.*` |
+| Body | "Hi {first name},", the message, then the link (when the notice has one) as a button `::button[{link label}]({portal}/{page})`. Category: Request for `requests.*`, Project for `projects.*`, Event for `calendar.*` |
 | On / off | Settings -> Advanced (Developer mode only); default from `PORTAL_NOTIFICATION_EMAILS` |
 | Skipped | Nobody is emailed about their own action; an employee with no valid work email gets no email |
 | Code | `PortalAudit::notify / notifyEach / notifyManagers / notifyIfOther` -> `PortalNotificationEmails::send` -> `SendPortalMail` job; wording in `PortalActivityCopy`; a failure is logged as `portal.notification.email.failed` |
@@ -261,9 +265,6 @@ Dates read like "Monday, October 12, 2026"; one day reads "for {date}", a range 
 > Juan Dela Cruz filed a leave request for Monday, October 12, 2026.
 >
 > [ Open queue ]   *(button to {portal}/manage/manage-requests)*
->
-> Best Regards,
-> IKAIKA Portal
 
 | Kind (type key) | Subject | Message | Link | Goes to |
 | --- | --- | --- | --- | --- |
@@ -305,9 +306,6 @@ changed, project rejected, recycle bin restore, "email sent".
 > **When:** {Tuesday, October 13, 2026 at 3:24 pm} (portal time)
 >
 > You get this because you hold Access alerts. The same attempt by the same person is reported at most once every 15 minutes.
->
-> Best Regards,
-> IKAIKA Portal
 
 ## 8. Send Email (composer)
 
@@ -335,9 +333,6 @@ changed, project rejected, recycle bin restore, "email sent".
 >
 > This is a **test** from the portal.
 > If you can read this, sending works.
->
-> Best Regards,
-> IKAIKA Portal
 
 ---
 

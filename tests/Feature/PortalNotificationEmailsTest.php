@@ -88,7 +88,7 @@ class PortalNotificationEmailsTest extends TestCase
                 && $mail->footerBody === $footerBody
                 && $mail->fromName === PortalNotificationEmails::FROM_NAME
                 && str_starts_with($mail->body, 'Hi '.trim((string) $admin->first_name).',')
-                && str_ends_with($mail->body, "Best Regards,\nIKAIKA Portal")
+                && ! str_contains($mail->body, 'Best Regards')
                 && str_contains($html, $this->memberName($member))
                 // One day reads "for" the day.
                 && str_contains($html, 'filed a leave request for ')
