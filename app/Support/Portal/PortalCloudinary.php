@@ -26,7 +26,7 @@ final class PortalCloudinary
     /**
      * @return array{fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}
      */
-    public function uploadReceipt(UploadedFile $file, string $folder = self::FOLDER): array
+    public function uploadReceipt(UploadedFile $file, string $folder = self::FOLDER, ?string $asName = null): array
     {
         $cloud = $this->cloudName();
         $key = $this->apiKey();
@@ -46,7 +46,8 @@ final class PortalCloudinary
             abort(422, 'Choose an image or PDF receipt.');
         }
 
-        $name = $file->getClientOriginalName();
+        // A name the caller gives instead of the device's: a bug report's screenshot must not carry its sender's.
+        $name = $asName ?? $file->getClientOriginalName();
         $uploadName = $name !== '' ? $name : 'receipt';
 
         try {

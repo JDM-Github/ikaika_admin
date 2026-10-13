@@ -12,8 +12,9 @@ use Symfony\Component\HttpFoundation\Response;
  * The label may be the device's place, its coordinates, or the network guess when the device timed
  * out: a located action, not proof of where someone was (docs/power/location-and-accountability-plan.md).
  *
- * Exempt, as the portal's ApiManager is: signing in, Developer mode's own password, and marking
- * notices read when a page opens.
+ * Exempt, as the portal's ApiManager is: signing in, Developer mode's own password, marking
+ * notices read when a page opens, and reporting a bug -- a report is anonymous, so where it was sent
+ * from is not asked (2026-10-13).
  */
 class RequirePortalLocation
 {
@@ -26,6 +27,8 @@ class RequirePortalLocation
         '*/portal/developer/mode',
         '*/portal/developer/password',
         '*/portal/user/notifications/*',
+        // Only the collection: MIS changing a report's status is located like any other write.
+        '*/portal/bug-reports',
     ];
 
     public function handle(Request $request, Closure $next): Response

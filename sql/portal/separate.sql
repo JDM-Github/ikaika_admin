@@ -1218,6 +1218,47 @@ SELECT id, 'manage.users.information.edit', NULL FROM employees WHERE id_no IN (
     '220302-0003'  -- Steven Gaurano
 );
 
+-- Bug reports (2026-10-13): anyone reports a bug with up to three screenshots; MIS reads and tracks
+-- them. Anonymous by design: no employee column and no time finer than the day.
+-- Existing databases: create_portal_bug_reports.
+CREATE TABLE IF NOT EXISTS bug_reports (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    title       VARCHAR(160) NOT NULL,
+    description TEXT         NOT NULL,
+    page        VARCHAR(200) NULL,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'new',
+    note        TEXT         NULL,
+    -- Who in MIS handles it, the semantic version level its fix needs, and the version it shipped in.
+    -- Existing databases: add_portal_bug_report_assignee_and_version.
+    assignee_id   INT UNSIGNED NULL,
+    version_level VARCHAR(10)  NULL,
+    fixed_in      VARCHAR(20)  NULL,
+    reported_on DATE         NOT NULL,
+    updated_at  TIMESTAMP    NULL,
+    INDEX bug_reports_status_reported_on_index (status, reported_on)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS bug_report_images (
+    id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    bug_report_id INT UNSIGNED NOT NULL,
+    file_url      VARCHAR(500) NOT NULL,
+    mime_type     VARCHAR(100) NOT NULL,
+    size_bytes    INT UNSIGNED NOT NULL,
+    FOREIGN KEY (bug_report_id) REFERENCES bug_reports(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The Bug Reports page: every MIS member and admin (only_department), and developers.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, only_department, sort_order)
+VALUES
+    ('bug-reports', NULL, 'Bug Reports',
+     'Read the bugs people report, never who sent them, and track each one to fixed.',
+     0, 1, 'MIS', 990);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('member', 'bug-reports', NULL, 0),
+    ('admin', 'bug-reports', NULL, 0),
+    ('developer', 'bug-reports', NULL, 0);
+
 -- Edit transactions (2026-10-13): a transaction's name, date, payor or payee, notes and receipt, never
 -- its money; admins, executives and developers hold it like the rest of Finance.
 -- Existing databases: add_portal_finance_transactions_edit_rule.
