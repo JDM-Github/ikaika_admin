@@ -812,7 +812,7 @@ class PortalOnboardingTest extends TestCase
         // The photo without its background, so the plain one is never asked for.
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/e_background_removal/c_fill,g_face,w_480,h_642/f_png/'));
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_642,f_jpg,q_90/'));
-        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/e_trim/c_limit,w_900,h_300,f_png/'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/e_trim/c_limit,w_1000,h_1000,f_png/'));
         $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
             ->where('message', 'like', '%made the ID card of%')->exists());
 

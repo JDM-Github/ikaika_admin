@@ -36,7 +36,8 @@ final class PortalEmployeeIdCards
     // The photo as taken, for when its background cannot be taken out yet.
     private const PLAIN_PHOTO_TRANSFORM = 'c_fill,g_face,w_480,h_642,f_jpg,q_90';
 
-    private const SIGNATURE_TRANSFORM = 'e_trim/c_limit,w_900,h_300,f_png';
+    // Large enough to cut to its ink here and still print sharp.
+    private const SIGNATURE_TRANSFORM = 'e_trim/c_limit,w_1000,h_1000,f_png';
 
     private const IMAGE_TIMEOUT_SECONDS = 15;
 
@@ -76,7 +77,7 @@ final class PortalEmployeeIdCards
             'emergencyContactName' => self::text($employee->emergency_contact_person_name),
             'emergencyContactNumber' => self::text($employee->emergency_contact_number),
             'photo' => $this->image($employee, 'photo', self::PHOTO_TRANSFORM, self::PLAIN_PHOTO_TRANSFORM),
-            'signature' => $this->image($employee, 'signature', self::SIGNATURE_TRANSFORM),
+            'signature' => $this->signature($employee),
             'logo' => 'data:image/png;base64,'.base64_encode((string) file_get_contents(resource_path('images/ikaika-logo.png'))),
             'qr' => ['text' => $qrText, 'rows' => self::qrRows($qrText)],
         ];
@@ -108,6 +109,18 @@ final class PortalEmployeeIdCards
         }
 
         return $rows;
+    }
+
+    // The signature as its ink alone (2026-10-14, user); as Cloudinary trims it where its ink cannot be read.
+    private function signature(Employee $employee): ?string
+    {
+        $picture = $this->image($employee, 'signature', self::SIGNATURE_TRANSFORM);
+        if ($picture === null) {
+            return null;
+        }
+        $ink = PortalSignatureInk::clean((string) base64_decode(substr($picture, (int) strpos($picture, ',') + 1)));
+
+        return $ink === null ? $picture : 'data:image/png;base64,'.base64_encode($ink);
     }
 
     // Their newest file in a slot on Cloudinary, read in as a data URI through the first of the transforms
