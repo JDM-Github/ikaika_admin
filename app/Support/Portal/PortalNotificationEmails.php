@@ -11,15 +11,15 @@ use App\Modules\Portal\Models\Employee;
  * notification_emails setting turns the whole thing off, so a local run that must not reach real
  * inboxes sends nothing, and the inbox row is written either way: a send that fails is logged and
  * dropped, never allowed to fail the write it was telling about. The email waits in the mail queue,
- * so a notice to several managers no longer holds the action for a relay round trip each.
+ * so a notice to several managers no longer holds the action for a relay round trip each. A submission
+ * on the report pages (a daily or late report, an overtime or offset request) emails only the head of
+ * the submitter's department instead, whoever else its inbox notice reaches (2026-10-13, user).
  */
 final class PortalNotificationEmails
 {
     // The notices that also go by email; every other type stays in the portal.
     public const TYPES = [
         PortalNotificationType::REQUEST_FILED_LEAVE => true,
-        PortalNotificationType::REQUEST_FILED_OVERTIME => true,
-        PortalNotificationType::REQUEST_FILED_OFFSET => true,
         PortalNotificationType::REQUEST_FILED_REIMBURSEMENT => true,
         'requests.leave.approved' => true,
         'requests.leave.rejected' => true,
@@ -45,6 +45,9 @@ final class PortalNotificationEmails
     // Shared with the shared-page emails, which go out as the same letter from the same sender.
     public const FROM_NAME = 'IKAIKA Portal';
 
+    // A department's head: its admin at the Management role level (Nathaniel for MIS, Steven for Engineering).
+    private const HEAD_ROLE_LEVEL = 'management';
+
     public function send(Employee|int $employeeId, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
     {
         if (! PortalAdvancedSettings::notificationEmails()) {
@@ -55,8 +58,54 @@ final class PortalNotificationEmails
         }
 
         $employee = $employeeId instanceof Employee ? $employeeId : Employee::query()->find($employeeId);
-        $email = $employee instanceof Employee ? strtolower(trim((string) ($employee->email ?? ''))) : '';
-        if ($employee === null || $email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+        if ($employee instanceof Employee) {
+            $this->deliver($employee, $type, $title, $message, $linkPath, $linkLabel);
+        }
+    }
+
+    /**
+     * A report-page submission's email, to the head of the submitter's department alone: its
+     * Management-level admin. A department without one sends none; the submitter never mails
+     * themselves.
+     */
+    public function sendToDepartmentHeads(Employee $actor, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
+    {
+        if (! PortalAdvancedSettings::notificationEmails()) {
+            return;
+        }
+        foreach (self::departmentHeads($actor) as $head) {
+            $this->deliver($head, $type, $title, $message, $linkPath, $linkLabel);
+        }
+    }
+
+    /**
+     * The active Management-level admins of the actor's department, the actor aside.
+     *
+     * @return list<Employee>
+     */
+    public static function departmentHeads(Employee $actor): array
+    {
+        $department = strtolower(trim((string) ($actor->department ?? '')));
+        if ($department === '') {
+            return [];
+        }
+
+        return Employee::query()
+            ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ?", [$department])
+            ->whereRaw("LOWER(TRIM(COALESCE(role_level, ''))) = ?", [self::HEAD_ROLE_LEVEL])
+            ->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'active'")
+            ->whereKeyNot($actor->getKey())
+            ->orderBy('id')
+            ->get()
+            ->filter(static fn (Employee $employee): bool => PortalRole::isDepartmentHead($employee->role, $employee->role_level))
+            ->values()
+            ->all();
+    }
+
+    private function deliver(Employee $employee, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
+    {
+        $email = strtolower(trim((string) ($employee->email ?? '')));
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
             return;
         }
 

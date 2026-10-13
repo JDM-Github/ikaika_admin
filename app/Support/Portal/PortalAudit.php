@@ -223,6 +223,18 @@ final class PortalAudit
         }
     }
 
+    // A report-page submission's email, which only the head of the submitter's department receives.
+    public function emailDepartmentHeads(
+        Employee $actor,
+        string $type,
+        string $title,
+        string $message,
+        ?string $linkPath = null,
+        ?string $linkLabel = null,
+    ): void {
+        $this->notificationEmails->sendToDepartmentHeads($actor, $type, $title, $message, $linkPath, $linkLabel);
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */

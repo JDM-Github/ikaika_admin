@@ -8,6 +8,7 @@ use App\Support\Portal\PortalBudgetEnvelopes;
 use App\Support\Portal\PortalEmailAttachments;
 use App\Support\Portal\PortalEmailMessages;
 use App\Support\Portal\PortalHomeLocations;
+use App\Support\Portal\PortalEmployeeDocuments;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
 use Illuminate\Foundation\Inspiring;
@@ -173,6 +174,14 @@ Artisan::command('portal:mail-test
 
     return 0;
 })->purpose('Send one test email with the current mail settings');
+
+// Promotion copies a candidate's files to Cloudinary since 2026-10-12; this copies them for anyone promoted before.
+Artisan::command('portal:copy-registration-documents', function (PortalEmployeeDocuments $documents): int {
+    $outcome = $documents->copyAllPromoted();
+    $this->info($outcome['copied'].' copied, '.$outcome['skipped'].' already on Cloudinary, '.$outcome['failed'].' failed.');
+
+    return $outcome['failed'] > 0 ? 1 : 0;
+})->purpose('Copy the registration files of promoted employees to Cloudinary as their documents');
 
 // Each attach clears what was abandoned too; this is for a scheduler, or after a quiet stretch.
 Artisan::command('portal:prune-email-attachments', function (PortalEmailAttachments $attachments): int {

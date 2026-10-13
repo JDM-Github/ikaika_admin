@@ -255,6 +255,33 @@ final class PortalActivityCopy
         return self::YOU.' cancelled a pending transfer of '.$amount;
     }
 
+    // MIS moving a bug report along; the reporter is anonymous, so only the report is named.
+    public static function updatedBugReport(string $title, ?string $statusLabel): string
+    {
+        return $statusLabel === null
+            ? self::YOU.' updated the bug report '.$title
+            : self::YOU.' marked the bug report '.$title.' '.$statusLabel;
+    }
+
+    // Who handles a bug report: taken by the person themselves, given to someone, or let go.
+    public static function assignedBugReport(string $title, ?string $assigneeName, bool $isTaken): string
+    {
+        if ($isTaken) {
+            return self::YOU.' took the bug report '.$title;
+        }
+
+        return $assigneeName === null
+            ? self::YOU.' unassigned the bug report '.$title
+            : self::YOU.' assigned the bug report '.$title.' to '.$assigneeName;
+    }
+
+    public static function editedTransaction(string $before, string $after): string
+    {
+        return $before === $after
+            ? self::YOU.' edited the transaction '.$after
+            : self::YOU.' edited the transaction '.$before.', now '.$after;
+    }
+
     public static function addedTransaction(string $kind, string $name, string $amount, ?string $envelopeName): string
     {
         $text = self::YOU.' added the '.strtolower($kind).' '.$name.' of '.$amount;

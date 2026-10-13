@@ -562,6 +562,73 @@ class PortalBudgetMovementsTest extends TestCase
             ->assertJsonPath('message', 'Choose an image or PDF receipt.');
     }
 
+    // The reported ask (2026-10-13): Edit changes a transaction's details and its receipt, never its money.
+    public function test_editing_a_transaction_changes_its_details_and_never_its_money(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::response([
+                'secure_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/transactions/taxi.jpg',
+                'original_filename' => 'taxi',
+                'bytes' => 900,
+            ], 200),
+        ]);
+        $account = $this->account('Seeded Edit Account', 'edit.seeded@example.test', 0.00);
+        $envelope = $this->envelope('Seeded Edit Envelope', 500.00, $account);
+        $this->addTransaction(['type' => 'Expense', 'name' => 'Taxi', 'amount' => 120, 'envelopeId' => $envelope, 'accountId' => $account, 'payorPayee' => 'Grab', 'notes' => 'To site'])
+            ->assertCreated();
+        $row = $this->lastRowOf($account);
+        $remaining = $this->envelopeRemaining($envelope);
+        $receiptId = $this->post(self::BASE.'budget-transactions/receipts', ['file' => UploadedFile::fake()->create('taxi.jpg', 9, 'image/jpeg')], $this->admin())
+            ->assertCreated()
+            ->json('data.receiptId');
+
+        // Money fields sent along are ignored: only the details move.
+        $this->patchJson(self::BASE.'budget-transactions/'.$row->id, [
+            'name' => 'Taxi to Makati', 'occurredOn' => '2026-10-06', 'payorPayee' => 'Grab Car', 'notes' => '', 'receiptId' => $receiptId,
+            'amount' => 999, 'type' => 'Income', 'envelopeId' => 1,
+        ], $this->admin())->assertOk()->assertJsonPath('data.name', 'Taxi to Makati');
+
+        $edited = DB::connection('tracker')->table('transactions')->where('id', $row->id)->first();
+        $this->assertSame('Taxi to Makati', $edited->transaction_name);
+        $this->assertSame('2026-10-06', substr((string) $edited->transaction_date, 0, 10));
+        $this->assertSame('Grab Car', $edited->payor_payee);
+        $this->assertNull($edited->description);
+        $this->assertSame('Expense', $edited->type);
+        $this->assertEqualsWithDelta(120.00, (float) $edited->amount, 0.001);
+        $this->assertEqualsWithDelta($remaining, $this->envelopeRemaining($envelope), 0.001);
+        $receipts = DB::connection('tracker')->table('attachments')->where(['table_name' => 'transactions', 'record_id' => $row->id, 'field_name' => 'receipt']);
+        $this->assertSame(['https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/transactions/taxi.jpg'], $receipts->pluck('file_url')->all());
+        $this->assertTrue($this->logged('manage.budget-transactions', 'edited the transaction Taxi, now Taxi to Makati'));
+
+        Cache::flush();
+        $listed = collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->assertOk()->json('data'))->keyBy('id');
+        $this->assertTrue($listed[(string) $row->id]['isEditable']);
+
+        // The receipt can come off too, and the name stay.
+        $this->patchJson(self::BASE.'budget-transactions/'.$row->id, ['name' => 'Taxi to Makati', 'occurredOn' => '2026-10-06', 'removeReceipt' => true], $this->admin())->assertOk();
+        $this->assertSame(0, DB::connection('tracker')->table('attachments')->where(['table_name' => 'transactions', 'record_id' => $row->id])->count());
+        $this->assertTrue($this->logged('manage.budget-transactions', 'edited the transaction Taxi to Makati'));
+
+        // A line the ledger wrote for itself is changed where it was made; a missing one is not found.
+        $other = $this->envelope('Seeded Edit Other', 0.00, $account);
+        $this->transferEnvelopes($envelope, $other, 50)->assertCreated();
+        $transfer = DB::connection('tracker')->table('transactions')->where('transaction_name', 'Expense - Envelope Transfer')->orderByDesc('id')->first();
+        $this->patchJson(self::BASE.'budget-transactions/'.$transfer->id, ['name' => 'Renamed', 'occurredOn' => '2026-10-06'], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'This line was written by a transfer, an allocation, funds received or an approval. Change it where it was made.');
+        Cache::flush();
+        $this->assertFalse(collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->json('data'))->firstWhere('id', (string) $transfer->id)['isEditable']);
+        $this->patchJson(self::BASE.'budget-transactions/999999999', ['name' => 'x', 'occurredOn' => '2026-10-06'], $this->admin())->assertNotFound();
+        $this->patchJson(self::BASE.'budget-transactions/'.$row->id, ['name' => 'x', 'occurredOn' => '2026-10-06', 'receiptId' => 'not-a-uuid'], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'That receipt upload has expired. Choose the photo again.');
+
+        // A member holds no Edit transactions.
+        $member = ['Authorization' => 'Bearer '.$this->loginToken($this->activeMember())];
+        $this->patchJson(self::BASE.'budget-transactions/'.$row->id, ['name' => 'x', 'occurredOn' => '2026-10-06'], $member)->assertForbidden();
+    }
+
     public function test_with_the_tracker_switched_off_nothing_moves(): void
     {
         config(['products.catalog.transaction-tracker.enabled' => false]);

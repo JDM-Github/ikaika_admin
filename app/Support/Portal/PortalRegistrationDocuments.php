@@ -31,6 +31,8 @@ final class PortalRegistrationDocuments
         'sss' => ['label' => 'The SSS ID', 'extensions' => ['pdf', 'jpg', 'jpeg', 'png'], 'multiple' => false],
         'philhealth' => ['label' => 'The PhilHealth ID', 'extensions' => ['pdf', 'jpg', 'jpeg', 'png'], 'multiple' => false],
         'hdmf' => ['label' => 'The HDMF ID', 'extensions' => ['pdf', 'jpg', 'jpeg', 'png'], 'multiple' => false],
+        // Optional (2026-10-12): never in REQUIRED, so a submit goes through without it.
+        'national_id' => ['label' => 'The national ID', 'extensions' => ['pdf', 'jpg', 'jpeg', 'png'], 'multiple' => false],
         'bank' => ['label' => 'The bank certificate', 'extensions' => ['pdf', 'jpg', 'jpeg', 'png'], 'multiple' => true],
     ];
 

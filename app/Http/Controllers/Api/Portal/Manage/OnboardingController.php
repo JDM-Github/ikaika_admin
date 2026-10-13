@@ -66,6 +66,11 @@ class OnboardingController extends Controller
         return response()->json(['data' => $this->registrations->markSent($this->actor($request), $request, $id)]);
     }
 
+    public function promotion(Request $request, int $id): JsonResponse
+    {
+        return response()->json(['data' => $this->registrations->promotion($this->actor($request), $id)]);
+    }
+
     public function promote(Request $request, int $id): JsonResponse
     {
         return response()->json(['data' => $this->registrations->promote($this->actor($request), $request, $id)]);

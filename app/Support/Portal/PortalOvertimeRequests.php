@@ -41,6 +41,9 @@ final class PortalOvertimeRequests
 
     private const MAX_HOURS = 8;
 
+    // A weekday's daily report must reach a full day before overtime goes on top of it (2026-10-13, user).
+    public const FULL_DAY_HOURS = 8.0;
+
     private const MAX_REASON = 500;
 
     private const NEW_STATUS = 'Pending';
@@ -108,7 +111,7 @@ final class PortalOvertimeRequests
             $dates[] = $group['date'];
         }
 
-        $this->assertDatesAreReported($employeeId, $dates);
+        $this->assertDatesHaveFullDay($employeeId, $dates);
         $this->assertDatesAreFree($actor, $dates);
 
         $projects = $this->ownProjectCatalog($employeeId);
@@ -170,6 +173,15 @@ final class PortalOvertimeRequests
                     'reason' => $group['reason'],
                 ],
             );
+            // Approvers keep the inbox notice; only the department head is emailed (2026-10-13, user).
+            $this->audit->emailDepartmentHeads(
+                $actor,
+                PortalNotificationType::REQUEST_FILED_OVERTIME,
+                'New overtime request',
+                PortalActivityCopy::notifyFiled(PortalActivityCopy::actorName($actor, $request, true), 'overtime request', $group['date'], $group['date']),
+                PortalShellPath::MANAGE_REQUESTS,
+                'Open queue',
+            );
             $this->audit->notifyManagers(
                 $actor,
                 'manage.requests.overtime',
@@ -211,7 +223,7 @@ final class PortalOvertimeRequests
         $group = $this->validatedSingleGroup($request, $currentDate);
 
         $employeeId = (int) $actor->getKey();
-        $this->assertDatesAreReported($employeeId, [$group['date']]);
+        $this->assertDatesHaveFullDay($employeeId, [$group['date']]);
         $this->assertDatesAreFree($actor, [$group['date']], array_values(array_filter(
             [$currentDate],
             static fn (?string $date): bool => $date !== null,
@@ -538,32 +550,43 @@ final class PortalOvertimeRequests
      *
      * @param  list<string>  $dates
      */
-    private function assertDatesAreReported(int $employeeId, array $dates): void
+    /**
+     * A weekday needs eight hours of daily report, late reports included, before overtime goes on top
+     * of it; Saturday and Sunday are overtime outright, with no report needed (2026-10-13, user).
+     *
+     * @param  list<string>  $dates
+     */
+    private function assertDatesHaveFullDay(int $employeeId, array $dates): void
     {
-        if ($dates === []) {
+        $weekdays = array_values(array_filter($dates, static fn (string $date): bool => ! Carbon::parse($date)->isWeekend()));
+        if ($weekdays === []) {
             return;
         }
 
         $rows = UserReport::query()
             ->toBase()
             ->select(['user_reports.report_date'])
+            ->selectRaw('SUM(COALESCE(user_reports.hours_rendered, 0)) AS hours')
             ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
             ->where('employees_user_reports.employee_id', $employeeId)
-            ->whereIn('user_reports.report_date', $dates)
+            ->whereIn('user_reports.report_date', $weekdays)
             ->groupBy('user_reports.report_date')
             ->get();
 
-        $reported = [];
+        $hours = [];
         foreach ($rows as $row) {
             $date = $this->calendarDate($row->report_date ?? null);
             if ($date !== null) {
-                $reported[] = $date;
+                $hours[$date] = round((float) ($row->hours ?? 0), 2);
             }
         }
 
-        foreach ($dates as $date) {
-            if (! in_array($date, $reported, true)) {
+        foreach ($weekdays as $date) {
+            if (! array_key_exists($date, $hours)) {
                 abort(422, 'There is no report for '.$date.', so there is no day to file overtime against.');
+            }
+            if ($hours[$date] < self::FULL_DAY_HOURS) {
+                abort(422, 'Overtime on '.$date.' needs 8 hours in that day\'s report first; it has '.$this->hoursLabel($hours[$date]).($hours[$date] === 1.0 ? ' hour.' : ' hours.'));
             }
         }
     }

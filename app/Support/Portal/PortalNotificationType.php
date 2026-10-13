@@ -17,6 +17,8 @@ final class PortalNotificationType
 
     public const REPORT_FILED_LATE = 'reports.late.filed';
 
+    public const REPORT_FILED_DAILY = 'reports.daily.filed';
+
     public const REQUEST_CANCELLED_LEAVE = 'requests.leave.cancelled';
 
     public const REQUEST_CANCELLED_OVERTIME = 'requests.overtime.cancelled';

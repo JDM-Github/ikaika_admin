@@ -6,19 +6,21 @@ use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalNotificationEmails;
+use App\Support\Portal\PortalRegistrations;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 /**
  * Manage / Onboarding and the registration link (docs/power/onboarding-plan.md): an administrator
  * creates a candidate entry, the candidate signs in with the password and the mailed code, fills
- * their details and documents, submits, and the administrator promotes them into an employees row.
+ * their details and documents, submits, and a head admin promotes them into an employees row.
  */
 class PortalOnboardingTest extends TestCase
 {
@@ -83,6 +85,17 @@ class PortalOnboardingTest extends TestCase
         return $this->token($this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'"));
     }
 
+    // Promote candidates is the head admins' own (2026-10-12): Nathaniel Tanglao, then any other admin.
+    private function headAdminToken(): string
+    {
+        return $this->token($this->employee("id_no = '220202-0002'"));
+    }
+
+    private function plainAdminToken(): string
+    {
+        return $this->token($this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive' AND id_no NOT IN ('220202-0002', '220302-0003')"));
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
@@ -133,6 +146,7 @@ class PortalOnboardingTest extends TestCase
             'nickname' => 'Liz',
             'startDate' => '2026-11-03',
             'dateOfBirth' => '1998-04-12',
+            'bloodType' => 'O+',
             'address' => '1 Test Street, Manila',
             'phoneNumber' => '09170000001',
             'emergencyContactPersonName' => 'Ana Reyes',
@@ -142,6 +156,7 @@ class PortalOnboardingTest extends TestCase
             'philhealthNo' => '12-345678901-2',
             'sssNo' => '12-3456789-0',
             'hdmfNo' => '1234-5678-9012',
+            'nationalIdNo' => '1234-5678-9012-3456',
             'bankName' => 'BDO',
             'bankAccountNumber' => '001234567890',
             'bankSwiftCode' => 'BNORPHMM',
@@ -323,7 +338,32 @@ class PortalOnboardingTest extends TestCase
         $this->withToken($session)->postJson(self::REGISTER.'/submit')->assertStatus(422);
         $this->uploadAll($session);
         $this->withToken($session)->postJson(self::REGISTER.'/submit')->assertOk()->assertJsonPath('data.submitted', true);
-        $this->withToken($session)->postJson(self::REGISTER.'/submit')->assertStatus(422);
+
+        // The reported ask (2026-10-12): a submitted candidate may still change what they sent, and
+        // sending it again updates the same New Employee Data row rather than adding a second.
+        $first = (int) DB::connection('portal')->table('registrations')->where('code', 'liza')->value('employee_data_id');
+        $before = DB::connection('portal')->table('new_employee_data')->count();
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', ['nickname' => 'Lizzy'])->assertOk();
+        $this->withToken($session)
+            ->post(self::REGISTER.'/documents', ['kind' => 'photo', 'file' => $this->upload('new-photo.png', $this->png())], ['Accept' => 'application/json'])
+            ->assertOk();
+        $this->withToken($session)->postJson(self::REGISTER.'/submit')->assertOk()->assertJsonPath('data.submitted', true);
+        $this->assertSame($first, (int) DB::connection('portal')->table('registrations')->where('code', 'liza')->value('employee_data_id'));
+        $this->assertSame($before, DB::connection('portal')->table('new_employee_data')->count());
+        $this->assertSame('Lizzy', DB::connection('portal')->table('new_employee_data')->where('id', $first)->value('nickname'));
+        $this->assertSame(['new-photo.png'], DB::connection('portal')->table('register_documents')
+            ->where('registration_id', (int) DB::connection('portal')->table('registrations')->where('code', 'liza')->value('id'))
+            ->where('kind', 'photo')->pluck('name')->all());
+
+        // Signing in again, past the resend wait, says it was already sent and that it can still change.
+        $this->travel(2)->minutes();
+        $this->postJson(self::REGISTER.'/liza/access', ['password' => $created['password']])->assertOk();
+        DB::connection('portal')->table('register_otps')
+            ->where('registration_id', (int) DB::connection('portal')->table('registrations')->where('code', 'liza')->value('id'))
+            ->update(['code_hash' => Hash::make('123456')]);
+        $again = $this->postJson(self::REGISTER.'/liza/verify', ['password' => $created['password'], 'otp' => '123456'])->assertOk();
+        $this->assertNotNull($again->json('data.submittedAt'));
+        $this->assertFalse($again->json('data.isLocked'));
 
         $registration = DB::connection('portal')->table('registrations')->where('code', 'liza')->first();
         $this->assertNotNull($registration->submitted_at);
@@ -333,6 +373,8 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame('liza.reyes@example.test', $data->email);
         $this->assertSame('2026-11-03', $data->start_date);
         $this->assertSame('12-345678901-2', $data->philhealth_no);
+        $this->assertSame('O+', $data->blood_type);
+        $this->assertSame('1234-5678-9012-3456', $data->national_id_no);
         $this->assertSame('Pending', $data->data_approval);
 
         $listed = collect($this->withToken($admin)->getJson(self::BASE)->json('data.registrations'))->firstWhere('code', 'liza');
@@ -358,6 +400,11 @@ class PortalOnboardingTest extends TestCase
             ->assertJsonPath('message', 'First name can only have letters, spaces, periods, apostrophes and hyphens.');
         $this->withToken($session)->getJson(self::REGISTER.'/session')->assertOk()->assertJsonPath('data.details.firstName', 'Liza Mae');
 
+        // The national ID's image is optional (2026-10-12): accepted, and never asked for.
+        $this->withToken($session)
+            ->post(self::REGISTER.'/documents', ['kind' => 'national_id', 'file' => $this->upload('national.png', $this->png())], ['Accept' => 'application/json'])
+            ->assertOk();
+
         // A draft saved before the sanitizing is held to the same shapes when it is submitted.
         DB::connection('portal')->table('registrations')->where('code', 'clean')
             ->update(['details' => json_encode(['sssNo' => 'SS-0001'] + $this->details())]);
@@ -365,6 +412,17 @@ class PortalOnboardingTest extends TestCase
         $this->withToken($session)->postJson(self::REGISTER.'/submit')
             ->assertStatus(422)
             ->assertJsonPath('message', 'Enter your SSS No.: 10 digits, numbers and dashes only.');
+    }
+
+    // The reported ask (2026-10-12): the details sheet's QR failed for want of the QR package.
+    public function test_the_qr_is_an_svg_of_the_link(): void
+    {
+        $admin = $this->adminToken();
+        $created = $this->createRegistration($admin, ['slug' => 'qr-link']);
+
+        $svg = $this->withToken($admin)->getJson(self::BASE.'/'.$created['registration']['id'].'/qr')->assertOk()->json('data.svg');
+        $this->assertIsString($svg);
+        $this->assertStringContainsString('<svg', $svg);
     }
 
     public function test_documents_are_checked_and_kept_privately(): void
@@ -394,6 +452,15 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame(1, DB::connection('portal')->table('register_documents')->where('registration_id', $registrationId)->where('kind', 'tin')->count());
         $this->assertNull(DB::connection('portal')->table('register_documents')->where('id', (int) $first['id'])->first());
 
+        // The reported ask (2026-10-12): the candidate reads their own file back to preview it, and nobody else's.
+        $own = $this->withToken($session)->get(self::REGISTER.'/documents/'.$second['id']);
+        $own->assertOk();
+        $this->assertSame(self::PDF, $own->streamedContent());
+        $other = $this->createRegistration($this->adminToken(), ['slug' => 'someone-else', 'email' => 'someone.else@example.test']);
+        $otherSession = $this->signIn('someone-else', $other['password']);
+        $this->withToken($otherSession)->getJson(self::REGISTER.'/documents/'.$second['id'])->assertNotFound();
+        $this->getJson(self::REGISTER.'/documents/'.$second['id'], ['Authorization' => ''])->assertUnauthorized();
+
         // Removing one takes its row.
         $this->withToken($session)->deleteJson(self::REGISTER.'/documents/'.$second['id'])->assertNoContent();
         $this->assertSame(0, DB::connection('portal')->table('register_documents')->where('registration_id', $registrationId)->where('kind', 'tin')->count());
@@ -401,25 +468,43 @@ class PortalOnboardingTest extends TestCase
 
     public function test_a_submitted_candidate_is_promoted(): void
     {
-        $admin = $this->adminToken();
-        $created = $this->createRegistration($admin, ['slug' => 'liza']);
+        $plain = $this->plainAdminToken();
+        $created = $this->createRegistration($plain, ['slug' => 'liza']);
         $id = (int) DB::connection('portal')->table('registrations')->where('code', 'liza')->value('id');
+        $admin = $this->headAdminToken();
+
+        // The reported ask (2026-10-12): only the head admins promote; Create and revoke alone does not.
+        $this->withToken($plain)->getJson(self::BASE.'/'.$id.'/promotion')->assertForbidden();
+        $this->withToken($plain)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => '991231-9001', 'email' => 'a@ikaikabim.test', 'department' => 'MIS'])->assertForbidden();
 
         // Nothing to promote before the candidate submits.
         $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => '991231-9001', 'department' => 'MIS'])->assertStatus(422);
+        $this->withToken($admin)->getJson(self::BASE.'/'.$id.'/promotion')
+            ->assertStatus(422)->assertJsonPath('message', 'The candidate has not submitted their requirements yet.');
 
         $session = $this->signIn('liza', $created['password']);
         $this->withToken($session)->patchJson(self::REGISTER.'/details', $this->details())->assertOk();
         $this->uploadAll($session);
         $this->withToken($session)->postJson(self::REGISTER.'/submit')->assertOk();
 
-        // The ID No. must fit the pattern and be free, and the email must be free.
-        $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => 'abc', 'department' => 'MIS'])->assertStatus(422);
+        // Promote opens its sheet on the submitted name and the next free ID No.
+        $promotion = $this->withToken($admin)->getJson(self::BASE.'/'.$id.'/promotion')->assertOk()->json('data');
+        $this->assertSame(['Liza', 'Cruz', 'Reyes'], [$promotion['firstName'], $promotion['middleName'], $promotion['lastName']]);
+        $this->assertMatchesRegularExpression('/^\d{6}-\d{4}$/', $promotion['nextIdNo']);
+        $this->assertContains('MIS', $promotion['departments']);
+
+        // The ID No. must fit the pattern and be free, and the work email given and free.
+        $work = 'liza.reyes@ikaikabim.test';
+        $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => 'abc', 'email' => $work, 'department' => 'MIS'])->assertStatus(422);
         $existing = (string) Employee::query()->value('id_no');
-        $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => $existing, 'department' => 'MIS'])->assertStatus(422);
+        $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => $existing, 'email' => $work, 'department' => 'MIS'])->assertStatus(422);
+        $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => '991231-9001', 'department' => 'MIS'])->assertStatus(422);
+        $taken = (string) Employee::query()->whereNotNull('email')->where('email', '!=', '')->value('email');
+        $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => '991231-9001', 'email' => $taken, 'department' => 'MIS'])
+            ->assertStatus(422)->assertJsonPath('message', 'Someone already has that email address.');
 
         $employee = $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', [
-            'idNo' => '991231-9001', 'department' => 'MIS', 'role' => 'User', 'jobTitle' => 'Draftsman',
+            'idNo' => '991231-9001', 'email' => $work, 'department' => 'MIS', 'role' => 'User', 'jobTitle' => 'Draftsman',
         ])->assertOk()->json('data.employee');
 
         $this->assertSame('991231-9001', $employee['idNo']);
@@ -427,12 +512,17 @@ class PortalOnboardingTest extends TestCase
         $this->assertNotNull($row);
         $this->assertSame('Liza', $row->first_name);
         $this->assertSame('Reyes', $row->last_name);
-        $this->assertSame('liza.reyes@example.test', $row->email);
+        // The work email signs them in; the address the link was bound to is kept as their personal one.
+        $this->assertSame($work, $row->email);
+        $this->assertSame('liza.reyes@example.test', $row->personal_email);
         $this->assertSame('MIS', $row->department);
         $this->assertSame('User', $row->role);
+        // The reported ask (2026-10-12): a head admin promoted them, so the account is active at once.
         $this->assertSame('Active', $row->status);
+        $this->postJson('/api/development/portal/auth/login', ['id_no' => '991231-9001'])->assertOk();
         $this->assertSame('123-456-789', $row->tax_identification_no);
         $this->assertSame('BNORPHMM', $row->bank_swift_code);
+        $this->assertSame('O+', $row->blood_type);
 
         $registration = DB::connection('portal')->table('registrations')->where('id', $id)->first();
         $this->assertNotNull($registration->promoted_at);
@@ -441,7 +531,147 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame('991231-9001', $data->id_no);
         $this->assertSame('Approved', $data->data_approval);
 
-        $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => '991231-9002', 'department' => 'MIS'])->assertStatus(422);
+        $this->withToken($admin)->postJson(self::BASE.'/'.$id.'/promote', ['idNo' => '991231-9002', 'email' => 'another@ikaikabim.test', 'department' => 'MIS'])->assertStatus(422);
+        $this->withToken($admin)->getJson(self::BASE.'/'.$id.'/promotion')
+            ->assertStatus(422)->assertJsonPath('message', 'This candidate is already an employee.');
+
+        // Promoted, the registration is the employee record's source and no longer changes.
+        $locked = 'HR has already approved this registration, so it can no longer be changed.';
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', ['nickname' => 'Late'])
+            ->assertStatus(422)->assertJsonPath('message', $locked);
+        $this->withToken($session)
+            ->post(self::REGISTER.'/documents', ['kind' => 'photo', 'file' => $this->upload('late.png', $this->png())], ['Accept' => 'application/json'])
+            ->assertStatus(422)->assertJsonPath('message', $locked);
+        $this->withToken($session)->postJson(self::REGISTER.'/submit')->assertStatus(422)->assertJsonPath('message', $locked);
+
+        // The reported ask (2026-10-12): nor does the admin change, revoke, send or re-password it.
+        $settled = 'This candidate is already an employee, so the registration can no longer be changed.';
+        $this->withToken($plain)->patchJson(self::BASE.'/'.$id, $this->payload())->assertStatus(422)->assertJsonPath('message', $settled);
+        $this->withToken($plain)->deleteJson(self::BASE.'/'.$id)->assertStatus(422)->assertJsonPath('message', $settled);
+        $this->withToken($plain)->postJson(self::BASE.'/'.$id.'/sent')->assertStatus(422)->assertJsonPath('message', $settled);
+        $this->withToken($plain)->postJson(self::BASE.'/'.$id.'/password')->assertStatus(422)->assertJsonPath('message', $settled);
+        $this->assertNull(DB::connection('portal')->table('registrations')->where('id', $id)->value('revoked_at'));
+    }
+
+    private function fakeCloudinary(): void
+    {
+        config([
+            'services.cloudinary.cloud_name' => 'demo-cloud',
+            'services.cloudinary.api_key' => 'key123',
+            'services.cloudinary.api_secret' => 'secret456',
+        ]);
+        $uploads = 0;
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/demo-cloud/auto/upload' => function () use (&$uploads) {
+                $uploads++;
+
+                return Http::response(['secure_url' => 'https://res.cloudinary.com/demo-cloud/image/upload/v1/ikaika-portal/employees/file'.$uploads]);
+            },
+            '*' => Http::response([], 200),
+        ]);
+    }
+
+    // A submitted registration, ready to promote, and its id.
+    private function submittedRegistration(string $plain): int
+    {
+        $created = $this->createRegistration($plain, ['slug' => 'liza']);
+        $id = (int) DB::connection('portal')->table('registrations')->where('code', 'liza')->value('id');
+        $session = $this->signIn('liza', $created['password']);
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', $this->details())->assertOk();
+        $this->uploadAll($session);
+        $this->withToken($session)->postJson(self::REGISTER.'/submit')->assertOk();
+
+        return $id;
+    }
+
+    /**
+     * @return array<string, int> field name => files there
+     */
+    private function cloudinaryFields(int $employeeId): array
+    {
+        return DB::connection('portal')->table('attachments')->where('table_name', 'employees')->where('record_id', $employeeId)
+            ->selectRaw('field_name, COUNT(*) AS files')->groupBy('field_name')->pluck('files', 'field_name')->map(fn ($n): int => (int) $n)->all();
+    }
+
+    // The reported ask (2026-10-12): a promoted employee's documents are on Cloudinary like everyone's, the
+    // photo their profile photo, and whoever sees their private details reads those and edits them.
+    public function test_promotion_puts_the_candidates_files_on_cloudinary_as_their_documents(): void
+    {
+        $this->fakeCloudinary();
+        $plain = $this->plainAdminToken();
+        $id = $this->submittedRegistration($plain);
+        $head = $this->headAdminToken();
+        $employeeId = (int) $this->withToken($head)->postJson(self::BASE.'/'.$id.'/promote', [
+            'idNo' => '991231-9011', 'email' => 'liza.reyes@ikaikabim.test', 'department' => 'MIS',
+        ])->assertOk()->json('data.employee.id');
+
+        // Each file under the field Airtable gives it, as every employee's documents are kept.
+        $this->assertEqualsCanonicalizing(
+            ['photo' => 1, 'tax_identification' => 1, 'ss_id' => 1, 'philhealth_id' => 1, 'hdmf_id' => 1, 'bank_certificate' => 1],
+            $this->cloudinaryFields($employeeId),
+        );
+
+        $users = '/api/development/portal/manage/users/'.$employeeId;
+        $profile = $this->withToken($head)->getJson($users)->assertOk()->json('data');
+        $this->assertStringStartsWith('https://res.cloudinary.com/demo-cloud/', (string) $profile['photoUrl']);
+        $this->assertTrue($profile['canEditInformation']);
+        $documents = collect($profile['documents']);
+        $this->assertCount(6, $documents);
+        $photo = $documents->firstWhere('field', 'photo');
+        $this->assertStringStartsWith('https://res.cloudinary.com/demo-cloud/', $photo['url']);
+        $this->assertStringContainsString('/upload/c_fill,h_96,w_96', (string) $photo['thumbUrl']);
+        $this->assertSame('image/png', $photo['mimeType']);
+        $this->assertNull($documents->firstWhere('field', 'tax_identification')['thumbUrl']);
+
+        // Copying again finds theirs all there already, so nothing doubles.
+        $this->artisan('portal:copy-registration-documents')->expectsOutputToContain('already on Cloudinary')->assertExitCode(0);
+        $this->assertSame([1], array_values(array_unique($this->cloudinaryFields($employeeId))));
+
+        // Someone without Show employee information sees no documents and changes nothing.
+        $plainProfile = $this->withToken($plain)->getJson($users)->assertOk()->json('data');
+        $this->assertSame([], $plainProfile['documents']);
+        $this->assertFalse($plainProfile['canEditInformation']);
+        $this->withToken($plain)->patchJson($users.'/information', ['address' => '9 New Street, Manila'])->assertForbidden();
+
+        // Only what is sent changes, cleaned the way a registration cleans it.
+        $saved = $this->withToken($head)->patchJson($users.'/information', [
+            'address' => '  9 <b>New</b> Street,   Manila ',
+            'personalEmail' => ' Liza.Personal@Example.test ',
+            'emergencyContactName' => 'Ana   Reyes-Cruz',
+            'bankSwiftCode' => 'bnor phmm',
+        ])->assertOk()->json('data.information');
+        $this->assertSame('9 New Street, Manila', $saved['address']);
+        $this->assertSame('liza.personal@example.test', $saved['personalEmail']);
+        $this->assertSame('Ana Reyes-Cruz', $saved['emergencyContactName']);
+        $this->assertSame('BNORPHMM', $saved['bankSwiftCode']);
+        $this->assertSame('123-456-789', $saved['taxIdentificationNo']);
+        $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
+            ->where('message', 'like', '%changed the employee information of%')->exists());
+
+        $this->withToken($head)->patchJson($users.'/information', ['sssNo' => '1111111111'])
+            ->assertStatus(422)->assertJsonPath('message', 'SSS No. cannot be one digit repeated. Check it.');
+        $this->withToken($head)->patchJson($users.'/information', ['personalEmail' => 'not-an-email'])->assertStatus(422);
+        $this->withToken($head)->patchJson($users.'/information', [])->assertStatus(422)->assertJsonPath('message', 'Change at least one detail.');
+        $this->withToken($head)->patchJson($users.'/information', ['bloodType' => null])->assertOk()->assertJsonPath('data.information.bloodType', null);
+    }
+
+    // A file that cannot be stored never stops a promotion; the copy command finishes the job later.
+    public function test_files_that_cannot_be_stored_never_stop_a_promotion_and_are_copied_later(): void
+    {
+        config(['services.cloudinary.cloud_name' => null]);
+        $id = $this->submittedRegistration($this->plainAdminToken());
+        $employeeId = (int) $this->withToken($this->headAdminToken())->postJson(self::BASE.'/'.$id.'/promote', [
+            'idNo' => '991231-9012', 'email' => 'liza.reyes@ikaikabim.test', 'department' => 'MIS',
+        ])->assertOk()->json('data.employee.id');
+
+        $this->assertSame([], $this->cloudinaryFields($employeeId));
+        $this->assertNotNull(Employee::query()->find($employeeId));
+        $this->artisan('portal:copy-registration-documents')->expectsOutputToContain('failed.')->assertExitCode(1);
+        $this->assertSame([], $this->cloudinaryFields($employeeId));
+
+        $this->fakeCloudinary();
+        $this->artisan('portal:copy-registration-documents')->expectsOutputToContain('copied')->assertExitCode(0);
+        $this->assertCount(6, $this->cloudinaryFields($employeeId));
     }
 
     public function test_a_document_downloads_for_an_admin_and_never_for_a_member(): void
@@ -469,8 +699,16 @@ class PortalOnboardingTest extends TestCase
         $id = (int) DB::connection('portal')->table('registrations')->where('code', 'liza')->value('id');
 
         $this->withToken($admin)->deleteJson(self::BASE.'/'.$id)->assertOk();
-        $this->withToken($session)->getJson(self::REGISTER.'/session')->assertStatus(401);
-        $this->getJson(self::REGISTER.'/liza')->assertStatus(404);
+        // Revoke is how HR turns a candidate down (2026-10-12): changes stop, and the candidate is told why.
+        $this->withToken($session)->getJson(self::REGISTER.'/session')
+            ->assertStatus(401)->assertJsonPath('message', PortalRegistrations::CLOSED);
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', ['nickname' => 'Late'])->assertStatus(401);
+        $this->withToken($session)->postJson(self::REGISTER.'/submit')->assertStatus(401);
+        $this->getJson(self::REGISTER.'/liza')->assertStatus(404)->assertJsonPath('message', PortalRegistrations::CLOSED);
+        $this->postJson(self::REGISTER.'/liza/access', ['password' => $created['password']])
+            ->assertStatus(404)->assertJsonPath('message', PortalRegistrations::CLOSED);
+        // A link that never was still reads as not active.
+        $this->getJson(self::REGISTER.'/never-made')->assertStatus(404)->assertJsonPath('message', 'This link is not active.');
 
         // An expired link is dead for the password step too.
         $expired = $this->createRegistration($admin, ['slug' => 'expired-one'])['registration'];

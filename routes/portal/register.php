@@ -21,6 +21,7 @@ Route::middleware(AuthenticateRegistrationJwt::class)->group(function (): void {
     Route::get('register/session', [RegisterController::class, 'session']);
     Route::patch('register/details', [RegisterController::class, 'details']);
     Route::post('register/documents', [RegisterController::class, 'storeDocument']);
+    Route::get('register/documents/{id}', [RegisterController::class, 'showDocument'])->whereNumber('id');
     Route::delete('register/documents/{id}', [RegisterController::class, 'destroyDocument'])->whereNumber('id');
     Route::post('register/submit', [RegisterController::class, 'submit']);
 });

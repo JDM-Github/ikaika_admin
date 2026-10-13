@@ -43,8 +43,12 @@ class AuthenticateRegistrationJwt
         $row = is_numeric($registrationId)
             ? DB::connection('portal')->table('registrations')->where('id', (int) $registrationId)->first()
             : null;
-        if ($row === null || $row->revoked_at !== null) {
+        if ($row === null) {
             abort(401, 'This link is no longer active.');
+        }
+        // A revoked link is a closed registration (2026-10-12), and says so to the candidate mid-session too.
+        if ($row->revoked_at !== null) {
+            abort(401, PortalRegistrations::CLOSED);
         }
         if ($row->expires_at !== null && strtotime((string) $row->expires_at) <= now()->getTimestamp()) {
             abort(401, 'This link has expired.');
