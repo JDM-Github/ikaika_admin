@@ -465,6 +465,23 @@
             "default": ""
           },
           {
+            "flag": "Preset",
+            "label": "-Preset   [String]",
+            "type": "string",
+            "required": false,
+            "description": "A named run from update-database.json's presets: the products, steps and switches it sets; what is typed here wins.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/update-database Preset"
+          },
+          {
+            "flag": "ConfigFile",
+            "label": "-ConfigFile   [String]",
+            "type": "file",
+            "required": false,
+            "description": "The settings file; .ikaika_scripts_configs/update-database.json when left out.",
+            "default": ""
+          },
+          {
             "flag": "DryRun",
             "label": "-DryRun   [SwitchParameter]",
             "type": "boolean",
@@ -474,7 +491,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Product ${update-database.args.Product} -AllProducts ${update-database.args.AllProducts} -Step ${update-database.args.Step} -Drop ${update-database.args.Drop} -Idempotent ${update-database.args.Idempotent} -DropAndRecreate ${update-database.args.DropAndRecreate} -Migrate ${update-database.args.Migrate} -DryRun ${update-database.args.DryRun}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Product ${update-database.args.Product} -AllProducts ${update-database.args.AllProducts} -Step ${update-database.args.Step} -Drop ${update-database.args.Drop} -Idempotent ${update-database.args.Idempotent} -DropAndRecreate ${update-database.args.DropAndRecreate} -Migrate ${update-database.args.Migrate} -Preset ${update-database.args.Preset} -ConfigFile ${update-database.args.ConfigFile} -DryRun ${update-database.args.DryRun}"
         ]
       }
     },

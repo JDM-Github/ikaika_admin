@@ -47,6 +47,14 @@
 # file, since otherwise it reads as "I updated the database and the app saw nothing". A file with no
 # USE line runs against the product's .env database.
 #
+# WHAT CAN CHANGE LIVES IN .ikaika_scripts_configs/update-database.json, or the file -ConfigFile names: the
+# sql folder and the patches folder's name, the order kinds run in and which run strictly, the errors that
+# mean "already there", how a database is created, the migrations folder and table and whether a rebuild
+# migrates, the core ledger, each product's overrides - its sql folder, its step order, a step's kind,
+# after lines or strictness, a step or a product skipped, a product kept from every drop, a product the
+# catalog does not have - and named runs for -Preset. Every key is optional: one left out is today's value,
+# and without the file every value is.
+#
 #     .\script.ps1 update-database                                        list everything, change nothing
 #     .\script.ps1 update-database -Product portal -Step data             load the portal rows
 #     .\script.ps1 update-database -Product transaction_tracker -Step patches
@@ -54,6 +62,7 @@
 #     .\script.ps1 update-database -Product portal -DropAndRecreate         the portal from nothing, up to date
 #     .\script.ps1 update-database -Idempotent                            bring every database up to date
 #     .\script.ps1 update-database -Migrate                               php artisan migrate
+#     .\script.ps1 update-database -Preset portal-from-nothing            a named run from update-database.json
 #
 # Requires PowerShell 7+, a mysql client on PATH (environment-variables puts one there), and a running
 # database (run-servers starts one).
@@ -74,6 +83,10 @@ param(
     [switch]$DropAndRecreate,
     # php artisan migrate: additive, and the supported way to update an existing deployment.
     [switch]$Migrate,
+    # A named run from update-database.json's presets: the products, steps and switches it sets; what is typed here wins.
+    [string]$Preset = '',
+    # The settings file; .ikaika_scripts_configs/update-database.json when left out.
+    [string]$ConfigFile = '',
     # List what would run, in order, and run nothing.
     [switch]$DryRun,
     [switch]$Help
@@ -90,6 +103,171 @@ $libDir = Join-Path $repoRoot 'decoupled-script\lib'
 . (Join-Path $configsDir 'lib\wamp.ps1')
 . (Join-Path $configsDir 'lib\laravel.ps1')
 
+# ------------------------------------------------------------------------ the settings
+# update-database.json's keys over today's values, one by one; 'about' anywhere is a note for people. JSON
+# objects come back case-insensitive, so "Folder" and "folder" are one key rather than one ignored.
+function ConvertTo-LooseValue($Value) {
+    if ($Value -is [Collections.IDictionary]) {
+        $loose = [ordered]@{}
+        foreach ($key in @($Value.Keys)) { $loose[$key] = ConvertTo-LooseValue $Value[$key] }
+        return $loose
+    }
+    if ($Value -is [string] -or $Value -isnot [Collections.IEnumerable]) { return $Value }
+    return , @($Value | ForEach-Object { ConvertTo-LooseValue $_ })
+}
+
+function Read-UpdateDatabaseConfig([string]$Path) {
+    $kinds = @('rebuild', 'structure', 'retrofit', 'other', 'data', 'patch')
+    $config = [ordered]@{
+        sqlRoot        = 'sql'
+        catalog        = 'config/products.php'
+        patches        = 'patches'
+        ledger         = '.ikaika_scripts_configs/.sql-applied.json'
+        kindOrder      = $kinds
+        strictKinds    = @('rebuild', 'data')
+        alreadyThere   = @(1050, 1060, 1061, 1062, 1068, 1091, 1826)
+        createDatabase = 'CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+        migrations     = [ordered]@{ path = 'database/migrations'; table = 'migrations'; afterRebuild = $true }
+        coreLedger     = [ordered]@{ product = 'core'; tables = @('actions', 'recycle'); column = 'product' }
+        products       = [ordered]@{}
+        presets        = [ordered]@{}
+        _path          = $Path
+        _present       = $false
+    }
+    if (-not (Test-Path -LiteralPath $Path)) { return $config }
+    $config._present = $true
+    try { $file = ConvertTo-LooseValue (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable) }
+    catch { throw "$Path is not JSON update-database can read: $($_.Exception.Message)" }
+    if ($file -isnot [Collections.IDictionary]) { throw "$Path must hold one JSON object." }
+
+    $fail = { param([string]$Message) throw "$Path - $Message" }
+    $identifier = '^[A-Za-z0-9_]+$'
+    $isList = { param($Value) $Value -isnot [string] -and $Value -is [Collections.IEnumerable] -and $Value -isnot [Collections.IDictionary] }
+    foreach ($key in @($file.Keys)) {
+        if ($key -in @('about', '$schema')) { continue }
+        if (-not $config.Contains($key) -or $key.StartsWith('_')) { & $fail "'$key' is not a setting; the settings are $(@($config.Keys | Where-Object { -not $_.StartsWith('_') }) -join ', ')." }
+        if ($key -in @('migrations', 'coreLedger')) {
+            if ($file[$key] -isnot [Collections.IDictionary]) { & $fail "$key must be an object." }
+            foreach ($inner in @($file[$key].Keys | Where-Object { $_ -ne 'about' })) {
+                if (-not $config[$key].Contains($inner)) { & $fail "$key.$inner is not a setting; $key has $(@($config[$key].Keys) -join ', ')." }
+                $config[$key][$inner] = $file[$key][$inner]
+            }
+        } else { $config[$key] = $file[$key] }
+    }
+
+    foreach ($key in 'sqlRoot', 'catalog', 'patches', 'ledger') {
+        if ($config[$key] -isnot [string] -or -not $config[$key].Trim()) { & $fail "$key must be a path, as text." }
+    }
+    if ($config.createDatabase -isnot [string] -or $config.createDatabase -notmatch '^[A-Za-z0-9_ =]*$') {
+        & $fail 'createDatabase must be what follows CREATE DATABASE <name>, such as CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci.'
+    }
+    foreach ($key in 'kindOrder', 'strictKinds') {
+        if (-not (& $isList $config[$key])) { & $fail "$key must be a list of kinds: $($kinds -join ', ')." }
+        $strange = @($config[$key] | Where-Object { $kinds -notcontains $_ })
+        if ($strange.Count) { & $fail "$key names $($strange -join ', '); the kinds are $($kinds -join ', ')." }
+    }
+    # A kind the order leaves out runs after the ones it names, in today's order.
+    $config.kindOrder = @(@($config.kindOrder | Select-Object -Unique) + @($kinds | Where-Object { $config.kindOrder -notcontains $_ }))
+    if (-not (& $isList $config.alreadyThere) -or @($config.alreadyThere | Where-Object { "$_" -notmatch '^\d+$' }).Count) {
+        & $fail 'alreadyThere must be a list of MySQL error numbers, such as 1061.'
+    }
+    if ("$($config.migrations.path)" -eq '' -or "$($config.migrations.table)" -notmatch $identifier) { & $fail 'migrations needs a path and a table name.' }
+    if ($config.migrations.afterRebuild -isnot [bool]) { & $fail 'migrations.afterRebuild must be true or false.' }
+    if ("$($config.coreLedger.product)" -eq '' -or "$($config.coreLedger.column)" -notmatch $identifier -or -not (& $isList $config.coreLedger.tables) -or
+        @($config.coreLedger.tables | Where-Object { "$_" -notmatch $identifier }).Count) {
+        & $fail 'coreLedger needs a product, a column, and a list of tables, each a plain name.'
+    }
+
+    $shapes = [ordered]@{
+        products = @('about', 'name', 'database', 'envPrefix', 'connection', 'folder', 'skip', 'drop', 'order', 'steps')
+        presets  = @('about', 'product', 'step', 'drop', 'dropAndRecreate', 'idempotent', 'migrate')
+    }
+    foreach ($section in $shapes.Keys) {
+        if ($config[$section] -isnot [Collections.IDictionary]) { & $fail "$section must be an object, one key per $($section.TrimEnd('s'))." }
+        foreach ($name in @($config[$section].Keys | Where-Object { $_ -ne 'about' })) {
+            $spec = $config[$section][$name]
+            if ($spec -isnot [Collections.IDictionary]) { & $fail "$section.$name must be an object." }
+            $stray = @($spec.Keys | Where-Object { $shapes[$section] -notcontains $_ })
+            if ($stray.Count) { & $fail "$section.$name.$($stray[0]) is not a setting; one has $(@($shapes[$section] | Where-Object { $_ -ne 'about' }) -join ', ')." }
+            foreach ($field in 'skip', 'drop', 'dropAndRecreate', 'idempotent', 'migrate') {
+                if ($spec.Contains($field) -and $spec[$field] -isnot [bool]) { & $fail "$section.$name.$field must be true or false." }
+            }
+        }
+    }
+    foreach ($name in @($config.products.Keys | Where-Object { $_ -ne 'about' })) {
+        $spec = $config.products[$name]
+        foreach ($field in 'database', 'envPrefix', 'connection') {
+            if ($spec.Contains($field) -and "$($spec[$field])" -notmatch $identifier) { & $fail "products.$name.$field must be a plain name." }
+        }
+        if ($spec.Contains('folder') -and "$($spec['folder'])" -notmatch '^[A-Za-z0-9_.-]+$') { & $fail "products.$name.folder must be one folder's name under $($config.sqlRoot)." }
+        if ($spec.Contains('order') -and -not (& $isList $spec['order'])) { & $fail "products.$name.order must be a list of step names." }
+        if (-not $spec.Contains('steps')) { continue }
+        if ($spec['steps'] -isnot [Collections.IDictionary]) { & $fail "products.$name.steps must be an object, one key per step." }
+        foreach ($stepName in @($spec['steps'].Keys | Where-Object { $_ -ne 'about' })) {
+            $override = $spec['steps'][$stepName]
+            if ($override -isnot [Collections.IDictionary]) { & $fail "products.$name.steps.$stepName must be an object." }
+            $stray = @($override.Keys | Where-Object { @('about', 'kind', 'after', 'skip', 'strict') -notcontains $_ })
+            if ($stray.Count) { & $fail "products.$name.steps.$stepName.$($stray[0]) is not a setting; a step has kind, after, skip, strict." }
+            if ($override.Contains('kind') -and $kinds -notcontains $override['kind']) { & $fail "products.$name.steps.$stepName.kind is '$($override['kind'])'; the kinds are $($kinds -join ', ')." }
+            if ($override.Contains('after') -and -not (& $isList $override['after'])) { & $fail "products.$name.steps.$stepName.after must be a list of step names." }
+            foreach ($field in 'skip', 'strict') {
+                if ($override.Contains($field) -and $override[$field] -isnot [bool]) { & $fail "products.$name.steps.$stepName.$field must be true or false." }
+            }
+        }
+    }
+    foreach ($name in @($config.presets.Keys | Where-Object { $_ -ne 'about' })) {
+        $set = $config.presets[$name]
+        if ($set.Contains('product') -and -not ("$($set['product'])" -eq 'all' -or (& $isList $set['product']))) { & $fail "presets.$name.product must be a list of products, or ""all""." }
+        if ($set.Contains('step') -and -not (& $isList $set['step'])) { & $fail "presets.$name.step must be a list of step names." }
+    }
+    return $config
+}
+
+# Each product's settings - its sql folder, whether it is skipped or kept from a drop, its step order and its
+# step overrides. A product the catalog lacks is added when update-database.json names its database, reached
+# with <envPrefix>_DB_* from .env where it gives one, else with DB_*.
+function Get-ProductSetting($Products, [string]$EnvPath) {
+    $settings = @{}
+    foreach ($key in @($Products.Keys)) { $settings[$key] = [pscustomobject]@{ Folder = $key; Skip = $false; Drop = $true; Order = @(); Steps = [ordered]@{} } }
+    foreach ($name in @($Config.products.Keys | Where-Object { $_ -ne 'about' })) {
+        $spec = $Config.products[$name]
+        $key = $name -replace '-', '_'
+        if (-not $Products.Contains($key)) {
+            if (-not $spec.Contains('database')) { throw "products.$name in $($Config._path) is no product in the catalog, and names no database to add it with." }
+            $prefix = "$($spec['envPrefix'])"
+            $read = { param([string]$Suffix, [string]$Fallback) if ($prefix) { Get-DotEnvValue $EnvPath "$($prefix)_DB_$Suffix" $Fallback } else { $Fallback } }
+            $Products[$key] = [pscustomobject]@{
+                Key        = $name
+                Name       = $(if ($spec.Contains('name')) { "$($spec['name'])" } else { $name })
+                Connection = "$($spec['connection'])"
+                Database   = & $read 'DATABASE' "$($spec['database'])"
+                DbHost     = & $read 'HOST' (Get-DotEnvValue $EnvPath 'DB_HOST' '127.0.0.1')
+                Port       = & $read 'PORT' (Get-DotEnvValue $EnvPath 'DB_PORT' '3306')
+                Username   = & $read 'USERNAME' (Get-DotEnvValue $EnvPath 'DB_USERNAME' 'root')
+                Password   = & $read 'PASSWORD' (Get-DotEnvValue $EnvPath 'DB_PASSWORD' '')
+            }
+            $settings[$key] = [pscustomobject]@{ Folder = $key; Skip = $false; Drop = $true; Order = @(); Steps = [ordered]@{} }
+        }
+        if ($spec.Contains('folder')) { $settings[$key].Folder = "$($spec['folder'])" }
+        if ($spec.Contains('skip')) { $settings[$key].Skip = $spec['skip'] }
+        if ($spec.Contains('drop')) { $settings[$key].Drop = $spec['drop'] }
+        if ($spec.Contains('order')) { $settings[$key].Order = @($spec['order']) }
+        if ($spec.Contains('steps')) { $settings[$key].Steps = $spec['steps'] }
+    }
+    return $settings
+}
+
+$configPath = if ($ConfigFile) { [IO.Path]::GetFullPath($ConfigFile, (Get-Location).Path) } else { Join-Path $configsDir 'update-database.json' }
+if ($ConfigFile -and -not (Test-Path -LiteralPath $configPath)) {
+    Write-Host "  There is no settings file at $configPath." -ForegroundColor Red
+    exit 1
+}
+try { $Config = Read-UpdateDatabaseConfig $configPath }
+catch {
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 if ($Help) {
     Write-Host @'
 
@@ -97,7 +275,8 @@ if ($Help) {
 
   Usage
     .\script.ps1 update-database [-Product <folder>[,...] | -AllProducts] [-Step <name>[,...]]
-                                 [-Drop | -DropAndRecreate] [-Idempotent] [-Migrate] [-DryRun]
+                                 [-Drop | -DropAndRecreate] [-Idempotent] [-Migrate]
+                                 [-Preset <name>] [-ConfigFile <file>] [-DryRun]
 
   With nothing picked it lists every product's steps and applies none.
 
@@ -126,6 +305,12 @@ if ($Help) {
   file - one that opens with DROP DATABASE - is refused on a database that has
   tables; -DropAndRecreate is how one is built again.
 
+  Settings live in .ikaika_scripts_configs/update-database.json, or -ConfigFile:
+  the sql folder, the order kinds run in, the errors that mean "already there",
+  how a database is created, the migrations and the core ledger, each product's
+  overrides, and named runs for -Preset. Every key is optional, and a key left
+  out keeps today's value.
+
   Examples
     .\script.ps1 update-database -Product portal -Step data
     .\script.ps1 update-database -Product transaction_tracker -Step patches
@@ -133,23 +318,56 @@ if ($Help) {
     .\script.ps1 update-database -Product portal -DropAndRecreate
     .\script.ps1 update-database -Product portal,transaction_tracker -DropAndRecreate -DryRun
     .\script.ps1 update-database -AllProducts -Step indexes,patches -DryRun
+    .\script.ps1 update-database -Preset portal-from-nothing -DryRun
 
   The databases and credentials come from .env, as config/products.php reads them.
 
 '@
+    $named = @($Config.presets.Keys | Where-Object { $_ -ne 'about' })
+    if ($named.Count) {
+        Write-Host "  Presets, from $($Config._path)"
+        foreach ($name in $named) { Write-Host "    $name$(if ($Config.presets[$name].about) { " - $($Config.presets[$name].about)" })" }
+        Write-Host ''
+    }
     exit 0
 }
 
 Start-BuildLog 'update-database'
 
-$sqlRoot = Join-Path $repoRoot 'sql'
-$products = Get-ProductDatabase (Join-Path $repoRoot '.env')
+# A preset fills in only what was not typed, so a named run can still be narrowed or widened by hand.
+if ($Preset) {
+    $named = @($Config.presets.Keys | Where-Object { $_ -ne 'about' })
+    if ($named -notcontains $Preset) {
+        Write-Host "  There is no preset called $Preset in $($Config._path)$(if ($named.Count) { "; there are $($named -join ', ')" } else { '; it has none' })." -ForegroundColor Red
+        exit 1
+    }
+    $set = $Config.presets[$Preset]
+    if ($set.Contains('product') -and -not $PSBoundParameters.ContainsKey('Product') -and -not $PSBoundParameters.ContainsKey('AllProducts')) {
+        if ("$($set['product'])" -eq 'all') { $AllProducts = $true } else { $Product = @($set['product']) }
+    }
+    if ($set.Contains('step') -and -not $PSBoundParameters.ContainsKey('Step')) { $Step = @($set['step']) }
+    foreach ($pair in @(@('drop', 'Drop'), @('dropAndRecreate', 'DropAndRecreate'), @('idempotent', 'Idempotent'), @('migrate', 'Migrate'))) {
+        if ($set.Contains($pair[0]) -and -not $PSBoundParameters.ContainsKey($pair[1])) { Set-Variable -Name $pair[1] -Value $set[$pair[0]] }
+    }
+}
 
-# Errors that mean the statement's work is already there, so a retrofit or patch that meets them has
-# nothing left to do on that line: table exists, duplicate column, key or row, primary key defined,
+$sqlRoot = Join-Path $repoRoot $Config.sqlRoot
+$envPath = Join-Path $repoRoot '.env'
+try {
+    $products = Get-ProductDatabase $envPath (Join-Path $repoRoot $Config.catalog)
+    $settings = Get-ProductSetting $products $envPath
+} catch {
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+$coreKey = "$($Config.coreLedger.product)" -replace '-', '_'
+
+# Errors that mean the statement's work is already there, so a retrofit or patch that meets them has nothing
+# left to do on that line - by default table exists, duplicate column, key or row, primary key defined,
 # nothing to drop, duplicate foreign key.
-$AlreadyThere = @(1050, 1060, 1061, 1062, 1068, 1091, 1826)
-$KindRank = [ordered]@{ rebuild = 0; structure = 1; retrofit = 2; other = 2; data = 3; patch = 4 }
+$AlreadyThere = @($Config.alreadyThere | ForEach-Object { [int]$_ })
+$KindRank = @{}
+for ($i = 0; $i -lt $Config.kindOrder.Count; $i++) { $KindRank[$Config.kindOrder[$i]] = $i }
 
 # ------------------------------------------------------------------------ what a file is
 function Get-SqlFileFacts([string]$Path, [bool]$IsPatch) {
@@ -179,21 +397,40 @@ function Get-SqlFileFacts([string]$Path, [bool]$IsPatch) {
     return $facts
 }
 
-# A product's steps in the order they run: by kind, then name, then each file's own "after" lines.
-function Get-ProductStep([string]$FolderPath) {
-    $steps = [Collections.Generic.List[object]]::new()
+# A product's steps in the order they run: by kind - or the product's own order from update-database.json -
+# then name, then each file's "after" lines, which a step's settings replace. A step they skip is not a step.
+function Get-ProductStep([string]$FolderPath, $Setting = $null) {
+    $found = [Collections.Generic.List[object]]::new()
     foreach ($file in @(Get-ChildItem -LiteralPath $FolderPath -Filter '*.sql' -File | Sort-Object Name)) {
-        $facts = Get-SqlFileFacts $file.FullName $false
-        $steps.Add([pscustomobject]@{ Name = $file.BaseName; Label = $file.Name; Facts = $facts })
+        $found.Add([pscustomobject]@{ Name = $file.BaseName; Label = $file.Name; Facts = (Get-SqlFileFacts $file.FullName $false); Strict = $null })
     }
-    $patchDir = Join-Path $FolderPath 'patches'
+    $patchDir = Join-Path $FolderPath $Config.patches
     if (Test-Path -LiteralPath $patchDir) {
         foreach ($file in @(Get-ChildItem -LiteralPath $patchDir -Filter '*.sql' -File | Sort-Object Name)) {
-            $steps.Add([pscustomobject]@{ Name = 'patches'; Label = "patches/$($file.Name)"; Facts = (Get-SqlFileFacts $file.FullName $true) })
+            $found.Add([pscustomobject]@{ Name = $Config.patches; Label = "$($Config.patches)/$($file.Name)"; Facts = (Get-SqlFileFacts $file.FullName $true); Strict = $null })
         }
     }
+    $overrides = if ($Setting) { $Setting.Steps } else { [ordered]@{} }
+    $steps = foreach ($s in $found) {
+        $override = if ($overrides.Contains($s.Label)) { $overrides[$s.Label] } elseif ($overrides.Contains($s.Name)) { $overrides[$s.Name] } else { $null }
+        if ($override) {
+            if ($override.Contains('skip') -and $override['skip']) { continue }
+            if ($override.Contains('kind')) { $s.Facts.Kind = $override['kind'] }
+            if ($override.Contains('after')) { $s.Facts.After = @($override['after']) }
+            if ($override.Contains('strict')) { $s.Strict = $override['strict'] }
+        }
+        $s
+    }
+    $order = @(if ($Setting) { $Setting.Order })
+    $rank = {
+        param($Item)
+        $at = [array]::IndexOf($order, $Item.Label)
+        if ($at -lt 0) { $at = [array]::IndexOf($order, $Item.Name) }
+        if ($at -ge 0) { return $at }
+        return $order.Count + $KindRank[$Item.Facts.Kind]
+    }
     $ordered = [Collections.Generic.List[object]]::new()
-    foreach ($s in @($steps | Sort-Object { $KindRank[$_.Facts.Kind] }, Label)) { $ordered.Add($s) }
+    foreach ($s in @($steps | Sort-Object { & $rank $_ }, Label)) { $ordered.Add($s) }
     # Each pass moves a file after anything it names that still comes later; a cycle stops at the cap.
     for ($pass = 0; $pass -lt $ordered.Count; $pass++) {
         $moved = $false
@@ -265,7 +502,7 @@ function Get-ErrorCode([string]$Line) {
 # or as its $connection, else Laravel's default. One counted against a database it does not touch only
 # runs again, and the migrations that write to a product check before they write.
 function Get-MigrationTarget([hashtable]$ConnectionDatabase, [string]$DefaultDatabase) {
-    $dir = Join-Path $repoRoot 'database\migrations'
+    $dir = Join-Path $repoRoot $Config.migrations.path
     if (-not (Test-Path -LiteralPath $dir)) { return @() }
     return @(Get-ChildItem -LiteralPath $dir -Filter '*.php' -File | Sort-Object Name | ForEach-Object {
             $text = Get-Content -LiteralPath $_.FullName -Raw
@@ -279,7 +516,7 @@ function Get-MigrationTarget([hashtable]$ConnectionDatabase, [string]$DefaultDat
 # file rather than a table, so no product schema carries a table that belongs to a build tool; the
 # hash, not the name, so a file edited after it was applied counts as unapplied again; and believed
 # only while the database still has tables, since anything can have happened to it in between.
-$LedgerPath = Join-Path $configsDir '.sql-applied.json'
+$LedgerPath = Join-Path $repoRoot $Config.ledger
 
 function Get-Ledger {
     if (-not (Test-Path -LiteralPath $LedgerPath)) { return @{} }
@@ -305,13 +542,15 @@ if (-not (Test-Path -LiteralPath $sqlRoot)) {
     Write-Host "  There is no sql folder at $sqlRoot." -ForegroundColor Red
     exit 1
 }
-$folders = @($products.Keys | Where-Object { Test-Path -LiteralPath (Join-Path $sqlRoot $_) })
-$orphans = @(Get-ChildItem -LiteralPath $sqlRoot -Directory | Where-Object { $folders -notcontains $_.Name -and (Get-ChildItem -LiteralPath $_.FullName -Filter '*.sql' -Recurse -File) } | ForEach-Object Name)
+$folders = @($products.Keys | Where-Object { -not $settings[$_].Skip -and (Test-Path -LiteralPath (Join-Path $sqlRoot $settings[$_].Folder)) })
+$skipped = @($products.Keys | Where-Object { $settings[$_].Skip })
+$claimed = @($products.Keys | ForEach-Object { $settings[$_].Folder })
+$orphans = @(Get-ChildItem -LiteralPath $sqlRoot -Directory | Where-Object { $claimed -notcontains $_.Name -and (Get-ChildItem -LiteralPath $_.FullName -Filter '*.sql' -Recurse -File) } | ForEach-Object Name)
 
 $wantedFolders = @($Product | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() -replace '-', '_' } | Where-Object { $_ })
 $unknown = @($wantedFolders | Where-Object { $folders -notcontains $_ })
 if ($unknown.Count) {
-    Write-Host "  No product has a sql/ folder called $($unknown -join ', '); there are $($folders -join ', ')." -ForegroundColor Red
+    Write-Host "  There is no product called $($unknown -join ', ') with a sql folder; there are $($folders -join ', ')." -ForegroundColor Red
     exit 1
 }
 $wantedSteps = @($Step | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() -replace '\.sql$', '' } | Where-Object { $_ })
@@ -331,7 +570,7 @@ if ($wiping -and -not $rebuild -and $Migrate) {
     exit 1
 }
 # Built back up to date means the migrations too: the sql/ files make the tables, and what came since lives in a migration.
-if ($rebuild) { $Idempotent = $true; $Migrate = $true }
+if ($rebuild) { $Idempotent = $true; if ($Config.migrations.afterRebuild) { $Migrate = $true } }
 # -Idempotent with nothing else named means everything, migrations included: every column added since
 # the sql/ files were written lives in a migration, and artisan migrate skips what it has already run.
 if ($Idempotent -and -not $wantedFolders.Count -and -not $wantedSteps.Count) {
@@ -342,7 +581,6 @@ $everyStep = $Idempotent -and -not $wantedSteps.Count
 $drops = @()
 
 # Laravel's own database - the default connection, where the migrations table is - and the database behind each connection.
-$envPath = Join-Path $repoRoot '.env'
 $laravelDb = [pscustomobject]@{
     Name     = 'Laravel'
     Key      = ''
@@ -359,6 +597,8 @@ foreach ($entry in $products.Values) { if ($entry.Connection) { $connectionDatab
 Write-Host ''
 Write-Host "  Update database - $(Get-ProjectValue 'app.displayName' 'this project')" -ForegroundColor Cyan
 Write-Host "  $sqlRoot" -ForegroundColor DarkGray
+Write-Host "  settings: $($Config._path)$(if (-not $Config._present) { ' - not there, so every value is the default' })" -ForegroundColor DarkGray
+if ($Preset) { Write-Host "  preset:   $Preset$(if ($Config.presets[$Preset].about) { " - $($Config.presets[$Preset].about)" })" -ForegroundColor DarkGray }
 
 $ledger = Get-Ledger
 $ledgerTouched = $false
@@ -367,11 +607,13 @@ $knownSteps = @()
 foreach ($folder in $folders) {
     $db = $products[$folder]
     Write-Host ''
-    Write-Host "  $($db.Name)  (sql/$folder)" -ForegroundColor Cyan
+    Write-Host "  $($db.Name)  ($($Config.sqlRoot)/$($settings[$folder].Folder))" -ForegroundColor Cyan
     Write-Host "    .env says $($db.Database) on $($db.DbHost):$($db.Port) as $($db.Username)" -ForegroundColor DarkGray
-    $productSteps = Get-ProductStep (Join-Path $sqlRoot $folder)
+    $productSteps = Get-ProductStep (Join-Path $sqlRoot $settings[$folder].Folder) $settings[$folder]
 
-    if ($wiping -and $wantedFolders -contains $folder) {
+    if ($wiping -and $wantedFolders -contains $folder -and -not $settings[$folder].Drop) {
+        Write-Host "    kept     products.$folder.drop is false in $(Split-Path -Leaf $Config._path), so no drop touches it" -ForegroundColor DarkGray
+    } elseif ($wiping -and $wantedFolders -contains $folder) {
         $databases = @(@($productSteps | ForEach-Object { if ($_.Facts.Target) { $_.Facts.Target } else { $db.Database } }) + @($db.Database) | Select-Object -Unique)
         $odd = @($databases | Where-Object { $_ -notmatch '^[A-Za-z0-9_]+$' })
         if ($odd.Count) {
@@ -431,7 +673,11 @@ foreach ($folder in $folders) {
 }
 foreach ($orphan in $orphans) {
     Write-Host ''
-    Write-Host "  sql/$orphan has .sql files but no product in config/products.php, so nothing knows its database; it is skipped." -ForegroundColor Yellow
+    Write-Host "  $($Config.sqlRoot)/$orphan has .sql files but no product claims it - in the catalog, or in $(Split-Path -Leaf $Config._path)'s products - so nothing knows its database; it is skipped." -ForegroundColor Yellow
+}
+if ($skipped.Count) {
+    Write-Host ''
+    Write-Host "  Skipped by $(Split-Path -Leaf $Config._path): $($skipped -join ', ')" -ForegroundColor DarkGray
 }
 
 # The migration records that describe a dropped database, forgotten so migrate runs them again - unless the
@@ -442,11 +688,11 @@ function Get-ForgottenMigration([string[]]$Databases) {
             Where-Object { @($_.Databases | Where-Object { $Databases -contains $_ }).Count -and $_.Name -match '^[A-Za-z0-9_]+$' } | ForEach-Object Name)
 }
 $droppedDatabases = @($drops | ForEach-Object { $_.Databases } | Select-Object -Unique)
-$coreGone = $products.Contains('core') -and $droppedDatabases -contains $products['core'].Database
+$coreGone = $products.Contains($coreKey) -and $droppedDatabases -contains $products[$coreKey].Database
 $forget = Get-ForgottenMigration $droppedDatabases
 if ($forget.Count) {
     Write-Host ''
-    Write-Host "  Migrations  $($forget.Count) record(s) in $($laravelDb.Database).migrations write to a dropped database; they are forgotten, so migrate runs them again" -ForegroundColor DarkGray
+    Write-Host "  Migrations  $($forget.Count) record(s) in $($laravelDb.Database).$($Config.migrations.table) write to a dropped database; they are forgotten, so migrate runs them again" -ForegroundColor DarkGray
 }
 
 $strayStep = @($wantedSteps | Where-Object { $knownSteps -notcontains $_ })
@@ -469,8 +715,8 @@ if (-not $plan.Count -and -not $drops.Count -and -not $Migrate) {
 if ($DryRun) {
     Write-Host ''
     Write-Host '  -DryRun: nothing ran. In order, this would apply:' -ForegroundColor Yellow
-    foreach ($wipe in $drops) { Write-Host "    drop $($wipe.Databases -join ', ') ($($wipe.Folder))$(if ($rebuild) { ', and create it empty' })$(if ($wipe.Folder -ne 'core' -and -not $coreGone) { ", then clear $($wipe.Product.Key)'s core ledger rows" })" }
-    if ($forget.Count) { Write-Host "    forget $($forget.Count) migration record(s) in $($laravelDb.Database).migrations" }
+    foreach ($wipe in $drops) { Write-Host "    drop $($wipe.Databases -join ', ') ($($wipe.Folder))$(if ($rebuild) { ', and create it empty' })$(if ($wipe.Folder -ne $coreKey -and -not $coreGone) { ", then clear $($wipe.Product.Key)'s core ledger rows" })" }
+    if ($forget.Count) { Write-Host "    forget $($forget.Count) migration record(s) in $($laravelDb.Database).$($Config.migrations.table)" }
     foreach ($item in $plan) { Write-Host "    $($item.Folder)/$($item.Step.Label) -> $($item.Target)$(if ($item.Facts.Kind -eq 'rebuild' -and $drops.Folder -notcontains $item.Folder) { ', then clear its core ledger rows' })" }
     if ($Migrate) { Write-Host '    php artisan migrate' }
     Write-Host ''
@@ -497,15 +743,18 @@ function Write-Applied([object]$Item, [string]$Note) {
 
 # The product's rows in the core ledger describe records its rebuilt database no longer has.
 function Clear-CoreLedger([object]$Rebuilt) {
-    $core = $products['core']
-    if (-not $core -or @(Get-PresentTable $core $core.Database) -notcontains 'actions') { return $true }
+    if (-not $products.Contains($coreKey)) { return $true }
+    $core = $products[$coreKey]
+    $present = @(Get-PresentTable $core $core.Database)
+    $tables = @($Config.coreLedger.tables | Where-Object { $present -contains $_ })
+    if (-not $tables.Count) { return $true }
     $productKey = $Rebuilt.Key -replace "'", "''"
-    $cleared = Invoke-MysqlQuery $core "DELETE FROM ``$($core.Database)``.actions WHERE product = '$productKey'; DELETE FROM ``$($core.Database)``.recycle WHERE product = '$productKey'; SELECT 'ok'"
-    if ($null -eq $cleared) {
+    $statements = ($tables | ForEach-Object { "DELETE FROM ``$($core.Database)``.``$_`` WHERE ``$($Config.coreLedger.column)`` = '$productKey';" }) -join ' '
+    if ($null -eq (Invoke-MysqlQuery $core "$statements SELECT 'ok'")) {
         Write-Host "      could not clear $($Rebuilt.Key)'s rows from the core ledger in $($core.Database)" -ForegroundColor Yellow
         return $false
     }
-    Write-Host "      cleared $($Rebuilt.Key)'s rows from the core ledger (actions, recycle)" -ForegroundColor DarkGray
+    Write-Host "      cleared $($Rebuilt.Key)'s rows from the core ledger ($($tables -join ', '))" -ForegroundColor DarkGray
     return $true
 }
 
@@ -514,7 +763,7 @@ $gone = @()
 foreach ($wipe in $drops) {
     Write-Host "    drop $($wipe.Folder): $($wipe.Databases -join ', ')"
     # Created again empty only to be built back, so a step with no USE line and migrate have somewhere to write.
-    $statements = ($wipe.Databases | ForEach-Object { "DROP DATABASE IF EXISTS ``$_``;$(if ($rebuild) { " CREATE DATABASE ``$_`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" })" }) -join ' '
+    $statements = ($wipe.Databases | ForEach-Object { "DROP DATABASE IF EXISTS ``$_``;$(if ($rebuild) { " CREATE DATABASE ``$_`` $($Config.createDatabase);" })" }) -join ' '
     if ($null -eq (Invoke-MysqlQuery $wipe.Product "$statements SELECT 'ok'")) {
         Write-Host "      FAILED - could not drop $($wipe.Databases -join ', ')$(if ($rebuild) { '; its steps are skipped' })" -ForegroundColor Red
         $undropped += $wipe.Folder
@@ -525,23 +774,24 @@ foreach ($wipe in $drops) {
     $gone += $wipe.Databases
     # What the ledger said was applied to these databases went with them.
     foreach ($name in @($ledger.Keys | Where-Object { $wipe.Databases -contains ($_ -split '\|')[0] })) { $ledger.Remove($name); $ledgerTouched = $true }
-    if ($wipe.Folder -ne 'core' -and -not $coreGone -and -not (Clear-CoreLedger $wipe.Product)) { $failures++ }
+    if ($wipe.Folder -ne $coreKey -and -not $coreGone -and -not (Clear-CoreLedger $wipe.Product)) { $failures++ }
 }
 $forgetting = Get-ForgottenMigration $gone
-if ($forgetting.Count -and @(Get-PresentTable $laravelDb $laravelDb.Database) -contains 'migrations') {
+$migrationsTable = $Config.migrations.table
+if ($forgetting.Count -and @(Get-PresentTable $laravelDb $laravelDb.Database) -contains $migrationsTable) {
     $names = ($forgetting | ForEach-Object { "'$_'" }) -join ','
-    if ($null -eq (Invoke-MysqlQuery $laravelDb "DELETE FROM ``$($laravelDb.Database)``.migrations WHERE migration IN ($names); SELECT 'ok'")) {
-        Write-Host "      could not forget the migrations that write to what was dropped, in $($laravelDb.Database).migrations" -ForegroundColor Yellow
+    if ($null -eq (Invoke-MysqlQuery $laravelDb "DELETE FROM ``$($laravelDb.Database)``.``$migrationsTable`` WHERE migration IN ($names); SELECT 'ok'")) {
+        Write-Host "      could not forget the migrations that write to what was dropped, in $($laravelDb.Database).$migrationsTable" -ForegroundColor Yellow
         $failures++
     } else {
-        Write-Host "      forgot $($forgetting.Count) migration record(s) in $($laravelDb.Database).migrations, so migrate runs them again" -ForegroundColor DarkGray
+        Write-Host "      forgot $($forgetting.Count) migration record(s) in $($laravelDb.Database).$migrationsTable, so migrate runs them again" -ForegroundColor DarkGray
     }
 }
 
 foreach ($item in $plan) {
     if ($undropped -contains $item.Folder) { continue }
     Write-Host "    $($item.Folder)/$($item.Step.Label)  ($($item.Facts.Kind))"
-    $strict = $item.Facts.Kind -in @('rebuild', 'data')
+    $strict = if ($null -ne $item.Step.Strict) { $item.Step.Strict } else { $Config.strictKinds -contains $item.Facts.Kind }
     $run = Invoke-SqlFile $item.Product $item.Facts (-not $strict)
     $real = @($run.Errors | Where-Object { $AlreadyThere -notcontains (Get-ErrorCode $_) })
     $there = @($run.Errors | Where-Object { $AlreadyThere -contains (Get-ErrorCode $_) })
@@ -551,7 +801,7 @@ foreach ($item in $plan) {
             foreach ($line in @($real | Select-Object -First 5)) { Write-Host "      $line" -ForegroundColor Red }
             if ($real.Count -gt 5) { Write-Host "      ...and $($real.Count - 5) more" -ForegroundColor Red }
             if ($real -match '^ERROR 1049') {
-                $creator = @(Get-ProductStep (Join-Path $sqlRoot $item.Folder) | Where-Object { $_.Facts.Kind -eq 'rebuild' } | Select-Object -First 1)
+                $creator = @(Get-ProductStep (Join-Path $sqlRoot $settings[$item.Folder].Folder) $settings[$item.Folder] | Where-Object { $_.Facts.Kind -eq 'rebuild' } | Select-Object -First 1)
                 if ($creator.Count) { Write-Host "      $($item.Target) does not exist yet; $($creator[0].Label) creates it: -Product $($item.Folder) -Step $($creator[0].Name)" -ForegroundColor Yellow }
             }
             $failures++
@@ -565,7 +815,7 @@ foreach ($item in $plan) {
     if ($run.Exit -eq 0) {
         Write-Host "      applied to $($item.Target)" -ForegroundColor Green
         Write-Applied $item 'applied'
-        if ($item.Facts.Kind -eq 'rebuild' -and $item.Folder -ne 'core' -and $drops.Folder -notcontains $item.Folder) {
+        if ($item.Facts.Kind -eq 'rebuild' -and $item.Folder -ne $coreKey -and $drops.Folder -notcontains $item.Folder) {
             if (-not (Clear-CoreLedger $item.Product)) { $failures++ }
         }
         continue
@@ -628,19 +878,30 @@ Write-Host '    .\script.ps1 run-servers -PhpMyAdmin  look at the result' -Foreg
 Write-Host ''
 exit $failures
 
-# Read by the manifest generator and run alone, so it finds the repo from the working directory itself.
-function Get-DialogChoiceParameters { return , @('Product', 'Step') }
+# Read by the manifest generator and run alone, so it finds the repo from the working directory itself, and
+# reads update-database.json for its presets and its sql folder.
+function Get-DialogChoiceParameters { return , @('Product', 'Step', 'Preset') }
 
 function Get-DialogChoices([string]$Parameter) {
     $dir = (Get-Location).Path
     while ($dir -and -not (Test-Path -LiteralPath (Join-Path $dir 'ikaika_scripts.env'))) { $dir = Split-Path $dir -Parent }
-    if (-not $dir -or -not (Test-Path -LiteralPath (Join-Path $dir 'sql'))) { return , @() }
-    $folders = @(Get-ChildItem -LiteralPath (Join-Path $dir 'sql') -Directory | Where-Object { Get-ChildItem -LiteralPath $_.FullName -Filter '*.sql' -Recurse -File })
+    if (-not $dir) { return , @() }
+    $settings = $null
+    $settingsFile = Join-Path $dir '.ikaika_scripts_configs\update-database.json'
+    if (Test-Path -LiteralPath $settingsFile) { try { $settings = Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json } catch { $settings = $null } }
+    if ($Parameter -eq 'Preset') {
+        if (-not $settings -or -not $settings.presets) { return , @() }
+        return , @($settings.presets.PSObject.Properties.Name | Where-Object { $_ -ne 'about' })
+    }
+    $root = Join-Path $dir $(if ($settings -and $settings.sqlRoot) { "$($settings.sqlRoot)" } else { 'sql' })
+    if (-not (Test-Path -LiteralPath $root)) { return , @() }
+    $folders = @(Get-ChildItem -LiteralPath $root -Directory | Where-Object { Get-ChildItem -LiteralPath $_.FullName -Filter '*.sql' -Recurse -File })
     if ($Parameter -eq 'Product') { return , @($folders | ForEach-Object Name) }
     if ($Parameter -eq 'Step') {
         $names = foreach ($folder in $folders) {
             Get-ChildItem -LiteralPath $folder.FullName -Filter '*.sql' -File | ForEach-Object BaseName
-            if (Test-Path -LiteralPath (Join-Path $folder.FullName 'patches')) { 'patches' }
+            $patches = if ($settings -and $settings.patches) { "$($settings.patches)" } else { 'patches' }
+            if (Test-Path -LiteralPath (Join-Path $folder.FullName $patches)) { $patches }
         }
         return , @($names | Sort-Object -Unique)
     }

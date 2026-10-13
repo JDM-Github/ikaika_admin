@@ -42,13 +42,14 @@ function Get-DotEnvValue {
 # used for: sql/project_estimator is the folder, 'project-estimator' is the catalog key,
 # and confusing the two silently applies nothing. Key keeps the catalog key, which is what
 # the core ledger's product column holds.
-function Get-ProductDatabase([string]$EnvPath) {
+# CatalogPath is the catalog to read; config/products.php beside .env when left out.
+function Get-ProductDatabase([string]$EnvPath, [string]$CatalogPath = '') {
     $host_ = Get-DotEnvValue $EnvPath 'DB_HOST' '127.0.0.1'
     $port = Get-DotEnvValue $EnvPath 'DB_PORT' '3306'
     $user = Get-DotEnvValue $EnvPath 'DB_USERNAME' 'root'
     $pass = Get-DotEnvValue $EnvPath 'DB_PASSWORD' ''
 
-    $catalogPath = Join-Path (Split-Path -Parent $EnvPath) 'config\products.php'
+    $catalogPath = if ($CatalogPath) { $CatalogPath } else { Join-Path (Split-Path -Parent $EnvPath) 'config\products.php' }
     if (-not (Test-Path -LiteralPath $catalogPath)) { throw "There is no product catalog at $catalogPath." }
     $catalog = Get-Content -LiteralPath $catalogPath -Raw
     $pattern = "'([a-z0-9-]+)'\s*=>\s*\[\s*'name'\s*=>\s*'([^']+)'.*?'database'\s*=>\s*env\('([A-Z0-9_]+)_DB_DATABASE',\s*'([^']*)'\)"
