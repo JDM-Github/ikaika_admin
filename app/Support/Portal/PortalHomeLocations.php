@@ -8,10 +8,11 @@ use Illuminate\Support\Facades\Http;
 use Throwable;
 
 /**
- * Where each active person lives, as a map point (2026-10-13, user): their address on record turned into
- * coordinates once through OpenStreetMap's Nominatim, and kept in employee_home_locations with the text
- * it came from, so only a new or changed address is looked up again. An address Nominatim cannot place
- * falls back to the person's region (employees.location). Nominatim allows one request a second.
+ * Where each active person lives, as a map point (2026-10-13, user). Each member and administrator sets
+ * their own home after signing in, by GPS or by a pin on the map (sources gps and map); executives are
+ * not asked. Until they do, their address on record stands in: turned into coordinates once through
+ * OpenStreetMap's Nominatim (sources address and region), and looked up again only when it changes. A
+ * home a person set is never overwritten by the address. Nominatim allows one request a second.
  */
 final class PortalHomeLocations
 {
@@ -21,6 +22,9 @@ final class PortalHomeLocations
 
     // The region field holds "NCR" for Metro Manila, which Nominatim does not read.
     private const REGION_QUERIES = ['ncr' => 'Metro Manila, Philippines', 'usa' => 'United States'];
+
+    // Homes a person set themselves; the address lookup leaves these alone.
+    public const OWN_SOURCES = ['gps', 'map'];
 
     public function __construct(private readonly bool $pauses = true) {}
 
@@ -40,7 +44,7 @@ final class PortalHomeLocations
                 continue;
             }
             $previous = $kept[(int) $person->id] ?? null;
-            if ($previous !== null && $previous->query === $queries[0]['text']) {
+            if ($previous !== null && (in_array($previous->source, self::OWN_SOURCES, true) || $previous->query === $queries[0]['text'])) {
                 $counts['unchanged']++;
 
                 continue;
@@ -76,6 +80,34 @@ final class PortalHomeLocations
         }
 
         return $counts;
+    }
+
+    /**
+     * The signed-in person's home, whether they still have to set it, and where the picker starts: their
+     * own home, else the point their address gave, else nothing.
+     *
+     * @return array{home: array{latitude: float, longitude: float, method: string}|null, required: bool, suggested: array{latitude: float, longitude: float}|null}
+     */
+    public function mine(object $employee): array
+    {
+        $row = $this->connection()->table('employee_home_locations')->where('employee_id', (int) $employee->id)->first();
+        $own = $row !== null && in_array($row->source, self::OWN_SOURCES, true);
+
+        return [
+            'home' => $own ? ['latitude' => (float) $row->latitude, 'longitude' => (float) $row->longitude, 'method' => (string) $row->source] : null,
+            // Executives are not asked; everyone else sets theirs before using the portal.
+            'required' => ! $own && ! PortalRole::isExecutive($employee->role ?? null, $employee->role_level ?? null),
+            'suggested' => $row === null ? null : ['latitude' => (float) $row->latitude, 'longitude' => (float) $row->longitude],
+        ];
+    }
+
+    // Kept as the person's own home: the address lookup will not move it again.
+    public function setOwn(int $employeeId, float $latitude, float $longitude, string $method): void
+    {
+        $this->connection()->table('employee_home_locations')->updateOrInsert(
+            ['employee_id' => $employeeId],
+            ['query' => $method, 'source' => $method, 'latitude' => $latitude, 'longitude' => $longitude, 'geocoded_at' => now()],
+        );
     }
 
     /**

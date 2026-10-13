@@ -23,6 +23,8 @@ class PortalTeamMapTest extends TestCase
 
     private const BASE = '/api/development/portal/manage/map';
 
+    private const BASE_HOME = '/api/development/portal/user/home';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -88,5 +90,40 @@ class PortalTeamMapTest extends TestCase
         $this->assertSame(['Pampanga', 'region'], [$person['place'], $person['source']]);
 
         $this->withToken($this->token($member))->getJson(self::BASE)->assertForbidden();
+    }
+
+    // The reported ask: a member sets their own home after signing in; the address never moves it again.
+    public function test_a_member_sets_their_own_home_and_the_address_leaves_it(): void
+    {
+        $member = $this->employee('user');
+        $member->forceFill(['address' => 'Angeles City, Pampanga', 'location' => 'Pampanga'])->save();
+        DB::connection('portal')->table('employee_home_locations')->insert([
+            'employee_id' => $member->getKey(), 'query' => 'Angeles City, Pampanga', 'source' => 'address', 'latitude' => 15.145, 'longitude' => 120.5887,
+        ]);
+        $token = $this->token($member);
+        $home = self::BASE_HOME;
+
+        $this->withToken($token)->getJson($home)->assertOk()
+            ->assertJsonPath('data.home', null)
+            ->assertJsonPath('data.required', true)
+            ->assertJsonPath('data.suggested.latitude', 15.145);
+
+        $this->withToken($token)->putJson($home, ['latitude' => 15.15, 'longitude' => 120.6, 'method' => 'teleport'])->assertStatus(422);
+        $this->withToken($token)->putJson($home, ['latitude' => 95, 'longitude' => 120.6, 'method' => 'gps'])->assertStatus(422);
+        $this->withToken($token)->withHeader('X-Portal-Location', 'Angeles City')->putJson($home, ['latitude' => 15.1501, 'longitude' => 120.6002, 'method' => 'map'])->assertOk()
+            ->assertJsonPath('data.required', false)
+            ->assertJsonPath('data.home.method', 'map');
+
+        // A changed address does not move a home the person set.
+        $member->forceFill(['address' => 'Somewhere Else, Laguna'])->save();
+        Http::fake();
+        (new PortalHomeLocations(false))->refresh();
+        $this->assertSame('15.1501000', (string) DB::connection('portal')->table('employee_home_locations')->where('employee_id', $member->getKey())->value('latitude'));
+
+        // An executive is never asked.
+        $executive = Employee::query()->whereRaw("LOWER(COALESCE(status, '')) = 'active'")->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")->whereNotNull('id_no')->first();
+        if ($executive instanceof Employee) {
+            $this->withToken($this->token($executive))->getJson($home)->assertOk()->assertJsonPath('data.required', false);
+        }
     }
 }

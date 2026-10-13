@@ -6,9 +6,9 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Manage / Map (2026-10-13, user): where each active person lives, from their address on record (their
- * region when the address could not be placed), as PortalHomeLocations keeps it. Only administrators
- * open it (manage.map).
+ * Manage / Map (2026-10-13, user): where each active person lives, as PortalHomeLocations keeps it: the
+ * home they set themselves, else their address on record, else their region. Only administrators open
+ * it (manage.map).
  */
 final class PortalTeamMap
 {
@@ -59,7 +59,7 @@ final class PortalTeamMap
     // The town and province, not the street: the last two parts of the address, else the region.
     private static function place(object $row): ?string
     {
-        if ($row->source === 'address') {
+        if ($row->source !== 'region') {
             $parts = PortalHomeLocations::addressParts((string) $row->address);
             if ($parts !== []) {
                 return implode(', ', array_slice($parts, -2));
