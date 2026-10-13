@@ -267,29 +267,32 @@ final class PortalEmailMessages
     }
 
     /**
-     * A fixed notice to chosen members, as the portal itself: no footer, no copies. Missing Reports'
-     * reminders go this way, so they land in the outbox and the bell exactly as a sent email does.
+     * A fixed notice to chosen members, as the portal itself: the system letter with the Company footer,
+     * no copies. Missing Reports' reminders go this way, so they land in the outbox and the bell exactly
+     * as a sent email does.
      *
      * @param  list<int>  $memberIds
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function sendToMembers(Employee $actor, Request $request, array $memberIds, string $subject, string $body, string $linkPath): array
     {
+        [$footerBody, $footerFormat] = PortalNotificationEmails::companyFooter();
+
         return $this->deliver(
             $actor,
             $request,
             'notice',
             $subject,
-            $body,
-            PortalEmailMarkup::FORMAT_MARKUP,
+            PortalLetters::body(null, $body),
+            PortalEmailMarkup::FORMAT_LETTER,
             null,
-            null,
-            null,
+            $footerBody,
+            $footerFormat,
             PortalEmailAudience::MEMBERS,
             ['departments' => [], 'roles' => [], 'memberIds' => array_values($memberIds), 'emails' => []],
             [],
             [],
-            null,
+            PortalNotificationEmails::FROM_NAME,
             null,
             $linkPath,
         );
@@ -512,13 +515,12 @@ final class PortalEmailMessages
         }
     }
 
-    // The fixed test mail `php artisan portal:mail-test` sends.
+    // The fixed test mail `php artisan portal:mail-test` sends: the same letter every system email is.
     public static function testMail(): PortalEmailMail
     {
-        return new PortalEmailMail(
+        return PortalLetters::letter(
             'IKAIKA Portal mail test',
-            "This is a **test** from the portal.\nIf you can read this, sending works.",
-            'Sent by the portal\'s mail test.',
+            PortalLetters::body(null, "This is a **test** from the portal.\nIf you can read this, sending works."),
         );
     }
 

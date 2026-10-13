@@ -506,8 +506,8 @@ final class PortalCalendarEvents
             PortalNotificationType::CALENDAR_EVENT_CREATED,
             'New event',
             $copy,
-            null,
-            null,
+            PortalShellPath::EVENT_CALENDAR,
+            'Open the calendar',
             ['recordId' => 'calendar-'.$id],
         );
         $inviteeIds = array_values(array_diff($memberIds, [$employeeId]));
@@ -517,8 +517,8 @@ final class PortalCalendarEvents
                 PortalNotificationType::CALENDAR_EVENT_CREATED,
                 'New event',
                 $copy,
-                null,
-                null,
+                PortalShellPath::EVENT_CALENDAR,
+                'Open the calendar',
                 ['recordId' => 'calendar-'.$id],
                 $employeeId,
             );

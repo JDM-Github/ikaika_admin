@@ -11,8 +11,9 @@ use Throwable;
 
 /**
  * The portal's own letters to one address: the composer's letter design, the Company footer under
- * it, from IKAIKA Portal. Shared pages, registrations and email sign-in send through here, so every
- * system letter looks the same as the notification emails.
+ * it, from IKAIKA Portal. Every email the system writes by itself -- codes, share letters,
+ * registrations, notifications, access alerts -- goes through here, and opens and closes the same
+ * way (body()), so no two of them ever look or read differently.
  *
  * A letter goes to the mail queue, since each one is a round trip to the mail relay, seconds long.
  * A one-time code cannot wait for the queue's next minute while someone stares at the screen, so
@@ -23,15 +24,26 @@ final class PortalLetters
 {
     private const FAILED = 'portal.letter.failed';
 
+    // A letter with no name to greet still opens the same way.
+    private const NO_NAME = 'there';
+
     /**
      * @param  list<array{name: string, data: string, mime: string}>  $inlineImages  data is base64
+     * @param  array<string, scalar|null>  $context  what the failure log names instead of the subject; never an address
      */
-    public static function send(string $to, string $subject, string $body, array $inlineImages = []): void
-    {
+    public static function send(
+        string $to,
+        string $subject,
+        string $body,
+        array $inlineImages = [],
+        string $failureEvent = self::FAILED,
+        array $context = [],
+    ): void {
+        $context = $context === [] ? ['subject' => $subject] : $context;
         try {
-            Queue::push(new SendPortalMail([$to], self::letter($subject, $body, $inlineImages), self::FAILED, ['subject' => $subject]));
+            Queue::push(new SendPortalMail([$to], self::letter($subject, $body, $inlineImages), $failureEvent, $context));
         } catch (Throwable $error) {
-            Log::warning(self::FAILED, ['subject' => $subject, 'reason' => $error->getMessage()]);
+            Log::warning($failureEvent, [...$context, 'reason' => $error->getMessage()]);
         }
     }
 
@@ -49,10 +61,20 @@ final class PortalLetters
         });
     }
 
+    // The words every letter shares: a greeting by first name, the message, and the portal's sign-off.
+    public static function body(?string $name, string $message): string
+    {
+        $name = trim((string) $name);
+
+        return 'Hi '.($name !== '' ? $name : self::NO_NAME).','
+            ."\n\n".trim($message)
+            ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME;
+    }
+
     /**
      * @param  list<array{name: string, data: string, mime: string}>  $inlineImages
      */
-    private static function letter(string $subject, string $body, array $inlineImages = []): PortalEmailMail
+    public static function letter(string $subject, string $body, array $inlineImages = []): PortalEmailMail
     {
         [$footerBody, $footerFormat] = PortalNotificationEmails::companyFooter();
 

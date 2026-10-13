@@ -61,14 +61,24 @@ final class PortalEmailMarkup
 
     private const LINK_COLOR = '#2563eb';
 
+    // The message text, one size for every design, so a letter and a formatted email read alike.
+    private const TEXT_SIZE = '14px';
+
+    /*
+     * Phones and webmail turn a bare address, date or domain into their own blue, underlined link. The
+     * meta asks them not to; the rule styles any they make anyway like the text around it.
+     */
+    private const DETECTION_HEAD = '<meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">'
+        .'<style>a[x-apple-data-detectors]{color:inherit !important;text-decoration:none !important;font-size:inherit !important;font-family:inherit !important;font-weight:inherit !important;line-height:inherit !important;}</style>';
+
     /**
      * @var array<string, string>
      */
     private const TAG_STYLES = [
         'p' => 'margin:0 0 12px',
-        'h1' => 'margin:0 0 12px;font-size:22px;line-height:1.3',
-        'h2' => 'margin:0 0 12px;font-size:19px;line-height:1.35',
-        'h3' => 'margin:0 0 10px;font-size:16px;line-height:1.4',
+        'h1' => 'margin:0 0 12px;font-size:20px;line-height:1.3',
+        'h2' => 'margin:0 0 12px;font-size:17px;line-height:1.35',
+        'h3' => 'margin:0 0 10px;font-size:15px;line-height:1.4',
         'ul' => 'margin:0 0 12px;padding-left:22px',
         'ol' => 'margin:0 0 12px;padding-left:22px',
         'li' => 'margin:0 0 4px',
@@ -150,7 +160,7 @@ final class PortalEmailMarkup
         }
 
         return self::FONT_HEAD
-            .'<div style="font-family:'.self::FONT_STACK.';font-size:15px;line-height:1.6;color:'.self::TEXT_COLOR.'">'
+            .'<div style="font-family:'.self::FONT_STACK.';font-size:'.self::TEXT_SIZE.';line-height:1.6;color:'.self::TEXT_COLOR.'">'
             .self::fragment($body, $bodyFormat)
             .$footerHtml
             .'</div>';
@@ -176,6 +186,7 @@ final class PortalEmailMarkup
             '<meta charset="utf-8">',
             '<meta name="viewport" content="width=device-width,initial-scale=1">',
             self::FONT_HEAD,
+            self::DETECTION_HEAD,
             '</head>',
             '<body style="margin:0;padding:0;background-color:#f3f4f6;">',
             '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6;border-collapse:collapse;">',
@@ -195,7 +206,7 @@ final class PortalEmailMarkup
             '                </td>',
             '                <td valign="middle" style="'.$font.';">',
             '                  <div style="font-size:15px;line-height:20px;font-weight:700;letter-spacing:0.3px;color:'.self::BRAND_COLOR.';">IKAIKA BIM</div>',
-            '                  <div style="font-size:12px;line-height:18px;color:#6b7280;">ikaikabim.com</div>',
+            '                  <div style="font-size:12px;line-height:18px;color:#6b7280;"><a href="https://ikaikabim.com" target="_blank" rel="noopener" style="color:#6b7280;text-decoration:none;">ikaikabim.com</a></div>',
             '                </td>',
             '              </tr>',
             '            </table>',
@@ -203,7 +214,7 @@ final class PortalEmailMarkup
             '        </tr>',
             '        <!-- Letter -->',
             '        <tr>',
-            '          <td style="padding:28px 32px 12px;'.$font.';font-size:15px;line-height:1.6;color:'.self::TEXT_COLOR.';">',
+            '          <td style="padding:28px 32px 12px;'.$font.';font-size:'.self::TEXT_SIZE.';line-height:1.6;color:'.self::TEXT_COLOR.';">',
             $content,
             '          </td>',
             '        </tr>',
@@ -220,6 +231,16 @@ final class PortalEmailMarkup
             '</body>',
             '</html>',
         ]);
+    }
+
+    /*
+     * Text from people (names, titles, reasons) set inside a letter's markup, so a * or [ in it stays
+     * itself. Dots and dashes are left alone: they only mean something at a line's start, where this
+     * text never sits, and escaping them would cut a web address in it in two.
+     */
+    public static function escape(string $text): string
+    {
+        return (string) preg_replace('/([\\\\`*_{}\[\]()#+!|<>~])/', '\\\\$1', $text);
     }
 
     public static function html(string $markup): string
@@ -239,10 +260,10 @@ final class PortalEmailMarkup
         // CommonMark writes <img ... /> with no size; a large picture must not overflow the message.
         $html = (string) preg_replace('/<img\s/', '<img style="display:block;max-width:100%;height:auto;border:0" ', $html);
 
-        // Links open in a new tab and read as links in every client, dark or light.
+        // Links open in a new tab and read as links by their colour alone, dark or light: no underline.
         return (string) preg_replace(
             '/<a href="([^"]*)"/',
-            '<a href="$1" target="_blank" rel="noopener" style="color:'.self::LINK_COLOR.';text-decoration:underline"',
+            '<a href="$1" target="_blank" rel="noopener" style="color:'.self::LINK_COLOR.';text-decoration:none"',
             $html,
         );
     }

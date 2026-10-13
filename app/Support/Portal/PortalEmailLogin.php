@@ -111,12 +111,11 @@ final class PortalEmailLogin
 
     private function letter(string $firstName, string $code): string
     {
-        $name = trim($firstName) !== '' ? trim($firstName) : 'there';
-
-        return 'Hi '.$name.','
-            ."\n\nYour IKAIKA Portal sign-in code is **".$code.'**. It is good for '.self::TTL_MINUTES.' minutes.'
-            ."\n\nIf you did not try to sign in, you can ignore this email; nobody can sign in without the code."
-            ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME;
+        return PortalLetters::body(
+            $firstName,
+            'Your IKAIKA Portal sign-in code is **'.$code.'**. It is good for '.self::TTL_MINUTES.' minutes.'
+                ."\n\nIf you did not try to sign in, you can ignore this email; nobody can sign in without the code.",
+        );
     }
 
     private function connection(): Connection

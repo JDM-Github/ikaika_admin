@@ -2,17 +2,12 @@
 
 namespace App\Support\Portal;
 
-use App\Jobs\SendPortalMail;
-use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailBlock;
 use App\Modules\Portal\Models\Employee;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Queue;
-use Throwable;
 
 /**
- * The email a mapped inbox notice also sends: the notice's title and message as a letter built by
- * PortalEmailMarkup, the Company footer under it, from the portal's own address. The
+ * The email a mapped inbox notice also sends: a letter (PortalLetters) greeting the person by name,
+ * the notice's message and its link, the Company footer under it, from the portal's own address. The
  * notification_emails setting turns the whole thing off, so a local run that must not reach real
  * inboxes sends nothing, and the inbox row is written either way: a send that fails is logged and
  * dropped, never allowed to fail the write it was telling about. The email waits in the mail queue,
@@ -65,35 +60,27 @@ final class PortalNotificationEmails
             return;
         }
 
-        $context = ['employee_id' => (int) $employee->getKey(), 'type' => $type];
-        try {
-            [$footerBody, $footerFormat] = self::companyFooter();
-            Queue::push(new SendPortalMail([$email], new PortalEmailMail(
-                $title,
-                $this->body($title, $message, $linkPath, $linkLabel),
-                $footerBody,
-                PortalEmailMarkup::FORMAT_MARKUP,
-                $footerFormat,
-                self::FROM_NAME,
-                null,
-            ), self::FAILED, $context));
-        } catch (Throwable) {
-            // The inbox row is already there, so a mail that cannot even be queued is only ever a warning.
-            Log::warning(self::FAILED, $context);
-        }
+        // The inbox row is already there, so a mail that fails is only ever a warning.
+        PortalLetters::send(
+            $email,
+            $title,
+            PortalLetters::body((string) $employee->first_name, $this->message($message, $linkPath, $linkLabel)),
+            [],
+            self::FAILED,
+            ['employee_id' => (int) $employee->getKey(), 'type' => $type],
+        );
     }
 
-    // The letter's message: the notice's title as a heading, its message under it, and its link last.
-    private function body(string $title, string $message, ?string $linkPath, ?string $linkLabel): string
+    // The notice's own words, then its link. Names and titles are people's text, so markup in them stays text.
+    private function message(string $message, ?string $linkPath, ?string $linkLabel): string
     {
-        $lines = ['# '.$title, '', $message];
+        $text = PortalEmailMarkup::escape($message);
         $url = $this->linkUrl($linkPath);
         if ($url !== null && $linkLabel !== null && trim($linkLabel) !== '') {
-            $lines[] = '';
-            $lines[] = '['.trim($linkLabel).']('.$url.')';
+            $text .= "\n\n[".trim($linkLabel).']('.$url.')';
         }
 
-        return implode("\n", $lines);
+        return $text;
     }
 
     // The same base PortalSharedPages::link uses; empty locally, so the link stays a path.

@@ -199,12 +199,12 @@ SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width
         &nbsp;&middot;&nbsp;
         Automated communication
       </div>
-      <!-- Location -->
+      <!-- Location: a link of its own, so a mail client does not underline it as an address it found -->
       <div style="margin-top:3px;font-size:11px;line-height:16px;color:#64748b;">
-        11th Floor, SM Aura Office Tower &nbsp;&middot;&nbsp; 26th St. corner McKinley Parkway
+        <a href="https://www.google.com/maps/search/?api=1&amp;query=SM+Aura+Office+Tower+Taguig" style="color:#64748b;text-decoration:none;">11th Floor, SM Aura Office Tower &nbsp;&middot;&nbsp; 26th St. corner McKinley Parkway</a>
       </div>
       <div style="font-size:11px;line-height:16px;color:#64748b;">
-        Fort Bonifacio, Taguig City, Metro Manila, Philippines
+        <a href="https://www.google.com/maps/search/?api=1&amp;query=SM+Aura+Office+Tower+Taguig" style="color:#64748b;text-decoration:none;">Fort Bonifacio, Taguig City, Metro Manila, Philippines</a>
       </div>
     </td>
   </tr>

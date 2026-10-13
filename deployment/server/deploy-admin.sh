@@ -89,6 +89,8 @@ set_release_key PORTAL_AZURE_REDIRECT_URI "${AZURE_REDIRECT_URI:-$PORTAL_URL}"
 # Mail goes through the database queue, which the scheduler cron below works off every minute; with the sync default
 # every notification and Send Email would hold the request for a relay round trip per email.
 set_release_key QUEUE_CONNECTION database
+# The name every email without a sender of its own goes out under, and what "Send as me" reads "<Name> via ..." with.
+set_release_key MAIL_FROM_NAME '"IKAIKA Portal"'
 chmod 600 "$NEW/.env"
 chmod -R 775 "$NEW/storage" "$NEW/bootstrap/cache"
 

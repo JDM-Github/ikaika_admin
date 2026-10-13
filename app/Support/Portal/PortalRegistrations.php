@@ -629,10 +629,11 @@ final class PortalRegistrations
         PortalLetters::sendAfterResponse(
             strtolower(trim((string) $registration->email)),
             'Your code for '.trim((string) $registration->candidate_name),
-            'Hi '.trim((string) $registration->candidate_name).','
-                ."\n\nYour code is **".$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                ."\n\nOpen your registration: [".$link.']('.$link.')'
-                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
+            PortalLetters::body(
+                (string) $registration->candidate_name,
+                'Your code is **'.$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
+                    ."\n\nOpen your registration: [".$link.']('.$link.')',
+            ),
         );
     }
 

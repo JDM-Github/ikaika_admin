@@ -2,14 +2,17 @@
 
 namespace Tests\Feature;
 
-use App\Mail\PortalAccessAlertMail;
+use App\Mail\PortalEmailMail;
 use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalAccessAlert;
 use App\Support\Portal\PortalAccessDenied;
+use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalManageUserPresenter;
+use App\Support\Portal\PortalNotificationEmails;
 use App\Support\Portal\PortalRole;
 use App\Support\Portal\PortalRules;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -315,7 +318,16 @@ class PortalManageUsersTest extends TestCase
             ->assertJsonPath('notified', true);
 
         $this->assertSame($executive->role, $executive->fresh()?->role);
-        Mail::assertSent(PortalAccessAlertMail::class);
+        // The system letter: letter design, Company footer, greeted by name, who tried what and why.
+        [$footerBody] = PortalNotificationEmails::companyFooter();
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('alerts@example.test')
+            && $mail->subjectLine === PortalAccessAlert::SUBJECT
+            && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
+            && $mail->fromName === PortalNotificationEmails::FROM_NAME
+            && $mail->footerBody === $footerBody
+            && str_starts_with($mail->body, 'Hi ')
+            && str_contains($mail->body, '**Tried:** `PATCH /api/development/portal/manage/users/'.$executive->id.'/role`')
+            && str_contains($mail->body, 'The executive role cannot be changed'));
     }
 
     public function test_an_admin_cannot_remove_their_own_role(): void
@@ -374,11 +386,15 @@ class PortalManageUsersTest extends TestCase
         $probe = fn () => $this->patchJson("/api/development/portal/manage/users/{$executive->id}/role", ['role' => PortalRole::USER], $headers);
 
         $probe()->assertForbidden()->assertJsonPath('notified', true);
+        $alerts = Mail::sent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->subjectLine === PortalAccessAlert::SUBJECT)->count();
         $probe()->assertForbidden()
             ->assertJsonPath('notified', false)
             ->assertJsonPath('warning', PortalAccessDenied::WARNING_RECORDED);
 
-        Mail::assertSent(PortalAccessAlertMail::class, 1);
+        // One letter per holder the first time, and none more for the repeat.
+        $this->assertGreaterThan(0, $alerts);
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('alerts@example.test'));
+        $this->assertSame($alerts, Mail::sent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->subjectLine === PortalAccessAlert::SUBJECT)->count());
     }
 
     private function tokenForAdmin(): string
@@ -476,7 +492,8 @@ class PortalManageUsersTest extends TestCase
             'Authorization' => 'Bearer '.$this->loginToken($actor),
         ])->assertForbidden()->assertJsonPath('notified', true);
 
-        Mail::assertSent(PortalAccessAlertMail::class, fn (PortalAccessAlertMail $mail): bool => ! $mail->hasTo('quiet-admin@example.test'));
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->subjectLine === PortalAccessAlert::SUBJECT);
+        Mail::assertNotSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('quiet-admin@example.test'));
     }
 
     private function giveAlertMailbox(Employee $employee, string $email = 'alerts@example.test'): void

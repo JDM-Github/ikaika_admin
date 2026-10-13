@@ -17,26 +17,32 @@ Last checked against the code: 2026-10-13.
 | Piece | What it is |
 | --- | --- |
 | Address | Always `noreply@ikaikabim.com`. |
-| Sender name | **IKAIKA Portal** when the email sets it. One that does not set it uses `MAIL_FROM_NAME`: "IKAIKA Portal" locally, but **"IKAIKA Platform" on the Test Server** (its `.env` has `MAIL_FROM_NAME="${APP_NAME}"`). |
+| Sender name | **IKAIKA Portal**. Every system email sets it; Send Email's "Portal" sender uses `MAIL_FROM_NAME`, which `deploy-admin.sh` writes as `"IKAIKA Portal"` on every deploy (it used to be "IKAIKA Platform" on the Test Server). |
 | Transport | `MAIL_MAILER=wprelay`: each email is a POST to the WordPress plugin on ikaikabim.com, which sends it with `wp_mail`. A few seconds per email. See `docs/deploy/wordpress/`. |
 | Local | The same relay, or `MAIL_MAILER=log` (emails land in `storage/logs/laravel.log`). |
 | HTML builder | `PortalEmailMarkup::document()` -- one builder for every design below, the same one Send Email's preview uses. |
-| One sender for system letters | `PortalLetters::send()`: Letter design + Company footer + IKAIKA Portal, through the **mail queue**. A one-time code uses `PortalLetters::sendAfterResponse()` instead: same letter, sent right **after the response** (`defer()`), so it never waits for the queue. A failure is logged as `portal.letter.failed`. |
+| One sender for system letters | `PortalLetters::send()`: Letter design + Company footer + IKAIKA Portal, through the **mail queue**. Every system email's words go through `PortalLetters::body($firstName, $message)`: "Hi {first name}," (or "Hi there,"), the message, then "Best Regards, / IKAIKA Portal" -- so no two can drift apart. People's own text set in a letter (names, titles, reasons) goes through `PortalEmailMarkup::escape()` so a `*` or `[` stays text. A one-time code uses `PortalLetters::sendAfterResponse()` instead: same letter, sent right **after the response** (`defer()`), so it never waits for the queue. A failure is logged as `portal.letter.failed`. |
 | Mail queue | The database queue (`jobs` table). The server has no always-on worker: the scheduler's every-minute cron starts `queue:work --stop-when-empty --max-time=55`, so a queued email leaves within about a minute. Each email gets 3 tries (now, +1 min, +5 min); then a system email is logged under its own failure event and a Send Email copy is counted failed on its row. `deploy-admin.sh` sets `QUEUE_CONNECTION=database` on the server; locally `.env` keeps `sync`, which sends inside the request as before. Jobs: `App\Jobs\SendPortalMail` (system emails), `App\Jobs\DeliverPortalEmail` (Send Email copies). |
 | Test | `php artisan portal:mail-test [to]` sends a test and prints the relay's answer. |
 
 ## The designs
 
-Every email uses one of these. The **Company footer** is the first footer block in Send Email -> Footers
-(logo, IKAIKA BIM, ikaikabim.com, info@, "IKAIKA Portal - Automated communication", the office address,
-and the confidentiality note).
+**Every email the system writes by itself is a Letter with the Company footer.** Formatted and HTML are
+only for Send Email. The **Company footer** is the first footer block in Send Email -> Footers (logo,
+IKAIKA BIM, ikaikabim.com, info@, "IKAIKA Portal - Automated communication", the office address, and the
+confidentiality note).
+
+Links are **never underlined**: they read by their blue colour alone. Anything a mail client would find
+by itself and underline (the letterhead's ikaikabim.com, the footer's office address, which links to the
+map) is a link of our own, styled as plain text, and every letter asks phones not to detect addresses,
+dates or numbers (`format-detection` meta + an `x-apple-data-detectors` rule). Message text is **14px**
+(headings 20 / 17 / 15px).
 
 | Design | What the reader sees | Builder |
 | --- | --- | --- |
-| **Letter** | A white card with rounded corners on a light grey page, max 640px wide. At the top the **letterhead**: a blue bar, the IKAIKA BIM logo, "IKAIKA BIM" and "ikaikabim.com". The message below, in Inter 15px. The footer, when there is one, inside the card under a thin rule. | `FORMAT_LETTER` -> `PortalEmailMarkup::letter()` |
-| **Formatted** | No card, no letterhead: the message as styled text (Inter 15px, bold, headings, links), then the footer under a thin rule when there is one. | `FORMAT_MARKUP` |
+| **Letter** | A white card with rounded corners on a light grey page, max 640px wide. At the top the **letterhead**: a blue bar, the IKAIKA BIM logo, "IKAIKA BIM" and "ikaikabim.com". The message below, in Inter 14px. The footer, when there is one, inside the card under a thin rule. | `FORMAT_LETTER` -> `PortalEmailMarkup::letter()` |
+| **Formatted** | No card, no letterhead: the message as styled text (Inter 14px, bold, headings, links), then the footer under a thin rule when there is one. Send Email only. | `FORMAT_MARKUP` |
 | **HTML** | Whatever HTML was written, sent as is; the footer goes before `</body>` (or at a `portal:footer` marker). Send Email only. | `FORMAT_HTML` |
-| **Plain** | Unstyled text in a `<pre>` block (keeps line breaks), no letterhead, no footer. | `PortalAccessAlertMail` only |
 
 Message text is written in the portal's markup (`**bold**`, `# heading`, `[label](link)`, `![alt](image)`);
 one line break stays a line break.
@@ -52,19 +58,45 @@ one line break stays a line break.
 | 3 | Shared page: new password | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | **QR** image inline | Queue |
 | 4 | Shared page: sign-in code | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | - | After response |
 | 5 | Registration code | The candidate | Letter | Yes | Yes | IKAIKA Portal | - | After response |
-| 6 | Notification emails (11 kinds) | Managers or the person concerned | Formatted | **No** | Yes | IKAIKA Portal | Link to the page | Queue |
-| 7 | Blocked access alert | Holders of Access alerts | Plain | **No** | **No** | Default (see above) | - | Queue |
+| 6 | Notification emails (11 kinds) | Managers or the person concerned | Letter | Yes | Yes | IKAIKA Portal | Link to the page | Queue |
+| 7 | Blocked access alert | Holders of Access alerts, one letter each | Letter | Yes | Yes | IKAIKA Portal | - | Queue |
 | 8 | Send Email (composer) | Whoever the admin picks | Admin's choice | If Letter | Admin's choice | IKAIKA Portal, or "{admin} via IKAIKA Portal" + Reply-To the admin | Images, attachments | Queue, one copy per recipient |
-| 9 | Mail test | The address given | Formatted | No | A one-line test footer | Default (see above) | - | Immediately |
+| 9 | Mail test | The address given | Letter | Yes | Yes | IKAIKA Portal | - | Immediately |
 
 **Drafts that open Send Email (#8) pre-filled** -- nothing is sent until the admin presses Send, and
-the admin can change everything:
+the admin can change everything. All three open as the same letter as the system emails: **Letter**
+design, category Notice, the **Company footer** (by name, `SendEmailConstant.companyFooterName`), a
+greeting by first name, links as `[link](link)`, a password in bold, signed "Best Regards," + the
+signed-in admin's name.
 
-| Draft | Opened from | Design it opens with | Footer | Code (portal) |
-| --- | --- | --- | --- | --- |
-| Missing report reminder | Manage / Missing Reports -> Email | Whatever the composer last used | Whatever the composer last used | `MissingReportsConstant.emailSubject/emailBody` |
-| Onboarding requirements | Manage / Onboarding -> Send | Whatever the composer last used | Whatever the composer last used | `OnboardingConstant.emailSubject/emailBody` |
-| Shared page resend | Manage / Shared Pages -> Link and QR -> Resend by email | **Letter**, category Notice | **Company footer** | `SharedPagesConstant.emailSubject/emailBody` |
+| Draft | Opened from | Greets | Code (portal) |
+| --- | --- | --- | --- |
+| Missing report reminder | Manage / Missing Reports -> Email | The member's first name, or "everyone" for several | `MissingReportsConstant.emailSubject/emailBody` |
+| Onboarding requirements | Manage / Onboarding -> Send | The candidate's first name | `OnboardingConstant.emailSubject/emailBody` |
+| Shared page resend | Manage / Shared Pages -> Link and QR -> Resend by email | The guest name, else the share name | `SharedPagesConstant.emailSubject/emailBody` |
+
+Missing report reminder:
+
+> Hi {first name | everyone},
+>
+> We have no report from you for {day}. Please file it as a Late Report when you can.
+>
+> Best Regards,
+> {admin}
+
+Onboarding requirements:
+
+> Hi {first name},
+>
+> Attached are your Job Offer Letter and Employment Agreement Contract. Please review them, and once you accept, sign and complete the documents and send them back to us.
+>
+> When your requirements are complete, submit them on your registration page:
+>
+> Link: {link}
+> Password: **{password}**
+>
+> Best Regards,
+> {admin}
 
 ---
 
@@ -179,26 +211,35 @@ Every in-portal notice of the kinds below is also emailed.
 
 | | |
 | --- | --- |
-| Design | **Formatted, no letterhead**, Company footer, from IKAIKA Portal, through the mail queue (one email per recipient) |
-| Body | `# {subject}` as a heading, the message, then the link (when the notice has one) as `[{link label}]({portal}/{page})` |
+| Design | Letter, letterhead, Company footer, from IKAIKA Portal, through the mail queue (one email per recipient) |
+| Body | "Hi {first name},", the message, then the link (when the notice has one) as `[{link label}]({portal}/{page})`, then "Best Regards, IKAIKA Portal" |
 | On / off | Settings -> Advanced (Developer mode only); default from `PORTAL_NOTIFICATION_EMAILS` |
 | Skipped | Nobody is emailed about their own action; an employee with no valid work email gets no email |
 | Code | `PortalAudit::notify / notifyEach / notifyManagers / notifyIfOther` -> `PortalNotificationEmails::send` -> `SendPortalMail` job; wording in `PortalActivityCopy`; a failure is logged as `portal.notification.email.failed` |
 
-Dates read like "Monday, October 12, 2026"; a range reads "from {date} to {date}".
+Dates read like "Monday, October 12, 2026"; one day reads "for {date}", a range "from {date} to {date}".
+
+> Hi {first name},
+>
+> Juan Dela Cruz filed a leave request for Monday, October 12, 2026.
+>
+> [Open queue]({portal}/manage/manage-requests)
+>
+> Best Regards,
+> IKAIKA Portal
 
 | Kind (type key) | Subject | Message | Link | Goes to |
 | --- | --- | --- | --- | --- |
-| Leave filed (`requests.leave.filed`) | New leave request | {name} filed a leave request {date or range}. | Open queue -> Manage / Requests | The managers who decide it |
-| Overtime filed (`requests.overtime.filed`) | New overtime request | {name} filed a overtime request {date}. | Open queue | The managers who decide it |
-| Offset filed (`requests.offset.filed`) | New offset request | {name} filed a offset request {date}. | Open queue | The managers who decide it |
-| Reimbursement filed (`requests.reimbursement.filed`) | New reimbursement request | {name} filed a reimbursement request {date}. | Open queue | The managers who decide it |
+| Leave filed (`requests.leave.filed`) | New leave request | {name} filed a leave request for {date} (or from {date} to {date}). | Open queue -> Manage / Requests | The managers who decide it |
+| Overtime filed (`requests.overtime.filed`) | New overtime request | {name} filed an overtime request for {date}. | Open queue | The managers who decide it |
+| Offset filed (`requests.offset.filed`) | New offset request | {name} filed an offset request for {date}. | Open queue | The managers who decide it |
+| Reimbursement filed (`requests.reimbursement.filed`) | New reimbursement request | {name} filed a reimbursement request for {date}. | Open queue | The managers who decide it |
 | Request decided (`requests.<kind>.approved` / `.rejected` / `.pending`) | Request approved / Request rejected / Request updated (*Late report ...* for a late report) | Your {kind} for {date} was approved / rejected / set back to pending by {manager}. | Open requests -> User Requests | The employee who filed it |
 | Project requested (`projects.requested`) | New project to approve (or Project sent again) | {name} added the project {project} and it waits for approval. (or: {name} sent the project {project} again for approval.) | Open Manage / Projects | Project Approvers whose reach covers it |
 | Project members added (`projects.requested.members`) | You were added to a project | {name} added you to the project {project}. | View Projects | The members added |
 | Project approved (`projects.approved`) | Project approved | {name} approved the project {project}. | Created Projects | The person who requested it |
 | Project modified (`projects.modified`) | Project updated | {name} edited the project {project}. | Open Manage / Projects | Project Approvers |
-| Event created (`calendar.event.created`) | New event | {name} added the event {title} {date or range}. | *(none)* | Holders of Manage / Reports, and the invitees |
+| Event created (`calendar.event.created`) | New event | {name} added the event {title} {date or range}. | Open the calendar -> Event Calendar | Holders of Manage / Reports, and the invitees |
 
 **Not emailed** (portal notice only): request cancelled, late report filed, role or department
 changed, project rejected, recycle bin restore, "email sent".
@@ -208,22 +249,27 @@ changed, project rejected, recycle bin restore, "email sent".
 | | |
 | --- | --- |
 | When | A signed-in user is refused a page or action (403); at most once per person, method and path every 15 minutes |
-| To | Everyone holding **Access alerts** (`administration.alerts`; admins and executives by preset) |
-| Design | **Plain** (unstyled `<pre>` text), no letterhead, no footer, sender name not set (Test Server: "IKAIKA Platform"), through the mail queue |
-| Code | `PortalAccessAlert::report` -> `SendPortalMail` job -> `App\Mail\PortalAccessAlertMail`; a failure is logged as `portal.access.alert.failed` |
+| To | Everyone holding **Access alerts** (`administration.alerts`; admins and executives by preset), each in a letter of their own |
+| Design | Letter, letterhead, Company footer, from IKAIKA Portal, through the mail queue |
+| Code | `PortalAccessAlert::report` -> `PortalLetters::send`; a failure is logged as `portal.access.alert.failed` |
 
 **Subject:** `Blocked portal access attempt`
 
-> An authenticated portal user tried to reach something they cannot access.
+> Hi {first name},
 >
-> Employee id: {id}
-> Id no: {ID number}
-> Name: {name}
-> Role: {role} / {role level}
-> Request: {method} {path}
-> IP: {ip}
-> When: {ISO date and time}
-> Reason: {why it was refused}
+> A signed-in portal user tried to reach something they are not allowed to.
+>
+> **Who:** {name} (ID no. {ID number})
+> **Role:** {role} / {role level}
+> **Tried:** `{METHOD} /{path}`
+> **Refused because:** {why it was refused}
+> **From IP:** {ip}
+> **When:** {Tuesday, October 13, 2026 at 3:24 pm} (portal time)
+>
+> You get this because you hold Access alerts. The same attempt by the same person is reported at most once every 15 minutes.
+>
+> Best Regards,
+> IKAIKA Portal
 
 ## 8. Send Email (composer)
 
@@ -242,13 +288,18 @@ changed, project rejected, recycle bin restore, "email sent".
 | | |
 | --- | --- |
 | When | `php artisan portal:mail-test [to] [--message=<id>]` |
-| Design | Formatted, no letterhead, a one-line footer "Sent by the portal's mail test."; `--message` resends a stored All Emails message exactly as it was built |
-| Code | `routes/console.php`, `PortalEmailMessages::testMail` |
+| Design | Letter, letterhead, Company footer, from IKAIKA Portal; `--message` resends a stored All Emails message exactly as it was built |
+| Code | `routes/console.php`, `PortalEmailMessages::testMail` -> `PortalLetters::letter` |
 
 **Subject:** `IKAIKA Portal mail test`
 
+> Hi there,
+>
 > This is a **test** from the portal.
 > If you can read this, sending works.
+>
+> Best Regards,
+> IKAIKA Portal
 
 ---
 
@@ -256,12 +307,7 @@ changed, project rejected, recycle bin restore, "email sent".
 
 | # | Problem | Effect | Fix |
 | --- | --- | --- | --- |
-| 7 | No letterhead, no Company footer; unstyled text | It looks unlike every other system email | Move to `PortalLetters::send` with a Letter body |
-| 6 | Formatted, not Letter: no letterhead | Notification emails look plainer than the sign-in and share emails | Switch `PortalNotificationEmails` to `FORMAT_LETTER` |
-| 7, 9 | Sender name not set | They arrive as **"IKAIKA Platform"** on the Test Server | Set IKAIKA Portal, or fix `MAIL_FROM_NAME` on the server |
 | 2, 3, 6, 7, 8 | Queued emails need the server's scheduler cron | Without the every-minute `schedule:run` cron nothing works the queue: those emails wait, and Send Email rows stay Sending | Every admin deploy adds the cron if it is missing; check cPanel -> Cron Jobs if mail stops |
-| 6 | "{name} filed a leave request Monday, ..." -- no "for"; "a overtime / a offset" | Reads oddly | Reword `PortalActivityCopy::notifyFiled` |
-| 6 | Event created has no link | The reader cannot open the event from the email | Give the notice a link to the Event Calendar |
 | Resend draft | No QR code | Weaker than #2 | Send Email can only attach uploaded files; needs a different approach |
 
 ---
@@ -278,7 +324,9 @@ Claude to apply it.
 ## Adding a new email
 
 1. Send it through `PortalLetters::send()` (Letter, Company footer, IKAIKA Portal, through the mail queue);
-   a one-time code someone waits on uses `PortalLetters::sendAfterResponse()`. Anything different -- say why here.
+   a one-time code someone waits on uses `PortalLetters::sendAfterResponse()`. Write its words with
+   `PortalLetters::body($firstName, $message)` and pass people's own text through `PortalEmailMarkup::escape()`.
+   Anything different -- say why here.
 2. Add it to [All emails at a glance](#all-emails-at-a-glance) and give it a section with its design,
    subject, body, recipients and trigger.
 3. Test it with `Mail::fake()` (recipient, subject, design); the test queue is `sync`, so a queued email is sent

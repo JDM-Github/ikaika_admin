@@ -2,14 +2,10 @@
 
 namespace App\Support\Portal;
 
-use App\Jobs\SendPortalMail;
-use App\Mail\PortalAccessAlertMail;
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Queue;
-use Throwable;
 
 /**
  * Emails whoever holds Access alerts (administration.alerts) when a signed-in user hits a route they
@@ -17,14 +13,19 @@ use Throwable;
  * or a limit on it, takes someone off the list, and a gift puts them on it.
  *
  * Unauthenticated 401s are login noise and stay quiet. Mail is rate-limited per actor,
- * method, and path so a probe cannot become a mail bomb. The body never includes tokens. The alert
- * waits in the mail queue, so the refused request answers without a relay round trip.
+ * method, and path so a probe cannot become a mail bomb. The body never includes tokens. Each holder
+ * gets their own letter (PortalLetters) through the mail queue, so the refused request answers
+ * without a relay round trip.
  */
 final class PortalAccessAlert
 {
     public const CACHE_TTL_SECONDS = 900;
 
+    public const SUBJECT = 'Blocked portal access attempt';
+
     private const ALERTS_RULE = 'administration.alerts';
+
+    public function __construct(private readonly PortalTimezone $timezone) {}
 
     public function report(Request $request, string $reason): bool
     {
@@ -45,34 +46,53 @@ final class PortalAccessAlert
             return false;
         }
 
-        $recipients = $this->recipientEmails($actor);
+        $recipients = $this->recipients($actor);
         if ($recipients === []) {
             return false;
         }
 
-        try {
-            Queue::push(new SendPortalMail($recipients, new PortalAccessAlertMail(
-                employeeId: $actor->getKey(),
-                idNo: $this->plain((string) $actor->id_no),
-                name: $this->plain(trim((string) $actor->first_name.' '.(string) $actor->last_name)),
-                role: $this->plain(trim((string) $actor->role.' / '.(string) $actor->role_level)),
-                method: $request->method(),
-                path: $request->path(),
-                ip: (string) ($request->ip() ?? 'unknown'),
-                reason: $this->plain($reason),
-                occurredAt: now()->toIso8601String(),
-            ), 'portal.access.alert.failed', ['employee_id' => (int) $actor->getKey()]));
-        } catch (Throwable) {
-            return false;
+        $message = $this->message($actor, $request, $reason);
+        foreach ($recipients as $email => $firstName) {
+            PortalLetters::send(
+                $email,
+                self::SUBJECT,
+                PortalLetters::body($firstName, $message),
+                [],
+                'portal.access.alert.failed',
+                ['employee_id' => (int) $actor->getKey()],
+            );
         }
 
         return true;
     }
 
+    // What was tried, by whom, and why it was refused; every value is the user's own text, so it is escaped.
+    private function message(Employee $actor, Request $request, string $reason): string
+    {
+        $name = trim((string) $actor->first_name.' '.(string) $actor->last_name);
+        $idNo = trim((string) $actor->id_no);
+        $role = trim((string) $actor->role.' / '.(string) $actor->role_level, ' /');
+
+        return implode("\n", [
+            'A signed-in portal user tried to reach something they are not allowed to.',
+            '',
+            '**Who:** '.$this->text($name === '' ? 'Unnamed account' : $name).($idNo === '' ? '' : ' (ID no. '.$this->text($idNo).')'),
+            '**Role:** '.$this->text($role === '' ? 'None' : $role),
+            '**Tried:** `'.str_replace('`', '', $request->method().' /'.ltrim($request->path(), '/')).'`',
+            '**Refused because:** '.$this->text($reason),
+            '**From IP:** '.$this->text((string) ($request->ip() ?? 'unknown')),
+            '**When:** '.$this->timezone->now()->format('l, F j, Y \a\t g:i a'),
+            '',
+            'You get this because you hold Access alerts. The same attempt by the same person is reported at most once every 15 minutes.',
+        ]);
+    }
+
     /**
-     * @return list<string>
+     * Each holder's work email, with the first name the letter greets them by.
+     *
+     * @return array<string, string>
      */
-    private function recipientEmails(Employee $actor): array
+    private function recipients(Employee $actor): array
     {
         $ids = [];
         foreach (PortalRules::holders([self::ALERTS_RULE]) as $holder) {
@@ -82,29 +102,29 @@ final class PortalAccessAlert
             return [];
         }
 
-        $emails = Employee::query()
+        $rows = Employee::query()
             ->toBase()
             ->whereIn('id', $ids)
             ->where('id', '!=', $actor->getKey())
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->whereNotNull('email')
             ->where('email', '!=', '')
-            ->pluck('email');
+            ->get(['email', 'first_name']);
 
         $unique = [];
-        foreach ($emails as $email) {
-            $trimmed = trim((string) $email);
-            if ($trimmed === '' || filter_var($trimmed, FILTER_VALIDATE_EMAIL) === false) {
+        foreach ($rows as $row) {
+            $email = trim((string) $row->email);
+            if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
                 continue;
             }
-            $unique[$trimmed] = $trimmed;
+            $unique[$email] ??= trim((string) $row->first_name);
         }
 
-        return array_values($unique);
+        return $unique;
     }
 
-    private function plain(string $value): string
+    private function text(string $value): string
     {
-        return (string) preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $value);
+        return PortalEmailMarkup::escape((string) preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $value));
     }
 }

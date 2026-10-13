@@ -359,14 +359,20 @@ final class PortalActivityCopy
         return self::YOU.' added '.$label.' '.self::span($from, $to);
     }
 
+    // "filed a leave request for Monday, ..." or "filed an overtime request from ... to ...".
     public static function notifyFiled(string $actorName, string $kind, string $from, string $to): string
     {
-        return $actorName.' filed a '.$kind.' '.self::span($from, $to).'.';
+        return $actorName.' filed '.self::article($kind).' '.$kind.' '.($from === $to ? 'for ' : '').self::span($from, $to).'.';
     }
 
     public static function notifyCancelled(string $actorName, string $kind, string $date): string
     {
-        return $actorName.' cancelled a '.$kind.' for '.self::date($date).'.';
+        return $actorName.' cancelled '.self::article($kind).' '.$kind.' for '.self::date($date).'.';
+    }
+
+    private static function article(string $noun): string
+    {
+        return preg_match('/^[aeiou]/i', $noun) === 1 ? 'an' : 'a';
     }
 
     public static function notifyDecided(string $kind, string $date, string $verb, string $by): string

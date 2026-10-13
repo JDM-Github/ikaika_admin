@@ -465,10 +465,11 @@ final class PortalSharedPages
         PortalLetters::sendAfterResponse(
             trim((string) $share->email),
             'Your code for '.trim((string) $share->label),
-            'Hi '.$this->displayName($share).','
-                ."\n\nYour code is **".$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                ."\n\nOpen the shared page: [".$link.']('.$link.')'
-                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
+            PortalLetters::body(
+                $this->displayName($share),
+                'Your code is **'.$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
+                    ."\n\nOpen the shared page: [".$link.']('.$link.')',
+            ),
         );
     }
 
@@ -556,16 +557,17 @@ final class PortalSharedPages
         PortalLetters::send(
             $email,
             ($isNewPassword ? 'Your new password for ' : 'Your link and password for ').$label,
-            'Hi '.$name.','
-                ."\n\n".($isNewPassword
+            PortalLetters::body(
+                $name,
+                ($isNewPassword
                     ? 'The password for your read-only shared page, **'.$label.'**, was changed. The old one no longer works.'
                     : 'A read-only shared page is ready for you: **'.$label.'**.')
-                ."\n\nLink: [".$link.']('.$link.')'
-                ."\nPassword: **".$password.'**'
-                ."\n\nOr scan this code with your phone to open the link:"
-                ."\n\n![QR code for the link](cid:".self::QR_IMAGE.')'
-                ."\n\n".$expiry.' It is read-only: you can look, not change anything.'
-                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
+                    ."\n\nLink: [".$link.']('.$link.')'
+                    ."\nPassword: **".$password.'**'
+                    ."\n\nOr scan this code with your phone to open the link:"
+                    ."\n\n![QR code for the link](cid:".self::QR_IMAGE.')'
+                    ."\n\n".$expiry.' It is read-only: you can look, not change anything.',
+            ),
             [['name' => self::QR_IMAGE, 'data' => base64_encode(PortalQrPng::png($link)), 'mime' => 'image/png']],
         );
     }
