@@ -2,6 +2,7 @@
 # The archive is what server/deploy-release uploads and deployment/server/deploy-admin.sh installs; this only builds it, so a pipeline can show building and uploading as two steps.
 # The target's folder is <kind>.assetUrl in ikaika_scripts.env, and a target without one is refused rather than built for the wrong folder - production has none until it is set up.
 # Nothing is bumped here: tag-version -Bump moves VERSION in the step before, and the archive carries VERSION as it stands.
+# A versioned copy, <artifact.prefix>-<version>[-debug].zip with its .sha256, goes in dist/ for the GitHub release, as the estimator's builds do.
 #
 #     .\script.ps1 build-release -Debug       the staging archive
 #     .\script.ps1 build-release              production's, once release.assetUrl is set
@@ -9,6 +10,9 @@
 param(
     # Staging: debug.assetUrl rather than production's release.assetUrl.
     [switch]$Debug,
+    # How many release copies dist/ keeps; older ones are pruned.
+    [ArgumentCompletions('5', '10', '20', '50')]
+    [int]$Keep = 10,
     [switch]$Help
 )
 
@@ -69,4 +73,18 @@ if (-not (Test-Path -LiteralPath $archive)) {
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLower()
 Write-Host ''
 Write-Host "  Built $archive - $([Math]::Round((Get-Item -LiteralPath $archive).Length / 1MB, 2)) MB, sha256 $($hash.Substring(0, 12))..." -ForegroundColor Green
+
+# The release copy, named as the estimator's are - <artifact.prefix>-<version>[-debug].zip with its .sha256 - in dist/,
+# which the GitHub release and the run's artifact take; server/deploy-release keeps the fixed name above. The newest -Keep stay.
+$prefix = "$(($config | Where-Object { $_ -match '^artifact\.prefix=' } | Select-Object -First 1) -replace '^[^=]*=', '')".Trim()
+if ($prefix -and $version) {
+    $dist = Join-Path $repoRoot 'dist'
+    New-Item -ItemType Directory -Force -Path $dist | Out-Null
+    $named = Join-Path $dist "$prefix-$version$(if ($Debug) { '-debug' }).zip"
+    Copy-Item -LiteralPath $archive -Destination $named -Force
+    [IO.File]::WriteAllLines("$named.sha256", @("$((Get-FileHash -LiteralPath $named -Algorithm SHA256).Hash.ToLower())  $(Split-Path -Leaf $named)"))
+    Get-ChildItem -LiteralPath $dist -Filter "$prefix-*.zip" -File | Sort-Object LastWriteTime -Descending | Select-Object -Skip $Keep |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName, "$($_.FullName).sha256" -Force -ErrorAction SilentlyContinue }
+    Write-Host "  Release copy: $named" -ForegroundColor Green
+}
 exit 0

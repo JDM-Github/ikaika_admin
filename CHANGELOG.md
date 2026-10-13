@@ -5,3 +5,7 @@ here or with .\script.ps1 changelog. A build of that version files them under it
 CHANGELOG.json, the copy the app reads, is written from this file.
 
 ## Unreleased
+
+### Other
+
+- Release builds carry their version, as the estimator's do: dist/ikaika-portal-backend-<version>[-debug].zip with its .sha256.

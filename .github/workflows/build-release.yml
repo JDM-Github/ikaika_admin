@@ -251,14 +251,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.bitbucket.outputs.tag }}
-        run: ./.ikaika_scripts_configs/ci-github-release.ps1 -DistDir deployment/out
+        run: ./.ikaika_scripts_configs/ci-github-release.ps1 -DistDir dist
 
       # Only when no GitHub release has the build - github_release off, a build that kept its version, or a release that failed - and also after a failed upload or push, so a finished build is never thrown away with the run.
       - name: Keep what was built
-        if: ${{ !cancelled() && hashFiles('deployment/out/*.zip') != '' && steps.release.outcome != 'success' }}
+        if: ${{ !cancelled() && hashFiles('dist/*.zip') != '' && steps.release.outcome != 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: deployment/out/*.zip
+          path: dist/
           if-no-files-found: error
           retention-days: 30

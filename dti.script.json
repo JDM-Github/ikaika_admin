@@ -36,9 +36,24 @@
     "commands": {
       "build-release": {
         "description": "Builds the API's release archive, deployment/out/central-platform.zip, for staging or production: deployment/build.ps1 with the public folder the target serves it from, which Vite bakes into every font URL",
-        "args": [],
+        "args": [
+          {
+            "flag": "Keep",
+            "label": "-Keep   [Int32]",
+            "type": "string",
+            "required": false,
+            "description": "How many release copies dist/ keeps; older ones are pruned.",
+            "default": "",
+            "allowed_values": [
+              "5",
+              "10",
+              "20",
+              "50"
+            ]
+          }
+        ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Keep ${build-release.args.Keep}"
         ]
       },
       "ci-check": {
