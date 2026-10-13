@@ -27,7 +27,6 @@ class PortalShareReadinessTest extends TestCase
 
     // The first read each ready page's screen asks for, per page-level rule.
     private const PAGE_READS = [
-        'home' => ['/api/development/portal/home'],
         'projects.view' => ['/api/development/portal/projects'],
         'projects.track' => ['/api/development/portal/projects/track'],
         'projects.created' => ['/api/development/portal/projects/mine'],

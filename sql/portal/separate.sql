@@ -1112,14 +1112,13 @@ CREATE TABLE IF NOT EXISTS shared_page_visits (
 -- check is run against that page (a guest has no person, so reach pages read all and own pages read
 -- empty), and the command that flips a key is the one that maps its guest read in
 -- tests/Feature/PortalShareReadinessTest.php. The page keys are the ones RouteRuleConstant maps on
--- the portal side, plus home.
+-- the portal side.
 CREATE TABLE IF NOT EXISTS shared_page_shareable (
     rule_key VARCHAR(100) NOT NULL PRIMARY KEY,
     is_ready TINYINT(1)   NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
-    ('home', 1),
     ('projects.view', 1),
     ('projects.track', 1),
     ('projects.created', 1),

@@ -311,7 +311,7 @@ final class PortalSharedPages
     }
 
     /**
-     * @return list<array{key: string, label: string, isReady: bool}>
+     * @return list<array{key: string, label: string, group: ?string, isReady: bool}>
      */
     private function pages(): array
     {
@@ -323,6 +323,7 @@ final class PortalSharedPages
             $pages[] = [
                 'key' => $key,
                 'label' => $entry?->label ?? $key,
+                'group' => self::groupOf($catalog, $key),
                 'isReady' => (bool) $row->is_ready,
                 'sortOrder' => (int) ($entry?->sort_order ?? 0),
             ];
@@ -330,9 +331,24 @@ final class PortalSharedPages
         usort($pages, static fn (array $left, array $right): int => $left['sortOrder'] <=> $right['sortOrder']);
 
         return array_map(
-            static fn (array $page): array => ['key' => $page['key'], 'label' => $page['label'], 'isReady' => $page['isReady']],
+            static fn (array $page): array => ['key' => $page['key'], 'label' => $page['label'], 'group' => $page['group'], 'isReady' => $page['isReady']],
             $pages,
         );
+    }
+
+    // The section a page reads under: its top-level rule's label, unless the page is that rule itself.
+    private static function groupOf(array $catalog, string $key): ?string
+    {
+        $root = $key;
+        for ($hops = 0; $hops < 8; $hops += 1) {
+            $parent = $catalog[$root]->parent_key ?? null;
+            if ($parent === null) {
+                break;
+            }
+            $root = $parent;
+        }
+
+        return $root === $key ? null : ($catalog[$root]->label ?? null);
     }
 
     /**
