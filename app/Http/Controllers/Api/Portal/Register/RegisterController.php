@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api\Portal\Register;
 
 use App\Http\Controllers\Controller;
+use App\Support\Portal\PortalPrivateFiles;
 use App\Support\Portal\PortalRegistrations;
 use App\Support\Portal\PortalRegistrationSession;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * The public side of a registration link: the password and the mailed code open a session, and the
@@ -50,6 +52,14 @@ class RegisterController extends Controller
     public function storeDocument(Request $request): JsonResponse
     {
         return response()->json(['data' => $this->registrations->storeDocument($this->current($request), $request)]);
+    }
+
+    // The candidate's own file, so the form can show what they sent (2026-10-12).
+    public function showDocument(Request $request, int $id): StreamedResponse
+    {
+        $row = $this->registrations->ownDocument($this->current($request), $id);
+
+        return PortalPrivateFiles::download($row['path'], $row['name'], $row['mime']);
     }
 
     public function destroyDocument(Request $request, int $id): JsonResponse

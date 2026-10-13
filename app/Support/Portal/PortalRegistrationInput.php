@@ -5,12 +5,16 @@ namespace App\Support\Portal;
 /**
  * Employee Registration's input sanitizing (2026-10-12). Every detail a candidate sends is cleaned
  * the way the portal cleans it while they type -- markup, control and invisible characters dropped,
- * runs of spaces collapsed -- then held to its field's shape: names in letters, numbers in digits of
- * the length their ID carries, a SWIFT code as banks write one. New Employee Data only ever receives
- * plain text an HR reviewer can trust.
+ * runs of space collapsed -- then held to its field's shape: names in letters, numbers in digits of
+ * the length their ID carries, a SWIFT code as banks write one, a blood type from the list. Mashed
+ * keys are refused too (2026-10-12): a letter three times running in a name, a number of one digit.
+ * New Employee Data only ever receives plain text an HR reviewer can trust.
  */
 final class PortalRegistrationInput
 {
+    /** @var list<string> */
+    public const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
     private const NAME = 'name';
 
     private const TEXT = 'text';
@@ -22,6 +26,8 @@ final class PortalRegistrationInput
     private const SWIFT = 'swift';
 
     private const DATE = 'date';
+
+    private const BLOOD = 'blood';
 
     /**
      * Each detail's kind, the label its messages use and, for a number, the digits it must carry.
@@ -35,6 +41,7 @@ final class PortalRegistrationInput
         'nickname' => [self::NAME, 'nickname'],
         'startDate' => [self::DATE, 'start date'],
         'dateOfBirth' => [self::DATE, 'date of birth'],
+        'bloodType' => [self::BLOOD, 'blood type'],
         'address' => [self::TEXT, 'home address'],
         'phoneNumber' => [self::PHONE, 'phone number', 10, 13],
         'emergencyContactPersonName' => [self::NAME, 'contact person'],
@@ -44,10 +51,21 @@ final class PortalRegistrationInput
         'philhealthNo' => [self::NUMBER, 'PhilHealth No.', 12, 12],
         'sssNo' => [self::NUMBER, 'SSS No.', 10, 10],
         'hdmfNo' => [self::NUMBER, 'Pag-IBIG (HDMF) No.', 12, 12],
+        'nationalIdNo' => [self::NUMBER, 'National ID No.', 16, 16],
         'bankName' => [self::TEXT, 'bank name'],
         'bankAccountNumber' => [self::NUMBER, 'account number', 6, 20],
         'bankSwiftCode' => [self::SWIFT, 'SWIFT code'],
     ];
+
+    /** The letters a full name must carry at least. */
+    private const MIN_LETTERS = ['firstName' => 2, 'lastName' => 2, 'emergencyContactPersonName' => 2];
+
+    /** The characters an address or a bank name must run to at least. */
+    private const MIN_TEXT = ['address' => 10, 'emergencyContactAddress' => 10, 'bankName' => 2];
+
+    private const ADULT_YEARS = 18;
+
+    private const OLDEST_YEARS = 100;
 
     /**
      * The details sent, cleaned and checked; a blank one reads as null. A field this form does not
@@ -87,19 +105,12 @@ final class PortalRegistrationInput
         }
 
         return match ($kind) {
-            self::NAME => $this->isName($clean)
-                ? $clean
-                : abort(422, ucfirst($label).' can only have letters, spaces, periods, apostrophes and hyphens.'),
-            self::TEXT => preg_match('/^[\p{L}\p{M}\p{N} .,#\'\-\/()&:]+$/u', $clean) === 1 && preg_match('/[\p{L}\p{N}]/u', $clean) === 1
-                ? $clean
-                : abort(422, ucfirst($label).' can only have letters, numbers, spaces and . , # \' - / ( ) & :'),
-            self::PHONE => $this->digits($clean, '/^\+?[0-9 ()\-]+$/', $rule[2] ?? 0, $rule[3] ?? 0)
-                ? $clean
-                : abort(422, 'Enter a '.$label.' with 10 to 13 digits.'),
-            self::NUMBER => $this->digits($clean, '/^[0-9][0-9 \-]*$/', $rule[2] ?? 0, $rule[3] ?? 0)
-                ? $clean
-                : abort(422, $this->digitsMessage($label, $rule[2] ?? 0, $rule[3] ?? 0)),
+            self::NAME => $this->name($field, $clean, $label),
+            self::TEXT => $this->text($field, $clean, $label),
+            self::PHONE => $this->phone($clean, $label, $rule[2] ?? 0, $rule[3] ?? 0),
+            self::NUMBER => $this->number($clean, $label, $rule[2] ?? 0, $rule[3] ?? 0),
             self::SWIFT => $this->swift($clean),
+            self::BLOOD => $this->bloodType($clean),
             default => $this->date($field, $clean, $label),
         };
     }
@@ -115,9 +126,79 @@ final class PortalRegistrationInput
         return trim($clean);
     }
 
+    private function name(string $field, string $value, string $label): string
+    {
+        if (! $this->isName($value)) {
+            abort(422, ucfirst($label).' can only have letters, spaces, periods, apostrophes and hyphens.');
+        }
+        if ($this->repeats($value, 3)) {
+            abort(422, ucfirst($label).' has the same letter three times in a row. Check it.');
+        }
+        $letters = preg_match_all('/\p{L}/u', $value);
+        if ($letters < (self::MIN_LETTERS[$field] ?? 1)) {
+            abort(422, ucfirst($label).' needs at least '.self::MIN_LETTERS[$field].' letters.');
+        }
+
+        return $value;
+    }
+
+    private function text(string $field, string $value, string $label): string
+    {
+        if (preg_match('/^[\p{L}\p{M}\p{N} .,#\'\-\/()&:]+$/u', $value) !== 1 || preg_match('/[\p{L}\p{N}]/u', $value) !== 1) {
+            abort(422, ucfirst($label).' can only have letters, numbers, spaces and . , # \' - / ( ) & :');
+        }
+        if ($this->repeats($value, 4)) {
+            abort(422, ucfirst($label).' has the same letter four times in a row. Check it.');
+        }
+        $shortest = self::MIN_TEXT[$field] ?? 1;
+        $isAddress = $field !== 'bankName';
+        if (mb_strlen($value) < $shortest || ($isAddress && ! str_contains($value, ' '))) {
+            abort(422, $isAddress
+                ? 'Write the full '.$label.', at least '.$shortest.' characters.'
+                : ucfirst($label).' needs at least '.$shortest.' characters.');
+        }
+
+        return $value;
+    }
+
+    private function phone(string $value, string $label, int $min, int $max): string
+    {
+        if (! $this->digits($value, '/^\+?[0-9 ()\-]+$/', $min, $max)) {
+            abort(422, 'Enter a '.$label.' with 10 to 13 digits.');
+        }
+        if ($this->sameDigit($value) || preg_match('/(\d)\1{6}/', (string) preg_replace('/\D/', '', $value)) === 1) {
+            abort(422, ucfirst($label).' repeats the same digit too many times. Check it.');
+        }
+
+        return $value;
+    }
+
+    private function number(string $value, string $label, int $min, int $max): string
+    {
+        if (! $this->digits($value, '/^[0-9][0-9 \-]*$/', $min, $max)) {
+            abort(422, $this->digitsMessage($label, $min, $max));
+        }
+        if ($this->sameDigit($value)) {
+            abort(422, ucfirst($label).' cannot be one digit repeated. Check it.');
+        }
+
+        return $value;
+    }
+
     private function isName(string $value): bool
     {
         return preg_match('/^[\p{L}\p{M} .\'\-]+$/u', $value) === 1 && preg_match('/\p{L}/u', $value) === 1;
+    }
+
+    // A letter typed the given number of times running, whatever its case.
+    private function repeats(string $value, int $times): bool
+    {
+        return preg_match('/(\p{L})\1{'.($times - 1).'}/iu', $value) === 1;
+    }
+
+    private function sameDigit(string $value): bool
+    {
+        return preg_match('/^(\d)\1*$/', (string) preg_replace('/\D/', '', $value)) === 1;
     }
 
     private function digits(string $value, string $shape, int $min, int $max): bool
@@ -138,22 +219,45 @@ final class PortalRegistrationInput
     private function swift(string $value): string
     {
         $code = strtoupper(str_replace(' ', '', $value));
-        if (preg_match('/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/', $code) !== 1) {
+        if (preg_match('/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/', $code) !== 1 || preg_match('/^(.)\1*$/', $code) === 1) {
             abort(422, 'Enter an 8 or 11 character SWIFT code, such as BNORPHMM.');
         }
 
         return $code;
     }
 
-    // A real calendar day, written YYYY-MM-DD; a birthday is never ahead of today.
+    private function bloodType(string $value): string
+    {
+        $type = strtoupper(str_replace([' ', "\u{2212}"], ['', '-'], $value));
+        if (! in_array($type, self::BLOOD_TYPES, true)) {
+            abort(422, 'Choose your blood type.');
+        }
+
+        return $type;
+    }
+
+    // A real calendar day, written YYYY-MM-DD: a candidate of working age, starting within a year of today.
     private function date(string $field, string $value, string $label): string
     {
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
         if ($date === false || $date->format('Y-m-d') !== $value || $value < '1900-01-01') {
             abort(422, 'Choose a real '.$label.'.');
         }
-        if ($field === 'dateOfBirth' && $value > now()->toDateString()) {
-            abort(422, 'Your date of birth cannot be in the future.');
+        $today = now()->startOfDay();
+        if ($field === 'dateOfBirth') {
+            if ($value > $today->toDateString()) {
+                abort(422, 'Your date of birth cannot be in the future.');
+            }
+            if ($value > $today->copy()->subYears(self::ADULT_YEARS)->toDateString()) {
+                abort(422, 'You must be at least '.self::ADULT_YEARS.' years old to register.');
+            }
+            if ($value < $today->copy()->subYears(self::OLDEST_YEARS)->toDateString()) {
+                abort(422, 'Check your date of birth.');
+            }
+        }
+        if ($field === 'startDate'
+            && ($value < $today->copy()->subYear()->toDateString() || $value > $today->copy()->addYear()->toDateString())) {
+            abort(422, 'Your start date must be within a year of today.');
         }
 
         return $value;

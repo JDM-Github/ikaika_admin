@@ -12,11 +12,13 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\NamesDepartmentHeads;
 use Tests\TestCase;
 
 class PortalOffsetRequestsTest extends TestCase
 {
     use DatabaseTransactions;
+    use NamesDepartmentHeads;
 
     /**
      * @var list<string>
@@ -111,6 +113,26 @@ class PortalOffsetRequestsTest extends TestCase
         $this->assertSame(8, $log->payload['hours']);
         $this->assertSame('Saturday coverage', $log->payload['reason']);
         $this->assertCount(2, $log->payload['entries']);
+    }
+
+    // The reported ask (2026-10-13): only the department head is emailed; approvers keep their inbox notice.
+    public function test_filing_offset_emails_only_the_department_head(): void
+    {
+        $this->turnNotificationEmailsOn();
+        $actor = $this->activeMember();
+        [$head, $admin] = $this->nameDepartmentHead($actor);
+        $project = $this->firstOwnProject($actor);
+        $work = $this->freeDate($actor, 2);
+
+        $this->withToken($this->loginToken($actor))->postJson('/api/development/portal/requests/offset', [
+            'requests' => [$this->group($work, $this->freeDayOff($actor, $work, 1), $project)],
+        ])->assertCreated();
+
+        $this->assertEmailedOnlyTheHead($head, $admin, 'New offset request');
+        $this->assertTrue(DB::connection('portal')->table('notifications')
+            ->where('employee_id', $admin->getKey())
+            ->where('type', 'requests.offset.filed')
+            ->exists());
     }
 
     public function test_offset_is_refused_when_either_day_is_already_taken(): void

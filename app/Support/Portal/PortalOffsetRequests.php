@@ -174,6 +174,15 @@ final class PortalOffsetRequests
                     'reason' => $group['reason'],
                 ],
             );
+            // Approvers keep the inbox notice; only the department head is emailed (2026-10-13, user).
+            $this->audit->emailDepartmentHeads(
+                $actor,
+                PortalNotificationType::REQUEST_FILED_OFFSET,
+                'New offset request',
+                PortalActivityCopy::notifyFiled(PortalActivityCopy::actorName($actor, $request, true), 'offset request', $group['workDate'], $group['workDate']),
+                PortalShellPath::MANAGE_REQUESTS,
+                'Open queue',
+            );
             $this->audit->notifyManagers(
                 $actor,
                 'manage.requests.offset',

@@ -11,6 +11,8 @@ final class PortalShellPath
 
     public const MANAGE_REQUESTS = '/manage/manage-requests';
 
+    public const MANAGE_REPORTS = '/manage/manage-reports';
+
     public const USER_MANAGEMENT = '/manage/user-management';
 
     public const MANAGE_PROJECTS = '/manage/manage-projects';

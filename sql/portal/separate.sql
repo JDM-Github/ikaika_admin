@@ -1137,7 +1137,7 @@ CREATE TABLE IF NOT EXISTS register_otps (
 CREATE TABLE IF NOT EXISTS register_documents (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     registration_id INT          NOT NULL,
-    kind            VARCHAR(24)  NOT NULL,          -- photo|tin|sss|philhealth|hdmf|bank
+    kind            VARCHAR(24)  NOT NULL,          -- photo|tin|sss|philhealth|hdmf|national_id|bank
     name            VARCHAR(191) NOT NULL,          -- the candidate's file name
     mime            VARCHAR(127) NOT NULL,
     size_bytes      INT          NOT NULL,
@@ -1156,7 +1156,7 @@ VALUES
      'Guest-free candidate registration: send a bound link, collect details and requirements.',
      0, 1, 'admin', 870),
     ('manage.onboarding.manage', 'manage.onboarding', 'Create and revoke',
-     'Create a candidate entry, change it, revoke it, and promote a submitted one.',
+     'Create a candidate entry, change it and revoke it.',
      0, 1, 'admin', 871),
     ('manage.onboarding.password', 'manage.onboarding', 'New passwords',
      'Give a candidate link a new password, whose old one stops working at once.',
@@ -1168,3 +1168,59 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'admin', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'developer', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';
+
+-- Only the head admins promote a submitted candidate, whose account is active at once (2026-10-12):
+-- their own defaults, matched on id_no like is_developer, and Developer mode's like every rule.
+-- Existing databases: add_portal_onboarding_promote_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.onboarding.promote', 'manage.onboarding', 'Promote candidates',
+     'Turn a candidate who submitted their requirements into an employee on the work email given, able to sign in at once.',
+     0, 1, 'admin', 873);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('developer', 'manage.onboarding.promote', NULL, 0);
+INSERT INTO access_personal (employee_id, permission_key, reach)
+SELECT id, 'manage.onboarding.promote', NULL FROM employees WHERE id_no IN (
+    '220202-0002', -- Nathaniel Tanglao
+    '220302-0003'  -- Steven Gaurano
+);
+
+-- Activate and deactivate (2026-10-12): an admin turns someone in their Users reach Active or Inactive,
+-- never themselves or an executive, a fellow admin only with Manage other admins. Admins, executives and
+-- developers hold it. Existing databases: add_portal_users_status_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.users.status', 'manage.users', 'Activate and deactivate',
+     'Turn the account of someone in {UserName|Your} reach active or inactive. An inactive account cannot sign in.',
+     0, 1, 'admin', 851);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('admin', 'manage.users.status', NULL, 0),
+    ('executive', 'manage.users.status', NULL, 0),
+    ('developer', 'manage.users.status', NULL, 0);
+
+-- Edit employee information (2026-10-12): the private details of the people whose information someone
+-- sees; held by those who see it. Portal only.
+-- Existing databases: add_portal_users_information_edit_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.users.information.edit', 'manage.users.information', 'Edit employee information',
+     'Change the private details of the people whose information {UserName|You} can see. Airtable keeps its own copy.',
+     0, 1, 'admin', 848);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('executive', 'manage.users.information.edit', NULL, 0),
+    ('developer', 'manage.users.information.edit', NULL, 0);
+INSERT INTO access_personal (employee_id, permission_key, reach)
+SELECT id, 'manage.users.information.edit', NULL FROM employees WHERE id_no IN (
+    '220202-0002', -- Nathaniel Tanglao
+    '220302-0003'  -- Steven Gaurano
+);
+
+-- The blood type and the optional national ID (PhilSys) number a registration asks for (2026-10-12).
+-- Portal-only: Airtable's table has neither, and the sync never sends them.
+-- Existing databases: add_blood_type_and_national_id_to_portal_new_employee_data.
+ALTER TABLE new_employee_data
+    ADD COLUMN blood_type     VARCHAR(3)  NULL AFTER date_of_birth,
+    ADD COLUMN national_id_no VARCHAR(30) NULL AFTER hdmf_no;

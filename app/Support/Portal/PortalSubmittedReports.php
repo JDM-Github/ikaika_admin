@@ -741,6 +741,21 @@ final class PortalSubmittedReports
             );
         }
 
+        // Only the head of their department hears by email, a daily report and a late one alike (2026-10-13, user).
+        $this->audit->emailDepartmentHeads(
+            $actor,
+            $isLate ? PortalNotificationType::REPORT_FILED_LATE : PortalNotificationType::REPORT_FILED_DAILY,
+            $isLate ? 'New late report' : 'New daily report',
+            PortalActivityCopy::notifyFiled(
+                PortalActivityCopy::actorName($actor, $request, true),
+                $isLate ? 'late report' : 'daily report',
+                min($dates),
+                max($dates),
+            ),
+            $isLate ? PortalShellPath::MANAGE_REQUESTS : PortalShellPath::MANAGE_REPORTS,
+            $isLate ? 'Open queue' : 'Open reports',
+        );
+
         if ($isLate) {
             $this->audit->notifyManagers(
                 $actor,
@@ -1501,6 +1516,7 @@ final class PortalSubmittedReports
         $rows = UserReport::query()
             ->toBase()
             ->select(['user_reports.report_date', 'user_reports.late_submission'])
+            ->selectRaw('SUM(COALESCE(user_reports.hours_rendered, 0)) AS hours')
             ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
             ->where('employees_user_reports.employee_id', $employeeId)
             ->whereNotNull('user_reports.report_date')
@@ -1509,6 +1525,7 @@ final class PortalSubmittedReports
             ->orderBy('user_reports.report_date')
             ->get();
 
+        // The hours each day carries, so Overtime can say which weekdays reach the eight it needs (2026-10-13).
         $days = [];
         foreach ($rows as $row) {
             $date = $this->calendarDate($row->report_date ?? null);
@@ -1516,7 +1533,7 @@ final class PortalSubmittedReports
                 continue;
             }
             $kind = PortalSubmittedReportPresenter::kind($row->late_submission ?? null);
-            $days[$date.'-'.$kind] = ['date' => $date, 'kind' => $kind];
+            $days[$date.'-'.$kind] = ['date' => $date, 'kind' => $kind, 'hours' => round((float) ($row->hours ?? 0), 2)];
         }
 
         return array_values($days);

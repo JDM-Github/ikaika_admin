@@ -58,6 +58,16 @@ class UsersController extends Controller
         return response()->json($this->users->changeDepartment($this->actor($request), $id, $request));
     }
 
+    public function updateStatus(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->users->changeStatus($this->actor($request), $id, $request));
+    }
+
+    public function updateInformation(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->users->updateInformation($this->actor($request), $id, $request));
+    }
+
     public function updateProfile(Request $request, int $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');
