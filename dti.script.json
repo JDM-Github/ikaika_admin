@@ -38,6 +38,21 @@
         "description": "Builds the API's release archive, deployment/out/central-platform.zip, for staging or production: deployment/build.ps1 with the public folder the target serves it from, which Vite bakes into every font URL",
         "args": [
           {
+            "flag": "Bump",
+            "label": "-Bump   [String]",
+            "type": "string",
+            "required": false,
+            "description": "The version to build as, as the estimator's build-release takes it: keep, patch, minor, major or an explicit x.y.z, bumped in VERSION...",
+            "default": "",
+            "allowed_values": [
+              "same",
+              "keep",
+              "patch",
+              "minor",
+              "major"
+            ]
+          },
+          {
             "flag": "Keep",
             "label": "-Keep   [Int32]",
             "type": "string",
@@ -53,7 +68,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Keep ${build-release.args.Keep}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Bump ${build-release.args.Bump} -Keep ${build-release.args.Keep}"
         ]
       },
       "ci-check": {
@@ -643,7 +658,12 @@
             "required": false,
             "description": "Tag name(s) for non-interactive use; given alone it implies -Yes.",
             "default": "",
-            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices git/manage-tags Tag"
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices git/manage-tags Tag",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/manage-tags Tag",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/manage-tags Tag -Preview"
+            }
           },
           {
             "flag": "Delete",
@@ -819,7 +839,13 @@
             "type": "string",
             "required": false,
             "description": "",
-            "default": ""
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices git/run-at-tag Tag",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/run-at-tag Tag",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh git/run-at-tag Tag -Preview"
+            }
           },
           {
             "flag": "Command",

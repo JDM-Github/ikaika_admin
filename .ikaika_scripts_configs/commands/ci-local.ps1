@@ -1,7 +1,7 @@
 # Plays the Build release workflow on this PC, for when GitHub Actions cannot: the same choices, planned by the same ci-release-plan.ps1, then each step's work run here.
 # Every secret the workflow reads comes from .local.actions-secret.env, by its GitHub name (.local.actions-secret.env.template lists them); the file must be ignored by git, and no value is ever printed.
 # Each phase is its own pwsh process, as a step is on a runner: secrets -Ci writes the sealed archive's deploy config and key where the toolkit reads them, and its values reach later phases through a private GITHUB_ENV file that is deleted afterwards.
-# Then, as on the runner: tag-version -Bump bumps VERSION, files the changelog, commits and tags, which is looked for on Bitbucket before build-release packages and server/deploy-release installs it with deploy-admin.sh.
+# Then, as on the runner and in the project estimator's order: build-release bumps VERSION uncommitted and packages it, then tag-version files the changelog, commits and tags once the build is good, which is looked for on Bitbucket before server/deploy-release installs it with deploy-admin.sh.
 # What is built is what Bitbucket has: an uncommitted change, or a branch that differs from Bitbucket's, stops the run before anything is built.
 # GitHub is best effort - the version commit and tag pushed there - since GitHub may be what is down; a failure there warns and changes nothing else.
 #
@@ -178,8 +178,8 @@ try {
     if ($PlanOnly) {
         Write-Phase 'What each phase would run'
         if ($purposes.Count) { Write-Host "  secrets      .\script.ps1 secrets -Ci -For $($purposes -join ', ')" }
-        if ($tagging) { Write-Host "  version      .\script.ps1 tag-version -Bump $env:VERSION_BUMP$(if ($env:BUILD_DEBUG -eq 'true') { ' -Debug' })" }
         Write-Host "  package      .\script.ps1 build-release $(@($plan.Keys | ForEach-Object { "-$_ $($plan[$_])" }) -join ' ')"
+        if ($tagging) { Write-Host "  version      .\script.ps1 tag-version$(if ($env:BUILD_DEBUG -eq 'true') { ' -Debug' })   once the build is good" }
         if ($deploy) { Write-Host "  upload       .\script.ps1 server/deploy-release $(@($deploy.Keys | ForEach-Object { "-$_ $($deploy[$_])" }) -join ' ')" }
         if ($tagging -and -not $NoGitHub) { Write-Host "  github       the version commit and tag to $(if ($githubRepo) { $githubRepo } else { 'GitHub (no github remote here)' })" }
         Write-Host ''
@@ -256,26 +256,26 @@ try {
         if (-not $ok) { Stop-Run 'The sealed archive did not give the upload what it needs; nothing was built.' }
     }
 
-    # ---------------------------------------------------------------- version
-    $tag = ''
-    if ($tagging) {
-        Write-Phase "Version - $env:VERSION_BUMP, the changelog filed, committed and tagged on Bitbucket"
-        $bumped = Invoke-Step 'version' "./script.ps1 tag-version -Bump $env:VERSION_BUMP$(if ($env:BUILD_DEBUG -eq 'true') { ' -Debug' }); exit `$LASTEXITCODE"
-        $tag = "v$(Get-AppVersion)$(if ($env:BUILD_DEBUG -ne 'true') { '-released' })"
-        if ($bumped -and -not (Invoke-Git ls-remote --tags origin "refs/tags/$tag").Text) {
-            $outcomes['version'] = 'failure'
-            Write-Host "  $tag is not on Bitbucket; see tag-version's output above." -ForegroundColor Red
-        }
-        if ($outcomes['version'] -ne 'success') { Stop-Run 'The version did not reach Bitbucket, so nothing was packaged or uploaded.' }
-    }
-
-    # ---------------------------------------------------------------- package and upload
-    Write-Phase "Package the API for $Target"
+    # ---------------------------------------------------------------- build, then the version, then the upload - the estimator's order
+    Write-Phase "Build the API for $Target with build-release$(if ($tagging) { ", bumping $env:VERSION_BUMP" })"
     $packaged = Invoke-Step 'package' @'
 $plan = $env:PACKAGE_JSON | ConvertFrom-Json -AsHashtable
 ./script.ps1 build-release @plan
 exit $LASTEXITCODE
 '@ @{ PACKAGE_JSON = ($plan | ConvertTo-Json -Depth 3 -Compress) }
+
+    # Only once the build is good, so a build that fails spends no version.
+    $tag = ''
+    if ($tagging -and $packaged) {
+        Write-Phase "File the changelog under the new version, then tag it as a $(if ($env:BUILD_DEBUG -eq 'true') { 'staging build' } else { 'production release' })"
+        $filed = Invoke-Step 'version' "./script.ps1 tag-version$(if ($env:BUILD_DEBUG -eq 'true') { ' -Debug' }); exit `$LASTEXITCODE"
+        $tag = "v$(Get-AppVersion)$(if ($env:BUILD_DEBUG -ne 'true') { '-released' })"
+        if ($filed -and -not (Invoke-Git ls-remote --tags origin "refs/tags/$tag").Text) {
+            $outcomes['version'] = 'failure'
+            Write-Host "  $tag is not on Bitbucket; see tag-version's output above." -ForegroundColor Red
+        }
+        if ($outcomes['version'] -ne 'success') { Stop-Run 'The version did not reach Bitbucket, so nothing was uploaded.' }
+    }
 
     if ($deploy -and $packaged) {
         Write-Phase "Upload to $Target - composer, the swap, migrations, the health check"
@@ -301,7 +301,7 @@ exit $LASTEXITCODE
 
     # ---------------------------------------------------------------- result
     Write-Phase 'Result'
-    $names = [ordered]@{ plan = 'Plan'; check = 'Checkout matches Bitbucket'; secrets = 'Secrets from the archive'; version = 'Changelog filed, version tagged'; package = "Packaged for $Target"; upload = "Installed on $Target"; github = 'Version on GitHub' }
+    $names = [ordered]@{ plan = 'Plan'; check = 'Checkout matches Bitbucket'; secrets = 'Secrets from the archive'; package = "Built for $Target"; version = 'Changelog filed, version tagged'; upload = "Installed on $Target"; github = 'Version on GitHub' }
     foreach ($key in $names.Keys) {
         if (-not $outcomes.Contains($key)) { continue }
         $color = if ($outcomes[$key] -eq 'success') { 'Green' } else { 'Red' }
