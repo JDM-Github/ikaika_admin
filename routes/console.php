@@ -7,6 +7,7 @@ use App\Support\Portal\PortalBitbucketSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
 use App\Support\Portal\PortalEmailAttachments;
 use App\Support\Portal\PortalEmailMessages;
+use App\Support\Portal\PortalHomeLocations;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
 use Illuminate\Foundation\Inspiring;
@@ -253,7 +254,16 @@ Artisan::command('portal:bitbucket-preview
 })->purpose('Show what the Bitbucket sync would read for one repository and one day, without saving anything');
 
 // The backstop for a missed push webhook, and what finishes counting a long history; needs the server's schedule:run cron.
+// Manage / Map: places each person's new or changed address; one Nominatim request a second.
+Artisan::command('portal:geocode-homes', function (PortalHomeLocations $homes): int {
+    $counts = $homes->refresh();
+    $this->info("Placed {$counts['placed']}, could not place {$counts['failed']}, unchanged {$counts['unchanged']}.");
+
+    return 0;
+})->purpose('Turn every address into a point for Manage / Map');
+
 Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
+Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();
 
 // The mail queue's worker. The server runs no daemon, so the minute cron starts one that leaves when the queue is
 // empty or after 55 s, before the next one starts; two that do meet cannot take the same job.

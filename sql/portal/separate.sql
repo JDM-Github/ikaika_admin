@@ -1270,3 +1270,15 @@ VALUES
      0, 1, 'admin', 880);
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT role, 'manage.map', NULL, 0 FROM (SELECT 'admin' AS role UNION ALL SELECT 'developer') AS roles;
+
+-- Manage / Map's points: each person's address turned into coordinates once (portal:geocode-homes).
+-- Existing databases: create_portal_employee_home_locations.
+CREATE TABLE IF NOT EXISTS employee_home_locations (
+    employee_id INT          NOT NULL PRIMARY KEY,
+    query       VARCHAR(500) NOT NULL,
+    source      VARCHAR(16)  NOT NULL,
+    latitude    DECIMAL(10,7) NOT NULL,
+    longitude   DECIMAL(10,7) NOT NULL,
+    geocoded_at TIMESTAMP    NULL,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -6,9 +6,9 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Manage / Map (2026-10-13, user): where each active person last saved something, from the location
- * every portal write carries (RequirePortalLocation, stored on logs). It is the last located action,
- * not live tracking, and only administrators open it (manage.map).
+ * Manage / Map (2026-10-13, user): where each active person lives, from their address on record (their
+ * region when the address could not be placed), as PortalHomeLocations keeps it. Only administrators
+ * open it (manage.map).
  */
 final class PortalTeamMap
 {
@@ -20,19 +20,13 @@ final class PortalTeamMap
     public function list(): array
     {
         $connection = $this->connection();
-        $latest = $connection->table('logs')
-            ->whereNotNull('location_lat')
-            ->whereNotNull('location_lng')
-            ->groupBy('employee_id')
-            ->selectRaw('employee_id, MAX(id) as id');
-        $rows = $connection->table('employees')
-            ->joinSub($latest, 'latest', 'latest.employee_id', '=', 'employees.id')
-            ->join('logs', 'logs.id', '=', 'latest.id')
-            ->whereRaw("LOWER(COALESCE(employees.status, '')) = 'active'")
+        $active = $connection->table('employees')->whereRaw("LOWER(COALESCE(employees.status, '')) = 'active'");
+        $rows = (clone $active)
+            ->join('employee_home_locations as home', 'home.employee_id', '=', 'employees.id')
             ->orderBy('employees.last_name')->orderBy('employees.first_name')
             ->get([
                 'employees.id', 'employees.first_name', 'employees.last_name', 'employees.department',
-                'logs.location_lat', 'logs.location_lng', 'logs.location_label', 'logs.created_at',
+                'employees.address', 'employees.location', 'home.latitude', 'home.longitude', 'home.source',
             ]);
         $photos = PortalEmployeePresenter::photoUrls($rows->pluck('id')->all());
 
@@ -43,23 +37,36 @@ final class PortalTeamMap
                 'name' => trim((string) $row->first_name.' '.(string) $row->last_name),
                 'department' => trim((string) $row->department) ?: null,
                 'photoUrl' => $photos[(int) $row->id] ?? null,
-                'latitude' => (float) $row->location_lat,
-                'longitude' => (float) $row->location_lng,
-                'place' => trim((string) $row->location_label) ?: null,
-                'locatedAt' => (string) $row->created_at,
+                'latitude' => (float) $row->latitude,
+                'longitude' => (float) $row->longitude,
+                'place' => self::place($row),
+                // address when the address itself was placed; region when only the region could be.
+                'source' => (string) $row->source,
             ];
         }
-        $active = $connection->table('employees')->whereRaw("LOWER(COALESCE(status, '')) = 'active'")->count();
 
         return [
             'section' => 'manage',
             'resource' => 'map',
             'data' => [
                 'people' => $people,
-                // Active people who have not saved anything with a location yet.
-                'unlocated' => max(0, $active - count($people)),
+                // Active people with neither an address nor a region that could be placed.
+                'unlocated' => max(0, (clone $active)->count() - count($people)),
             ],
         ];
+    }
+
+    // The town and province, not the street: the last two parts of the address, else the region.
+    private static function place(object $row): ?string
+    {
+        if ($row->source === 'address') {
+            $parts = PortalHomeLocations::addressParts((string) $row->address);
+            if ($parts !== []) {
+                return implode(', ', array_slice($parts, -2));
+            }
+        }
+
+        return trim((string) $row->location) ?: null;
     }
 
     private function connection(): Connection
