@@ -183,8 +183,9 @@ SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width
     <td class="pl-foot-col" valign="middle" style="padding:6px 26px 18px 0;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
         <tr>
-          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 17px 0 0;">
-            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_144,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="72" style="display:block;width:72px;max-width:72px;height:auto;border:0;outline:none;text-decoration:none;" />
+          <!-- The logo sits on a white tile: unseen on white, a badge where a mail client turns the page dark -->
+          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;">
+            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_144/c_pad,w_172,h_180,b_white/r_26/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="86" style="display:block;width:86px;max-width:86px;height:auto;border:0;outline:none;text-decoration:none;" />
           </td>
           <td valign="middle" width="1" height="72" style="width:1px;height:72px;background-color:#4a74a1;font-size:0;line-height:0;">&nbsp;</td>
           <td class="pl-foot-text" valign="middle" style="padding:0 0 0 17px;">
@@ -193,10 +194,10 @@ SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width
             <div style="margin-top:4px;font-size:11px;line-height:15px;letter-spacing:0.15px;color:#245b99;">Automated communication</div>
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;border-collapse:collapse;">
               <tr>
-                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865759/email-design/icon-globe.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871370/email-design/icon-globe.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
                 <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="https://ikaikabim.com" style="color:#245b99;text-decoration:none;">ikaikabim.com</a></td>
                 <td valign="middle" style="padding:0 12px;"><div style="width:1px;height:17px;background-color:#bfd0e5;font-size:0;line-height:0;">&nbsp;</div></td>
-                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865760/email-design/icon-mail.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871371/email-design/icon-mail.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
                 <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="mailto:info@ikaikabim.com" style="color:#245b99;text-decoration:none;">info@ikaikabim.com</a></td>
               </tr>
             </table>
@@ -225,46 +226,47 @@ SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width
   </tr>
 </table>', 'html', id
 FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
--- A signature footer: the $SIGNATURE token is replaced with the person's own details when it is used
+-- A signature footer (database/seeders/email/company-signature.html): the $SIGNATURE token is replaced with the person's own details when it is used
 -- as an email signature (Manage / Signatures, and each employee's Settings). The plain Company footer
 -- above has no token, so it is usable in email but cannot be a signature.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
-SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;color:#374151;">
+SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
   <tr>
-    <!-- Logo -->
-    <td width="95" valign="middle" style="width:95px;padding:2px 4px 2px 0;border-right:2px solid #1f4e8c;">
-      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="82" style="display:block;width:82px;max-width:82px;height:auto;border:0;outline:none;text-decoration:none;" />
+    <td class="pl-foot-col" valign="middle" style="padding:6px 26px 18px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+        <tr>
+          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;"><img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_144/c_pad,w_172,h_180,b_white/r_26/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="86" style="display:block;width:86px;max-width:86px;height:auto;border:0;" /></td>
+          <td valign="middle" width="1" height="72" style="width:1px;height:72px;background-color:#4a74a1;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="pl-foot-text" valign="middle" style="padding:0 0 0 17px;">
+            <div style="font-size:19px;line-height:22px;font-weight:700;letter-spacing:0.25px;color:#174d87;">{name}</div>
+            <div style="margin-top:4px;font-size:12px;line-height:16px;color:#245b99;">{title}&nbsp;&middot;&nbsp;{department}</div>
+            <div style="margin-top:8px;font-size:11px;line-height:15px;color:#245b99;white-space:nowrap;"><a href="mailto:{email}" style="color:#245b99;text-decoration:none;">{email}</a>&nbsp;&middot;&nbsp;{phone}&nbsp;&middot;&nbsp;{location}</div>
+          </td>
+        </tr>
+      </table>
     </td>
-    <!-- Information -->
-    <td valign="middle" style="padding:2px 0 2px 14px;">
-      <!-- Name -->
-      <div style="font-size:18px;line-height:22px;font-weight:700;color:#1f4e8c;">{name}</div>
-      <!-- Position -->
-      <div style="font-size:13px;line-height:18px;color:#64748b;">{title}&nbsp;&middot;&nbsp;{department}</div>
-      <!-- Personal Contact -->
-      <div style="font-size:12px;line-height:18px;color:#475569;white-space:nowrap;">
-        <a href="mailto:{email}" style="color:#475569;text-decoration:none;">{email}</a>
-        &nbsp;&middot;&nbsp;{phone}
-        &nbsp;&middot;&nbsp;{location}
-      </div>
-      <!-- Company -->
-      <div style="margin-top:8px;">
-        <div style="font-size:15px;line-height:19px;font-weight:700;color:#1f4e8c;">IKAIKA BIM</div>
-        <div style="font-size:12px;line-height:17px;white-space:nowrap;">
-          <a href="https://ikaikabim.com" style="color:#64748b;text-decoration:none;">ikaikabim.com</a>
-          &nbsp;&middot;&nbsp;
-          <a href="mailto:info@ikaikabim.com" style="color:#64748b;text-decoration:none;">info@ikaikabim.com</a>
-        </div>
-      </div>
+    <td class="pl-foot-col" valign="middle" width="230" style="width:230px;padding:6px 0 18px 0;">
+      <table role="presentation" class="pl-foot-address" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-left:1px solid #b7cbe4;">
+        <tr>
+          <td style="padding:5px 0 5px 22px;">
+            <div style="font-size:15px;line-height:19px;font-weight:700;letter-spacing:0.2px;color:#174d87;">IKAIKA BIM</div>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;border-collapse:collapse;">
+              <tr>
+                <td valign="middle" style="padding:0 7px 4px 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871370/email-design/icon-globe.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="padding:0 0 4px;font-size:11px;line-height:15px;white-space:nowrap;"><a href="https://ikaikabim.com" style="color:#245b99;text-decoration:none;">ikaikabim.com</a></td>
+              </tr>
+              <tr>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871371/email-design/icon-mail.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="mailto:info@ikaikabim.com" style="color:#245b99;text-decoration:none;">info@ikaikabim.com</a></td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
     </td>
   </tr>
-  <!-- Divider -->
   <tr>
-    <td colspan="2" style="padding-top:12px;border-bottom:1px solid #d1d9e2;font-size:0;line-height:0;">&nbsp;</td>
-  </tr>
-  <!-- Confidentiality Notice -->
-  <tr>
-    <td colspan="2" style="padding-top:6px;font-size:10px;line-height:14px;color:#94a3b8;">
+    <td colspan="2" style="padding:11px 0 16px;border-top:1px solid #d5e0ee;font-size:10px;line-height:16px;color:#7f99bb;">
       This message may contain confidential information and is meant only for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
     </td>
   </tr>
@@ -313,18 +315,19 @@ SELECT 'footer', 'IKAIKA BIM footer', NULL, NULL, '<table role="presentation" wi
     <td class="pl-foot-col" valign="middle" style="padding:6px 26px 18px 0;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
         <tr>
-          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 17px 0 0;">
-            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_144,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="72" style="display:block;width:72px;max-width:72px;height:auto;border:0;outline:none;text-decoration:none;" />
+          <!-- The logo sits on a white tile: unseen on white, a badge where a mail client turns the page dark -->
+          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;">
+            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_144/c_pad,w_172,h_180,b_white/r_26/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="86" style="display:block;width:86px;max-width:86px;height:auto;border:0;outline:none;text-decoration:none;" />
           </td>
           <td valign="middle" width="1" height="72" style="width:1px;height:72px;background-color:#4a74a1;font-size:0;line-height:0;">&nbsp;</td>
           <td class="pl-foot-text" valign="middle" style="padding:0 0 0 17px;">
             <div style="font-size:19px;line-height:22px;font-weight:700;letter-spacing:0.25px;color:#174d87;">IKAIKA BIM</div>
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;border-collapse:collapse;">
               <tr>
-                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865759/email-design/icon-globe.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871370/email-design/icon-globe.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
                 <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="https://ikaikabim.com" style="color:#245b99;text-decoration:none;">ikaikabim.com</a></td>
                 <td valign="middle" style="padding:0 12px;"><div style="width:1px;height:17px;background-color:#bfd0e5;font-size:0;line-height:0;">&nbsp;</div></td>
-                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865760/email-design/icon-mail.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871371/email-design/icon-mail.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
                 <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="mailto:info@ikaikabim.com" style="color:#245b99;text-decoration:none;">info@ikaikabim.com</a></td>
               </tr>
             </table>

@@ -53,6 +53,20 @@ block in Send Email -> Footers.
   composer swaps the Company footer for the **IKAIKA BIM footer** (the same design without IKAIKA PORTAL
   and "Automated communication"; `database/seeders/email/ikaika-bim-footer.html`, migration
   `2026_10_13_150000_seed_ikaika_bim_footer`, `separate.sql`).
+- **Company signature** (Manage / Signatures, Outlook via the Exchange rule): the same structure and fonts
+  -- logo tile, divider, `{name}` (19px navy), `{title} · {department}`, `{email} · {phone} · {location}`,
+  then IKAIKA BIM with the website and mailbox icons behind a pale divider, the notice under a rule. Same
+  words and placeholders as before (`database/seeders/email/company-signature.html`, migration
+  `2026_10_13_180000_restyle_company_signature`); about 3,600 characters filled, under Exchange's 5,000.
+  The footers' dark-mode versions: migration `2026_10_13_170000_dark_mode_safe_footers`. Each migration
+  replaces only a block that is still exactly the previous built-in.
+
+**Dark mode (2026-10-13).** Mail clients darken or invert backgrounds and text but never pictures, so
+every picture is made to read on both: the stripes and the bottom-bar accent are on a **transparent**
+ground (the bar's own colour shows through; the pale wedge behind the stripes is faint), the **logo sits
+on a white rounded tile** (Cloudinary `c_pad,...,b_white/r_..` -- unseen on white, a badge on dark), and
+the website and mailbox icons carry a thin **white outline**. The composer's Dark preview shows it as
+Gmail and Apple Mail draw it.
 
 Mail clients drop SVG and skewed or gradient CSS, so the stripes, the bottom accent and the three icons
 are **pictures** drawn from the mockup's CSS at 2x: sources in `database/seeders/email/design/`, hosted in

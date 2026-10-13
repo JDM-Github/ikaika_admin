@@ -59,16 +59,18 @@ final class PortalEmailMarkup
     private const BRAND_COLOR = '#174d87';
 
     // The company mark the Company footer carries.
-    private const LETTER_LOGO = 'https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_116,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png';
+    // The logo on a white rounded tile: unseen on the white letterhead, a badge where a mail client darkens the page.
+    private const LETTER_LOGO = 'https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_116/c_pad,w_140,h_146,b_white/r_22/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png';
 
     /*
      * The letterhead's diagonal stripes and the bottom bar's accent, drawn from the approved mockup's CSS
      * at twice their size: mail clients drop skewed and gradient CSS, so the design travels as pictures.
+     * Both are on a transparent ground, so a page or bar a mail client darkens or inverts shows through.
      * Sources: database/seeders/email/design/, kept in Cloudinary under email-design/.
      */
-    private const LETTER_HEADER_ACCENT = 'https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865756/email-design/letter-header-accent.png';
+    private const LETTER_HEADER_ACCENT = 'https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871561/email-design/letter-header-accent.png';
 
-    private const LETTER_BOTTOM_ACCENT = 'https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865830/email-design/letter-bottom-accent.png';
+    private const LETTER_BOTTOM_ACCENT = 'https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871563/email-design/letter-bottom-accent.png';
 
     // A phone stacks the letter and drops the stripes; clients without media queries keep the desktop layout.
     private const LETTER_STYLE = '<style>@media only screen and (max-width:760px){'
@@ -76,11 +78,11 @@ final class PortalEmailMarkup
         .'.pl-accent{display:none !important;}'
         .'.pl-brand{font-size:21px !important;line-height:24px !important;}'
         .'.pl-product{font-size:9px !important;letter-spacing:2px !important;}'
-        .'.pl-logo{width:47px !important;}'
+        .'.pl-logo{width:57px !important;}'
         .'.pl-foot-col{display:block !important;width:100% !important;padding-right:0 !important;}'
         .'.pl-foot-address{border-left:0 !important;border-top:1px solid #d3dfed !important;padding:13px 0 0 !important;}'
         .'.pl-outer{padding:12px 6px !important;}'
-        .'.pl-foot-logo{width:55px !important;max-width:55px !important;}'
+        .'.pl-foot-logo{width:66px !important;max-width:66px !important;}'
         .'.pl-foot-logo-cell{padding-right:12px !important;}'
         .'.pl-foot-text{padding-left:12px !important;}'
         .'}</style>';
@@ -280,11 +282,11 @@ final class PortalEmailMarkup
             '          <td style="padding:0;border-bottom:1px solid #e0e7f0;background-color:#ffffff;">',
             '            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
             '              <tr>',
-            '                <td class="pl-pad" valign="middle" style="padding:20px 0 20px 30px;">',
+            '                <td class="pl-pad" valign="middle" style="padding:20px 0 20px 24px;">',
             '                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
             '                    <tr>',
-            '                      <td valign="middle" style="padding:0 18px 0 0;">',
-            '                        <img class="pl-logo" src="'.self::LETTER_LOGO.'" alt="IKAIKA BIM" width="58" style="display:block;width:58px;height:auto;border:0;">',
+            '                      <td valign="middle" style="padding:0 12px 0 0;">',
+            '                        <img class="pl-logo" src="'.self::LETTER_LOGO.'" alt="IKAIKA BIM" width="70" style="display:block;width:70px;height:auto;border:0;">',
             '                      </td>',
             '                      <td valign="middle" width="1" height="58" style="width:1px;height:58px;background-color:#45719f;font-size:0;line-height:0;">&nbsp;</td>',
             '                      <td valign="middle" style="padding:0 0 0 18px;'.$font.';">',

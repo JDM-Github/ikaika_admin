@@ -72,10 +72,14 @@ class PortalEmailBuiltInsTest extends TestCase
     {
         $footer = $this->migration()::body('company-footer.html');
 
-        // The logo at 72px, fetched at twice that for sharp screens.
-        $this->assertStringContainsString('/c_limit,w_144,f_auto,q_auto/', $footer);
+        // The logo at 72px on a white tile (86px with its margin), fetched at twice that for sharp screens:
+        // the tile is unseen on white and keeps the navy logo readable where a mail client darkens the page.
+        foreach (['company-footer.html', 'ikaika-bim-footer.html', 'company-signature.html'] as $file) {
+            $body = $this->migration()::body($file);
+            $this->assertStringContainsString('/c_limit,w_144/c_pad,w_172,h_180,b_white/r_26/f_png/', $body, $file);
+            $this->assertStringContainsString('width="86"', $body, $file);
+        }
         $this->assertStringContainsString('/email-upload/global/', $footer);
-        $this->assertStringContainsString('width="72"', $footer);
         $this->assertDoesNotMatchRegularExpression('#email-upload/\d+/#', $footer.$this->migration()::body('portal-email-test.html'));
         // The icons are pictures from email-design/, never SVG, which mail clients drop.
         foreach (['icon-globe', 'icon-mail', 'icon-pin'] as $icon) {
@@ -111,11 +115,66 @@ class PortalEmailBuiltInsTest extends TestCase
         $this->assertSame($body, rtrim(str_replace("\r\n", "\n", (string) $stored()[0]->body)));
     }
 
+    // The dark-mode versions replace only footers still exactly the previous built-ins.
+    public function test_the_dark_mode_migration_replaces_only_unedited_footers(): void
+    {
+        $darkSafe = require database_path('migrations/2026_10_13_170000_dark_mode_safe_footers.php');
+        $bim = require database_path('migrations/2026_10_13_150000_seed_ikaika_bim_footer.php');
+        $this->assertSame($bim::body(), $darkSafe::BIM_NEW);
+
+        $portal = DB::connection('portal');
+        $creator = (int) $portal->table('employees')->value('id');
+        $company = $portal->table('email_blocks')->insertGetId(['kind' => 'footer', 'name' => 'Old company', 'body' => $darkSafe::COMPANY_OLD, 'format' => 'html', 'created_by' => $creator]);
+        $bimRow = $portal->table('email_blocks')->insertGetId(['kind' => 'footer', 'name' => 'Old BIM', 'body' => str_replace("\n", "\r\n", $darkSafe::BIM_OLD), 'format' => 'html', 'created_by' => $creator]);
+        $own = $portal->table('email_blocks')->insertGetId(['kind' => 'footer', 'name' => 'Own', 'body' => '<p>Ours</p>', 'format' => 'html', 'created_by' => $creator]);
+
+        $darkSafe->up();
+
+        $this->assertSame($darkSafe::COMPANY_NEW, $portal->table('email_blocks')->where('id', $company)->value('body'));
+        $this->assertSame($darkSafe::BIM_NEW, $portal->table('email_blocks')->where('id', $bimRow)->value('body'));
+        $this->assertSame('<p>Ours</p>', $portal->table('email_blocks')->where('id', $own)->value('body'));
+    }
+
+    // The Company signature takes the footers' design, never new words: every placeholder and sentence stays.
+    public function test_the_signature_keeps_its_words_in_the_new_design_and_fits_an_exchange_rule(): void
+    {
+        $restyle = require database_path('migrations/2026_10_13_180000_restyle_company_signature.php');
+        $this->assertSame($this->migration()::body('company-signature.html'), $restyle::NEW);
+
+        // The words and placeholders in order; separators and line breaks are layout, not wording.
+        $words = static function (string $html): array {
+            preg_match_all('/[{}\w@.\'-]+/u', html_entity_decode(strip_tags($html)), $match);
+
+            return $match[0];
+        };
+        $this->assertSame($words($restyle::OLD), $words($restyle::NEW));
+        foreach (['{name}', '{title}', '{department}', '{email}', '{phone}', '{location}'] as $token) {
+            $this->assertStringContainsString($token, $restyle::NEW);
+        }
+        // Filled for a long name it still fits the 5000 characters an Exchange disclaimer rule allows.
+        $filled = str_replace(['{name}', '{title}', '{department}', '{email}', '{phone}', '{location}'], [str_repeat('N', 60), str_repeat('T', 60), str_repeat('D', 40), str_repeat('e', 50).'@ikaikabim.com', '0917 123 4567', str_repeat('L', 40)], $restyle::NEW);
+        $this->assertLessThan(5000, strlen($filled));
+
+        // Same in a fresh database, and only an unedited signature is replaced.
+        $sql = str_replace("\r\n", "\n", (string) file_get_contents(base_path('sql/portal/separate.sql')));
+        $this->assertStringContainsString("'Company signature', NULL, NULL, '".str_replace("'", "''", $restyle::NEW)."', 'html'", $sql);
+        $portal = DB::connection('portal');
+        $creator = (int) $portal->table('employees')->value('id');
+        $stale = $portal->table('email_blocks')->insertGetId(['kind' => 'footer', 'name' => 'Old signature', 'body' => $restyle::OLD, 'format' => 'html', 'created_by' => $creator]);
+        $own = $portal->table('email_blocks')->insertGetId(['kind' => 'footer', 'name' => 'Own signature', 'body' => '<p>{name}</p>', 'format' => 'html', 'created_by' => $creator]);
+        $restyle->up();
+        $this->assertSame($restyle::NEW, $portal->table('email_blocks')->where('id', $stale)->value('body'));
+        $this->assertSame('<p>{name}</p>', $portal->table('email_blocks')->where('id', $own)->value('body'));
+    }
+
     // A footer still the previous built-in becomes the new design; one someone rewrote is left alone.
     public function test_the_redesign_migration_replaces_only_an_unedited_footer(): void
     {
         $redesign = require database_path('migrations/2026_10_13_120000_redesign_company_footer.php');
-        $this->assertSame($this->migration()::body('company-footer.html'), $redesign::NEW);
+        // Each later version starts where this one ended, and the last is the seed.
+        $darkSafe = require database_path('migrations/2026_10_13_170000_dark_mode_safe_footers.php');
+        $this->assertSame($redesign::NEW, $darkSafe::COMPANY_OLD);
+        $this->assertSame($this->migration()::body('company-footer.html'), $darkSafe::COMPANY_NEW);
 
         $portal = DB::connection('portal');
         $creator = (int) $portal->table('employees')->value('id');
