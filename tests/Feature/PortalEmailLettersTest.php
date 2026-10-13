@@ -49,6 +49,51 @@ class PortalEmailLettersTest extends TestCase
         $this->assertStringContainsString('font-size:14px', PortalEmailMarkup::document('Plain', null));
     }
 
+    public function test_a_letter_opens_with_its_category_and_its_subject_as_the_title(): void
+    {
+        $html = PortalEmailMarkup::document('Hi.', null, PortalEmailMarkup::FORMAT_LETTER, PortalEmailMarkup::FORMAT_MARKUP, 'security', 'Your <code>');
+
+        $this->assertStringContainsString('text-transform:uppercase;">Security</td>', $html);
+        $this->assertStringContainsString('>Your &lt;code&gt;</h1>', $html);
+        // The category leads the subject too, so the inbox says what it is before it is opened.
+        $this->assertSame('[Security] Your code', PortalEmailMarkup::subject('security', 'Your code'));
+        $this->assertSame('[Request] New leave request', PortalEmailMarkup::subject('request', 'New leave request'));
+        // Other, or no category, has neither pill nor prefix; a formatted email has no header at all.
+        $this->assertSame('Your code', PortalEmailMarkup::subject('other', 'Your code'));
+        $this->assertSame('Your code', PortalEmailMarkup::subject(null, 'Your code'));
+        $this->assertStringNotContainsString('text-transform:uppercase', PortalEmailMarkup::document('Hi.', null, PortalEmailMarkup::FORMAT_LETTER, PortalEmailMarkup::FORMAT_MARKUP, 'other', 'Title'));
+        $this->assertStringNotContainsString('<h1', PortalEmailMarkup::document('Hi.', null, PortalEmailMarkup::FORMAT_MARKUP, PortalEmailMarkup::FORMAT_MARKUP, 'security', 'Title'));
+    }
+
+    // A code reads off a box and a link is a button, never a bare address to copy.
+    public function test_code_and_button_lines_become_blocks_of_their_own(): void
+    {
+        $html = PortalEmailMarkup::html("Use this code:\n::code 655991\n::button[Open the queue](https://example.test/q?a=1&b=2)\nThanks.");
+
+        $this->assertStringNotContainsString('::code', $html);
+        $this->assertStringNotContainsString('::button', $html);
+        $this->assertStringContainsString('letter-spacing:8px;font-weight:700;color:#1f4e8c;">655991</td>', $html);
+        $this->assertStringContainsString('<a href="https://example.test/q?a=1&amp;b=2" target="_blank" rel="noopener" style="display:inline-block;', $html);
+        $this->assertStringContainsString('>Open the queue</a>', $html);
+        // A block never sits inside a paragraph, and the text around it stays its own.
+        $this->assertStringNotContainsString('<p style="margin:0 0 12px"><table', $html);
+        $this->assertStringContainsString('<p style="margin:0 0 12px">Thanks.</p>', $html);
+
+        // A long password still fits a phone; a value is text, never markup.
+        $this->assertStringContainsString('letter-spacing:3px;font-weight:700;color:#1f4e8c;">Kp7mQ2xR&lt;b&gt;9Ls</td>', PortalEmailMarkup::html('::code Kp7mQ2xR<b>9Ls'));
+        // A button to anything but a web address is not a button.
+        $this->assertStringNotContainsString('display:inline-block', PortalEmailMarkup::html('::button[Run](javascript:alert)'));
+    }
+
+    // The sign-off sits close to the footer, not a screen away.
+    public function test_the_footer_sits_close_under_the_message(): void
+    {
+        $html = PortalEmailMarkup::document('Hi.', '<p>Footer</p>', PortalEmailMarkup::FORMAT_LETTER, PortalEmailMarkup::FORMAT_HTML);
+
+        $this->assertStringContainsString('padding:28px 32px 4px;', $html);
+        $this->assertStringContainsString('margin:16px 0 12px', $html);
+    }
+
     public function test_people_text_set_in_a_letter_stays_text(): void
     {
         $escaped = PortalEmailMarkup::escape('Ana_Cruz *bold* [click](javascript:alert) # 1. <b> Mary-Ann');
@@ -69,6 +114,7 @@ class PortalEmailLettersTest extends TestCase
         [$footerBody] = PortalNotificationEmails::companyFooter();
 
         $this->assertSame(PortalEmailMarkup::FORMAT_LETTER, $mail->bodyFormat);
+        $this->assertSame(PortalEmailMarkup::CATEGORY_NOTICE, $mail->category);
         $this->assertSame($footerBody, $mail->footerBody);
         $this->assertSame(PortalNotificationEmails::FROM_NAME, $mail->fromName);
         $this->assertStringStartsWith('Hi there,', $mail->body);

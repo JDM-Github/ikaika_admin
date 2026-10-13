@@ -38,6 +38,8 @@ class PortalEmailMail extends Mailable
         public readonly array $attachedFiles = [],
         /** @var list<array{name: string, data: string, mime: string}> data is base64 */
         public readonly array $inlineImages = [],
+        // What it is about (notice, security, ...): in front of the subject, and a letter's pill.
+        public readonly ?string $category = null,
     ) {}
 
     // Called by the mailer just before it sends, after the queue has rebuilt this mail.
@@ -53,13 +55,20 @@ class PortalEmailMail extends Mailable
         return new Envelope(
             from: $this->fromName === null ? null : new Address((string) config('mail.from.address'), $this->fromName),
             replyTo: $this->replyToAddress === null ? [] : [new Address($this->replyToAddress, $this->fromName)],
-            subject: $this->subjectLine,
+            subject: PortalEmailMarkup::subject($this->category, $this->subjectLine),
         );
     }
 
     public function content(): Content
     {
-        return new Content(htmlString: PortalEmailMarkup::document($this->body, $this->footerBody, $this->bodyFormat, $this->footerFormat));
+        return new Content(htmlString: PortalEmailMarkup::document(
+            $this->body,
+            $this->footerBody,
+            $this->bodyFormat,
+            $this->footerFormat,
+            $this->category,
+            $this->subjectLine,
+        ));
     }
 
     /**

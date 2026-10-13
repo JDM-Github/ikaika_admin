@@ -17,8 +17,13 @@ use Illuminate\Support\Str;
  * whole document (one with its own <html>) is the email itself: nothing wraps it, and the footer
  * goes where it marks FOOTER_SLOT, or else just before its </body>.
  *
- * The letter format is markup set in the letter design (letter()): a letterhead, the message on a
- * white sheet, the footer at its foot. The design is a whole document, so the HTML of a letter -- what
+ * The letter format is markup set in the letter design (letter()): a letterhead, then the email's
+ * category as a coloured pill and its subject as the title, the message on a white sheet, the footer
+ * at its foot.
+ *
+ * Two lines of markup become blocks of their own, in any markup body: `::code 655991` sets a one-time
+ * code or a password in a box, and `::button[Open the page](https://...)` a button, so a long address
+ * never has to be read or copied. The design is a whole document, so the HTML of a letter -- what
  * the preview hands back for one with no footer -- sends exactly as the letter does, and a writer can
  * change the design there.
  */
@@ -29,6 +34,19 @@ final class PortalEmailMarkup
     public const FORMAT_HTML = 'html';
 
     public const FORMAT_LETTER = 'letter';
+
+    // The categories the system's own emails use; the composer's come from PortalEmail::CATEGORIES.
+    public const CATEGORY_NOTICE = 'notice';
+
+    public const CATEGORY_EVENT = 'event';
+
+    public const CATEGORY_SECURITY = 'security';
+
+    public const CATEGORY_WARNING = 'warning';
+
+    public const CATEGORY_REQUEST = 'request';
+
+    public const CATEGORY_PROJECT = 'project';
 
     // Where a whole document wants the footer; kept, unseen, when there is none, so the HTML stays a design.
     public const FOOTER_SLOT = '<!-- portal:footer -->';
@@ -71,6 +89,25 @@ final class PortalEmailMarkup
     private const DETECTION_HEAD = '<meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">'
         .'<style>a[x-apple-data-detectors]{color:inherit !important;text-decoration:none !important;font-size:inherit !important;font-family:inherit !important;font-weight:inherit !important;line-height:inherit !important;}</style>';
 
+    /*
+     * What an email is about, shown as a pill above its title and in front of its subject. The first
+     * four are the composer's own categories; the rest are the system's. Other has no pill.
+     *
+     * @var array<string, array{0: string, 1: string, 2: string}> key => label, text colour, background
+     */
+    private const CATEGORIES = [
+        self::CATEGORY_NOTICE => ['Notice', '#1f4e8c', '#e8eef7'],
+        self::CATEGORY_EVENT => ['Event', '#1e7b3c', '#e7f6ec'],
+        'complaint' => ['Complaint', '#b42318', '#fdecec'],
+        self::CATEGORY_SECURITY => ['Security', '#4338ca', '#eef0fe'],
+        self::CATEGORY_WARNING => ['Warning', '#b45309', '#fff4e5'],
+        self::CATEGORY_REQUEST => ['Request', '#0f766e', '#e6f6f4'],
+        self::CATEGORY_PROJECT => ['Project', '#7e22ce', '#f3e8ff'],
+    ];
+
+    // A block line: `::code <value>` or `::button[<label>](<link>)`, alone on its line.
+    private const BLOCK_LINE = '/^::(code|button)[ \t]*(.+?)[ \t]*$/m';
+
     /**
      * @var array<string, string>
      */
@@ -82,7 +119,8 @@ final class PortalEmailMarkup
         'ul' => 'margin:0 0 12px;padding-left:22px',
         'ol' => 'margin:0 0 12px;padding-left:22px',
         'li' => 'margin:0 0 4px',
-        'blockquote' => 'margin:0 0 12px;padding:2px 0 2px 12px;border-left:3px solid '.self::RULE_COLOR.';color:'.self::MUTED_COLOR,
+        // A panel for details set apart from the message: who, what, when.
+        'blockquote' => 'margin:4px 0 16px;padding:12px 16px 0;background-color:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid '.self::BRAND_COLOR.';border-radius:8px;color:#374151',
         'code' => 'font-family:monospace;background:#f3f4f6;padding:1px 4px;border-radius:4px',
         'hr' => 'border:none;border-top:1px solid '.self::RULE_COLOR.';margin:16px 0',
     ];
@@ -126,21 +164,24 @@ final class PortalEmailMarkup
     }
 
     /**
-     * The whole email body: the message, then the footer under a rule when one was chosen.
+     * The whole email body: the message, then the footer under a rule when one was chosen. A letter
+     * also carries its category and title (the subject) above the message.
      */
     public static function document(
         string $body,
         ?string $footer,
         string $bodyFormat = self::FORMAT_MARKUP,
         string $footerFormat = self::FORMAT_MARKUP,
+        ?string $category = null,
+        ?string $title = null,
     ): string {
         $footerHtml = $footer === null || trim($footer) === ''
             ? ''
-            : '<hr style="border:none;border-top:1px solid '.self::RULE_COLOR.';margin:24px 0 12px">'
+            : '<hr style="border:none;border-top:1px solid '.self::RULE_COLOR.';margin:16px 0 12px">'
                 .'<div style="color:'.self::MUTED_COLOR.';font-size:13px">'.self::fragment($footer, $footerFormat).'</div>';
 
         if ($bodyFormat === self::FORMAT_LETTER) {
-            $body = self::letter(self::html($body));
+            $body = self::letter(self::header($category, $title).self::html($body));
             $bodyFormat = self::FORMAT_HTML;
         }
 
@@ -214,7 +255,7 @@ final class PortalEmailMarkup
             '        </tr>',
             '        <!-- Letter -->',
             '        <tr>',
-            '          <td style="padding:28px 32px 12px;'.$font.';font-size:'.self::TEXT_SIZE.';line-height:1.6;color:'.self::TEXT_COLOR.';">',
+            '          <td style="padding:28px 32px 4px;'.$font.';font-size:'.self::TEXT_SIZE.';line-height:1.6;color:'.self::TEXT_COLOR.';">',
             $content,
             '          </td>',
             '        </tr>',
@@ -233,6 +274,62 @@ final class PortalEmailMarkup
         ]);
     }
 
+    // The subject an inbox shows: the category in front, so a reader knows what it is before opening it.
+    public static function subject(?string $category, string $subject): string
+    {
+        $known = self::CATEGORIES[strtolower((string) $category)] ?? null;
+
+        return $known === null ? $subject : '['.$known[0].'] '.$subject;
+    }
+
+    // The category pill and the title over a letter's message; nothing when neither is known.
+    private static function header(?string $category, ?string $title): string
+    {
+        $known = self::CATEGORIES[strtolower((string) $category)] ?? null;
+        $title = trim((string) $title);
+        $html = '';
+        if ($known !== null) {
+            [$label, $color, $background] = $known;
+            $html .= '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 12px;border-collapse:separate;"><tr>'
+                .'<td style="padding:3px 10px;border-radius:999px;background-color:'.$background.';color:'.$color.';font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">'
+                .e($label).'</td></tr></table>';
+        }
+        if ($title !== '') {
+            $html .= '<h1 style="margin:0 0 18px;font-size:20px;line-height:1.3;font-weight:700;color:'.self::TEXT_COLOR.';">'.e($title).'</h1>';
+        }
+
+        return $html;
+    }
+
+    // A code or password in a box of its own: large, spaced and easy to read off or copy.
+    private static function codeBlock(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        // A short code reads best spaced wide; a long password must still fit a phone.
+        $size = strlen($value) <= 8 ? 'font-size:30px;line-height:38px;letter-spacing:8px' : 'font-size:22px;line-height:30px;letter-spacing:3px';
+
+        return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:4px 0 18px;border-collapse:separate;"><tr>'
+            .'<td align="center" style="padding:16px 12px;background-color:#f3f6fb;border:1px solid #dbe4f0;border-radius:10px;'
+            ."font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;".$size.';font-weight:700;color:'.self::BRAND_COLOR.';">'
+            .e($value).'</td></tr></table>';
+    }
+
+    // A button for a link: its label is what the reader clicks, never the address itself.
+    private static function buttonBlock(string $spec): ?string
+    {
+        if (preg_match('/^\[([^\]]+)\]\((https?:\/\/\S+|\/\S*)\)$/', trim($spec), $match) !== 1) {
+            return null;
+        }
+
+        return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 18px;border-collapse:separate;"><tr>'
+            .'<td style="border-radius:8px;background-color:'.self::BRAND_COLOR.';">'
+            .'<a href="'.e($match[2]).'" target="_blank" rel="noopener" style="display:inline-block;padding:11px 22px;font-family:'.self::FONT_STACK.';font-size:14px;line-height:20px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">'
+            .e($match[1]).'</a></td></tr></table>';
+    }
+
     /*
      * Text from people (names, titles, reasons) set inside a letter's markup, so a * or [ in it stays
      * itself. Dots and dashes are left alone: they only mean something at a line's start, where this
@@ -245,6 +342,19 @@ final class PortalEmailMarkup
 
     public static function html(string $markup): string
     {
+        // Each block stands in as a paragraph of its own until Markdown is done, then takes its place.
+        $blocks = [];
+        $markup = (string) preg_replace_callback(self::BLOCK_LINE, static function (array $line) use (&$blocks): string {
+            $html = $line[1] === 'code' ? self::codeBlock($line[2]) : self::buttonBlock($line[2]);
+            if ($html === null) {
+                return $line[0];
+            }
+            $token = 'PORTALBLOCK'.count($blocks).'END';
+            $blocks[$token] = $html;
+
+            return "\n\n".$token."\n\n";
+        }, $markup);
+
         $html = Str::markdown($markup, [
             'html_input' => 'escape',
             'allow_unsafe_links' => false,
@@ -261,10 +371,18 @@ final class PortalEmailMarkup
         $html = (string) preg_replace('/<img\s/', '<img style="display:block;max-width:100%;height:auto;border:0" ', $html);
 
         // Links open in a new tab and read as links by their colour alone, dark or light: no underline.
-        return (string) preg_replace(
+        $html = (string) preg_replace(
             '/<a href="([^"]*)"/',
             '<a href="$1" target="_blank" rel="noopener" style="color:'.self::LINK_COLOR.';text-decoration:none"',
             $html,
         );
+
+        // Last, so nothing above restyles a block's own table or button.
+        $paragraph = '<p style="'.self::TAG_STYLES['p'].'">';
+        foreach ($blocks as $token => $block) {
+            $html = str_replace([$paragraph.$token.'</p>', $token], $block, $html);
+        }
+
+        return $html;
     }
 }

@@ -53,7 +53,8 @@ class PortalEmailLoginTest extends TestCase
     {
         $mail = Mail::sent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo($address))->last();
         $this->assertNotNull($mail);
-        preg_match('/\*\*(\d{6})\*\*/', $mail->body, $match);
+        // The code sits on a ::code line of its own, which the letter draws as a box.
+        preg_match('/^::code (\d{6})$/m', $mail->body, $match);
 
         return $match[1];
     }
@@ -125,7 +126,7 @@ class PortalEmailLoginTest extends TestCase
     // A code is a relay round trip; it waits for the answer, so two codes never hold the screen.
     public function test_a_code_goes_out_after_the_answer_and_a_failed_one_is_only_logged(): void
     {
-        PortalLetters::sendAfterResponse('kelly.login@example.test', 'Subject', 'Body');
+        PortalLetters::sendAfterResponse('kelly.login@example.test', PortalEmailMarkup::CATEGORY_SECURITY, 'Subject', 'Body');
         Mail::assertNothingSent();
 
         app(DeferredCallbackCollection::class)->invoke();
@@ -133,7 +134,7 @@ class PortalEmailLoginTest extends TestCase
 
         Mail::shouldReceive('to')->andThrow(new RuntimeException('relay down'));
         Log::spy();
-        PortalLetters::sendAfterResponse('kelly.login@example.test', 'Subject', 'Body');
+        PortalLetters::sendAfterResponse('kelly.login@example.test', PortalEmailMarkup::CATEGORY_SECURITY, 'Subject', 'Body');
         app(DeferredCallbackCollection::class)->invoke();
         Log::shouldHaveReceived('warning')->with('portal.letter.failed', ['subject' => 'Subject', 'reason' => 'relay down']);
     }

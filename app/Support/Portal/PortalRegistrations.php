@@ -628,11 +628,13 @@ final class PortalRegistrations
         $link = $this->link((string) $registration->code);
         PortalLetters::sendAfterResponse(
             strtolower(trim((string) $registration->email)),
+            PortalEmailMarkup::CATEGORY_SECURITY,
             'Your code for '.trim((string) $registration->candidate_name),
             PortalLetters::body(
                 (string) $registration->candidate_name,
-                'Your code is **'.$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                    ."\n\nOpen your registration: [".$link.']('.$link.')',
+                'Use this code to open your registration. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
+                    ."\n\n::code ".$code
+                    ."\n\n::button[Open your registration](".$link.')',
             ),
         );
     }

@@ -63,6 +63,7 @@ final class PortalNotificationEmails
         // The inbox row is already there, so a mail that fails is only ever a warning.
         PortalLetters::send(
             $email,
+            self::category($type),
             $title,
             PortalLetters::body((string) $employee->first_name, $this->message($message, $linkPath, $linkLabel)),
             [],
@@ -71,13 +72,25 @@ final class PortalNotificationEmails
         );
     }
 
-    // The notice's own words, then its link. Names and titles are people's text, so markup in them stays text.
+    // Requests, projects and events each wear their own category; anything else is a notice.
+    private static function category(string $type): string
+    {
+        return match (true) {
+            str_starts_with($type, 'requests.') => PortalEmailMarkup::CATEGORY_REQUEST,
+            str_starts_with($type, 'projects.') => PortalEmailMarkup::CATEGORY_PROJECT,
+            str_starts_with($type, 'calendar.') => PortalEmailMarkup::CATEGORY_EVENT,
+            default => PortalEmailMarkup::CATEGORY_NOTICE,
+        };
+    }
+
+    // The notice's own words, then its link as a button. Names and titles are people's text, so markup in them stays text.
     private function message(string $message, ?string $linkPath, ?string $linkLabel): string
     {
         $text = PortalEmailMarkup::escape($message);
         $url = $this->linkUrl($linkPath);
-        if ($url !== null && $linkLabel !== null && trim($linkLabel) !== '') {
-            $text .= "\n\n[".trim($linkLabel).']('.$url.')';
+        $label = trim((string) $linkLabel);
+        if ($url !== null && $label !== '') {
+            $text .= "\n\n::button[".str_replace([']', '['], '', $label).']('.$url.')';
         }
 
         return $text;

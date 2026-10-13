@@ -55,6 +55,7 @@ final class PortalAccessAlert
         foreach ($recipients as $email => $firstName) {
             PortalLetters::send(
                 $email,
+                PortalEmailMarkup::CATEGORY_WARNING,
                 self::SUBJECT,
                 PortalLetters::body($firstName, $message),
                 [],
@@ -73,15 +74,16 @@ final class PortalAccessAlert
         $idNo = trim((string) $actor->id_no);
         $role = trim((string) $actor->role.' / '.(string) $actor->role_level, ' /');
 
+        // The details sit in a panel of their own, apart from the sentences around them.
         return implode("\n", [
             'A signed-in portal user tried to reach something they are not allowed to.',
             '',
-            '**Who:** '.$this->text($name === '' ? 'Unnamed account' : $name).($idNo === '' ? '' : ' (ID no. '.$this->text($idNo).')'),
-            '**Role:** '.$this->text($role === '' ? 'None' : $role),
-            '**Tried:** `'.str_replace('`', '', $request->method().' /'.ltrim($request->path(), '/')).'`',
-            '**Refused because:** '.$this->text($reason),
-            '**From IP:** '.$this->text((string) ($request->ip() ?? 'unknown')),
-            '**When:** '.$this->timezone->now()->format('l, F j, Y \a\t g:i a'),
+            '> **Who:** '.$this->text($name === '' ? 'Unnamed account' : $name).($idNo === '' ? '' : ' (ID no. '.$this->text($idNo).')'),
+            '> **Role:** '.$this->text($role === '' ? 'None' : $role),
+            '> **Tried:** `'.str_replace('`', '', $request->method().' /'.ltrim($request->path(), '/')).'`',
+            '> **Refused because:** '.$this->text($reason),
+            '> **From IP:** '.$this->text((string) ($request->ip() ?? 'unknown')),
+            '> **When:** '.$this->timezone->now()->format('l, F j, Y \a\t g:i a'),
             '',
             'You get this because you hold Access alerts. The same attempt by the same person is reported at most once every 15 minutes.',
         ]);

@@ -82,6 +82,9 @@ class PortalNotificationEmailsTest extends TestCase
                 && $mail->subjectLine === 'New leave request'
                 // The system letter: letter design, the Company footer, greeted by first name, signed off.
                 && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
+                && $mail->category === PortalEmailMarkup::CATEGORY_REQUEST
+                && $mail->envelope()->subject === '[Request] New leave request'
+                && str_contains($mail->body, '::button[Open queue](')
                 && $mail->footerBody === $footerBody
                 && $mail->fromName === PortalNotificationEmails::FROM_NAME
                 && str_starts_with($mail->body, 'Hi '.trim((string) $admin->first_name).',')
@@ -195,7 +198,8 @@ class PortalNotificationEmailsTest extends TestCase
             && $mail->subjectLine === 'New event'
             && str_contains($mail->body, 'Design review')
             // The reader can open the event from the email.
-            && str_contains($mail->body, '[Open the calendar](')
+            && $mail->category === PortalEmailMarkup::CATEGORY_EVENT
+            && str_contains($mail->body, '::button[Open the calendar](')
             && str_contains($mail->body, '/event-calendar)'));
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo((string) $admin->email)
             && $mail->subjectLine === 'New event'

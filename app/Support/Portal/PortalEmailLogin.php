@@ -53,7 +53,7 @@ final class PortalEmailLogin
             ],
         );
 
-        PortalLetters::sendAfterResponse($address, 'Your IKAIKA Portal sign-in code', $this->letter((string) $employee->first_name, $code));
+        PortalLetters::sendAfterResponse($address, PortalEmailMarkup::CATEGORY_SECURITY, 'Your IKAIKA Portal sign-in code', $this->letter((string) $employee->first_name, $code));
 
         return [['kind' => self::KIND_WORK, 'hint' => self::mask($address)]];
     }
@@ -113,7 +113,8 @@ final class PortalEmailLogin
     {
         return PortalLetters::body(
             $firstName,
-            'Your IKAIKA Portal sign-in code is **'.$code.'**. It is good for '.self::TTL_MINUTES.' minutes.'
+            'Use this code to sign in to the IKAIKA Portal. It is good for '.self::TTL_MINUTES.' minutes.'
+                ."\n\n::code ".$code
                 ."\n\nIf you did not try to sign in, you can ignore this email; nobody can sign in without the code.",
         );
     }

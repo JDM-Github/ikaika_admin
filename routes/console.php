@@ -1,13 +1,11 @@
 <?php
 
-use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailMessage;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Portal\PortalBitbucketPreview;
 use App\Support\Portal\PortalBitbucketSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
 use App\Support\Portal\PortalEmailAttachments;
-use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalEmailMessages;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
@@ -143,15 +141,7 @@ Artisan::command('portal:mail-test
 
             return 1;
         }
-        $mail = new PortalEmailMail(
-            (string) $row->subject,
-            (string) $row->body,
-            is_string($row->footer_body) ? $row->footer_body : null,
-            PortalEmailMarkup::format($row->format) ?? PortalEmailMarkup::FORMAT_MARKUP,
-            PortalEmailMarkup::format($row->footer_format) ?? PortalEmailMarkup::FORMAT_MARKUP,
-            is_string($row->from_name) ? $row->from_name : null,
-            is_string($row->reply_to) ? $row->reply_to : null,
-        );
+        $mail = PortalEmailMessages::mailFromRow($row);
         $this->line(sprintf(
             'Resending #%d "%s" (%s, %s, %s)',
             (int) $row->getKey(),

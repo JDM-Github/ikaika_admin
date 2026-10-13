@@ -464,11 +464,13 @@ final class PortalSharedPages
         $link = $this->link((string) $share->code);
         PortalLetters::sendAfterResponse(
             trim((string) $share->email),
+            PortalEmailMarkup::CATEGORY_SECURITY,
             'Your code for '.trim((string) $share->label),
             PortalLetters::body(
                 $this->displayName($share),
-                'Your code is **'.$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                    ."\n\nOpen the shared page: [".$link.']('.$link.')',
+                'Use this code to open **'.PortalEmailMarkup::escape(trim((string) $share->label)).'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
+                    ."\n\n::code ".$code
+                    ."\n\n::button[Open the shared page](".$link.')',
             ),
         );
     }
@@ -554,17 +556,20 @@ final class PortalSharedPages
             : 'It is good until '.date('j M Y, g:i a', strtotime($expiresAt)).'.';
         $link = $this->link($code);
 
+        $shown = PortalEmailMarkup::escape($label);
         PortalLetters::send(
             $email,
+            PortalEmailMarkup::CATEGORY_SECURITY,
             ($isNewPassword ? 'Your new password for ' : 'Your link and password for ').$label,
             PortalLetters::body(
                 $name,
                 ($isNewPassword
-                    ? 'The password for your read-only shared page, **'.$label.'**, was changed. The old one no longer works.'
-                    : 'A read-only shared page is ready for you: **'.$label.'**.')
-                    ."\n\nLink: [".$link.']('.$link.')'
-                    ."\nPassword: **".$password.'**'
-                    ."\n\nOr scan this code with your phone to open the link:"
+                    ? 'The password for your read-only shared page, **'.$shown.'**, was changed. The old one no longer works.'
+                    : 'A read-only shared page is ready for you: **'.$shown.'**.')
+                    ."\n\n::button[Open the shared page](".$link.')'
+                    ."\n\nYour password:"
+                    ."\n\n::code ".$password
+                    ."\n\nOr scan this code with your phone to open it:"
                     ."\n\n![QR code for the link](cid:".self::QR_IMAGE.')'
                     ."\n\n".$expiry.' It is read-only: you can look, not change anything.',
             ),

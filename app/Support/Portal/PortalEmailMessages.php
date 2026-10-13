@@ -209,7 +209,15 @@ final class PortalEmailMessages
         return [
             'section' => 'administration',
             'resource' => 'emails',
-            'data' => ['html' => PortalEmailMarkup::document(trim($body), $footerBody, $format, $footerFormat)],
+            // A letter shows its category and subject above the message, so the preview takes them too.
+            'data' => ['html' => PortalEmailMarkup::document(
+                trim($body),
+                $footerBody,
+                $format,
+                $footerFormat,
+                PortalEmail::category($request->input('category')),
+                trim((string) $request->input('subject', '')),
+            )],
         ];
     }
 
@@ -417,21 +425,12 @@ final class PortalEmailMessages
     public function deliverCopy(int $messageId, array $to, array $cc, array $bcc): bool
     {
         $row = $this->connection()->table('email_messages')->where('id', $messageId)
-            ->first(['subject', 'body', 'format', 'footer_body', 'footer_format', 'from_name', 'reply_to']);
+            ->first(['category', 'subject', 'body', 'format', 'footer_body', 'footer_format', 'from_name', 'reply_to']);
         if ($row === null) {
             return false;
         }
 
-        $mail = $this->mail(
-            (string) $row->subject,
-            (string) $row->body,
-            $row->footer_body === null ? null : (string) $row->footer_body,
-            PortalEmailMarkup::format($row->format) ?? PortalEmailMarkup::FORMAT_MARKUP,
-            PortalEmailMarkup::format($row->footer_format),
-            $row->from_name === null ? null : (string) $row->from_name,
-            $row->reply_to === null ? null : (string) $row->reply_to,
-            $this->attachments->mailFilesFor($messageId),
-        );
+        $mail = self::mailFromRow($row, $this->attachments->mailFilesFor($messageId));
         ($to === [] ? Mail::bcc($bcc) : Mail::to($to)->cc($cc)->bcc($bcc))->send($mail);
 
         return true;
@@ -519,6 +518,7 @@ final class PortalEmailMessages
     public static function testMail(): PortalEmailMail
     {
         return PortalLetters::letter(
+            PortalEmailMarkup::CATEGORY_NOTICE,
             'IKAIKA Portal mail test',
             PortalLetters::body(null, "This is a **test** from the portal.\nIf you can read this, sending works."),
         );
@@ -546,25 +546,24 @@ final class PortalEmailMessages
         Cache::forever(self::CACHE_VERSION_KEY, $current + 1);
     }
 
-    private function mail(
-        string $subject,
-        string $body,
-        ?string $footerBody,
-        string $format,
-        ?string $footerFormat,
-        ?string $fromName,
-        ?string $replyTo,
-        array $files = [],
-    ): PortalEmailMail {
+    /**
+     * One stored email as the mail it went out as: a queued copy, and the mail test's --message, send this.
+     *
+     * @param  list<array{path: string, name: string, mime: string}>  $files
+     */
+    public static function mailFromRow(object $row, array $files = []): PortalEmailMail
+    {
         return new PortalEmailMail(
-            $subject,
-            $body,
-            $footerBody,
-            $format,
-            $footerFormat ?? PortalEmailMarkup::FORMAT_MARKUP,
-            $fromName,
-            $replyTo,
+            (string) $row->subject,
+            (string) $row->body,
+            is_string($row->footer_body) ? $row->footer_body : null,
+            PortalEmailMarkup::format($row->format) ?? PortalEmailMarkup::FORMAT_MARKUP,
+            PortalEmailMarkup::format($row->footer_format) ?? PortalEmailMarkup::FORMAT_MARKUP,
+            is_string($row->from_name) ? $row->from_name : null,
+            is_string($row->reply_to) ? $row->reply_to : null,
             $files,
+            [],
+            PortalEmail::category($row->category),
         );
     }
 

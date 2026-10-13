@@ -656,10 +656,16 @@ class PortalEmailTest extends TestCase
         $headers = $this->authHeaders();
         $body = "Dear Team,\n\nThe office is closed on **Friday**.";
 
-        $html = $this->postJson(self::BASE.'/administration/emails/preview', ['body' => $body, 'format' => 'letter'], $headers)
-            ->assertOk()
-            ->json('data.html');
-        $this->assertSame(PortalEmailMarkup::document($body, null, 'letter'), $html);
+        // A letter carries its category and subject over the message, in the preview as in the send.
+        $html = $this->postJson(self::BASE.'/administration/emails/preview', [
+            'body' => $body,
+            'format' => 'letter',
+            'category' => 'notice',
+            'subject' => 'Closed on Friday',
+        ], $headers)->assertOk()->json('data.html');
+        $this->assertSame(PortalEmailMarkup::document($body, null, 'letter', 'markup', 'notice', 'Closed on Friday'), $html);
+        $this->assertStringContainsString('>Notice</td>', $html);
+        $this->assertStringContainsString('>Closed on Friday</h1>', $html);
 
         $this->postJson(self::BASE.'/administration/emails', [
             'category' => 'notice',
@@ -668,7 +674,8 @@ class PortalEmailTest extends TestCase
             'format' => 'letter',
             'audience' => 'everyone',
         ], $headers)->assertCreated()->assertJsonPath('data.format', 'letter');
-        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->render() === $html);
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->render() === $html
+            && $mail->envelope()->subject === '[Notice] Closed on Friday');
 
         $this->postJson(self::BASE.'/administration/email-blocks', [
             'kind' => 'template',

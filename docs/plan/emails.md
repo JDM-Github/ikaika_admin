@@ -38,6 +38,31 @@ map) is a link of our own, styled as plain text, and every letter asks phones no
 dates or numbers (`format-detection` meta + an `x-apple-data-detectors` rule). Message text is **14px**
 (headings 20 / 17 / 15px).
 
+**Category.** Every email says what it is about, twice: in front of its subject (`[Security] Your
+IKAIKA Portal sign-in code`) and, in a letter, as a coloured pill above the title (the subject, in
+20px bold). `PortalEmailMarkup::subject()` / `header()`; colours in `PortalEmailMarkup::CATEGORIES`.
+
+| Category | Colour | Used by |
+| --- | --- | --- |
+| **Security** | indigo | sign-in code, shared-page letters and code, registration code |
+| **Warning** | amber | blocked access alert |
+| **Request** | teal | request filed / decided notifications |
+| **Project** | purple | project notifications |
+| **Event** | green | new-event notifications; Send Email's Event |
+| **Notice** | brand blue | mail test, Missing Reports reminder; Send Email's Notice and the three drafts |
+| **Complaint** | red | Send Email's Complaint |
+| Other | -- | Send Email's Other: no pill, no prefix |
+
+**Blocks.** Two lines of markup become blocks of their own in any markup body (letters and Formatted):
+
+| Line | Becomes |
+| --- | --- |
+| `::code 655991` | The code (or password) in a box: monospace, bold, brand blue, spaced wide (30px for 8 characters or fewer, 22px for longer) |
+| `::button[Open the shared page](https://...)` | A brand-blue button with that label; only an `http(s)://` or `/` link -- anything else stays text |
+| Lines starting `> ` | A tinted details panel (light grey, brand-blue left edge, rounded) |
+
+A link is a button, never a long address to read or copy. The footer sits 16px under the sign-off.
+
 | Design | What the reader sees | Builder |
 | --- | --- | --- |
 | **Letter** | A white card with rounded corners on a light grey page, max 640px wide. At the top the **letterhead**: a blue bar, the IKAIKA BIM logo, "IKAIKA BIM" and "ikaikabim.com". The message below, in Inter 14px. The footer, when there is one, inside the card under a thin rule. | `FORMAT_LETTER` -> `PortalEmailMarkup::letter()` |
@@ -51,23 +76,23 @@ one line break stays a line break.
 
 ## All emails at a glance
 
-| # | Email | Goes to | Design | Letterhead | Company footer | Sender name | Extras | Sent |
+| # | Email | Category | Goes to | Design | Company footer | Sender name | Blocks | Sent |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Sign-in code | Employee's **work** email | Letter | Yes | Yes | IKAIKA Portal | - | After response |
-| 2 | Shared page: link + password | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | **QR** image inline | Queue |
-| 3 | Shared page: new password | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | **QR** image inline | Queue |
-| 4 | Shared page: sign-in code | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | - | After response |
-| 5 | Registration code | The candidate | Letter | Yes | Yes | IKAIKA Portal | - | After response |
-| 6 | Notification emails (11 kinds) | Managers or the person concerned | Letter | Yes | Yes | IKAIKA Portal | Link to the page | Queue |
-| 7 | Blocked access alert | Holders of Access alerts, one letter each | Letter | Yes | Yes | IKAIKA Portal | - | Queue |
-| 8 | Send Email (composer) | Whoever the admin picks | Admin's choice | If Letter | Admin's choice | IKAIKA Portal, or "{admin} via IKAIKA Portal" + Reply-To the admin | Images, attachments | Queue, one copy per recipient |
-| 9 | Mail test | The address given | Letter | Yes | Yes | IKAIKA Portal | - | Immediately |
+| 1 | Sign-in code | Security | Employee's **work** email | Letter | Yes | IKAIKA Portal | code box | After response |
+| 2 | Shared page: link + password | Security | Share's bound email | Letter | Yes | IKAIKA Portal | button, password box, **QR** inline | Queue |
+| 3 | Shared page: new password | Security | Share's bound email | Letter | Yes | IKAIKA Portal | button, password box, **QR** inline | Queue |
+| 4 | Shared page: sign-in code | Security | Share's bound email | Letter | Yes | IKAIKA Portal | code box, button | After response |
+| 5 | Registration code | Security | The candidate | Letter | Yes | IKAIKA Portal | code box, button | After response |
+| 6 | Notification emails (11 kinds) | Request / Project / Event | Managers or the person concerned | Letter | Yes | IKAIKA Portal | button to the page | Queue |
+| 7 | Blocked access alert | Warning | Holders of Access alerts, one letter each | Letter | Yes | IKAIKA Portal | details panel | Queue |
+| 8 | Send Email (composer) | The admin's pick | Whoever the admin picks | Admin's choice | Admin's choice | IKAIKA Portal, or "{admin} via IKAIKA Portal" + Reply-To the admin | any; images, attachments | Queue, one copy per recipient |
+| 9 | Mail test | Notice | The address given | Letter | Yes | IKAIKA Portal | - | Immediately |
 
 **Drafts that open Send Email (#8) pre-filled** -- nothing is sent until the admin presses Send, and
 the admin can change everything. All three open as the same letter as the system emails: **Letter**
 design, category Notice, the **Company footer** (by name, `SendEmailConstant.companyFooterName`), a
-greeting by first name, links as `[link](link)`, a password in bold, signed "Best Regards," + the
-signed-in admin's name.
+greeting by first name, the link as a `::button`, a password in a `::code` box, signed "Best Regards," +
+the signed-in admin's name. The composer's preview shows the category pill and the subject as the title.
 
 | Draft | Opened from | Greets | Code (portal) |
 | --- | --- | --- | --- |
@@ -90,10 +115,13 @@ Onboarding requirements:
 >
 > Attached are your Job Offer Letter and Employment Agreement Contract. Please review them, and once you accept, sign and complete the documents and send them back to us.
 >
-> When your requirements are complete, submit them on your registration page:
+> When your requirements are complete, submit them on your registration page.
 >
-> Link: {link}
-> Password: **{password}**
+> [ Open your registration ]   *(button)*
+>
+> Your password:
+>
+> [ {password} ]   *(password box)*
 >
 > Best Regards,
 > {admin}
@@ -114,7 +142,9 @@ Onboarding requirements:
 
 > Hi {first name},
 >
-> Your IKAIKA Portal sign-in code is **{code}**. It is good for 10 minutes.
+> Use this code to sign in to the IKAIKA Portal. It is good for 10 minutes.
+>
+> [ {code} ]   *(code box)*
 >
 > If you did not try to sign in, you can ignore this email; nobody can sign in without the code.
 >
@@ -136,10 +166,13 @@ Onboarding requirements:
 >
 > A read-only shared page is ready for you: **{share name}**.
 >
-> Link: {link}
-> Password: **{password}**
+> [ Open the shared page ]   *(button)*
 >
-> Or scan this code with your phone to open the link:
+> Your password:
+>
+> [ {password} ]   *(password box)*
+>
+> Or scan this code with your phone to open it:
 >
 > [QR code of the link]
 >
@@ -177,9 +210,11 @@ Body as #2, with the second paragraph:
 
 > Hi {guest name, else share name},
 >
-> Your code is **{code}**. It is good for 10 minutes.
+> Use this code to open **{share name}**. It is good for 10 minutes.
 >
-> Open the shared page: {link}
+> [ {code} ]   *(code box)*
+>
+> [ Open the shared page ]   *(button)*
 >
 > Best Regards,
 > IKAIKA Portal
@@ -198,9 +233,11 @@ Body as #2, with the second paragraph:
 
 > Hi {candidate name},
 >
-> Your code is **{code}**. It is good for 10 minutes.
+> Use this code to open your registration. It is good for 10 minutes.
 >
-> Open your registration: {link}
+> [ {code} ]   *(code box)*
+>
+> [ Open your registration ]   *(button)*
 >
 > Best Regards,
 > IKAIKA Portal
@@ -212,7 +249,7 @@ Every in-portal notice of the kinds below is also emailed.
 | | |
 | --- | --- |
 | Design | Letter, letterhead, Company footer, from IKAIKA Portal, through the mail queue (one email per recipient) |
-| Body | "Hi {first name},", the message, then the link (when the notice has one) as `[{link label}]({portal}/{page})`, then "Best Regards, IKAIKA Portal" |
+| Body | "Hi {first name},", the message, then the link (when the notice has one) as a button `::button[{link label}]({portal}/{page})`, then "Best Regards, IKAIKA Portal". Category: Request for `requests.*`, Project for `projects.*`, Event for `calendar.*` |
 | On / off | Settings -> Advanced (Developer mode only); default from `PORTAL_NOTIFICATION_EMAILS` |
 | Skipped | Nobody is emailed about their own action; an employee with no valid work email gets no email |
 | Code | `PortalAudit::notify / notifyEach / notifyManagers / notifyIfOther` -> `PortalNotificationEmails::send` -> `SendPortalMail` job; wording in `PortalActivityCopy`; a failure is logged as `portal.notification.email.failed` |
@@ -223,7 +260,7 @@ Dates read like "Monday, October 12, 2026"; one day reads "for {date}", a range 
 >
 > Juan Dela Cruz filed a leave request for Monday, October 12, 2026.
 >
-> [Open queue]({portal}/manage/manage-requests)
+> [ Open queue ]   *(button to {portal}/manage/manage-requests)*
 >
 > Best Regards,
 > IKAIKA Portal
@@ -259,6 +296,7 @@ changed, project rejected, recycle bin restore, "email sent".
 >
 > A signed-in portal user tried to reach something they are not allowed to.
 >
+> *(details panel)*
 > **Who:** {name} (ID no. {ID number})
 > **Role:** {role} / {role level}
 > **Tried:** `{METHOD} /{path}`
@@ -325,8 +363,10 @@ Claude to apply it.
 ## Adding a new email
 
 1. Send it through `PortalLetters::send()` (Letter, Company footer, IKAIKA Portal, through the mail queue);
-   a one-time code someone waits on uses `PortalLetters::sendAfterResponse()`. Write its words with
-   `PortalLetters::body($firstName, $message)` and pass people's own text through `PortalEmailMarkup::escape()`.
+   a one-time code someone waits on uses `PortalLetters::sendAfterResponse()`. Give it a category
+   (`PortalEmailMarkup::CATEGORY_*`), write its words with `PortalLetters::body($firstName, $message)`, put
+   a code on a `::code` line and a link on a `::button` line, and pass people's own text through
+   `PortalEmailMarkup::escape()`.
    Anything different -- say why here.
 2. Add it to [All emails at a glance](#all-emails-at-a-glance) and give it a section with its design,
    subject, body, recipients and trigger.

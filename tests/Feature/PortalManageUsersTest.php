@@ -323,10 +323,11 @@ class PortalManageUsersTest extends TestCase
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('alerts@example.test')
             && $mail->subjectLine === PortalAccessAlert::SUBJECT
             && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
+            && $mail->category === PortalEmailMarkup::CATEGORY_WARNING
             && $mail->fromName === PortalNotificationEmails::FROM_NAME
             && $mail->footerBody === $footerBody
             && str_starts_with($mail->body, 'Hi ')
-            && str_contains($mail->body, '**Tried:** `PATCH /api/development/portal/manage/users/'.$executive->id.'/role`')
+            && str_contains($mail->body, '> **Tried:** `PATCH /api/development/portal/manage/users/'.$executive->id.'/role`')
             && str_contains($mail->body, 'The executive role cannot be changed'));
     }
 
