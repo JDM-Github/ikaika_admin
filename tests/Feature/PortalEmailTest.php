@@ -640,7 +640,7 @@ class PortalEmailTest extends TestCase
         // The footer sits at the foot of the sheet, inside the design rather than under it.
         $this->assertStringNotContainsString(PortalEmailMarkup::FOOTER_SLOT, $letter);
         $this->assertMatchesRegularExpression(
-            '#<!-- Footer:.*?<td[^>]*>\s*<hr[^>]*>.*<strong>MIS</strong>.*?</td>\s*</tr>\s*</table>\s*</td>\s*</tr>\s*</table>\s*</body>#s',
+            '#<!-- Footer:.*?<td[^>]*>\s*<hr[^>]*>.*<strong>MIS</strong>.*?</td>\s*</tr>\s*</table>\s*</div>\s*<!--\[if mso\]></td></tr></table><!\[endif\]-->\s*</td>\s*</tr>\s*</table>\s*</body>#s',
             $letter,
         );
 

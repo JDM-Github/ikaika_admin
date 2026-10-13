@@ -76,8 +76,9 @@ class PortalEmailBuiltInsTest extends TestCase
         // the tile is unseen on white and keeps the navy logo readable where a mail client darkens the page.
         foreach (['company-footer.html', 'ikaika-bim-footer.html', 'company-signature.html'] as $file) {
             $body = $this->migration()::body($file);
-            $this->assertStringContainsString('/c_limit,w_144/c_pad,w_172,h_180,b_white/r_26/f_png/', $body, $file);
-            $this->assertStringContainsString('width="86"', $body, $file);
+            // c_lpad pads without scaling the logo up, so white shows all round it.
+            $this->assertStringContainsString('/c_limit,w_136/c_lpad,w_176,h_184,b_white/r_28/f_png/', $body, $file);
+            $this->assertStringContainsString('width="88"', $body, $file);
         }
         $this->assertStringContainsString('/email-upload/global/', $footer);
         $this->assertDoesNotMatchRegularExpression('#email-upload/\d+/#', $footer.$this->migration()::body('portal-email-test.html'));
@@ -120,7 +121,7 @@ class PortalEmailBuiltInsTest extends TestCase
     {
         $darkSafe = require database_path('migrations/2026_10_13_170000_dark_mode_safe_footers.php');
         $bim = require database_path('migrations/2026_10_13_150000_seed_ikaika_bim_footer.php');
-        $this->assertSame($bim::body(), $darkSafe::BIM_NEW);
+        $this->assertSame($bim::body(), $this->roomier($darkSafe::BIM_NEW));
 
         $portal = DB::connection('portal');
         $creator = (int) $portal->table('employees')->value('id');
@@ -139,7 +140,7 @@ class PortalEmailBuiltInsTest extends TestCase
     public function test_the_signature_keeps_its_words_in_the_new_design_and_fits_an_exchange_rule(): void
     {
         $restyle = require database_path('migrations/2026_10_13_180000_restyle_company_signature.php');
-        $this->assertSame($this->migration()::body('company-signature.html'), $restyle::NEW);
+        $this->assertSame($this->migration()::body('company-signature.html'), $this->roomier($restyle::NEW));
 
         // The words and placeholders in order; separators and line breaks are layout, not wording.
         $words = static function (string $html): array {
@@ -157,7 +158,7 @@ class PortalEmailBuiltInsTest extends TestCase
 
         // Same in a fresh database, and only an unedited signature is replaced.
         $sql = str_replace("\r\n", "\n", (string) file_get_contents(base_path('sql/portal/separate.sql')));
-        $this->assertStringContainsString("'Company signature', NULL, NULL, '".str_replace("'", "''", $restyle::NEW)."', 'html'", $sql);
+        $this->assertStringContainsString("'Company signature', NULL, NULL, '".str_replace("'", "''", $this->roomier($restyle::NEW))."', 'html'", $sql);
         $portal = DB::connection('portal');
         $creator = (int) $portal->table('employees')->value('id');
         $stale = $portal->table('email_blocks')->insertGetId(['kind' => 'footer', 'name' => 'Old signature', 'body' => $restyle::OLD, 'format' => 'html', 'created_by' => $creator]);
@@ -167,6 +168,33 @@ class PortalEmailBuiltInsTest extends TestCase
         $this->assertSame('<p>{name}</p>', $portal->table('email_blocks')->where('id', $own)->value('body'));
     }
 
+    // The roomier tile replaces the tight one wherever a footer still carries it, edited or not.
+    public function test_the_roomier_tile_migration_gives_the_logo_room_in_every_footer(): void
+    {
+        $roomy = require database_path('migrations/2026_10_13_190000_roomier_logo_tile.php');
+        $portal = DB::connection('portal');
+        $creator = (int) $portal->table('employees')->value('id');
+        $tight = '<img src="https://res.cloudinary.com/x/image/upload/c_limit,w_144/c_pad,w_172,h_180,b_white/r_26/f_png/v1/l.png" width="86" style="display:block;width:86px;max-width:86px;height:auto;" /><p>Own words</p>';
+        $id = $portal->table('email_blocks')->insertGetId(['kind' => 'footer', 'name' => 'Edited', 'body' => $tight, 'format' => 'html', 'created_by' => $creator]);
+
+        $roomy->up();
+        $this->assertSame($this->roomier($tight), $portal->table('email_blocks')->where('id', $id)->value('body'));
+        $this->assertStringContainsString('<p>Own words</p>', (string) $portal->table('email_blocks')->where('id', $id)->value('body'));
+
+        $roomy->down();
+        $this->assertSame($tight, $portal->table('email_blocks')->where('id', $id)->value('body'));
+    }
+
+    // A footer as the roomier-tile migration leaves it.
+    private function roomier(string $html): string
+    {
+        foreach ((require database_path('migrations/2026_10_13_190000_roomier_logo_tile.php'))::pairs() as [$from, $to]) {
+            $html = str_replace($from, $to, $html);
+        }
+
+        return $html;
+    }
+
     // A footer still the previous built-in becomes the new design; one someone rewrote is left alone.
     public function test_the_redesign_migration_replaces_only_an_unedited_footer(): void
     {
@@ -174,7 +202,7 @@ class PortalEmailBuiltInsTest extends TestCase
         // Each later version starts where this one ended, and the last is the seed.
         $darkSafe = require database_path('migrations/2026_10_13_170000_dark_mode_safe_footers.php');
         $this->assertSame($redesign::NEW, $darkSafe::COMPANY_OLD);
-        $this->assertSame($this->migration()::body('company-footer.html'), $darkSafe::COMPANY_NEW);
+        $this->assertSame($this->migration()::body('company-footer.html'), $this->roomier($darkSafe::COMPANY_NEW));
 
         $portal = DB::connection('portal');
         $creator = (int) $portal->table('employees')->value('id');

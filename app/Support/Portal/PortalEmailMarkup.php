@@ -59,8 +59,8 @@ final class PortalEmailMarkup
     private const BRAND_COLOR = '#174d87';
 
     // The company mark the Company footer carries.
-    // The logo on a white rounded tile: unseen on the white letterhead, a badge where a mail client darkens the page.
-    private const LETTER_LOGO = 'https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_116/c_pad,w_140,h_146,b_white/r_22/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png';
+    // The logo on a white rounded tile with room around it: unseen on the white letterhead, a badge where a mail client darkens the page.
+    private const LETTER_LOGO = 'https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_118/c_lpad,w_152,h_158,b_white/r_24/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png';
 
     /*
      * The letterhead's diagonal stripes and the bottom bar's accent, drawn from the approved mockup's CSS
@@ -78,7 +78,7 @@ final class PortalEmailMarkup
         .'.pl-accent{display:none !important;}'
         .'.pl-brand{font-size:21px !important;line-height:24px !important;}'
         .'.pl-product{font-size:9px !important;letter-spacing:2px !important;}'
-        .'.pl-logo{width:57px !important;}'
+        .'.pl-logo{width:62px !important;}'
         .'.pl-foot-col{display:block !important;width:100% !important;padding-right:0 !important;}'
         .'.pl-foot-address{border-left:0 !important;border-top:1px solid #d3dfed !important;padding:13px 0 0 !important;}'
         .'.pl-outer{padding:12px 6px !important;}'
@@ -272,7 +272,10 @@ final class PortalEmailMarkup
             '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5f9;border-collapse:collapse;">',
             '  <tr>',
             '    <td class="pl-outer" align="center" style="padding:24px 12px;">',
-            '      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:720px;border-collapse:separate;background-color:#ffffff;border:1px solid #dfe6ef;border-radius:12px;">',
+            '      <!--[if mso]><table role="presentation" width="720" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->',
+            '      <!-- The card clips what it holds, so the navy rule and bar follow its rounded corners. -->',
+            '      <div style="max-width:720px;margin:0 auto;border:1px solid #dfe6ef;border-radius:12px;overflow:hidden;background-color:#ffffff;">',
+            '      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background-color:#ffffff;">',
             '        <!-- Top rule -->',
             '        <tr>',
             '          <td style="height:6px;line-height:6px;font-size:0;background-color:'.$navy.';border-radius:11px 11px 0 0;">&nbsp;</td>',
@@ -286,7 +289,7 @@ final class PortalEmailMarkup
             '                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">',
             '                    <tr>',
             '                      <td valign="middle" style="padding:0 12px 0 0;">',
-            '                        <img class="pl-logo" src="'.self::LETTER_LOGO.'" alt="IKAIKA BIM" width="70" style="display:block;width:70px;height:auto;border:0;">',
+            '                        <img class="pl-logo" src="'.self::LETTER_LOGO.'" alt="IKAIKA BIM" width="76" style="display:block;width:76px;height:auto;border:0;">',
             '                      </td>',
             '                      <td valign="middle" width="1" height="58" style="width:1px;height:58px;background-color:#45719f;font-size:0;line-height:0;">&nbsp;</td>',
             '                      <td valign="middle" style="padding:0 0 0 18px;'.$font.';">',
@@ -323,6 +326,8 @@ final class PortalEmailMarkup
             '          </td>',
             '        </tr>',
             '      </table>',
+            '      </div>',
+            '      <!--[if mso]></td></tr></table><![endif]-->',
             '    </td>',
             '  </tr>',
             '</table>',

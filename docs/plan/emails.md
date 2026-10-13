@@ -64,9 +64,18 @@ block in Send Email -> Footers.
 **Dark mode (2026-10-13).** Mail clients darken or invert backgrounds and text but never pictures, so
 every picture is made to read on both: the stripes and the bottom-bar accent are on a **transparent**
 ground (the bar's own colour shows through; the pale wedge behind the stripes is faint), the **logo sits
-on a white rounded tile** (Cloudinary `c_pad,...,b_white/r_..` -- unseen on white, a badge on dark), and
+on a white rounded tile with room around it** (Cloudinary `c_lpad,...,b_white/r_..` -- `lpad` pads without
+scaling the logo up; unseen on white, a badge on dark; migration `2026_10_13_190000_roomier_logo_tile`), and
 the website and mailbox icons carry a thin **white outline**. The composer's Dark preview shows it as
 Gmail and Apple Mail draw it.
+
+**Rounded corners.** The card is a `div` with `border-radius:12px;overflow:hidden` around the table, so the
+navy rule and bar follow its corners in clients that do not round a table cell; desktop Outlook gets a
+720px table through an `<!--[if mso]>` wrapper.
+
+**The composer's preview is the received email.** The preview drops the narrow-screen rules and shrinks the
+whole email to fit its frame (`EmailMarkupUtility.previewDocument` / `fitToWidth`, a 760px desktop layout
+zoomed down), so it shows the stripes and the side-by-side footer exactly as a desktop inbox does.
 
 Mail clients drop SVG and skewed or gradient CSS, so the stripes, the bottom accent and the three icons
 are **pictures** drawn from the mockup's CSS at 2x: sources in `database/seeders/email/design/`, hosted in

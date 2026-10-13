@@ -93,6 +93,11 @@ class PortalEmailLettersTest extends TestCase
         $html = PortalEmailMarkup::document('Hi.', '<p>Footer</p>', PortalEmailMarkup::FORMAT_LETTER, PortalEmailMarkup::FORMAT_HTML);
 
         $this->assertStringContainsString('max-width:720px', $html);
+        // The card clips what it holds, so the navy rule and bar follow its rounded corners everywhere.
+        $this->assertStringContainsString('border-radius:12px;overflow:hidden;', $html);
+        $this->assertStringContainsString('<!--[if mso]><table role="presentation" width="720"', $html);
+        // The logo on its white tile, with room around it.
+        $this->assertStringContainsString('/c_limit,w_118/c_lpad,w_152,h_158,b_white/r_24/f_png/', $html);
         $this->assertStringContainsString('/email-design/letter-header-accent.png" alt="" width="281" height="122"', $html);
         $this->assertStringContainsString('/email-design/letter-bottom-accent.png" alt="" width="128" height="14"', $html);
         $this->assertStringContainsString('padding:24px 36px 2px;', $html);

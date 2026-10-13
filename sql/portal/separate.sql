@@ -185,7 +185,7 @@ SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width
         <tr>
           <!-- The logo sits on a white tile: unseen on white, a badge where a mail client turns the page dark -->
           <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;">
-            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_144/c_pad,w_172,h_180,b_white/r_26/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="86" style="display:block;width:86px;max-width:86px;height:auto;border:0;outline:none;text-decoration:none;" />
+            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_136/c_lpad,w_176,h_184,b_white/r_28/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="88" style="display:block;width:88px;max-width:88px;height:auto;border:0;outline:none;text-decoration:none;" />
           </td>
           <td valign="middle" width="1" height="72" style="width:1px;height:72px;background-color:#4a74a1;font-size:0;line-height:0;">&nbsp;</td>
           <td class="pl-foot-text" valign="middle" style="padding:0 0 0 17px;">
@@ -235,7 +235,7 @@ SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" wi
     <td class="pl-foot-col" valign="middle" style="padding:6px 26px 18px 0;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
         <tr>
-          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;"><img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_144/c_pad,w_172,h_180,b_white/r_26/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="86" style="display:block;width:86px;max-width:86px;height:auto;border:0;" /></td>
+          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;"><img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_136/c_lpad,w_176,h_184,b_white/r_28/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="88" style="display:block;width:88px;max-width:88px;height:auto;border:0;" /></td>
           <td valign="middle" width="1" height="72" style="width:1px;height:72px;background-color:#4a74a1;font-size:0;line-height:0;">&nbsp;</td>
           <td class="pl-foot-text" valign="middle" style="padding:0 0 0 17px;">
             <div style="font-size:19px;line-height:22px;font-weight:700;letter-spacing:0.25px;color:#174d87;">{name}</div>
@@ -317,7 +317,7 @@ SELECT 'footer', 'IKAIKA BIM footer', NULL, NULL, '<table role="presentation" wi
         <tr>
           <!-- The logo sits on a white tile: unseen on white, a badge where a mail client turns the page dark -->
           <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;">
-            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_144/c_pad,w_172,h_180,b_white/r_26/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="86" style="display:block;width:86px;max-width:86px;height:auto;border:0;outline:none;text-decoration:none;" />
+            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_136/c_lpad,w_176,h_184,b_white/r_28/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="88" style="display:block;width:88px;max-width:88px;height:auto;border:0;outline:none;text-decoration:none;" />
           </td>
           <td valign="middle" width="1" height="72" style="width:1px;height:72px;background-color:#4a74a1;font-size:0;line-height:0;">&nbsp;</td>
           <td class="pl-foot-text" valign="middle" style="padding:0 0 0 17px;">
