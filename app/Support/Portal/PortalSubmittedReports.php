@@ -669,7 +669,12 @@ final class PortalSubmittedReports
         }
 
         // One check per filing, not per line: every group in this request is the same employee.
-        $isFlagged = PortalReportReview::waits($kind, $actor->department, $this->hasActiveWarning($employeeId));
+        $isFlagged = PortalReportReview::waits(
+            $kind,
+            $actor->department,
+            $this->hasActiveWarning($employeeId),
+            PortalRole::isDepartmentHead($actor->role, $actor->role_level),
+        );
 
         $this->ledger->within($this->connection(), function () use (
             $employeeId,

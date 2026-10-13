@@ -1218,6 +1218,20 @@ SELECT id, 'manage.users.information.edit', NULL FROM employees WHERE id_no IN (
     '220302-0003'  -- Steven Gaurano
 );
 
+-- Edit transactions (2026-10-13): a transaction's name, date, payor or payee, notes and receipt, never
+-- its money; admins, executives and developers hold it like the rest of Finance.
+-- Existing databases: add_portal_finance_transactions_edit_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, sort_order)
+VALUES
+    ('finance.transactions.edit', 'finance.transactions', 'Edit transactions',
+     'Change a transaction''s name, date, payor or payee, notes and receipt. Its amount, type, envelope and account stay as they were.',
+     0, 1, 865);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('admin', 'finance.transactions.edit', NULL, 0),
+    ('executive', 'finance.transactions.edit', NULL, 0),
+    ('developer', 'finance.transactions.edit', NULL, 0);
+
 -- The blood type and the optional national ID (PhilSys) number a registration asks for (2026-10-12).
 -- Portal-only: Airtable's table has neither, and the sync never sends them.
 -- Existing databases: add_blood_type_and_national_id_to_portal_new_employee_data.

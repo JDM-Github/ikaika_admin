@@ -98,7 +98,7 @@ final class PortalNotificationEmails
             ->whereKeyNot($actor->getKey())
             ->orderBy('id')
             ->get()
-            ->filter(static fn (Employee $employee): bool => PortalRole::isAdmin($employee->role, $employee->role_level))
+            ->filter(static fn (Employee $employee): bool => PortalRole::isDepartmentHead($employee->role, $employee->role_level))
             ->values()
             ->all();
     }

@@ -240,6 +240,13 @@ final class PortalActivityCopy
         return self::YOU.' cancelled a pending transfer of '.$amount;
     }
 
+    public static function editedTransaction(string $before, string $after): string
+    {
+        return $before === $after
+            ? self::YOU.' edited the transaction '.$after
+            : self::YOU.' edited the transaction '.$before.', now '.$after;
+    }
+
     public static function addedTransaction(string $kind, string $name, string $amount, ?string $envelopeName): string
     {
         $text = self::YOU.' added the '.strtolower($kind).' '.$name.' of '.$amount;

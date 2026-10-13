@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalProjectApproval;
 use App\Support\Portal\PortalReportReview;
+use App\Support\Portal\PortalRole;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -14,7 +15,8 @@ use Illuminate\Support\Facades\DB;
 use Tests\Concerns\FilesPortalReports;
 use Tests\TestCase;
 
-// Daily report review (2026-10-07): Engineering's daily reports wait for their department's admin, MIS's never do.
+// Daily report review (2026-10-07): Engineering's daily reports wait for their department's admin; MIS's are
+// approved unless their author is flagged (2026-10-13).
 class PortalReportReviewTest extends TestCase
 {
     use DatabaseTransactions;
@@ -41,8 +43,7 @@ class PortalReportReviewTest extends TestCase
         $engineer = $this->memberOf('Engineering');
         $this->clearWarnings($engineer);
         $analyst = $this->memberOf('MIS');
-        // Not even a warning holds an MIS daily report.
-        $this->insertWarning($analyst);
+        $this->clearWarnings($analyst);
 
         $engineerDay = $this->file($engineer);
         $analystDay = $this->file($analyst);
@@ -53,10 +54,52 @@ class PortalReportReviewTest extends TestCase
         $this->assertSame(PortalReportReview::APPROVED, $this->reviewStatusOf($analyst, $analystDay.'-daily'));
     }
 
+    // The reported ask (2026-10-13): Steven heads Engineering, so his own daily report is approved when filed.
+    public function test_the_engineering_head_s_own_daily_report_is_approved_at_once(): void
+    {
+        $head = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role, '')) = 'admin'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'management'")
+            ->whereRaw('LOWER(TRIM(department)) = ?', ['engineering'])
+            ->whereExists(fn ($query) => $query->from('employees_projects')
+                ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
+                ->whereColumn('employees_projects.employee_id', 'employees.id')
+                ->whereNull('projects.deleted_at')
+                ->tap(PortalProjectApproval::openForWork(...)))
+            ->first();
+        $this->assertNotNull($head, 'No active Engineering head with a project.');
+        $this->clearWarnings($head);
+
+        $day = $this->file($head);
+
+        $this->assertSame(0, $this->flagOf($head, $day)[0]);
+        $this->assertSame(PortalReportReview::APPROVED, $this->reviewStatusOf($head, $day.'-daily'));
+        $this->assertTrue(PortalRole::isDepartmentHead('Admin', ' Management '));
+        $this->assertFalse(PortalRole::isDepartmentHead('User', 'Management'));
+        $this->assertFalse(PortalRole::isDepartmentHead('Admin', 'Staff'));
+    }
+
+    // The reported ask (2026-10-13): an MIS member on a warning waits like anyone flagged.
+    public function test_a_flagged_mis_daily_report_waits_for_review(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $this->insertWarning($analyst);
+
+        $day = $this->file($analyst);
+
+        $this->assertSame([1, 'Pending'], $this->flagOf($analyst, $day));
+        $this->assertSame(PortalReportReview::PENDING, $this->reviewStatusOf($analyst, $day.'-daily'));
+    }
+
     // The reported ask: User Requests' Daily Reports tab shows a member their own reviewed reports and the answers.
     public function test_a_member_follows_their_own_daily_report_through_review(): void
     {
         $engineer = $this->memberOf('Engineering');
+        $other = $this->memberOf('MIS');
+        $otherHeaders = $this->headers($other);
+        // What the MIS member reads before the filing: real reports of theirs may share the day.
+        $theirsBefore = $this->withHeaders($otherHeaders)->getJson(self::REVIEWS)->assertOk()->json('data');
         $day = $this->file($engineer);
         $headers = $this->headers($engineer);
 
@@ -82,10 +125,9 @@ class PortalReportReviewTest extends TestCase
         $this->assertSame([1, 'Pending'], $this->flagOf($engineer, $day));
         $this->assertSame('pending', $this->ownReview($engineer, $day)['status']);
 
-        // Nobody else reads it.
-        $other = $this->memberOf('MIS');
-        $theirs = $this->withHeaders($this->headers($other))->getJson(self::REVIEWS)->assertOk()->json('data');
-        $this->assertNotContains($day, array_column($theirs, 'submittedOn'));
+        // Nobody else reads it: the MIS member's list is what it was before the filing.
+        $theirs = $this->withHeaders($otherHeaders)->getJson(self::REVIEWS)->assertOk()->json('data');
+        $this->assertSame(array_column($theirsBefore, 'id'), array_column($theirs, 'id'));
     }
 
     // A late report keeps the older rule, a warning, beside its own late approval.
@@ -119,7 +161,11 @@ class PortalReportReviewTest extends TestCase
         $this->assertSame('rejected', PortalReportReview::status('late', true, 'Pending', 'Rejected'));
 
         $this->assertTrue(PortalReportReview::waits('daily', ' engineering ', false));
-        $this->assertFalse(PortalReportReview::waits('daily', 'MIS', true));
+        // Engineering's own head is approved at once, unless a warning holds them like anyone.
+        $this->assertFalse(PortalReportReview::waits('daily', 'Engineering', false, true));
+        $this->assertTrue(PortalReportReview::waits('daily', 'Engineering', true, true));
+        $this->assertTrue(PortalReportReview::waits('daily', 'MIS', true));
+        $this->assertFalse(PortalReportReview::waits('daily', 'MIS', false));
         $this->assertTrue(PortalReportReview::waits('daily', 'Operations', true));
         $this->assertFalse(PortalReportReview::waits('late', 'Engineering', false));
     }

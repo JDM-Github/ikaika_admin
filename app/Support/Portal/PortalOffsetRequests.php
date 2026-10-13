@@ -20,15 +20,15 @@ use Throwable;
  * the day taken off. Ownership is the composed name the rest of the portal matches on -- the
  * requests table has no employee junction.
  *
- * Dates (2026-10-07): the day worked is today or up to seven days either side of it; the day off is
- * any day at all, as long as it is not the day worked.
+ * Dates: the day worked is today or one of the seven days before it, never a day ahead (2026-10-13,
+ * user); the day off is any day at all, as long as it is not the day worked.
  */
 final class PortalOffsetRequests
 {
     public const WINDOW_DAYS = PortalSubmittedReports::MUTATION_WINDOW_DAYS;
 
-    // The day worked is a week either side of today (2026-10-07): the last seven, today, the next seven.
-    public const WORK_LOOKAHEAD_DAYS = 7;
+    // The day worked is today or a day before it, never one ahead (2026-10-13, user).
+    public const WORK_LOOKAHEAD_DAYS = 0;
 
     public const WORK_LOOKBACK_DAYS = self::WINDOW_DAYS;
 
@@ -683,7 +683,7 @@ final class PortalOffsetRequests
         ];
     }
 
-    // The day worked is today or up to seven days either side. An edit keeps the day it already holds.
+    // The day worked is today or up to seven days before. An edit keeps the day it already holds.
     private function assertWorkDate(string $date, ?string $current = null): void
     {
         if ($current !== null && $date === $current) {
@@ -693,7 +693,7 @@ final class PortalOffsetRequests
         $today = $this->timezone->today();
         if ($day->gt($today->copy()->addDays(self::WORK_LOOKAHEAD_DAYS))
             || $day->lt($today->copy()->subDays(self::WORK_LOOKBACK_DAYS))) {
-            abort(422, 'The day to work must be within seven days of today, before or after.');
+            abort(422, 'The day to work must be today or one of the last seven days.');
         }
     }
 
