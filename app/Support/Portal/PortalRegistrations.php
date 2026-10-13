@@ -693,7 +693,7 @@ final class PortalRegistrations
             ['registration_id' => $registration->id],
             ['code_hash' => Hash::make($code), 'attempts' => 0, 'created_at' => now(), 'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES)],
         );
-        $link = $this->link((string) $registration->code);
+        // The candidate is on their registration page asking for this code, so the letter carries no link back (2026-10-14, user).
         PortalLetters::sendAfterResponse(
             strtolower(trim((string) $registration->email)),
             PortalEmailMarkup::CATEGORY_SECURITY,
@@ -701,8 +701,7 @@ final class PortalRegistrations
             PortalLetters::body(
                 (string) $registration->candidate_name,
                 'Use this code to open your registration. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                    ."\n\n::code ".$code
-                    ."\n\n::button[Open your registration](".$link.')',
+                    ."\n\n::code ".$code,
             ),
         );
     }

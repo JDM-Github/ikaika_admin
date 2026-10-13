@@ -289,7 +289,9 @@ class PortalOnboardingTest extends TestCase
             && $mail->fromName === PortalNotificationEmails::FROM_NAME
             && $mail->footerBody === $footerBody
             && str_starts_with($mail->body, 'Hi Liza Reyes,')
-            && str_contains($mail->body, '/register/liza)'));
+            && str_contains($mail->body, '::code ')
+            // The candidate is already on the page asking for it, so the code email has no button back.
+            && ! str_contains($mail->body, '::button'));
 
         $id = (int) DB::connection('portal')->table('registrations')->where('code', 'liza')->value('id');
         DB::connection('portal')->table('register_otps')->where('registration_id', $id)->update(['code_hash' => Hash::make('123456')]);

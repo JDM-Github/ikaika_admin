@@ -280,8 +280,6 @@ Body as #2, with the second paragraph:
 > Use this code to open your registration. It is good for 10 minutes.
 >
 > [ {code} ]   *(code box)*
->
-> [ Open your registration ]   *(button)*
 
 ## 6. Notification emails
 
