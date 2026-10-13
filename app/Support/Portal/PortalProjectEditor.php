@@ -190,7 +190,10 @@ final class PortalProjectEditor
         // Who may lead, and where: Project Lead at all leads anywhere, at department (or own) their own department's.
         $leadReaches = PortalProjectPowers::leadReaches();
         $employees = [];
-        foreach ($this->activeEmployees() as $row) {
+        $people = [...$this->activeEmployees()];
+        // Scope assignees show as heads in Manage Scopes, so each person carries their photo.
+        $photos = PortalEmployeePresenter::photoUrls(array_map(static fn (object $row): int => (int) $row->id, $people));
+        foreach ($people as $row) {
             $reach = $this->text($row->email) === null ? null : ($leadReaches[(int) $row->id] ?? null);
             $employees[] = [
                 'id' => (string) (int) $row->id,
@@ -199,6 +202,7 @@ final class PortalProjectEditor
                 'canLead' => $reach !== null,
                 'leadsAnywhere' => $reach === 'all',
                 'leadDepartment' => $reach === null || $reach === 'all' ? null : $this->text($row->department),
+                'photoUrl' => $photos[(int) $row->id] ?? null,
             ];
         }
         $departments = $this->departments();

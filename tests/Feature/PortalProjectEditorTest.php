@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalActivityScopes;
+use App\Support\Portal\PortalEmployeePresenter;
 use App\Support\Portal\PortalProjectActivities;
 use App\Support\Portal\PortalReportProjects;
 use App\Support\Portal\PortalViewProjectPresenter;
@@ -771,6 +772,23 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame([$task], $project['scopeCodes']);
         $this->assertSame(1, $project['scopeSummary']['total']);
         $this->assertSame('{UserName|You} set 1 scope on the project '.DB::connection('portal')->table('projects')->where('id', $id)->value('project_name'), DB::connection('portal')->table('logs')->where('resource', 'projects')->where('record_id', (string) $id)->orderByDesc('id')->value('message'));
+    }
+
+    // Manage Scopes shows each assignee's head, so the people list carries their photo when they have one.
+    public function test_the_form_options_carry_each_persons_photo(): void
+    {
+        $person = $this->employee('user', 3);
+        DB::connection('portal')->table('attachments')->insert([
+            'table_name' => 'employees', 'record_id' => $person->getKey(), 'field_name' => 'photo',
+            'file_url' => 'https://res.cloudinary.com/demo/image/upload/head.jpg', 'file_name' => 'head.jpg',
+        ]);
+
+        $employees = collect($this->withToken($this->token($this->employee('admin')))->getJson(self::BASE.'/options')
+            ->assertOk()->json('data.employees'))->keyBy('id');
+
+        $id = (int) $person->getKey();
+        $this->assertNotNull($employees[(string) $id]['photoUrl']);
+        $this->assertSame(PortalEmployeePresenter::photoUrls([$id])[$id], $employees[(string) $id]['photoUrl']);
     }
 
     public function test_the_form_options_are_for_those_who_add_edit_or_lead(): void
