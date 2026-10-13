@@ -834,8 +834,12 @@ final class PortalProjectEditor
         if ($link === null || in_array($kind, self::FREE_TEXT_LINKS, true)) {
             return $link;
         }
+        // Temporary (2026-10-13, user): N/A stands for a link the project does not have yet; View Projects hides it.
+        if (strtolower($link) === 'n/a') {
+            return 'N/A';
+        }
         if (filter_var($link, FILTER_VALIDATE_URL) === false || preg_match('#^https?://#i', $link) !== 1) {
-            abort(422, 'Each link must start with http:// or https://.');
+            abort(422, 'Each link must start with http:// or https://, or be N/A.');
         }
 
         return $link;

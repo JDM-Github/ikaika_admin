@@ -547,7 +547,8 @@ class PortalProjectEditorTest extends TestCase
         $inactive = (int) DB::connection('portal')->table('employees')->whereRaw("LOWER(COALESCE(status, '')) != 'active'")->value('id');
 
         $this->create($token, $this->payload(['scopeCodes' => ['999-99']]))->assertStatus(422)->assertJsonPath('message', 'Choose scopes from the list.');
-        $this->create($token, $this->payload(['links' => [...$this->payload()['links'], 'forma' => 'javascript:alert(1)']]))->assertStatus(422)->assertJsonPath('message', 'Each link must start with http:// or https://.');
+        $this->create($token, $this->payload(['links' => [...$this->payload()['links'], 'forma' => 'javascript:alert(1)']]))->assertStatus(422)->assertJsonPath('message', 'Each link must start with http:// or https://, or be N/A.');
+        $this->create($token, $this->payload(['links' => [...$this->payload()['links'], 'forma' => ' n/a ']]))->assertCreated()->assertJsonPath('data.links.forma', 'N/A');
         $this->create($token, $this->payload(['memberIds' => [$inactive]]))->assertStatus(422)->assertJsonPath('message', 'Choose members from the list.');
         $this->create($token, $this->payload(['department' => 'Nowhere']))->assertStatus(422)->assertJsonPath('message', 'Choose a department from the list.');
         $this->create($token, $this->payload(['status' => 'paused']))->assertStatus(422);
