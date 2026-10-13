@@ -103,6 +103,11 @@ final class PortalActivityCopy
             : $who.' rejected the project '.$name.($remarks === null ? '.' : ': '.$remarks);
     }
 
+    public static function notifyProjectReopened(string $who, string $name): string
+    {
+        return $who.' sent the project '.$name.' back to waiting for approval.';
+    }
+
     public static function notifyProjectModified(string $who, string $name): string
     {
         return $who.' edited the project '.$name.'.';
@@ -135,6 +140,11 @@ final class PortalActivityCopy
     public static function decidedProject(string $name, bool $isApproved): string
     {
         return self::YOU.($isApproved ? ' approved' : ' rejected').' the project '.$name;
+    }
+
+    public static function reopenedProject(string $name): string
+    {
+        return self::YOU.' sent the project '.$name.' back to waiting';
     }
 
     public static function addedProject(string $name): string

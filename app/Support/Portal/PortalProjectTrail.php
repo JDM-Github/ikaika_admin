@@ -33,6 +33,8 @@ final class PortalProjectTrail
 
     public const RESUBMITTED = 'Project Creation Resubmission';
 
+    public const REOPENED = 'Project Creation Reopened';
+
     public function record(int $projectId, string $actionName, Employee $actor, ?Request $request, ?string $remarks = null): void
     {
         $actionId = (int) $this->connection()->table('project_action_history')->insertGetId([
