@@ -20,7 +20,11 @@ final class PortalTeamMap
     public function list(): array
     {
         $connection = $this->connection();
-        $active = $connection->table('employees')->whereRaw("LOWER(COALESCE(employees.status, '')) = 'active'");
+        // Never an executive: the page keeps no executive's records, as Manage / Requests does.
+        $active = $connection->table('employees')
+            ->whereRaw("LOWER(COALESCE(employees.status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(employees.role_level, '')) != 'executive'")
+            ->whereRaw("LOWER(COALESCE(employees.role, '')) != 'executive'");
         $rows = (clone $active)
             ->join('employee_home_locations as home', 'home.employee_id', '=', 'employees.id')
             ->orderBy('employees.last_name')->orderBy('employees.first_name')

@@ -92,6 +92,36 @@ class PortalTeamMapTest extends TestCase
         $this->withToken($this->token($member))->getJson(self::BASE)->assertForbidden();
     }
 
+    // The reported ask: the page is for the team, never for an executive's own record or place.
+    public function test_executives_are_left_out_of_the_map_entirely(): void
+    {
+        $executive = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")
+            ->orderBy('id')
+            ->first();
+
+        if (! $executive instanceof Employee) {
+            $this->markTestSkipped('No active executive exists locally to check against.');
+        }
+
+        DB::connection('portal')->table('employee_home_locations')->insert([
+            'employee_id' => $executive->getKey(), 'query' => 'Makati', 'source' => 'map', 'latitude' => 14.5547, 'longitude' => 121.0244,
+        ]);
+
+        $response = $this->withToken($this->token($this->employee('admin')))->getJson(self::BASE)->assertOk();
+        $ids = collect($response->json('data.people'))->pluck('id')->all();
+
+        $this->assertNotContains((string) $executive->getKey(), $ids);
+        // Placed and unlocated together are the non-executive active people: an executive is neither a pin nor a gap.
+        $actives = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->whereRaw("LOWER(COALESCE(role, '')) != 'executive'")
+            ->count();
+        $this->assertSame($actives, count($ids) + $response->json('data.unlocated'));
+    }
+
     // The reported ask: a member sets their own home after signing in; the address never moves it again.
     public function test_a_member_sets_their_own_home_and_the_address_leaves_it(): void
     {
