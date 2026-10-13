@@ -1259,3 +1259,14 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'admin', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'developer', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';
+
+-- Manage / Map: where each person last saved something. An administrator's power.
+-- Existing databases: add_portal_team_map_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.map', 'manage', 'Map',
+     'See on a world map where each person last saved something in the portal.',
+     0, 1, 'admin', 880);
+INSERT INTO access_presets (role, permission_key, reach, include_executives)
+SELECT role, 'manage.map', NULL, 0 FROM (SELECT 'admin' AS role UNION ALL SELECT 'developer') AS roles;

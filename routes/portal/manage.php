@@ -10,9 +10,11 @@ use App\Http\Controllers\Api\Portal\Manage\ReferencesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\SharedPagesController;
+use App\Http\Controllers\Api\Portal\Manage\TeamMapController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
 use App\Http\Middleware\AuthenticatePortalJwt;
 use App\Support\Portal\PortalFlaggedMembers;
+use App\Support\Portal\PortalTeamMap;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
@@ -173,6 +175,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     });
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
+    // Manage / Map: where each person last saved something; an administrator's power.
+    Route::middleware(['portal.rule:'.PortalTeamMap::RULE, 'throttle:portal-manage-requests'])
+        ->get('manage/map', [TeamMapController::class, 'index']);
     // Flagged users: whoever may approve or reject flagged reports puts people on review and takes them off.
     Route::middleware(['portal.rule:'.PortalFlaggedMembers::RULE, 'throttle:portal-manage-requests'])
         ->get('manage/flagged-members', [FlaggedMembersController::class, 'index']);
