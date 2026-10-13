@@ -9,6 +9,7 @@ use App\Modules\Portal\Models\EmailMessage;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Portal\PortalAdvancedSettings;
+use App\Support\Portal\PortalAudit;
 use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalEmailMessages;
 use App\Support\Portal\PortalNotificationEmails;
@@ -247,6 +248,24 @@ class PortalMailQueueTest extends TestCase
             && $job->mail instanceof PortalEmailMail
             && $job->mail->subjectLine === 'Project approved'
             && $job->failureEvent === 'portal.notification.email.failed');
+    }
+
+    // The reported ask: the email's Open project button opens that project, as the bell's notice does.
+    public function test_a_notice_email_button_opens_the_record_it_is_about(): void
+    {
+        Mail::fake();
+        Queue::fake();
+        config(['products.catalog.portal.notification_emails' => true]);
+        DB::connection('core')->table('settings')
+            ->where('product', 'portal')
+            ->where('setting_key', PortalAdvancedSettings::NOTIFICATION_EMAILS)
+            ->delete();
+        $member = $this->member();
+
+        app(PortalAudit::class)->notify((int) $member->getKey(), PortalNotificationType::PROJECT_APPROVED, 'Project approved', 'Someone approved it.', '/projects/projects', 'Open project', ['recordId' => '42']);
+
+        Queue::assertPushed(SendPortalMail::class, fn (SendPortalMail $job): bool => $job->mail instanceof PortalEmailMail
+            && str_contains($job->mail->body, '/projects/projects?record=42)'));
     }
 
     // The QR is raw PNG bytes, which a JSON queue payload cannot hold; it rides as base64 and is embedded on send.

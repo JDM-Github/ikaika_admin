@@ -274,9 +274,21 @@ final class PortalAudit
         $notification->save();
         $this->bumpNotificationCache();
         // Mapped notices also go by email; the mailer itself decides whether anything leaves.
-        $this->notificationEmails->send($employeeId, $type, $title, $message, $linkPath, $notification->link_label);
+        $this->notificationEmails->send($employeeId, $type, $title, $message, self::emailLink($linkPath, $payload), $notification->link_label);
 
         return (int) $notification->id;
+    }
+
+    // A project notice's email button opens that project, as the bell does: ?record=<id> on the page,
+    // which View Projects and Manage / Projects read; every other email keeps its plain page link.
+    private static function emailLink(?string $linkPath, array $payload): ?string
+    {
+        $record = trim((string) ($payload['recordId'] ?? ''));
+        if ($record === '' || ! in_array($linkPath, [PortalShellPath::VIEW_PROJECTS, PortalShellPath::MANAGE_PROJECTS], true)) {
+            return $linkPath;
+        }
+
+        return $linkPath.'?record='.rawurlencode($record);
     }
 
     /**
@@ -343,7 +355,7 @@ final class PortalAudit
         }
         $this->bumpNotificationCache();
         foreach ($recipients as $employeeId) {
-            $this->notificationEmails->send($employeeId, $type, $title, $message, $linkPath, $linkLabel);
+            $this->notificationEmails->send($employeeId, $type, $title, $message, self::emailLink($linkPath, $payload), $linkLabel);
         }
 
         return count($rows);
