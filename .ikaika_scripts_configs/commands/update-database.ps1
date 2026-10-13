@@ -15,7 +15,10 @@
 #     patch      anything under patches/                          last, in name order
 # A file that needs something else first says so in its own header, and that line wins:
 #     -- update-database: after data.sql
-# sql/portal/separate.sql carries one, because its grants need the employees data.sql loads.
+# sql/portal/separate.sql carries one, because its grants need the employees data.sql loads. A product's
+# order in update-database.json, when it has one, is the order of the steps it lists, over both: after
+# lines then move only the steps it leaves out, which run after the listed ones and are flagged as not in
+# it, and a name it gives that no step answers to is refused rather than left to run a step out of place.
 #
 # HOW A FILE RUNS FOLLOWS FROM ITS KIND. mysql stops at its first error, so a retrofit or a patch
 # that meets an index or column already there would never reach the statements after it; those files
@@ -285,7 +288,9 @@ if ($Help) {
 
   Steps run in the order their contents call for, whatever order they are typed:
     rebuild -> structure -> retrofit -> data -> patch
-  and a file's own "-- update-database: after <file>" line moves it later.
+  and a file's own "-- update-database: after <file>" line moves it later. A
+  product's order in update-database.json, when it has one, is the order of the
+  steps it lists; a step it leaves out runs after them, and is flagged.
 
   -Drop removes each picked product's database completely, as phpMyAdmin's
   Drop does, and builds nothing back. It takes no -Step or -Migrate.
@@ -397,17 +402,18 @@ function Get-SqlFileFacts([string]$Path, [bool]$IsPatch) {
     return $facts
 }
 
-# A product's steps in the order they run: by kind - or the product's own order from update-database.json -
-# then name, then each file's "after" lines, which a step's settings replace. A step they skip is not a step.
+# A product's steps in the order they run: its order from update-database.json for the steps it lists, then
+# the rest by kind and name, each moved by its "after" lines - which a step's settings replace - while the
+# listed ones stay where the order puts them. A step the settings skip is not a step.
 function Get-ProductStep([string]$FolderPath, $Setting = $null) {
     $found = [Collections.Generic.List[object]]::new()
     foreach ($file in @(Get-ChildItem -LiteralPath $FolderPath -Filter '*.sql' -File | Sort-Object Name)) {
-        $found.Add([pscustomobject]@{ Name = $file.BaseName; Label = $file.Name; Facts = (Get-SqlFileFacts $file.FullName $false); Strict = $null })
+        $found.Add([pscustomobject]@{ Name = $file.BaseName; Label = $file.Name; Facts = (Get-SqlFileFacts $file.FullName $false); Strict = $null; Listed = $false })
     }
     $patchDir = Join-Path $FolderPath $Config.patches
     if (Test-Path -LiteralPath $patchDir) {
         foreach ($file in @(Get-ChildItem -LiteralPath $patchDir -Filter '*.sql' -File | Sort-Object Name)) {
-            $found.Add([pscustomobject]@{ Name = $Config.patches; Label = "$($Config.patches)/$($file.Name)"; Facts = (Get-SqlFileFacts $file.FullName $true); Strict = $null })
+            $found.Add([pscustomobject]@{ Name = $Config.patches; Label = "$($Config.patches)/$($file.Name)"; Facts = (Get-SqlFileFacts $file.FullName $true); Strict = $null; Listed = $false })
         }
     }
     $overrides = if ($Setting) { $Setting.Steps } else { [ordered]@{} }
@@ -422,10 +428,16 @@ function Get-ProductStep([string]$FolderPath, $Setting = $null) {
         $s
     }
     $order = @(if ($Setting) { $Setting.Order })
+    # Where the order lists a step, by its file name or its step name and in any case; -1 when it does not.
+    $position = {
+        param($Item)
+        for ($i = 0; $i -lt $order.Count; $i++) { if ($order[$i] -eq $Item.Label -or $order[$i] -eq $Item.Name) { return $i } }
+        return -1
+    }
+    foreach ($s in @($steps)) { $s.Listed = (& $position $s) -ge 0 }
     $rank = {
         param($Item)
-        $at = [array]::IndexOf($order, $Item.Label)
-        if ($at -lt 0) { $at = [array]::IndexOf($order, $Item.Name) }
+        $at = & $position $Item
         if ($at -ge 0) { return $at }
         return $order.Count + $KindRank[$Item.Facts.Kind]
     }
@@ -435,6 +447,7 @@ function Get-ProductStep([string]$FolderPath, $Setting = $null) {
     for ($pass = 0; $pass -lt $ordered.Count; $pass++) {
         $moved = $false
         foreach ($s in @($ordered)) {
+            if ($s.Listed) { continue }
             foreach ($dependency in $s.Facts.After) {
                 $at = $ordered.IndexOf($s)
                 $depAt = -1
@@ -449,6 +462,20 @@ function Get-ProductStep([string]$FolderPath, $Setting = $null) {
         if (-not $moved) { break }
     }
     return , $ordered
+}
+
+# The names a product's order gives that no file in its folder answers to - a typo there would run a step
+# out of place. Skipped steps still answer, since they are on disk.
+function Get-OrderStray([string]$FolderPath, $Setting) {
+    $order = @(if ($Setting) { $Setting.Order })
+    if (-not $order.Count) { return @() }
+    $names = @(Get-ChildItem -LiteralPath $FolderPath -Filter '*.sql' -File | ForEach-Object { $_.BaseName; $_.Name })
+    $patchDir = Join-Path $FolderPath $Config.patches
+    if (Test-Path -LiteralPath $patchDir) {
+        $names += $Config.patches
+        $names += @(Get-ChildItem -LiteralPath $patchDir -Filter '*.sql' -File | ForEach-Object { "$($Config.patches)/$($_.Name)" })
+    }
+    return @($order | Where-Object { $names -notcontains $_ })
 }
 
 # ------------------------------------------------------------------------ the server
@@ -610,6 +637,12 @@ foreach ($folder in $folders) {
     Write-Host "  $($db.Name)  ($($Config.sqlRoot)/$($settings[$folder].Folder))" -ForegroundColor Cyan
     Write-Host "    .env says $($db.Database) on $($db.DbHost):$($db.Port) as $($db.Username)" -ForegroundColor DarkGray
     $productSteps = Get-ProductStep (Join-Path $sqlRoot $settings[$folder].Folder) $settings[$folder]
+    $stray = @(Get-OrderStray (Join-Path $sqlRoot $settings[$folder].Folder) $settings[$folder])
+    if ($stray.Count) {
+        Write-Host "  products.$folder.order in $(Split-Path -Leaf $Config._path) names $($stray -join ', '), which no file in $($Config.sqlRoot)/$($settings[$folder].Folder) answers to." -ForegroundColor Red
+        exit 1
+    }
+    $hasOrder = @($settings[$folder].Order).Count -gt 0
 
     if ($wiping -and $wantedFolders -contains $folder -and -not $settings[$folder].Drop) {
         Write-Host "    kept     products.$folder.drop is false in $(Split-Path -Leaf $Config._path), so no drop touches it" -ForegroundColor DarkGray
@@ -643,7 +676,8 @@ foreach ($folder in $folders) {
         elseif ($facts.Drops -and $liveTables -gt 0) { $notes += "DROPS THE DATABASE ($liveTables table(s) would go)" }
         elseif ($facts.Drops) { $notes += 'DROPS THE DATABASE (could not reach the server to see what is in it)' }
         if ($facts.Truncates) { $notes += "truncates $($facts.Truncates) table(s)" }
-        if ($facts.After.Count) { $notes += "after $($facts.After -join ', ')" }
+        if ($hasOrder -and -not $s.Listed) { $notes += "not in products.$folder.order - runs after the steps it lists" }
+        if ($facts.After.Count -and -not $s.Listed) { $notes += "after $($facts.After -join ', ')" }
         if ($facts.Target -and $facts.Target -ne $db.Database) { $notes += "writes to $($facts.Target), but .env reads $($db.Database)" }
         if (-not $facts.Target) { $notes += "no USE line - runs against $($db.Database)" }
 
