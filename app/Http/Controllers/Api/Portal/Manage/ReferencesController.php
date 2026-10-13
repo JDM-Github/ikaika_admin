@@ -32,6 +32,21 @@ class ReferencesController extends Controller
         return response()->json($this->settings->removeScope($this->editor($request), $request, $id));
     }
 
+    public function storeTreeScope(Request $request): JsonResponse
+    {
+        return response()->json($this->settings->addTreeScope($this->editor($request), $request));
+    }
+
+    public function updateTreeScope(Request $request, string $code): JsonResponse
+    {
+        return response()->json($this->settings->renameTreeScope($this->editor($request), $request, $code));
+    }
+
+    public function destroyTreeScope(Request $request, string $code): JsonResponse
+    {
+        return response()->json($this->settings->removeTreeScope($this->editor($request), $request, $code));
+    }
+
     public function storeJobType(Request $request): JsonResponse
     {
         return response()->json($this->settings->addJobType($this->editor($request), $request));

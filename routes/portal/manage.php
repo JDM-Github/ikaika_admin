@@ -36,6 +36,12 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
             ->whereNumber('id');
         Route::delete('manage/references/scopes/{id}', [ReferencesController::class, 'destroyScope'])
             ->whereNumber('id');
+        // A department's scope tree, by its WBS code (100, 100-01, 100-01-01, 100-01-01-01).
+        Route::post('manage/references/tree-scopes', [ReferencesController::class, 'storeTreeScope']);
+        Route::patch('manage/references/tree-scopes/{code}', [ReferencesController::class, 'updateTreeScope'])
+            ->where('code', '[0-9-]+');
+        Route::delete('manage/references/tree-scopes/{code}', [ReferencesController::class, 'destroyTreeScope'])
+            ->where('code', '[0-9-]+');
         Route::post('manage/references/job-types', [ReferencesController::class, 'storeJobType']);
         Route::patch('manage/references/job-types/{id}', [ReferencesController::class, 'updateJobType'])
             ->whereNumber('id');

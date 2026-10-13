@@ -127,13 +127,6 @@ final class PortalProjectEditor
     /** A drive path is a folder path people paste, not always a URL. */
     private const FREE_TEXT_LINKS = ['google-drive'];
 
-    private const SCOPE_TABLES = [
-        'project_scope_t1_processes',
-        'project_scope_t2_procedures',
-        'project_scope_t3_activities',
-        'project_scope_t4_tasks',
-    ];
-
     private const LEVEL_LABELS = [
         'structural' => 'Structural',
         'architectural' => 'Architectural',
@@ -167,6 +160,7 @@ final class PortalProjectEditor
         private readonly PortalProjectApproval $approval,
         private readonly PortalProjectRepositories $repositories,
         private readonly PortalProjectActivities $activities,
+        private readonly PortalScopeTree $scopeTree,
     ) {}
 
     /**
@@ -245,8 +239,10 @@ final class PortalProjectEditor
                 'allowedActivitiesByType' => $this->allowedActivitiesByType(),
                 // Editing a job type's allowed activities is a global change, so it needs All reach.
                 'canManageAllowedActivities' => PortalRules::reach($actor, $request, PortalProjectPowers::EDIT) === 'all',
-                // A project that is not Engineering's picks its scopes from these, by its department.
+                // The activity code catalogue, for the allowed activities a project keeps.
                 'activityCodes' => PortalActivityScopes::all(),
+                // Each department's scope tree; a project picks from its own department's.
+                'scopeTree' => $this->scopeTree->roots(),
             ],
         ];
     }
@@ -895,7 +891,7 @@ final class PortalProjectEditor
     }
 
     /**
-     * WBS codes for an Engineering project; no other department has scopes yet, so it may hold none.
+     * Codes from the project's department's scope tree, which Manage / References edits.
      *
      * @return list<string>
      */
@@ -913,32 +909,8 @@ final class PortalProjectEditor
                 $codes[] = $code;
             }
         }
-        if ($codes !== [] && ! PortalProjectWork::isEngineering($department)) {
-            abort(422, 'Only Engineering projects have scopes.');
-        }
-        if ($codes !== [] && array_diff($codes, $this->knownScopeCodes()) !== []) {
+        if ($codes !== [] && array_diff($codes, $this->scopeTree->codesFor($department)) !== []) {
             abort(422, 'Choose scopes from the list.');
-        }
-
-        return $codes;
-    }
-
-    /**
-     * Every WBS code across the four tiers. Airtable holds one task code with its number missing
-     * ('200-03-02-'), which the portal's catalogue reads as the first task, '-01'.
-     *
-     * @return list<string>
-     */
-    private function knownScopeCodes(): array
-    {
-        $codes = [];
-        foreach (self::SCOPE_TABLES as $table) {
-            foreach ($this->connection()->table($table)->pluck('wbs_code') as $raw) {
-                $code = trim((string) $raw);
-                if ($code !== '') {
-                    $codes[] = str_ends_with($code, '-') ? $code.'01' : $code;
-                }
-            }
         }
 
         return $codes;

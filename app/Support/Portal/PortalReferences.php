@@ -21,7 +21,10 @@ use Illuminate\Http\Request;
  */
 final class PortalReferences
 {
-    public function __construct(private readonly PortalAudit $audit) {}
+    public function __construct(
+        private readonly PortalAudit $audit,
+        private readonly PortalScopeTree $scopeTree,
+    ) {}
 
     /**
      * @return array{section: string, resource: string, data: array<string, mixed>}
@@ -94,6 +97,7 @@ final class PortalReferences
             'resource' => 'references',
             'data' => [
                 'scopes' => $scopes,
+                'scopeTree' => $this->scopeTree->roots(),
                 'jobTypes' => $jobTypes,
                 'departments' => $departments,
                 'clients' => $clients,
@@ -234,6 +238,71 @@ final class PortalReferences
         $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.scope', '{UserName|You} removed the scope '.trim((string) $row->id_no), (string) $id, $request);
 
         return $this->index();
+    }
+
+    /**
+     * A scope in a department's tree: its code typed in the WBS shape, under a parent of the same department.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function addTreeScope(Employee $actor, Request $request): array
+    {
+        $data = $request->validate([
+            'code' => ['required', 'string', 'max:20'],
+            'name' => ['required', 'string', 'max:255'],
+            'department' => ['required', 'string', 'max:100'],
+        ]);
+        [$code, $name] = [trim($data['code']), trim($data['name'])];
+        if ($name === '') {
+            abort(422, 'Give the scope a name.');
+        }
+        $department = $this->knownDepartment($data['department']);
+        $this->scopeTree->add($department, $code, $name);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.wbs', '{UserName|You} added the scope '.$code.' '.$name, $code, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function renameTreeScope(Employee $actor, Request $request, string $code): array
+    {
+        $data = $request->validate(['name' => ['required', 'string', 'max:255']]);
+        $name = trim($data['name']);
+        if ($name === '') {
+            abort(422, 'Give the scope a name.');
+        }
+        $this->scopeTree->rename($code, $name);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.wbs', '{UserName|You} renamed the scope '.$code.' to '.$name, $code, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function removeTreeScope(Employee $actor, Request $request, string $code): array
+    {
+        $this->scopeTree->remove($code);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.wbs', '{UserName|You} removed the scope '.$code, $code, $request);
+
+        return $this->index();
+    }
+
+    // A department on the Departments tab, spelled as it is there.
+    private function knownDepartment(string $raw): string
+    {
+        $key = self::departmentKey($raw);
+        foreach ($this->connection()->table('departments')->pluck('name') as $name) {
+            if (self::departmentKey((string) $name) === $key) {
+                return trim((string) $name);
+            }
+        }
+        abort(422, 'Choose a department from the list.');
     }
 
     /**

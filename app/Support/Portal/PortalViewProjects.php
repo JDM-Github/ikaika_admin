@@ -124,17 +124,14 @@ final class PortalViewProjects
     }
 
     /**
-     * One project's effective scope codes: the WBS codes saved from Manage Scopes, else the codes its
-     * pivots or reports name. The editor shows the same list the board does; only Engineering has any.
+     * One project's effective scope codes: the codes saved from Manage Scopes, else -- Engineering only --
+     * the codes its pivots or reports name. The editor shows the same list the board does.
      *
      * @return list<string>
      */
     public function scopeCodesForProject(int $projectId, mixed $department): array
     {
-        if (! PortalProjectWork::isEngineering($department)) {
-            return [];
-        }
-        $summaries = $this->scopeSummariesByProject([$projectId]);
+        $summaries = $this->scopeSummariesByProject([$projectId], PortalProjectWork::isEngineering($department) ? [$projectId] : []);
 
         return $summaries[$projectId]['scopeCodes'] ?? [];
     }
@@ -158,8 +155,8 @@ final class PortalViewProjects
         $memberNames = $this->namesByProject($members);
         $memberPhotos = $this->photosByProject($members);
         $clientNames = $this->clientNamesByProject($projectIds);
-        // Only Engineering has scopes; another department's report codes are activities, not scopes.
-        $scopeSummaries = $this->scopeSummariesByProject(array_map(
+        // Another department's report codes are activities, not scopes, so only Engineering falls back to them.
+        $scopeSummaries = $this->scopeSummariesByProject($projectIds, array_map(
             static fn (object $row): int => (int) $row->id,
             array_values(array_filter($rows, static fn (object $row): bool => PortalProjectWork::isEngineering($row->department ?? null))),
         ));
@@ -224,6 +221,8 @@ final class PortalViewProjects
             'section' => 'projects',
             'resource' => 'board',
             'data' => $projects,
+            // Every department's scope tree, so the board names each project's scopes.
+            'scopeTree' => (new PortalScopeTree)->roots(),
         ];
     }
 
@@ -545,7 +544,7 @@ final class PortalViewProjects
      *     scopeCodes: list<string>
      * }>
      */
-    private function scopeSummariesByProject(array $projectIds): array
+    private function scopeSummariesByProject(array $projectIds, array $fallbackIds): array
     {
         if ($projectIds === []) {
             return [];
@@ -568,7 +567,7 @@ final class PortalViewProjects
         $directRows = $this->connection()
             ->table('projects_project_scopes')
             ->join('project_scopes', 'project_scopes.id', '=', 'projects_project_scopes.project_scope_id')
-            ->whereIn('projects_project_scopes.project_id', $projectIds)
+            ->whereIn('projects_project_scopes.project_id', $fallbackIds)
             ->select([
                 'projects_project_scopes.project_id',
                 'projects_project_scopes.project_scope_id',
@@ -585,7 +584,7 @@ final class PortalViewProjects
                 'project_activity.activity_id',
             )
             ->join('project_scopes as scope', 'scope.id', '=', 'scope_activity.project_scope_id')
-            ->whereIn('project_activity.project_id', $projectIds)
+            ->whereIn('project_activity.project_id', $fallbackIds)
             ->select([
                 'project_activity.project_id',
                 'scope_activity.project_scope_id',
@@ -607,7 +606,7 @@ final class PortalViewProjects
                 'project_report.user_report_id',
             )
             ->join('activity_codes as activity_code', 'activity_code.id', '=', 'report_activity.activity_code_id')
-            ->whereIn('project_report.project_id', $projectIds)
+            ->whereIn('project_report.project_id', $fallbackIds)
             ->select([
                 'project_report.project_id',
                 'activity_code.id as activity_code_id',

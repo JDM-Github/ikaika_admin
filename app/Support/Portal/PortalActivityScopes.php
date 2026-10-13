@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * The activity code catalogue, for allowed activities and the project form. Activity codes are never a
- * project's scopes: only Engineering has scopes (the WBS tree), every other department has none yet.
+ * project's scopes: those come from each department's scope tree (PortalScopeTree).
  */
 final class PortalActivityScopes
 {

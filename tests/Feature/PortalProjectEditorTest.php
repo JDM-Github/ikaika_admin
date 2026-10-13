@@ -904,27 +904,30 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame('https://teams.microsoft.com/l/1', $row->msteams_project_link);
     }
 
-    // Only Engineering has scopes: another department's project takes none, and its report codes never show as scopes.
-    public function test_only_engineering_projects_have_scopes(): void
+    // Each department picks from its own scope tree; another department's report codes never show as scopes.
+    public function test_a_project_picks_scopes_from_its_own_departments_tree(): void
     {
         $portal = DB::connection('portal');
-        $portal->table('activity_codes')->insert(['id_no' => '9901', 'name' => '9901- TEST MIS WORK', 'department' => 'MIS']);
+        $portal->table('project_scope_t1_processes')->insert(['wbs_code' => '910', 'name' => 'MIS Planning', 'department' => 'MIS']);
+        $portal->table('project_scope_t2_procedures')->insert(['wbs_code' => '910-01', 'name' => 'Sprint planning', 'department' => 'MIS']);
         $id = $this->liveProjectId();
         $token = $this->token($this->employee('admin'));
-        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => $this->scopeCodes()])->assertOk();
         $portal->table('projects')->where('id', $id)->update(['department' => 'MIS']);
         Cache::flush();
 
-        // Scopes kept from before read as none, on the board and in the editor.
-        $board = collect($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame([], $board['scopeCodes']);
-        $this->assertArrayNotHasKey('scopeOptions', $board);
+        // Its report codes are activities, not scopes, so nothing shows until it picks some.
+        $board = $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $this->assertSame([], collect($board->json('data'))->firstWhere('id', (string) $id)['scopeCodes']);
+        $this->assertContains('910', array_column($board->json('scopeTree'), 'code'));
         $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk()->assertJsonPath('data.scopeCodes', []);
+        $this->assertSame('MIS', collect($this->withToken($token)->getJson(self::BASE.'/options')->json('data.scopeTree'))->firstWhere('code', '910')['department']);
 
-        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => ['9901']])
-            ->assertStatus(422)->assertJsonPath('message', 'Only Engineering projects have scopes.');
-        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => []])->assertOk();
-        $this->assertSame(0, $portal->table('projects_wbs_scopes')->where('project_id', $id)->count());
+        // Engineering's codes are not MIS's.
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$this->scopeCodes()[0]]])
+            ->assertStatus(422)->assertJsonPath('message', 'Choose scopes from the list.');
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => ['910', '910-01']])->assertOk();
+        Cache::flush();
+        $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk()->assertJsonPath('data.scopeCodes', ['910', '910-01']);
     }
 
     public function test_writes_are_held_to_twenty_a_minute(): void
