@@ -133,9 +133,11 @@ Four standalone Python scripts, no Anthropic/Claude dependency:
   fall back to local downloaded paths. Reimbursement receipts are a special
   case — written under `field_name = 'receipts'` (matching
   `PortalReimbursementRequests::RECEIPT_FIELD`, the only table the live app
-  currently reads attachments from), not the raw Airtable field name. No
-  equivalent script exists yet for the Project Estimator or Transaction
-  Tracker bases' schemas.
+  currently reads attachments from), not the raw Airtable field name.
+  Transaction Tracker and Project Estimator generators were added later
+  (`generate/generate_sql_transaction_tracker.py`,
+  `generate/generate_sql_project_estimator.py`) together with
+  `verify_migration.py`; see README.md and HOW-IT-WORKS.md.
   **`migrations/data.sql` is the real, current output** — generated against
   the TEST base with the Cloudinary cache applied (183 attachment rows: 186
   uploaded minus 3 reimbursements that had both receipt fields set, where

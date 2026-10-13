@@ -11,6 +11,11 @@
           schema.sql   the checked-in sql/<product>/ DDL, assembled into one file
           data.sql     generated from that export
 
+  After generating data.sql it runs verify_migration.py, which re-derives
+  every mapped row straight from the export and compares it cell by cell
+  against data.sql. A failed verification stops the run before the import
+  commands are printed. See HOW-IT-WORKS.md for what is checked.
+
   Pass -Target and -Produce to skip the prompts.
 
   Data is pulled live from Airtable (fetch -> Cloudinary upload -> SQL) for the
@@ -86,6 +91,7 @@ $targets = @(
         AfterData    = @('sql/portal/separate.sql')
         Generator    = 'generate/generate_sql_users_projects.py'
         DataSnapshot = $null
+        Verify       = 'users-projects'
     },
     @{
         Key          = 'users-projects-test'
@@ -97,6 +103,7 @@ $targets = @(
         AfterData    = @('sql/portal/separate.sql')
         Generator    = 'generate/generate_sql_users_projects.py'
         DataSnapshot = $null
+        Verify       = 'users-projects'
     },
     @{
         Key          = 'project-estimator'
@@ -105,8 +112,9 @@ $targets = @(
         BaseId       = 'appgh0Mki2uHDLAQY'
         Database     = 'test_estimator_database'
         SchemaFiles  = @('sql/project_estimator/schema.sql')
-        Generator    = $null
-        DataSnapshot = 'sql/project_estimator/data.sql'
+        Generator    = 'generate/generate_sql_project_estimator.py'
+        DataSnapshot = $null
+        Verify       = 'project-estimator'
         AfterData    = @()
     },
     @{
@@ -118,6 +126,7 @@ $targets = @(
         SchemaFiles  = @('sql/transaction_tracker/schema.sql')
         Generator    = 'generate/generate_sql_transaction_tracker.py'
         DataSnapshot = $null
+        Verify       = 'transaction-tracker'
         AfterData    = @()
     },
     # The test app: a sandbox copy to try Finance against without touching the live books.
@@ -130,6 +139,7 @@ $targets = @(
         SchemaFiles  = @('sql/transaction_tracker/schema.sql')
         Generator    = 'generate/generate_sql_transaction_tracker.py'
         DataSnapshot = $null
+        Verify       = 'transaction-tracker'
         AfterData    = @()
     },
     @{
@@ -197,6 +207,39 @@ function Invoke-Python {
     python @Arguments
     if ($LASTEXITCODE -ne 0) {
         Stop-WithMessage "$Label failed (exit $LASTEXITCODE). Stopping -- nothing after this step ran." $LASTEXITCODE
+    }
+}
+
+function Resolve-AirtableToken {
+    param([string]$Token)
+
+    if (-not $Token) {
+        $tokenFile = Join-Path $scriptDir '.token.private.txt'
+        if (Test-Path $tokenFile) {
+            $Token = (Get-Content -Raw -Path $tokenFile).Trim()
+            Write-Host 'Using the token in .token.private.txt.' -ForegroundColor DarkGray
+        }
+    }
+    if (-not $Token) {
+        $secure = Read-Host 'Airtable Personal Access Token' -AsSecureString
+        $Token = [System.Net.NetworkCredential]::new('', $secure).Password
+    }
+    if (-not $Token) {
+        Stop-WithMessage 'A token is required to fetch from Airtable.'
+    }
+    return $Token
+}
+
+function Invoke-AirtableFetch {
+    param($Selected, [string]$ExportDir, [string]$Token)
+
+    $Token = Resolve-AirtableToken -Token $Token
+    $env:AIRTABLE_API_KEY = $Token
+    try {
+        Invoke-Python -Label "Fetching $($Selected.BaseId) into export/" `
+            -Arguments @('fetch_airtable.py', '--base-id', $Selected.BaseId, '--output-dir', $ExportDir)
+    } finally {
+        Remove-Item Env:\AIRTABLE_API_KEY -ErrorAction SilentlyContinue
     }
 }
 
@@ -283,28 +326,7 @@ try {
     if ($mode.Data) {
         if ($selected.Generator) {
             if ($Step -in @('all', 'fetch')) {
-                if (-not $Token) {
-                    $tokenFile = Join-Path $scriptDir '.token.private.txt'
-                    if (Test-Path $tokenFile) {
-                        $Token = (Get-Content -Raw -Path $tokenFile).Trim()
-                        Write-Host 'Using the token in .token.private.txt.' -ForegroundColor DarkGray
-                    }
-                }
-                if (-not $Token) {
-                    $secure = Read-Host 'Airtable Personal Access Token' -AsSecureString
-                    $Token = [System.Net.NetworkCredential]::new('', $secure).Password
-                }
-                if (-not $Token) {
-                    Stop-WithMessage 'A token is required to fetch from Airtable.'
-                }
-
-                $env:AIRTABLE_API_KEY = $Token
-                try {
-                    Invoke-Python -Label "Fetching $($selected.BaseId) into export/" `
-                        -Arguments @('fetch_airtable.py', '--base-id', $selected.BaseId, '--output-dir', $exportDir)
-                } finally {
-                    Remove-Item Env:\AIRTABLE_API_KEY -ErrorAction SilentlyContinue
-                }
+                Invoke-AirtableFetch -Selected $selected -ExportDir $exportDir -Token $Token
             }
 
             if ($Step -in @('all', 'upload')) {
@@ -323,8 +345,7 @@ try {
             }
         }
         elseif ($Step -eq 'fetch') {
-            Invoke-Python -Label "Fetching $($selected.BaseId) into export/ (raw export only)" `
-                -Arguments @('fetch_airtable.py', '--base-id', $selected.BaseId, '--output-dir', $exportDir)
+            Invoke-AirtableFetch -Selected $selected -ExportDir $exportDir -Token $Token
             Write-Host "No generator exists for this base yet, so no data.sql was written." -ForegroundColor Yellow
             Write-Host "Inspect the export with: python inspect_schema.py --export-dir $exportDir" -ForegroundColor Yellow
         }
@@ -362,6 +383,16 @@ try {
                 $extra = $extra -replace "(?im)^(\s*USE\s+)$([regex]::Escape($selected.Database))\b", "`${1}$databaseName"
             }
             Add-Content -Path $dataFile -Encoding UTF8 -Value ("`n-- ---------------------------------------------------------------------------`n-- $relative (after the data)`n-- ---------------------------------------------------------------------------`n`n" + $extra)
+        }
+    }
+
+    if ($mode.Data -and $selected.Verify -and $selected.Generator -and $freshData -and $Step -in @('all', 'generate')) {
+        Write-Host '==> Verifying data.sql against the export (verify_migration.py)' -ForegroundColor Cyan
+        python verify_migration.py --export-dir $exportDir --data-sql $dataFile --base $selected.Verify
+        if ($LASTEXITCODE -ne 0) {
+            Stop-WithMessage ('Verification failed (see the report above). data.sql does not prove out ' +
+                'against the export, so this run stops before printing the import commands. ' +
+                'Fix the mapping (see HOW-IT-WORKS.md), then regenerate.') $LASTEXITCODE
         }
     }
 
