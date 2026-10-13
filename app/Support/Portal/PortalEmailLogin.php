@@ -53,7 +53,7 @@ final class PortalEmailLogin
             ],
         );
 
-        PortalLetters::send($address, 'Your IKAIKA Portal sign-in code', $this->letter((string) $employee->first_name, $code));
+        PortalLetters::sendAfterResponse($address, 'Your IKAIKA Portal sign-in code', $this->letter((string) $employee->first_name, $code));
 
         return [['kind' => self::KIND_WORK, 'hint' => self::mask($address)]];
     }

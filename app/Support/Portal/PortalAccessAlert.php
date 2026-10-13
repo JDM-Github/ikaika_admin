@@ -2,12 +2,13 @@
 
 namespace App\Support\Portal;
 
+use App\Jobs\SendPortalMail;
 use App\Mail\PortalAccessAlertMail;
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 use Throwable;
 
 /**
@@ -16,7 +17,8 @@ use Throwable;
  * or a limit on it, takes someone off the list, and a gift puts them on it.
  *
  * Unauthenticated 401s are login noise and stay quiet. Mail is rate-limited per actor,
- * method, and path so a probe cannot become a mail bomb. The body never includes tokens.
+ * method, and path so a probe cannot become a mail bomb. The body never includes tokens. The alert
+ * waits in the mail queue, so the refused request answers without a relay round trip.
  */
 final class PortalAccessAlert
 {
@@ -49,7 +51,7 @@ final class PortalAccessAlert
         }
 
         try {
-            Mail::to($recipients)->send(new PortalAccessAlertMail(
+            Queue::push(new SendPortalMail($recipients, new PortalAccessAlertMail(
                 employeeId: $actor->getKey(),
                 idNo: $this->plain((string) $actor->id_no),
                 name: $this->plain(trim((string) $actor->first_name.' '.(string) $actor->last_name)),
@@ -59,7 +61,7 @@ final class PortalAccessAlert
                 ip: (string) ($request->ip() ?? 'unknown'),
                 reason: $this->plain($reason),
                 occurredAt: now()->toIso8601String(),
-            ));
+            ), 'portal.access.alert.failed', ['employee_id' => (int) $actor->getKey()]));
         } catch (Throwable) {
             return false;
         }

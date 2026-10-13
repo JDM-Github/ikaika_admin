@@ -2,6 +2,7 @@
 
 namespace App\Support\Portal;
 
+use App\Jobs\DeliverPortalEmail;
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailBlock;
 use App\Modules\Portal\Models\EmailMessage;
@@ -11,18 +12,21 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Mail\SentMessage;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 /**
  * Administration / Send Email: the outbox.
  *
- * The row is written before the first message leaves, so a transport that dies halfway still
- * leaves an account of what went out. Every recipient is delivered on its own and a failure is
- * recorded against that member alone. A delivered notice also drops an inbox row, because the
- * portal bell is where a member looks. Addresses are used to send and are never stored: the
- * outbox records who was reached, by name.
+ * The row is written first and reads Sending; the send itself goes to the mail queue as one copy per
+ * recipient (DeliverPortalEmail), so the Send button answers at once however big the audience. Each
+ * copy counts itself onto the row as it lands, a failure against that member alone, and the row
+ * settles on sent, partial or failed once everyone is counted. A delivered notice also drops an inbox
+ * row, because the portal bell is where a member looks. A queued copy holds its addresses only until it
+ * leaves; failures and the synced ledger name people, never addresses.
  *
  * Attachments are staged before the send (PortalEmailAttachments) and claimed by its row in the same
  * transaction that opens it, so a file goes out with one email only and the outbox keeps what it was.
@@ -76,7 +80,7 @@ final class PortalEmailMessages
      *     section: string,
      *     resource: string,
      *     data: list<array<string, mixed>>,
-     *     counts: array{total: int, sent: int, partial: int, failed: int},
+     *     counts: array{total: int, sent: int, partial: int, failed: int, sending: int},
      *     meta: array{current_page: int, per_page: int, total: int, last_page: int}
      * }
      */
@@ -344,74 +348,29 @@ final class PortalEmailMessages
             $recipients,
             $employeeId,
         ));
-        $files = PortalEmailAttachments::mailFiles($attachments);
-
-        $sent = 0;
-        $failures = [];
-        $reached = [];
-        if ($audience === PortalEmailAudience::CUSTOM) {
-            // Typed addresses go as one email, as a mail client sends it: To and Cc on show, Bcc hidden.
-            try {
-                Mail::to(array_column($recipients, 'email'))->cc($cc)->bcc($bcc)
-                    ->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo, $files));
-                $sent = count($recipients);
-            } catch (Throwable $error) {
-                $reason = $this->reason($error);
-                foreach (array_slice($recipients, 0, self::MAX_FAILURES) as $recipient) {
-                    $failures[] = ['employeeId' => null, 'name' => $recipient['name'], 'reason' => $reason];
-                }
-            }
-        } else {
-            foreach ($recipients as $recipient) {
-                try {
-                    Mail::to($recipient['email'])->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo, $files));
-                    $sent++;
-                    if ($recipient['id'] !== null) {
-                        $reached[] = $recipient['id'];
-                    }
-                } catch (Throwable $error) {
-                    if (count($failures) < self::MAX_FAILURES) {
-                        $failures[] = [
-                            'employeeId' => $recipient['id'],
-                            'name' => $recipient['name'],
-                            'reason' => $this->reason($error),
-                        ];
-                    }
-                }
-            }
-        }
-
-        // A member audience keeps its private copies, so CC and BCC share one more: CC people see each other, BCC nobody.
-        if ($audience !== PortalEmailAudience::CUSTOM && ($cc !== [] || $bcc !== [])) {
-            try {
-                $copy = $cc !== [] ? Mail::to($cc)->bcc($bcc) : Mail::bcc($bcc);
-                $copy->send($this->mail($subject, $body, $footerBody, $format, $footerFormat, $fromName, $replyTo, $files));
-            } catch (Throwable $error) {
-                $failures[] = ['employeeId' => null, 'name' => self::COPY_NAME, 'reason' => $this->reason($error)];
-            }
-        }
-
-        $failed = count($recipients) - $sent;
-        $this->closeRow($messageId, $sent, $failed, $failures);
-
-        if ($reached !== []) {
-            $this->audit->notifyEach(
-                $reached,
-                PortalNotificationType::EMAIL_SENT,
-                'New email',
-                PortalActivityCopy::notifyEmailArrived($subject, PortalActivityCopy::actorName($actor, $request, true)),
-                $linkPath,
-                $linkPath === null ? null : 'Open',
-                ['emailId' => (string) $messageId, 'category' => $category],
-                $employeeId,
-            );
+        $copies = $this->copies($messageId, $audience, $recipients, $cc, $bcc, [
+            'title' => 'New email',
+            'message' => PortalActivityCopy::notifyEmailArrived($subject, PortalActivityCopy::actorName($actor, $request, true)),
+            'linkPath' => $linkPath,
+            'linkLabel' => $linkPath === null ? null : 'Open',
+            'payload' => ['emailId' => (string) $messageId, 'category' => $category],
+            'actorId' => $employeeId,
+        ]);
+        try {
+            Queue::bulk($copies);
+        } catch (Throwable $error) {
+            // Nothing will deliver it, so the row says so instead of reading Sending for ever.
+            $this->closeRow($messageId, 0, count($recipients), $this->failuresFor($recipients, 'The email could not be queued for sending.'));
+            $this->bumpCache();
+            Log::warning('portal.email.queue.failed', ['message_id' => $messageId, 'reason' => $error->getMessage()]);
+            abort(503, 'The email could not be queued. Try again in a moment.');
         }
 
         $this->audit->record(
             $actor,
             PortalLogAction::POST,
             PortalEmail::CORE_RESOURCE,
-            PortalActivityCopy::sentEmail($subject, $sent),
+            PortalActivityCopy::sentEmail($subject, count($recipients)),
             (string) $messageId,
             $request,
             [
@@ -424,8 +383,8 @@ final class PortalEmailMessages
                 'bcc' => count($bcc),
                 'asSender' => $fromName !== null,
                 'recipientCount' => count($recipients),
-                'sent' => $sent,
-                'failed' => $failed,
+                // Queued, not yet delivered: how each copy fared is written onto the outbox row as it lands.
+                'copies' => count($copies),
                 // How many files and how large, never their names: the ledger syncs out.
                 'attachments' => count($attachments),
                 'attachmentBytes' => PortalEmailAttachments::totalBytes($attachments),
@@ -442,6 +401,115 @@ final class PortalEmailMessages
                 $this->attachments->forMessage($messageId),
             ),
         ];
+    }
+
+    /**
+     * Sends one queued copy of an outbox row, rebuilt from what the row kept, with the files it claimed.
+     * False when the row is gone, so a copy outliving its email sends nothing.
+     *
+     * @param  list<string>  $to
+     * @param  list<string>  $cc
+     * @param  list<string>  $bcc
+     */
+    public function deliverCopy(int $messageId, array $to, array $cc, array $bcc): bool
+    {
+        $row = $this->connection()->table('email_messages')->where('id', $messageId)
+            ->first(['subject', 'body', 'format', 'footer_body', 'footer_format', 'from_name', 'reply_to']);
+        if ($row === null) {
+            return false;
+        }
+
+        $mail = $this->mail(
+            (string) $row->subject,
+            (string) $row->body,
+            $row->footer_body === null ? null : (string) $row->footer_body,
+            PortalEmailMarkup::format($row->format) ?? PortalEmailMarkup::FORMAT_MARKUP,
+            PortalEmailMarkup::format($row->footer_format),
+            $row->from_name === null ? null : (string) $row->from_name,
+            $row->reply_to === null ? null : (string) $row->reply_to,
+            $this->attachments->mailFilesFor($messageId),
+        );
+        ($to === [] ? Mail::bcc($bcc) : Mail::to($to)->cc($cc)->bcc($bcc))->send($mail);
+
+        return true;
+    }
+
+    /**
+     * Writes how one copy fared onto its row, under a lock since copies land in any order. The row
+     * reads Sending until every recipient is counted. The CC and BCC copy counts for nobody, so its
+     * failure is named on the row but never changes the status.
+     *
+     * @param  list<array{id: ?int, name: string}>  $recipients
+     * @param  array{title: string, message: string, linkPath: ?string, linkLabel: ?string, payload: array<string, string>, actorId: int}|null  $notice
+     */
+    public function settleCopy(int $messageId, array $recipients, ?Throwable $error, ?array $notice = null): void
+    {
+        $reason = $error === null ? null : $this->reason($error);
+        $settled = $this->connection()->transaction(function () use ($messageId, $recipients, $reason): bool {
+            $row = $this->connection()->table('email_messages')->where('id', $messageId)->lockForUpdate()->first(['recipient_count', 'sent_count', 'failed_count', 'failures']);
+            if ($row === null) {
+                return false;
+            }
+
+            $total = (int) $row->recipient_count;
+            $sent = (int) $row->sent_count;
+            $failed = (int) $row->failed_count;
+            $failures = json_decode((string) $row->failures, true);
+            $failures = is_array($failures) ? $failures : [];
+            // A copy the queue ran twice cannot count anyone past the total.
+            $counted = min(count($recipients), max(0, $total - $sent - $failed));
+
+            if ($reason === null) {
+                $sent += $counted;
+            } else {
+                $failed += $counted;
+                if ($recipients === []) {
+                    $failures[] = ['employeeId' => null, 'name' => self::COPY_NAME, 'reason' => $reason];
+                }
+                foreach (array_slice($recipients, 0, $counted) as $recipient) {
+                    if (count($failures) >= self::MAX_FAILURES) {
+                        break;
+                    }
+                    $failures[] = ['employeeId' => $recipient['id'], 'name' => $recipient['name'], 'reason' => $reason];
+                }
+            }
+
+            $changes = [
+                'sent_count' => $sent,
+                'failed_count' => $failed,
+                'failures' => $failures === [] ? null : json_encode($failures),
+            ];
+            if ($counted > 0 && $sent + $failed >= $total) {
+                $changes['status'] = self::finalStatus($sent, $failed);
+                $changes['date_sent'] = $this->timezone->now()->toDateTimeString();
+            }
+            $this->connection()->table('email_messages')->where('id', $messageId)->update($changes);
+
+            return true;
+        });
+        if (! $settled) {
+            return;
+        }
+
+        // The copy is out and counted; a bell or cache hiccup after that must not send it again.
+        try {
+            $reached = array_values(array_filter(array_map(static fn (array $recipient): int => (int) $recipient['id'], $recipients)));
+            if ($reason === null && $notice !== null && $reached !== []) {
+                $this->audit->notifyEach(
+                    $reached,
+                    PortalNotificationType::EMAIL_SENT,
+                    $notice['title'],
+                    $notice['message'],
+                    $notice['linkPath'],
+                    $notice['linkLabel'],
+                    $notice['payload'],
+                    $notice['actorId'],
+                );
+            }
+            $this->bumpCache();
+        } catch (Throwable $followUp) {
+            Log::warning('portal.email.settle.followup.failed', ['message_id' => $messageId, 'reason' => $followUp->getMessage()]);
+        }
     }
 
     // The fixed test mail `php artisan portal:mail-test` sends.
@@ -622,7 +690,8 @@ final class PortalEmailMessages
             'sent_count' => 0,
             'failed_count' => 0,
             'failures' => null,
-            'status' => PortalEmailPresenter::STATUS_SENT,
+            // Until every copy has left; each one that lands is counted onto this row.
+            'status' => PortalEmailPresenter::STATUS_SENDING,
             'sent_by' => $employeeId,
             'date_sent' => null,
             'date_created' => $this->timezone->now()->toDateTimeString(),
@@ -634,17 +703,70 @@ final class PortalEmailMessages
      */
     private function closeRow(int $messageId, int $sent, int $failed, array $failures): void
     {
-        $status = $failed === 0
-            ? PortalEmailPresenter::STATUS_SENT
-            : ($sent === 0 ? PortalEmailPresenter::STATUS_FAILED : PortalEmailPresenter::STATUS_PARTIAL);
-
         $this->connection()->table('email_messages')->where('id', $messageId)->update([
             'sent_count' => $sent,
             'failed_count' => $failed,
             'failures' => $failures === [] ? null : json_encode($failures),
-            'status' => $status,
+            'status' => self::finalStatus($sent, $failed),
             'date_sent' => $this->timezone->now()->toDateTimeString(),
         ]);
+    }
+
+    private static function finalStatus(int $sent, int $failed): string
+    {
+        return $failed === 0
+            ? PortalEmailPresenter::STATUS_SENT
+            : ($sent === 0 ? PortalEmailPresenter::STATUS_FAILED : PortalEmailPresenter::STATUS_PARTIAL);
+    }
+
+    /**
+     * The same reason against each recipient, as many as a row keeps.
+     *
+     * @param  list<array{id: ?int, name: string, email: string}>  $recipients
+     * @return list<array{employeeId: ?int, name: string, reason: string}>
+     */
+    private function failuresFor(array $recipients, string $reason): array
+    {
+        return array_map(
+            static fn (array $recipient): array => ['employeeId' => $recipient['id'], 'name' => (string) $recipient['name'], 'reason' => $reason],
+            array_slice($recipients, 0, self::MAX_FAILURES),
+        );
+    }
+
+    /**
+     * The queued copies one send becomes. Members each get their own, so a refusal is theirs alone and
+     * only those reached get the bell; their CC and BCC share one more. Typed addresses go as one
+     * email, as a mail client sends it: To and Cc on show, Bcc hidden.
+     *
+     * @param  list<array{id: ?int, name: string, email: string}>  $recipients
+     * @param  list<string>  $cc
+     * @param  list<string>  $bcc
+     * @param  array{title: string, message: string, linkPath: ?string, linkLabel: ?string, payload: array<string, string>, actorId: int}  $notice
+     * @return list<DeliverPortalEmail>
+     */
+    private function copies(int $messageId, string $audience, array $recipients, array $cc, array $bcc, array $notice): array
+    {
+        $counted = static fn (array $recipient): array => ['id' => $recipient['id'], 'name' => (string) $recipient['name']];
+        if ($audience === PortalEmailAudience::CUSTOM) {
+            return [new DeliverPortalEmail($messageId, array_column($recipients, 'email'), $cc, $bcc, array_map($counted, $recipients))];
+        }
+
+        $copies = array_map(
+            static fn (array $recipient): DeliverPortalEmail => new DeliverPortalEmail(
+                $messageId,
+                [(string) $recipient['email']],
+                [],
+                [],
+                [$counted($recipient)],
+                $recipient['id'] === null ? null : $notice,
+            ),
+            $recipients,
+        );
+        if ($cc !== [] || $bcc !== []) {
+            $copies[] = new DeliverPortalEmail($messageId, $cc, [], $bcc, []);
+        }
+
+        return $copies;
     }
 
     /**
@@ -652,7 +774,7 @@ final class PortalEmailMessages
      *     section: string,
      *     resource: string,
      *     data: list<array<string, mixed>>,
-     *     counts: array{total: int, sent: int, partial: int, failed: int},
+     *     counts: array{total: int, sent: int, partial: int, failed: int, sending: int},
      *     meta: array{current_page: int, per_page: int, total: int, last_page: int}
      * }
      */
@@ -741,7 +863,7 @@ final class PortalEmailMessages
     {
         $status = strtolower(trim((string) $value));
 
-        return in_array($status, [PortalEmailPresenter::STATUS_SENT, PortalEmailPresenter::STATUS_PARTIAL, PortalEmailPresenter::STATUS_FAILED], true)
+        return in_array($status, PortalEmailPresenter::STATUSES, true)
             ? $status
             : null;
     }
@@ -760,7 +882,7 @@ final class PortalEmailMessages
     }
 
     /**
-     * @return array{total: int, sent: int, partial: int, failed: int}
+     * @return array{total: int, sent: int, partial: int, failed: int, sending: int}
      */
     private function counts(?string $category, ?string $from, ?string $to): array
     {
@@ -773,12 +895,14 @@ final class PortalEmailMessages
         $sent = (int) ($grouped[PortalEmailPresenter::STATUS_SENT] ?? 0);
         $partial = (int) ($grouped[PortalEmailPresenter::STATUS_PARTIAL] ?? 0);
         $failed = (int) ($grouped[PortalEmailPresenter::STATUS_FAILED] ?? 0);
+        $sending = (int) ($grouped[PortalEmailPresenter::STATUS_SENDING] ?? 0);
 
         return [
-            'total' => $sent + $partial + $failed,
+            'total' => $sent + $partial + $failed + $sending,
             'sent' => $sent,
             'partial' => $partial,
             'failed' => $failed,
+            'sending' => $sending,
         ];
     }
 

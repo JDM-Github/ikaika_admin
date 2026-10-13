@@ -32,7 +32,7 @@ Each command asks for the SSH key passphrase twice, once for the upload and once
 1. Runs `build.ps1`: builds CSS and fonts for the subfolder and packs `out/central-platform.zip`.
 2. Uploads the zip and the server scripts.
 3. On the server, `deploy-admin.sh` unpacks the zip, runs `composer install`, dumps the default, portal and tracker databases to `backups/databases-<stamp>/` (a failed dump stops the deploy before anything changes), and swaps in the new release.
-4. It then migrates, applies the tracker patches (`sql/transaction_tracker/patches/*.sql`, safe to rerun), adds the every-minute scheduler cron if it is missing, republishes the public folder, and prunes old backups.
+4. It then migrates, applies the tracker patches (`sql/transaction_tracker/patches/*.sql`, safe to rerun), adds the every-minute scheduler cron if it is missing (it also works the mail queue: `QUEUE_CONNECTION=database` is written into the release's `.env`, and without the cron queued email never leaves), republishes the public folder, and prunes old backups.
 5. **Migration health checks** fail the deploy, printing the exact rollback commands (code, public folder, and each database dump): `migrate:status --pending` must show nothing left, and `/health` must answer 200 (the portal database reachable). `deploy.ps1` then stops with "Deploy failed on the server".
 
 Expected last lines:

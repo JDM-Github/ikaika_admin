@@ -21,7 +21,8 @@ use Symfony\Component\Mime\Email;
  * sender checks rather than looking like a spoofed personal address.
  *
  * Attached files come off the private disk under the names they were attached with. Inline images
- * (a share's QR) are embedded under their name, so the body shows them as cid:<name>.
+ * (a share's QR) are embedded under their name, so the body shows them as cid:<name>. They are held
+ * as base64 and embedded only at send time, so a queued copy stores as JSON with no closure in it.
  */
 class PortalEmailMail extends Mailable
 {
@@ -35,11 +36,15 @@ class PortalEmailMail extends Mailable
         public readonly ?string $replyToAddress = null,
         /** @var list<array{path: string, name: string, mime: string}> */
         public readonly array $attachedFiles = [],
-        /** @var list<array{name: string, data: string, mime: string}> */
+        /** @var list<array{name: string, data: string, mime: string}> data is base64 */
         public readonly array $inlineImages = [],
-    ) {
+    ) {}
+
+    // Called by the mailer just before it sends, after the queue has rebuilt this mail.
+    public function build(): void
+    {
         foreach ($this->inlineImages as $image) {
-            $this->withSymfonyMessage(static fn (Email $message): Email => $message->embed($image['data'], $image['name'], $image['mime']));
+            $this->withSymfonyMessage(static fn (Email $message): Email => $message->embed((string) base64_decode($image['data'], true), $image['name'], $image['mime']));
         }
     }
 

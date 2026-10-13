@@ -8,7 +8,7 @@ updates this file in the same commit.
 line under [Requested changes](#requested-changes), and ask Claude to "apply docs/plan/emails.md". The
 section is the spec; the code follows it.
 
-Last checked against the code: 2026-10-12.
+Last checked against the code: 2026-10-13.
 
 ---
 
@@ -21,7 +21,8 @@ Last checked against the code: 2026-10-12.
 | Transport | `MAIL_MAILER=wprelay`: each email is a POST to the WordPress plugin on ikaikabim.com, which sends it with `wp_mail`. A few seconds per email. See `docs/deploy/wordpress/`. |
 | Local | The same relay, or `MAIL_MAILER=log` (emails land in `storage/logs/laravel.log`). |
 | HTML builder | `PortalEmailMarkup::document()` -- one builder for every design below, the same one Send Email's preview uses. |
-| One sender for system letters | `PortalLetters::send()`: Letter design + Company footer + IKAIKA Portal, sent **after the response** (`defer()`), a failure logged as `portal.letter.failed`. |
+| One sender for system letters | `PortalLetters::send()`: Letter design + Company footer + IKAIKA Portal, through the **mail queue**. A one-time code uses `PortalLetters::sendAfterResponse()` instead: same letter, sent right **after the response** (`defer()`), so it never waits for the queue. A failure is logged as `portal.letter.failed`. |
+| Mail queue | The database queue (`jobs` table). The server has no always-on worker: the scheduler's every-minute cron starts `queue:work --stop-when-empty --max-time=55`, so a queued email leaves within about a minute. Each email gets 3 tries (now, +1 min, +5 min); then a system email is logged under its own failure event and a Send Email copy is counted failed on its row. `deploy-admin.sh` sets `QUEUE_CONNECTION=database` on the server; locally `.env` keeps `sync`, which sends inside the request as before. Jobs: `App\Jobs\SendPortalMail` (system emails), `App\Jobs\DeliverPortalEmail` (Send Email copies). |
 | Test | `php artisan portal:mail-test [to]` sends a test and prints the relay's answer. |
 
 ## The designs
@@ -47,13 +48,13 @@ one line break stays a line break.
 | # | Email | Goes to | Design | Letterhead | Company footer | Sender name | Extras | Sent |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Sign-in code | Employee's **work** email | Letter | Yes | Yes | IKAIKA Portal | - | After response |
-| 2 | Shared page: link + password | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | **QR** image inline | After response |
-| 3 | Shared page: new password | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | **QR** image inline | After response |
+| 2 | Shared page: link + password | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | **QR** image inline | Queue |
+| 3 | Shared page: new password | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | **QR** image inline | Queue |
 | 4 | Shared page: sign-in code | Share's bound email | Letter | Yes | Yes | IKAIKA Portal | - | After response |
-| 5 | Registration code | The candidate | Formatted | **No** | **No** | Default (see above) | - | **During the request** |
-| 6 | Notification emails (11 kinds) | Managers or the person concerned | Formatted | **No** | Yes | IKAIKA Portal | Link to the page | **During the request** |
-| 7 | Blocked access alert | Holders of Access alerts | Plain | **No** | **No** | Default (see above) | - | **During the request** |
-| 8 | Send Email (composer) | Whoever the admin picks | Admin's choice | If Letter | Admin's choice | IKAIKA Portal, or "{admin} via IKAIKA Portal" + Reply-To the admin | Images, attachments | During the request |
+| 5 | Registration code | The candidate | Letter | Yes | Yes | IKAIKA Portal | - | After response |
+| 6 | Notification emails (11 kinds) | Managers or the person concerned | Formatted | **No** | Yes | IKAIKA Portal | Link to the page | Queue |
+| 7 | Blocked access alert | Holders of Access alerts | Plain | **No** | **No** | Default (see above) | - | Queue |
+| 8 | Send Email (composer) | Whoever the admin picks | Admin's choice | If Letter | Admin's choice | IKAIKA Portal, or "{admin} via IKAIKA Portal" + Reply-To the admin | Images, attachments | Queue, one copy per recipient |
 | 9 | Mail test | The address given | Formatted | No | A one-line test footer | Default (see above) | - | Immediately |
 
 **Drafts that open Send Email (#8) pre-filled** -- nothing is sent until the admin presses Send, and
@@ -75,7 +76,7 @@ the admin can change everything:
 | To | The employee's **work email only** (supervisor, 2026-10-12). A personal email, an unknown one or an inactive account gets no email; the page reads "No active portal account uses that email." |
 | Design | Letter, letterhead, Company footer, from IKAIKA Portal, after the response |
 | Code rules | 6 digits, 10 minutes, 5 tries |
-| Code | `PortalEmailLogin::start` -> `PortalLetters::send` |
+| Code | `PortalEmailLogin::start` -> `PortalLetters::sendAfterResponse` |
 
 **Subject:** `Your IKAIKA Portal sign-in code`
 
@@ -94,7 +95,7 @@ the admin can change everything:
 | --- | --- |
 | When | A shared page is created with an email bound |
 | To | The bound email |
-| Design | Letter, letterhead, Company footer, from IKAIKA Portal, after the response; the link's **QR code** as an inline PNG (about 300 px) |
+| Design | Letter, letterhead, Company footer, from IKAIKA Portal, through the mail queue; the link's **QR code** as an inline PNG (about 300 px), carried in the queue as base64 and embedded when it is sent |
 | Code | `PortalSharedPages::create` -> `mailPassword` -> `PortalLetters::send`; QR from `PortalQrPng` |
 
 **Subject:** `Your link and password for {share name}`
@@ -121,7 +122,7 @@ the admin can change everything:
 | --- | --- |
 | When | **New password** on a share that has an email |
 | To | The bound email |
-| Design | As #2 (Letter, letterhead, Company footer, QR) |
+| Design | As #2 (Letter, letterhead, Company footer, QR, through the mail queue) |
 | Code | `PortalSharedPages::regenerate` -> `mailPassword` |
 
 **Subject:** `Your new password for {share name}`
@@ -138,7 +139,7 @@ Body as #2, with the second paragraph:
 | To | The bound email |
 | Design | Letter, letterhead, Company footer, from IKAIKA Portal, after the response |
 | Code rules | 6 digits, 10 minutes, 5 tries, 60 s between resends |
-| Code | `PortalSharedPages::sendOtp` -> `PortalLetters::send` |
+| Code | `PortalSharedPages::sendOtp` -> `PortalLetters::sendAfterResponse` |
 
 **Subject:** `Your code for {share name}`
 
@@ -157,15 +158,20 @@ Body as #2, with the second paragraph:
 | --- | --- |
 | When | A candidate types the password on their `/register/<code>` link |
 | To | The candidate's bound email |
-| Design | **Formatted, no letterhead, no footer**, sender name not set (Test Server: "IKAIKA Platform"), sent **during the request** |
+| Design | Letter, letterhead, Company footer, from IKAIKA Portal, after the response |
 | Code rules | 6 digits, 10 minutes |
-| Code | `PortalRegistrations::sendOtp` (`Mail::to()->send(new PortalEmailMail(...))` directly) |
+| Code | `PortalRegistrations::sendOtp` -> `PortalLetters::sendAfterResponse` |
 
 **Subject:** `Your code for {candidate name}`
 
-> Your code is {code}. It is good for 10 minutes.
+> Hi {candidate name},
+>
+> Your code is **{code}**. It is good for 10 minutes.
 >
 > Open your registration: {link}
+>
+> Best Regards,
+> IKAIKA Portal
 
 ## 6. Notification emails
 
@@ -173,11 +179,11 @@ Every in-portal notice of the kinds below is also emailed.
 
 | | |
 | --- | --- |
-| Design | **Formatted, no letterhead**, Company footer, from IKAIKA Portal, sent **during the request** (one relay round trip per recipient) |
+| Design | **Formatted, no letterhead**, Company footer, from IKAIKA Portal, through the mail queue (one email per recipient) |
 | Body | `# {subject}` as a heading, the message, then the link (when the notice has one) as `[{link label}]({portal}/{page})` |
 | On / off | Settings -> Advanced (Developer mode only); default from `PORTAL_NOTIFICATION_EMAILS` |
 | Skipped | Nobody is emailed about their own action; an employee with no valid work email gets no email |
-| Code | `PortalAudit::notify / notifyEach / notifyManagers / notifyIfOther` -> `PortalNotificationEmails::send`; wording in `PortalActivityCopy` |
+| Code | `PortalAudit::notify / notifyEach / notifyManagers / notifyIfOther` -> `PortalNotificationEmails::send` -> `SendPortalMail` job; wording in `PortalActivityCopy`; a failure is logged as `portal.notification.email.failed` |
 
 Dates read like "Monday, October 12, 2026"; a range reads "from {date} to {date}".
 
@@ -203,8 +209,8 @@ changed, project rejected, recycle bin restore, "email sent".
 | --- | --- |
 | When | A signed-in user is refused a page or action (403); at most once per person, method and path every 15 minutes |
 | To | Everyone holding **Access alerts** (`administration.alerts`; admins and executives by preset) |
-| Design | **Plain** (unstyled `<pre>` text), no letterhead, no footer, sender name not set (Test Server: "IKAIKA Platform"), sent **during the request** |
-| Code | `PortalAccessAlert::report` -> `App\Mail\PortalAccessAlertMail` |
+| Design | **Plain** (unstyled `<pre>` text), no letterhead, no footer, sender name not set (Test Server: "IKAIKA Platform"), through the mail queue |
+| Code | `PortalAccessAlert::report` -> `SendPortalMail` job -> `App\Mail\PortalAccessAlertMail`; a failure is logged as `portal.access.alert.failed` |
 
 **Subject:** `Blocked portal access attempt`
 
@@ -227,8 +233,9 @@ changed, project rejected, recycle bin restore, "email sent".
 | To | Members, departments, roles, everyone, or typed addresses; Cc and Bcc |
 | Design | The admin picks: Formatted, Formatted + **Letter design** switch, or HTML; any saved footer or none; images and attachments |
 | Sender | IKAIKA Portal, or "{admin} via IKAIKA Portal" with Reply-To the admin |
+| Sent | Through the mail queue: the Send button answers at once and the row reads **Sending**. Each member gets their own copy (a `DeliverPortalEmail` job), Cc/Bcc share one more, and typed addresses go as one email. Each copy counts itself onto the row as it lands; the row settles on Sent, Partially sent or Failed once every recipient is counted. The composer's toast says "Email queued for N recipients"; All Emails re-reads itself every 10 s while a row it shows is Sending. If the queue cannot take the send at all, the row is marked Failed and the button shows the error |
 | Kept | Every send is stored and listed in All Emails |
-| Code | `PortalEmailMessages` (server), `SendEmailScreenController` (portal) |
+| Code | `PortalEmailMessages::deliver / deliverCopy / settleCopy`, `App\Jobs\DeliverPortalEmail` (server); `SendEmailScreenController`, `AllEmailsScreenController` (portal) |
 
 ## 9. Mail test
 
@@ -249,14 +256,12 @@ changed, project rejected, recycle bin restore, "email sent".
 
 | # | Problem | Effect | Fix |
 | --- | --- | --- | --- |
-| 5, 6, 7 | Sent **during the request**, not after it | The action that triggers them waits a few seconds per email (the relay); a notice to several managers waits for each | Send through `PortalLetters` / `defer()` like #1-4 |
-| 5, 7 | No letterhead, no Company footer; #7 is unstyled text | They look unlike every other system email | Move to `PortalLetters::send` with a Letter body |
+| 7 | No letterhead, no Company footer; unstyled text | It looks unlike every other system email | Move to `PortalLetters::send` with a Letter body |
 | 6 | Formatted, not Letter: no letterhead | Notification emails look plainer than the sign-in and share emails | Switch `PortalNotificationEmails` to `FORMAT_LETTER` |
-| 5, 7, 9 | Sender name not set | They arrive as **"IKAIKA Platform"** on the Test Server | Set IKAIKA Portal, or fix `MAIL_FROM_NAME` on the server |
-| 5 | No "Hi {name}" or sign-off | Reads abruptly | Word it like #4 |
+| 7, 9 | Sender name not set | They arrive as **"IKAIKA Platform"** on the Test Server | Set IKAIKA Portal, or fix `MAIL_FROM_NAME` on the server |
+| 2, 3, 6, 7, 8 | Queued emails need the server's scheduler cron | Without the every-minute `schedule:run` cron nothing works the queue: those emails wait, and Send Email rows stay Sending | Every admin deploy adds the cron if it is missing; check cPanel -> Cron Jobs if mail stops |
 | 6 | "{name} filed a leave request Monday, ..." -- no "for"; "a overtime / a offset" | Reads oddly | Reword `PortalActivityCopy::notifyFiled` |
 | 6 | Event created has no link | The reader cannot open the event from the email | Give the notice a link to the Event Calendar |
-| 8 | A big send waits for every recipient | The Send button can take long | Send in the background (needs a queue or `defer()`) |
 | Resend draft | No QR code | Weaker than #2 | Send Email can only attach uploaded files; needs a different approach |
 
 ---
@@ -272,9 +277,10 @@ Claude to apply it.
 
 ## Adding a new email
 
-1. Send it through `PortalLetters::send()` (Letter, Company footer, IKAIKA Portal, after the response)
-   unless it must be different -- then say why here.
+1. Send it through `PortalLetters::send()` (Letter, Company footer, IKAIKA Portal, through the mail queue);
+   a one-time code someone waits on uses `PortalLetters::sendAfterResponse()`. Anything different -- say why here.
 2. Add it to [All emails at a glance](#all-emails-at-a-glance) and give it a section with its design,
    subject, body, recipients and trigger.
-3. Test it with `Mail::fake()` (recipient, subject, design).
+3. Test it with `Mail::fake()` (recipient, subject, design); the test queue is `sync`, so a queued email is sent
+   inside the test. Use `Queue::fake()` to check it was queued instead of sent.
 4. Update this file in the same commit.

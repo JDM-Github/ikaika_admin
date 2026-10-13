@@ -250,7 +250,7 @@ class PortalSharedPagesTest extends TestCase
             && count($mail->inlineImages) === 1
             && $mail->inlineImages[0]['name'] === 'share-qr'
             && $mail->inlineImages[0]['mime'] === 'image/png'
-            && $mail->inlineImages[0]['data'] === PortalQrPng::png((string) $created->json('data.share.link')));
+            && $mail->inlineImages[0]['data'] === base64_encode(PortalQrPng::png((string) $created->json('data.share.link'))));
 
         // A new password says so in its own subject.
         $this->withToken($token)->postJson(self::BASE.'/'.$created->json('data.share.id').'/regenerate')->assertOk();

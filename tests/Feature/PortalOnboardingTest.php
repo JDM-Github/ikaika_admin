@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalNotificationEmails;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Middleware\ThrottleRequests;
@@ -264,7 +266,15 @@ class PortalOnboardingTest extends TestCase
         $this->postJson(self::REGISTER.'/liza/access', ['password' => $created['password']])
             ->assertOk()
             ->assertJsonPath('data.otpRequired', true);
-        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('liza.reyes@example.test'));
+        // The portal's letter, like the sign-in code: letterhead, Company footer, from IKAIKA Portal, a greeting.
+        [$footerBody] = PortalNotificationEmails::companyFooter();
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('liza.reyes@example.test')
+            && $mail->subjectLine === 'Your code for Liza Reyes'
+            && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
+            && $mail->fromName === PortalNotificationEmails::FROM_NAME
+            && $mail->footerBody === $footerBody
+            && str_starts_with($mail->body, 'Hi Liza Reyes,')
+            && str_contains($mail->body, '/register/liza)'));
 
         $id = (int) DB::connection('portal')->table('registrations')->where('code', 'liza')->value('id');
         DB::connection('portal')->table('register_otps')->where('registration_id', $id)->update(['code_hash' => Hash::make('123456')]);

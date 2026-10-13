@@ -86,6 +86,9 @@ set_release_key PORTAL_PUBLIC_URL "$PORTAL_URL"
 # portal's own address stands in. Never left to the server's .env: a stale one (the old temporary domain) refuses
 # every Microsoft sign-in with a silent 401, since the code is only exchanged for a matching redirect.
 set_release_key PORTAL_AZURE_REDIRECT_URI "${AZURE_REDIRECT_URI:-$PORTAL_URL}"
+# Mail goes through the database queue, which the scheduler cron below works off every minute; with the sync default
+# every notification and Send Email would hold the request for a relay round trip per email.
+set_release_key QUEUE_CONNECTION database
 chmod 600 "$NEW/.env"
 chmod -R 775 "$NEW/storage" "$NEW/bootstrap/cache"
 
@@ -175,7 +178,8 @@ else
     echo "   none"
 fi
 
-# The scheduler drives the hourly Bitbucket sync and any later scheduled job; cPanel's Cron Jobs page shows this line too.
+# The scheduler drives the mail queue's worker every minute, the hourly Bitbucket sync and any later scheduled job; without
+# it queued email never leaves. cPanel's Cron Jobs page shows this line too.
 echo "== Scheduler cron"
 CRON_LINE="* * * * * cd $APP_DIR && $(command -v php) artisan schedule:run >> /dev/null 2>&1"
 if crontab -l 2>/dev/null | grep -Fq 'artisan schedule:run'; then

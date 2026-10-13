@@ -264,3 +264,7 @@ Artisan::command('portal:bitbucket-preview
 
 // The backstop for a missed push webhook, and what finishes counting a long history; needs the server's schedule:run cron.
 Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
+
+// The mail queue's worker. The server runs no daemon, so the minute cron starts one that leaves when the queue is
+// empty or after 55 s, before the next one starts; two that do meet cannot take the same job.
+Schedule::command('queue:work --stop-when-empty --max-time=55')->everyMinute()->runInBackground();

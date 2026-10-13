@@ -2,11 +2,12 @@
 
 namespace App\Support\Portal;
 
+use App\Jobs\SendPortalMail;
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailBlock;
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 use Throwable;
 
 /**
@@ -14,7 +15,8 @@ use Throwable;
  * PortalEmailMarkup, the Company footer under it, from the portal's own address. The
  * notification_emails setting turns the whole thing off, so a local run that must not reach real
  * inboxes sends nothing, and the inbox row is written either way: a send that fails is logged and
- * dropped, never allowed to fail the write it was telling about.
+ * dropped, never allowed to fail the write it was telling about. The email waits in the mail queue,
+ * so a notice to several managers no longer holds the action for a relay round trip each.
  */
 final class PortalNotificationEmails
 {
@@ -43,6 +45,8 @@ final class PortalNotificationEmails
         PortalNotificationType::CALENDAR_EVENT_CREATED => true,
     ];
 
+    private const FAILED = 'portal.notification.email.failed';
+
     // Shared with the shared-page emails, which go out as the same letter from the same sender.
     public const FROM_NAME = 'IKAIKA Portal';
 
@@ -61,9 +65,10 @@ final class PortalNotificationEmails
             return;
         }
 
+        $context = ['employee_id' => (int) $employee->getKey(), 'type' => $type];
         try {
             [$footerBody, $footerFormat] = self::companyFooter();
-            Mail::to($email)->send(new PortalEmailMail(
+            Queue::push(new SendPortalMail([$email], new PortalEmailMail(
                 $title,
                 $this->body($title, $message, $linkPath, $linkLabel),
                 $footerBody,
@@ -71,13 +76,10 @@ final class PortalNotificationEmails
                 $footerFormat,
                 self::FROM_NAME,
                 null,
-            ));
+            ), self::FAILED, $context));
         } catch (Throwable) {
-            // The inbox row is already there, so a transport failure is only ever a warning.
-            Log::warning('portal.notification.email.failed', [
-                'employee_id' => (int) $employee->getKey(),
-                'type' => $type,
-            ]);
+            // The inbox row is already there, so a mail that cannot even be queued is only ever a warning.
+            Log::warning(self::FAILED, $context);
         }
     }
 

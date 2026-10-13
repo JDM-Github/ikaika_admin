@@ -273,8 +273,9 @@ class PortalEmailTest extends TestCase
         $this->assertSame('Portal maintenance tonight', $log->payload['subject']);
         $this->assertSame('everyone', $log->payload['audience']);
         $this->assertSame($expected, $log->payload['recipientCount']);
-        $this->assertSame($expected, $log->payload['sent']);
-        $this->assertSame(0, $log->payload['failed']);
+        // The log is written when the copies are queued; how each fared lives on the outbox row.
+        $this->assertSame($expected, $log->payload['copies']);
+        $this->assertArrayNotHasKey('sent', $log->payload);
         $this->assertArrayNotHasKey('body', $log->payload);
     }
 
@@ -408,14 +409,14 @@ class PortalEmailTest extends TestCase
 
         $all = $this->getJson($days, $headers)->assertOk();
         $this->assertSame([$partial, $event, $sent], array_map('intval', array_column($all->json('data'), 'id')));
-        $all->assertJsonPath('counts', ['total' => 3, 'sent' => 1, 'partial' => 1, 'failed' => 1]);
+        $all->assertJsonPath('counts', ['total' => 3, 'sent' => 1, 'partial' => 1, 'failed' => 1, 'sending' => 0]);
 
         $failed = $this->getJson($days.'&status=failed', $headers)->assertOk();
         $this->assertSame([$event], array_map('intval', array_column($failed->json('data'), 'id')));
         $failed->assertJsonPath('counts.total', 3)->assertJsonPath('meta.total', 1);
 
         $this->getJson($days.'&category=notice', $headers)->assertOk()
-            ->assertJsonPath('counts', ['total' => 2, 'sent' => 1, 'partial' => 1, 'failed' => 0]);
+            ->assertJsonPath('counts', ['total' => 2, 'sent' => 1, 'partial' => 1, 'failed' => 0, 'sending' => 0]);
         $this->assertCount(1, $this->getJson(self::BASE.'/administration/emails?from=2031-03-05&to=2031-03-05&status=partial', $headers)->json('data'));
         // An unknown status is no filter at all; a malformed day is refused.
         $this->assertCount(3, $this->getJson($days.'&status=lost', $headers)->json('data'));
@@ -768,8 +769,9 @@ class PortalEmailTest extends TestCase
         $member = $this->administrator();
         Mail::shouldReceive('to')->andReturnUsing(function ($to) {
             $pending = Mockery::mock();
+            $pending->shouldReceive('cc')->andReturnSelf();
+            $pending->shouldReceive('bcc')->andReturnSelf();
             if ($to === ['boss@ikaika.test']) {
-                $pending->shouldReceive('bcc')->andReturnSelf();
                 $pending->shouldReceive('send')->andThrow(new RuntimeException('550 relay denied for boss@ikaika.test'));
             } else {
                 $pending->shouldReceive('send')->andReturnNull();
@@ -949,7 +951,9 @@ class PortalEmailTest extends TestCase
 
         Mail::shouldReceive('to')->andReturnUsing(function ($to) use ($address) {
             $pending = Mockery::mock();
-            if (is_string($to) && trim($to) === $address) {
+            $pending->shouldReceive('cc')->andReturnSelf();
+            $pending->shouldReceive('bcc')->andReturnSelf();
+            if ($to === [$address]) {
                 $pending->shouldReceive('send')->andThrow(
                     new RuntimeException('550 mailbox unavailable for '.$address),
                 );

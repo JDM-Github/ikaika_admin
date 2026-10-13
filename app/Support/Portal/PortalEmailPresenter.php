@@ -18,6 +18,11 @@ final class PortalEmailPresenter
 
     public const STATUS_FAILED = 'failed';
 
+    // Queued: its copies are still leaving, and each one that lands is counted onto the row.
+    public const STATUS_SENDING = 'sending';
+
+    public const STATUSES = [self::STATUS_SENT, self::STATUS_PARTIAL, self::STATUS_FAILED, self::STATUS_SENDING];
+
     /**
      * @return list<string>
      */
@@ -301,7 +306,7 @@ final class PortalEmailPresenter
     private static function status(mixed $stored, int $sentCount, int $failedCount): string
     {
         $status = trim((string) $stored);
-        if (in_array($status, [self::STATUS_SENT, self::STATUS_PARTIAL, self::STATUS_FAILED], true)) {
+        if (in_array($status, self::STATUSES, true)) {
             return $status;
         }
 

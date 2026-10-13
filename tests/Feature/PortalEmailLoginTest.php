@@ -122,10 +122,10 @@ class PortalEmailLoginTest extends TestCase
             ->assertStatus(422)->assertJsonPath('message', 'Ask for a new code.');
     }
 
-    // Each letter is a relay round trip; it waits for the answer, so two codes never hold the screen.
-    public function test_a_letter_goes_out_after_the_answer_and_a_failed_one_is_only_logged(): void
+    // A code is a relay round trip; it waits for the answer, so two codes never hold the screen.
+    public function test_a_code_goes_out_after_the_answer_and_a_failed_one_is_only_logged(): void
     {
-        PortalLetters::send('kelly.login@example.test', 'Subject', 'Body');
+        PortalLetters::sendAfterResponse('kelly.login@example.test', 'Subject', 'Body');
         Mail::assertNothingSent();
 
         app(DeferredCallbackCollection::class)->invoke();
@@ -133,7 +133,7 @@ class PortalEmailLoginTest extends TestCase
 
         Mail::shouldReceive('to')->andThrow(new RuntimeException('relay down'));
         Log::spy();
-        PortalLetters::send('kelly.login@example.test', 'Subject', 'Body');
+        PortalLetters::sendAfterResponse('kelly.login@example.test', 'Subject', 'Body');
         app(DeferredCallbackCollection::class)->invoke();
         Log::shouldHaveReceived('warning')->with('portal.letter.failed', ['subject' => 'Subject', 'reason' => 'relay down']);
     }

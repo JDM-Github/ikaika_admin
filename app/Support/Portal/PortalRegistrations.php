@@ -2,7 +2,6 @@
 
 namespace App\Support\Portal;
 
-use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
@@ -11,7 +10,6 @@ use BaconQrCode\Writer;
 use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
 
 /**
  * Manage / Onboarding (docs/power/onboarding-plan.md): the candidate entries behind the registration
@@ -627,11 +625,15 @@ final class PortalRegistrations
             ['registration_id' => $registration->id],
             ['code_hash' => Hash::make($code), 'attempts' => 0, 'created_at' => now(), 'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES)],
         );
-        Mail::to(strtolower(trim((string) $registration->email)))->send(new PortalEmailMail(
+        $link = $this->link((string) $registration->code);
+        PortalLetters::sendAfterResponse(
+            strtolower(trim((string) $registration->email)),
             'Your code for '.trim((string) $registration->candidate_name),
-            'Your code is '.$code.'. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                ."\n\nOpen your registration: ".$this->link((string) $registration->code),
-        ));
+            'Hi '.trim((string) $registration->candidate_name).','
+                ."\n\nYour code is **".$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
+                ."\n\nOpen your registration: [".$link.']('.$link.')'
+                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
+        );
     }
 
     /**

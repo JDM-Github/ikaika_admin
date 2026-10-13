@@ -462,7 +462,7 @@ final class PortalSharedPages
             ['code_hash' => Hash::make($code), 'attempts' => 0, 'issued_at' => now(), 'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES)],
         );
         $link = $this->link((string) $share->code);
-        PortalLetters::send(
+        PortalLetters::sendAfterResponse(
             trim((string) $share->email),
             'Your code for '.trim((string) $share->label),
             'Hi '.$this->displayName($share).','
@@ -566,7 +566,7 @@ final class PortalSharedPages
                 ."\n\n![QR code for the link](cid:".self::QR_IMAGE.')'
                 ."\n\n".$expiry.' It is read-only: you can look, not change anything.'
                 ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
-            [['name' => self::QR_IMAGE, 'data' => PortalQrPng::png($link), 'mime' => 'image/png']],
+            [['name' => self::QR_IMAGE, 'data' => base64_encode(PortalQrPng::png($link)), 'mime' => 'image/png']],
         );
     }
 
