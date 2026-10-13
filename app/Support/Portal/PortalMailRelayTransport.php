@@ -57,11 +57,7 @@ final class PortalMailRelayTransport extends AbstractTransport
             'replyTo' => $replyTo?->getAddress(),
         ];
         if ($files !== []) {
-            $payload['attachments'] = array_map(static fn (DataPart $file): array => [
-                'name' => (string) $file->getFilename(),
-                'type' => $file->getMediaType().'/'.$file->getMediaSubtype(),
-                'content' => base64_encode($file->getBody()),
-            ], $files);
+            $payload['attachments'] = array_map(self::file(...), $files);
         }
         $url = $files === [] ? $this->url : $this->attachmentsUrl();
 
@@ -107,6 +103,33 @@ final class PortalMailRelayTransport extends AbstractTransport
         }
 
         return $url;
+    }
+
+    /*
+     * One file for the bridge. An inline image (a share's QR) is shown by the body as cid:<its name>, so
+     * the bridge must embed it under that id rather than attach it; it also gets an extension, which the
+     * bridge needs to know its type. A bridge from before inline images attaches it instead of failing.
+     *
+     * @return array{name: string, type: string, content: string, inline?: bool, cid?: string}
+     */
+    private static function file(DataPart $file): array
+    {
+        $name = (string) $file->getFilename();
+        $entry = [
+            'name' => $name,
+            'type' => $file->getMediaType().'/'.$file->getMediaSubtype(),
+            'content' => base64_encode($file->getBody()),
+        ];
+        if ($file->getDisposition() !== 'inline') {
+            return $entry;
+        }
+
+        return [
+            ...$entry,
+            'name' => pathinfo($name, PATHINFO_EXTENSION) === '' ? $name.'.'.$file->getMediaSubtype() : $name,
+            'inline' => true,
+            'cid' => $name,
+        ];
     }
 
     /**

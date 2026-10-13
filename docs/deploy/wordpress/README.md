@@ -35,6 +35,18 @@ message (the portal holds a send to 10 MB) of PDF, Office, CSV, text, image and 
 The request body is the files in base64, about a third larger than the files: the host's PHP
 `post_max_size` must allow roughly 16 MB.
 
+## Inline images (the shared-page QR)
+
+The shared-page link and password letters show the link's QR inside the message, as
+`<img src="cid:share-qr">`. The portal sends that picture on v2 marked `"inline": true` with
+`"cid": "share-qr"`, and the bridge embeds it under that id (PHPMailer `addEmbeddedImage`) instead of
+attaching it. Only pictures (JPG, PNG, GIF, WebP) may be inline.
+
+A bridge from before this (2026-10-13) attaches the QR as a loose file and the letter shows a broken
+image; one from before 2026-10-13's portal fix refused the letter outright ("An attachment is not a type
+this bridge sends"). **Upload the current `ikaika-portal-mail.php` to `public_html/wp-content/mu-plugins/`
+for the QR to show.**
+
 ## Checks
 
 - `https://ikaikabim.com/wp-json/ikaika-portal/v1` lists `"namespace":"ikaika-portal/v1"`: the plugin is loaded.

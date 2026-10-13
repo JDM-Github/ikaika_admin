@@ -308,6 +308,7 @@ changed, project rejected, recycle bin restore, "email sent".
 | # | Problem | Effect | Fix |
 | --- | --- | --- | --- |
 | 2, 3, 6, 7, 8 | Queued emails need the server's scheduler cron | Without the every-minute `schedule:run` cron nothing works the queue: those emails wait, and Send Email rows stay Sending | Every admin deploy adds the cron if it is missing; check cPanel -> Cron Jobs if mail stops |
+| 2, 3 | The QR shows inside the letter only once the current mail bridge is uploaded | Until then the live bridge attaches the QR as a loose file and the letter shows a broken image (before 2026-10-13 it refused these two letters outright, so they never arrived) | Upload `docs/deploy/wordpress/ikaika-portal-mail.php` to `public_html/wp-content/mu-plugins/` (see that README's Inline images) |
 | Resend draft | No QR code | Weaker than #2 | Send Email can only attach uploaded files; needs a different approach |
 
 ---
