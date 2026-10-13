@@ -232,7 +232,7 @@ final class PortalAudit
         ?string $linkPath = null,
         ?string $linkLabel = null,
     ): void {
-        $this->notificationEmails->sendToDepartmentHeads($actor, $type, $title, $message, $linkPath, $linkLabel);
+        $this->notificationEmails->sendToDepartmentHeads($actor, $type, $title, $message, self::emailLink($linkPath, $type, []), $linkLabel);
     }
 
     /**
@@ -274,21 +274,25 @@ final class PortalAudit
         $notification->save();
         $this->bumpNotificationCache();
         // Mapped notices also go by email; the mailer itself decides whether anything leaves.
-        $this->notificationEmails->send($employeeId, $type, $title, $message, self::emailLink($linkPath, $payload), $notification->link_label);
+        $this->notificationEmails->send($employeeId, $type, $title, $message, self::emailLink($linkPath, $type, $payload), $notification->link_label);
 
         return (int) $notification->id;
     }
 
-    // A project notice's email button opens that project, as the bell does: ?record=<id> on the page,
-    // which View Projects and Manage / Projects read; every other email keeps its plain page link.
-    private static function emailLink(?string $linkPath, array $payload): ?string
+    // An email's button opens what the bell's notice opens: the notice's type (the request tab) and its
+    // record ride on the page link, and the portal opens them once the reader is signed in.
+    private static function emailLink(?string $linkPath, string $type, array $payload): ?string
     {
+        if ($linkPath === null) {
+            return null;
+        }
+        $query = ['notice' => $type];
         $record = trim((string) ($payload['recordId'] ?? ''));
-        if ($record === '' || ! in_array($linkPath, [PortalShellPath::VIEW_PROJECTS, PortalShellPath::MANAGE_PROJECTS], true)) {
-            return $linkPath;
+        if ($record !== '') {
+            $query['record'] = $record;
         }
 
-        return $linkPath.'?record='.rawurlencode($record);
+        return $linkPath.'?'.http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
 
     /**
@@ -355,7 +359,7 @@ final class PortalAudit
         }
         $this->bumpNotificationCache();
         foreach ($recipients as $employeeId) {
-            $this->notificationEmails->send($employeeId, $type, $title, $message, self::emailLink($linkPath, $payload), $linkLabel);
+            $this->notificationEmails->send($employeeId, $type, $title, $message, self::emailLink($linkPath, $type, $payload), $linkLabel);
         }
 
         return count($rows);

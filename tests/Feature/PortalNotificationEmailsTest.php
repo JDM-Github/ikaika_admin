@@ -200,7 +200,7 @@ class PortalNotificationEmailsTest extends TestCase
             // The reader can open the event from the email.
             && $mail->category === PortalEmailMarkup::CATEGORY_EVENT
             && str_contains($mail->body, '::button[Open the calendar](')
-            && str_contains($mail->body, '/event-calendar)'));
+            && str_contains($mail->body, '/event-calendar?notice='));
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo((string) $admin->email)
             && $mail->subjectLine === 'New event'
             && str_contains($mail->body, 'Design review'));

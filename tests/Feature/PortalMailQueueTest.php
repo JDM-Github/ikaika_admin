@@ -265,7 +265,7 @@ class PortalMailQueueTest extends TestCase
         app(PortalAudit::class)->notify((int) $member->getKey(), PortalNotificationType::PROJECT_APPROVED, 'Project approved', 'Someone approved it.', '/projects/projects', 'Open project', ['recordId' => '42']);
 
         Queue::assertPushed(SendPortalMail::class, fn (SendPortalMail $job): bool => $job->mail instanceof PortalEmailMail
-            && str_contains($job->mail->body, '/projects/projects?record=42)'));
+            && str_contains($job->mail->body, '/projects/projects?notice=projects.approved&record=42)'));
     }
 
     // The QR is raw PNG bytes, which a JSON queue payload cannot hold; it rides as base64 and is embedded on send.
