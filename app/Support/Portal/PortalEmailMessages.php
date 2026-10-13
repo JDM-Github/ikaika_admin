@@ -54,6 +54,9 @@ final class PortalEmailMessages
 
     private const MAX_REASON = 191;
 
+    // The composer's From: the portal (the default), the administrator ("me"), or the company.
+    private const SENDER_COMPANY = 'company';
+
     /**
      * Table column key => SQL columns. Unknown keys fall back to newest first.
      *
@@ -217,6 +220,7 @@ final class PortalEmailMessages
                 $footerFormat,
                 PortalEmail::category($request->input('category')),
                 trim((string) $request->input('subject', '')),
+                $request->input('sender') === self::SENDER_COMPANY,
             )],
         ];
     }
@@ -570,13 +574,18 @@ final class PortalEmailMessages
     /**
      * "Send as me": the sender's own name on the portal's address, and replies to their own mailbox.
      * A developer acting in Developer mode goes out as "A developer" with no reply address, so the
-     * mail never names who stood behind it. Off, both are null and the mail is the portal's.
+     * mail never names who stood behind it. As the company it goes out as IKAIKA BIM, with no reply
+     * address; otherwise both are null and the mail is the portal's.
      *
      * @return array{0: ?string, 1: ?string}
      */
     private function sender(Employee $actor, Request $request): array
     {
-        if (! $request->boolean('asSender')) {
+        // As the company: its own name on the portal's address, with no one person to reply to.
+        if ($request->input('sender') === self::SENDER_COMPANY) {
+            return [PortalEmailMarkup::COMPANY_SENDER, null];
+        }
+        if (! $request->boolean('asSender') && $request->input('sender') !== 'me') {
             return [null, null];
         }
 

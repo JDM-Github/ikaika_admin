@@ -46,8 +46,13 @@ block in Send Email -> Footers.
   icon + info@ikaikabim.com; on the right, behind a pale divider, the pin icon and the office address on
   four lines (a link to the map); under another rule the confidentiality notice.
 - **Bottom bar**: a 14px navy bar with the light diagonal accent near the right corner (picture).
-- **Phones** (`max-width:620px`, where the client honours it): the stripes drop, the brand shrinks, the
-  footer stacks (address under the brand, its divider on top), the margins narrow.
+- **Narrow screens** (`max-width:760px`, where the client honours it; also the composer's preview frame):
+  the stripes drop, the brand shrinks, the footer stacks (address under the brand, its divider on top),
+  the margins narrow. A formatted email carries the same rules, so its footer never scrolls sideways.
+- **From: IKAIKA BIM** (the company writing as itself): the letterhead drops the IKAIKA PORTAL line, and the
+  composer swaps the Company footer for the **IKAIKA BIM footer** (the same design without IKAIKA PORTAL
+  and "Automated communication"; `database/seeders/email/ikaika-bim-footer.html`, migration
+  `2026_10_13_150000_seed_ikaika_bim_footer`, `separate.sql`).
 
 Mail clients drop SVG and skewed or gradient CSS, so the stripes, the bottom accent and the three icons
 are **pictures** drawn from the mockup's CSS at 2x: sources in `database/seeders/email/design/`, hosted in
@@ -71,9 +76,13 @@ IKAIKA Portal sign-in code`) and, in a letter, as a coloured pill above the titl
 | **Request** | teal | request filed / decided notifications |
 | **Project** | purple | project notifications |
 | **Event** | green | new-event notifications; Send Email's Event |
+| **Reminder** | sky blue | Send Email's Reminder |
 | **Notice** | brand blue | mail test, Missing Reports reminder; Send Email's Notice and the three drafts |
 | **Complaint** | red | Send Email's Complaint |
 | Other | -- | Send Email's Other: no pill, no prefix |
+
+Send Email offers every one of them (2026-10-13): Notice, Event, Reminder, Request, Project, Security,
+Warning, Complaint, Other (`PortalEmail::CATEGORIES`, portal `EmailCategory`).
 
 **Blocks.** Two lines of markup become blocks of their own in any markup body (letters and Formatted):
 
@@ -115,6 +124,11 @@ the admin can change everything. All three open as the same letter as the system
 design, category Notice, the **Company footer** (by name, `SendEmailConstant.companyFooterName`), a
 greeting by first name, the link as a `::button`, a password in a `::code` box, and no sign-off. The
 composer's preview shows the category pill and the subject as the title.
+
+**Letter Formats** (the composer's ready-made letters, `EmailLettersConstant.letters`, 20 of them, at
+least one per category) read the same way since 2026-10-13: "Hi team," or "Hi [Name],", a short lead,
+the details in a `> ` panel, bullets where they help, and no memo header or sign-off. Each [part in
+brackets] must be filled before the send goes.
 
 | Draft | Opened from | Greets | Code (portal) |
 | --- | --- | --- | --- |
@@ -314,7 +328,7 @@ changed, project rejected, recycle bin restore, "email sent".
 | When | An admin presses **Send Email** on the Email page |
 | To | Members, departments, roles, everyone, or typed addresses; Cc and Bcc |
 | Design | The admin picks: Formatted, Formatted + **Letter design** switch, or HTML; any saved footer or none; images and attachments |
-| Sender | IKAIKA Portal, or "{admin} via IKAIKA Portal" with Reply-To the admin |
+| Sender | **Portal** (IKAIKA Portal), **IKAIKA BIM** (the company; no Reply-To; its own letterhead and footer), or **Me** ("{admin} via IKAIKA Portal" with Reply-To the admin; offered only with a valid address). Request field `sender: company`, or `asSender` for Me |
 | Sent | Through the mail queue: the Send button answers at once and the row reads **Sending**. Each member gets their own copy (a `DeliverPortalEmail` job), Cc/Bcc share one more, and typed addresses go as one email. Each copy counts itself onto the row as it lands; the row settles on Sent, Partially sent or Failed once every recipient is counted. The composer's toast says "Email queued for N recipients"; All Emails re-reads itself every 10 s while a row it shows is Sending. If the queue cannot take the send at all, the row is marked Failed and the button shows the error |
 | Kept | Every send is stored and listed in All Emails |
 | Code | `PortalEmailMessages::deliver / deliverCopy / settleCopy`, `App\Jobs\DeliverPortalEmail` (server); `SendEmailScreenController`, `AllEmailsScreenController` (portal) |

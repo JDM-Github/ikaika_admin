@@ -36,7 +36,7 @@ final class PortalEmail
      *
      * @var list<string>
      */
-    public const CATEGORIES = ['notice', 'event', 'complaint', 'other'];
+    public const CATEGORIES = ['notice', 'event', 'reminder', 'request', 'project', 'security', 'warning', 'complaint', 'other'];
 
     public const CORE_RESOURCE = 'administration.email';
 

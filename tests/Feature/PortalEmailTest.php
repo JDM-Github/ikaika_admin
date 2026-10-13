@@ -650,6 +650,44 @@ class PortalEmailTest extends TestCase
         $this->assertSame($letter, PortalEmailMarkup::document($html, "Regards,\n**MIS**", PortalEmailMarkup::FORMAT_HTML));
     }
 
+    // From: IKAIKA BIM sends as the company, with no one to reply to, under its own letterhead; every category the composer offers is taken.
+    public function test_an_email_goes_out_as_the_company_in_any_offered_category(): void
+    {
+        Mail::fake();
+        $headers = $this->authHeaders();
+        $member = $this->administrator();
+
+        foreach (['reminder', 'request', 'project', 'security', 'warning'] as $category) {
+            $sent = $this->postJson(self::BASE.'/administration/emails', [
+                'category' => $category,
+                'subject' => 'Company '.$category,
+                'body' => 'From the company.',
+                'format' => 'letter',
+                'audience' => 'members',
+                'memberIds' => [(int) $member->getKey()],
+                'sender' => 'company',
+            ], $headers)->assertCreated()->assertJsonPath('data.category', $category);
+
+            $row = EmailMessage::query()->findOrFail($sent->json('data.id'));
+            $this->assertSame('IKAIKA BIM', $row->from_name);
+            $this->assertNull($row->reply_to);
+        }
+
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->subjectLine === 'Company reminder'
+            && $mail->fromName === 'IKAIKA BIM'
+            && $mail->replyToAddress === null
+            && $mail->envelope()->subject === '[Reminder] Company reminder'
+            && ! str_contains($mail->render(), 'IKAIKA PORTAL'));
+
+        // The preview draws the same letterhead when told the email is the company's.
+        $html = $this->postJson(self::BASE.'/administration/emails/preview', ['body' => 'Hi', 'format' => 'letter', 'sender' => 'company'], $headers)
+            ->assertOk()->json('data.html');
+        $this->assertStringNotContainsString('IKAIKA PORTAL', (string) $html);
+        $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'gossip', 'subject' => 'x', 'body' => 'x', 'audience' => 'everyone',
+        ], $headers)->assertStatus(422);
+    }
+
     public function test_a_letter_is_previewed_sent_and_saved_as_a_letter(): void
     {
         Mail::fake();

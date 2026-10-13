@@ -84,6 +84,33 @@ class PortalEmailBuiltInsTest extends TestCase
         $this->assertStringNotContainsString('<svg', $footer);
     }
 
+    // The company's own footer: the same design without the portal's lines, added once, the same from SQL.
+    public function test_the_ikaika_bim_footer_is_added_once_and_the_same_from_sql(): void
+    {
+        $bim = require database_path('migrations/2026_10_13_150000_seed_ikaika_bim_footer.php');
+        $body = $bim::body();
+        $this->assertStringContainsString('>IKAIKA BIM</div>', $body);
+        $this->assertStringNotContainsString('IKAIKA PORTAL', $body);
+        $this->assertStringNotContainsString('Automated communication', $body);
+
+        $portal = DB::connection('portal');
+        $stored = fn () => $portal->table('email_blocks')->where('kind', 'footer')->where('name', $bim::NAME)->get(['body', 'format']);
+        $portal->table('email_blocks')->where('kind', 'footer')->where('name', $bim::NAME)->delete();
+
+        $bim->up();
+        $bim->up();
+        $this->assertCount(1, $stored());
+        $this->assertSame($body, rtrim(str_replace("\r\n", "\n", (string) $stored()[0]->body)));
+        $this->assertSame('html', $stored()[0]->format);
+
+        $portal->table('email_blocks')->where('kind', 'footer')->where('name', $bim::NAME)->delete();
+        $sql = str_replace("\r\n", "\n", (string) file_get_contents(base_path('sql/portal/separate.sql')));
+        $this->assertSame(1, preg_match('/-- The IKAIKA BIM footer.*?\n\n/s', $sql, $section));
+        $portal->unprepared($section[0]);
+        $this->assertCount(1, $stored());
+        $this->assertSame($body, rtrim(str_replace("\r\n", "\n", (string) $stored()[0]->body)));
+    }
+
     // A footer still the previous built-in becomes the new design; one someone rewrote is left alone.
     public function test_the_redesign_migration_replaces_only_an_unedited_footer(): void
     {

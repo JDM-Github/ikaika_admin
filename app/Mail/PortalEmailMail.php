@@ -68,6 +68,7 @@ class PortalEmailMail extends Mailable
             $this->footerFormat,
             $this->category,
             $this->subjectLine,
+            $this->fromName === PortalEmailMarkup::COMPANY_SENDER,
         ));
     }
 

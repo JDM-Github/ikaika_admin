@@ -174,6 +174,7 @@ final class PortalEmailPresenter
                 self::format($row->footer_format),
                 trim((string) $row->category),
                 trim((string) $row->subject),
+                $row->from_name === PortalEmailMarkup::COMPANY_SENDER,
             ),
             'failures' => self::failures($row->failures),
         ];

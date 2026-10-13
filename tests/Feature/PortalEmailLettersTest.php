@@ -98,8 +98,20 @@ class PortalEmailLettersTest extends TestCase
         $this->assertStringContainsString('padding:24px 36px 2px;', $html);
         $this->assertStringContainsString('margin:12px 0">', $html);
         // A phone drops the stripes and stacks the footer.
-        $this->assertStringContainsString('@media only screen and (max-width:620px)', $html);
+        $this->assertStringContainsString('@media only screen and (max-width:760px)', $html);
         $this->assertStringContainsString('.pl-accent{display:none !important;}', $html);
+    }
+
+    // The company writes as itself: no IKAIKA PORTAL under its name; the portal's letters keep it.
+    public function test_a_letter_from_the_company_drops_the_portal_line(): void
+    {
+        $company = PortalEmailMarkup::document('Hi.', null, PortalEmailMarkup::FORMAT_LETTER, PortalEmailMarkup::FORMAT_MARKUP, 'notice', 'T', true);
+        $portal = PortalEmailMarkup::document('Hi.', null, PortalEmailMarkup::FORMAT_LETTER, PortalEmailMarkup::FORMAT_MARKUP, 'notice', 'T');
+
+        $this->assertStringContainsString('>IKAIKA BIM</div>', $company);
+        $this->assertStringNotContainsString('IKAIKA PORTAL', $company);
+        $this->assertStringContainsString('>IKAIKA PORTAL</div>', $portal);
+        $this->assertSame('[Reminder] Due Friday', PortalEmailMarkup::subject('reminder', 'Due Friday'));
     }
 
     public function test_people_text_set_in_a_letter_stays_text(): void

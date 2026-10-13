@@ -48,6 +48,11 @@ final class PortalEmailMarkup
 
     public const CATEGORY_PROJECT = 'project';
 
+    public const CATEGORY_REMINDER = 'reminder';
+
+    // Sent as the company itself, not the portal: its letterhead drops IKAIKA PORTAL.
+    public const COMPANY_SENDER = 'IKAIKA BIM';
+
     // Where a whole document wants the footer; kept, unseen, when there is none, so the HTML stays a design.
     public const FOOTER_SLOT = '<!-- portal:footer -->';
 
@@ -66,7 +71,7 @@ final class PortalEmailMarkup
     private const LETTER_BOTTOM_ACCENT = 'https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865830/email-design/letter-bottom-accent.png';
 
     // A phone stacks the letter and drops the stripes; clients without media queries keep the desktop layout.
-    private const LETTER_STYLE = '<style>@media only screen and (max-width:620px){'
+    private const LETTER_STYLE = '<style>@media only screen and (max-width:760px){'
         .'.pl-pad{padding-left:20px !important;padding-right:20px !important;}'
         .'.pl-accent{display:none !important;}'
         .'.pl-brand{font-size:21px !important;line-height:24px !important;}'
@@ -122,6 +127,7 @@ final class PortalEmailMarkup
     private const CATEGORIES = [
         self::CATEGORY_NOTICE => ['Notice', '#1f4e8c', '#e8eef7'],
         self::CATEGORY_EVENT => ['Event', '#1e7b3c', '#e7f6ec'],
+        self::CATEGORY_REMINDER => ['Reminder', '#0369a1', '#e0f2fe'],
         'complaint' => ['Complaint', '#b42318', '#fdecec'],
         self::CATEGORY_SECURITY => ['Security', '#4338ca', '#eef0fe'],
         self::CATEGORY_WARNING => ['Warning', '#b45309', '#fff4e5'],
@@ -189,7 +195,8 @@ final class PortalEmailMarkup
 
     /**
      * The whole email body: the message, then the footer under a rule when one was chosen. A letter
-     * also carries its category and title (the subject) above the message.
+     * also carries its category and title (the subject) above the message, and one sent as the
+     * company has a letterhead of its own.
      */
     public static function document(
         string $body,
@@ -198,6 +205,7 @@ final class PortalEmailMarkup
         string $footerFormat = self::FORMAT_MARKUP,
         ?string $category = null,
         ?string $title = null,
+        bool $company = false,
     ): string {
         $footerHtml = $footer === null || trim($footer) === ''
             ? ''
@@ -205,7 +213,7 @@ final class PortalEmailMarkup
                 .'<div style="color:'.self::MUTED_COLOR.';font-size:13px">'.self::fragment($footer, $footerFormat).'</div>';
 
         if ($bodyFormat === self::FORMAT_LETTER) {
-            $body = self::letter(self::header($category, $title).self::html($body));
+            $body = self::letter(self::header($category, $title).self::html($body), $company);
             $bodyFormat = self::FORMAT_HTML;
         }
 
@@ -224,7 +232,8 @@ final class PortalEmailMarkup
                 : substr($body, 0, $close).$footerHtml.substr($body, $close);
         }
 
-        return self::FONT_HEAD
+        // The phone rules too, so the Company footer stacks under a formatted message as under a letter.
+        return self::FONT_HEAD.self::LETTER_STYLE
             .'<div style="font-family:'.self::FONT_STACK.';font-size:'.self::TEXT_SIZE.';line-height:1.55;color:'.self::TEXT_COLOR.'">'
             .self::fragment($body, $bodyFormat)
             .$footerHtml
@@ -242,7 +251,7 @@ final class PortalEmailMarkup
      * message, the footer, and a navy bar with its accent at the foot. Tables and inline styles, as mail
      * clients need; laid out line by line, since a writer who takes the HTML changes the design here.
      */
-    public static function letter(string $content): string
+    public static function letter(string $content, bool $company = false): string
     {
         $font = 'font-family:'.self::FONT_STACK;
         $navy = self::BRAND_COLOR;
@@ -280,7 +289,8 @@ final class PortalEmailMarkup
             '                      <td valign="middle" width="1" height="58" style="width:1px;height:58px;background-color:#45719f;font-size:0;line-height:0;">&nbsp;</td>',
             '                      <td valign="middle" style="padding:0 0 0 18px;'.$font.';">',
             '                        <div class="pl-brand" style="font-size:27px;line-height:30px;font-weight:700;letter-spacing:0.7px;color:'.$navy.';white-space:nowrap;">IKAIKA BIM</div>',
-            '                        <div class="pl-product" style="margin-top:7px;font-size:12px;line-height:14px;font-weight:700;letter-spacing:3.2px;color:#658bbd;white-space:nowrap;">IKAIKA PORTAL</div>',
+            // The company writes as itself; only the portal's own letters name the portal.
+            $company ? '' : '                        <div class="pl-product" style="margin-top:7px;font-size:12px;line-height:14px;font-weight:700;letter-spacing:3.2px;color:#658bbd;white-space:nowrap;">IKAIKA PORTAL</div>',
             '                      </td>',
             '                    </tr>',
             '                  </table>',
