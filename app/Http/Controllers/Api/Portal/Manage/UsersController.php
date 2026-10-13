@@ -68,6 +68,21 @@ class UsersController extends Controller
         return response()->json($this->users->updateInformation($this->actor($request), $id, $request));
     }
 
+    public function idCard(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->users->idCard($this->actor($request), $id, $request));
+    }
+
+    public function storeDocument(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->users->uploadDocument($this->actor($request), $id, $request), 201);
+    }
+
+    public function destroyDocument(Request $request, int $id, int $documentId): JsonResponse
+    {
+        return response()->json($this->users->removeDocument($this->actor($request), $id, $documentId, $request));
+    }
+
     public function updateProfile(Request $request, int $id): JsonResponse
     {
         $actor = $request->attributes->get('portalEmployee');

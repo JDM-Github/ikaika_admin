@@ -275,11 +275,14 @@ final class PortalActivityCopy
             : self::YOU.' assigned the bug report '.$title.' to '.$assigneeName;
     }
 
-    public static function editedTransaction(string $before, string $after): string
+    // An amount changed reads from what it was to what it is (2026-10-13).
+    public static function editedTransaction(string $before, string $after, ?string $wasAmount = null, ?string $amount = null): string
     {
-        return $before === $after
+        $edited = $before === $after
             ? self::YOU.' edited the transaction '.$after
             : self::YOU.' edited the transaction '.$before.', now '.$after;
+
+        return $wasAmount === null || $amount === null ? $edited : $edited.', from '.$wasAmount.' to '.$amount;
     }
 
     public static function addedTransaction(string $kind, string $name, string $amount, ?string $envelopeName): string

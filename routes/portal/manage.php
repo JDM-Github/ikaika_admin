@@ -133,6 +133,17 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:manage.users.information.edit', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/information', [UsersController::class, 'updateInformation'])
         ->whereNumber('id');
+    // An ID card prints private details, so it is made for the people whose information someone sees (2026-10-14).
+    Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
+        ->get('manage/users/{id}/id-card', [UsersController::class, 'idCard'])
+        ->whereNumber('id');
+    // Their documents follow the same power: a file into one of their slots, or one taken off (2026-10-13).
+    Route::middleware(['portal.rule:manage.users.information.edit', 'throttle:portal-manage-users-write'])->group(function (): void {
+        Route::post('manage/users/{id}/documents', [UsersController::class, 'storeDocument'])
+            ->whereNumber('id');
+        Route::delete('manage/users/{id}/documents/{documentId}', [UsersController::class, 'destroyDocument'])
+            ->whereNumber(['id', 'documentId']);
+    });
     // Activate and deactivate: an account Active or Inactive, which sign-in follows (2026-10-12).
     Route::middleware(['portal.rule:manage.users.status', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/status', [UsersController::class, 'updateStatus'])

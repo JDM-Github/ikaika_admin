@@ -9,6 +9,10 @@ namespace App\Support\Portal;
  * the length their ID carries, a SWIFT code as banks write one, a blood type from the list. Mashed
  * keys are refused too (2026-10-12): a letter three times running in a name, a number of one digit.
  * New Employee Data only ever receives plain text an HR reviewer can trust.
+ *
+ * An address comes in parts since 2026-10-13 (user): its street, and -- outside the Philippines, where
+ * nothing is picked from a list -- its province, city and barangay as typed. A start date is today or
+ * later, within a year.
  */
 final class PortalRegistrationInput
 {
@@ -55,13 +59,31 @@ final class PortalRegistrationInput
         'bankName' => [self::TEXT, 'bank name'],
         'bankAccountNumber' => [self::NUMBER, 'account number', 6, 20],
         'bankSwiftCode' => [self::SWIFT, 'SWIFT code'],
+        'addressCountry' => [self::TEXT, 'country'],
+        'addressProvince' => [self::TEXT, 'province'],
+        'addressCity' => [self::TEXT, 'city'],
+        'addressBarangay' => [self::TEXT, 'barangay'],
+        'addressStreet' => [self::TEXT, 'house number and street'],
+        'emergencyContactCountry' => [self::TEXT, 'contact country'],
+        'emergencyContactProvince' => [self::TEXT, 'contact province'],
+        'emergencyContactCity' => [self::TEXT, 'contact city'],
+        'emergencyContactBarangay' => [self::TEXT, 'contact barangay'],
+        'emergencyContactStreet' => [self::TEXT, 'contact house number and street'],
     ];
 
     /** The letters a full name must carry at least. */
     private const MIN_LETTERS = ['firstName' => 2, 'lastName' => 2, 'emergencyContactPersonName' => 2];
 
     /** The characters an address or a bank name must run to at least. */
-    private const MIN_TEXT = ['address' => 10, 'emergencyContactAddress' => 10, 'bankName' => 2];
+    private const MIN_TEXT = [
+        'address' => 10, 'emergencyContactAddress' => 10, 'bankName' => 2,
+        'addressStreet' => 3, 'emergencyContactStreet' => 3,
+        'addressProvince' => 2, 'addressCity' => 2, 'addressBarangay' => 2, 'addressCountry' => 2,
+        'emergencyContactProvince' => 2, 'emergencyContactCity' => 2, 'emergencyContactBarangay' => 2, 'emergencyContactCountry' => 2,
+    ];
+
+    /** The whole lines an address is written as, which run to a full address with a space in them. */
+    private const ADDRESS_LINES = ['address', 'emergencyContactAddress'];
 
     private const ADULT_YEARS = 18;
 
@@ -151,7 +173,7 @@ final class PortalRegistrationInput
             abort(422, ucfirst($label).' has the same letter four times in a row. Check it.');
         }
         $shortest = self::MIN_TEXT[$field] ?? 1;
-        $isAddress = $field !== 'bankName';
+        $isAddress = in_array($field, self::ADDRESS_LINES, true);
         if (mb_strlen($value) < $shortest || ($isAddress && ! str_contains($value, ' '))) {
             abort(422, $isAddress
                 ? 'Write the full '.$label.', at least '.$shortest.' characters.'
@@ -255,8 +277,10 @@ final class PortalRegistrationInput
                 abort(422, 'Check your date of birth.');
             }
         }
-        if ($field === 'startDate'
-            && ($value < $today->copy()->subYear()->toDateString() || $value > $today->copy()->addYear()->toDateString())) {
+        if ($field === 'startDate' && $value < $today->toDateString()) {
+            abort(422, 'Your start date cannot be in the past.');
+        }
+        if ($field === 'startDate' && $value > $today->copy()->addYear()->toDateString()) {
             abort(422, 'Your start date must be within a year of today.');
         }
 

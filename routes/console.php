@@ -7,10 +7,11 @@ use App\Support\Portal\PortalBitbucketSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
 use App\Support\Portal\PortalEmailAttachments;
 use App\Support\Portal\PortalEmailMessages;
-use App\Support\Portal\PortalHomeLocations;
 use App\Support\Portal\PortalEmployeeDocuments;
+use App\Support\Portal\PortalHomeLocations;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
+use App\Support\Portal\PortalPlaces;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Mail;
@@ -182,6 +183,14 @@ Artisan::command('portal:copy-registration-documents', function (PortalEmployeeD
 
     return $outcome['failed'] > 0 ? 1 : 0;
 })->purpose('Copy the registration files of promoted employees to Cloudinary as their documents');
+
+// The registration form's address lists (2026-10-13): loaded by their migration, and again from a newer copy.
+Artisan::command('portal:import-places', function (PortalPlaces $places): int {
+    $loaded = $places->import();
+    $this->info($loaded['psgc_provinces'].' provinces, '.$loaded['psgc_cities'].' cities and municipalities, '.$loaded['psgc_barangays'].' barangays.');
+
+    return 0;
+})->purpose('Load the Philippine provinces, cities and barangays from database/data/psgc');
 
 // Each attach clears what was abandoned too; this is for a scheduler, or after a quiet stretch.
 Artisan::command('portal:prune-email-attachments', function (PortalEmailAttachments $attachments): int {

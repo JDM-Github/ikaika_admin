@@ -19,6 +19,12 @@ final class PortalNotificationType
 
     public const REPORT_FILED_DAILY = 'reports.daily.filed';
 
+    // A report that waits for review on Manage / Requests' Daily Reports (2026-10-13).
+    public const REPORT_TO_REVIEW = 'reports.flagged.filed';
+
+    // A bug report came in, for whoever reads Bug Reports (2026-10-13). It names no sender.
+    public const BUG_REPORTED = 'bug-reports.filed';
+
     public const REQUEST_CANCELLED_LEAVE = 'requests.leave.cancelled';
 
     public const REQUEST_CANCELLED_OVERTIME = 'requests.overtime.cancelled';

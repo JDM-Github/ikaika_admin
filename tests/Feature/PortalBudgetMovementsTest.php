@@ -562,8 +562,8 @@ class PortalBudgetMovementsTest extends TestCase
             ->assertJsonPath('message', 'Choose an image or PDF receipt.');
     }
 
-    // The reported ask (2026-10-13): Edit changes a transaction's details and its receipt, never its money.
-    public function test_editing_a_transaction_changes_its_details_and_never_its_money(): void
+    // The reported ask (2026-10-13): Edit changes a transaction's details, receipt and amount, never where it went.
+    public function test_editing_a_transaction_changes_its_details_and_amount_never_where_it_went(): void
     {
         Http::preventStrayRequests();
         Http::fake([
@@ -583,11 +583,11 @@ class PortalBudgetMovementsTest extends TestCase
             ->assertCreated()
             ->json('data.receiptId');
 
-        // Money fields sent along are ignored: only the details move.
+        // Its type and envelope sent along are ignored; the amount moves the envelope by the difference.
         $this->patchJson(self::BASE.'budget-transactions/'.$row->id, [
             'name' => 'Taxi to Makati', 'occurredOn' => '2026-10-06', 'payorPayee' => 'Grab Car', 'notes' => '', 'receiptId' => $receiptId,
-            'amount' => 999, 'type' => 'Income', 'envelopeId' => 1,
-        ], $this->admin())->assertOk()->assertJsonPath('data.name', 'Taxi to Makati');
+            'amount' => 150, 'type' => 'Income', 'envelopeId' => 1,
+        ], $this->admin())->assertOk()->assertJsonPath('data.name', 'Taxi to Makati')->assertJsonPath('data.amount', 150);
 
         $edited = DB::connection('tracker')->table('transactions')->where('id', $row->id)->first();
         $this->assertSame('Taxi to Makati', $edited->transaction_name);
@@ -595,11 +595,11 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertSame('Grab Car', $edited->payor_payee);
         $this->assertNull($edited->description);
         $this->assertSame('Expense', $edited->type);
-        $this->assertEqualsWithDelta(120.00, (float) $edited->amount, 0.001);
-        $this->assertEqualsWithDelta($remaining, $this->envelopeRemaining($envelope), 0.001);
+        $this->assertEqualsWithDelta(150.00, (float) $edited->amount, 0.001);
+        $this->assertEqualsWithDelta($remaining - 30, $this->envelopeRemaining($envelope), 0.001);
         $receipts = DB::connection('tracker')->table('attachments')->where(['table_name' => 'transactions', 'record_id' => $row->id, 'field_name' => 'receipt']);
         $this->assertSame(['https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/transactions/taxi.jpg'], $receipts->pluck('file_url')->all());
-        $this->assertTrue($this->logged('manage.budget-transactions', 'edited the transaction Taxi, now Taxi to Makati'));
+        $this->assertTrue($this->logged('manage.budget-transactions', 'edited the transaction Taxi, now Taxi to Makati, from ₱120.00 to ₱150.00'));
 
         Cache::flush();
         $listed = collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->assertOk()->json('data'))->keyBy('id');
@@ -627,6 +627,51 @@ class PortalBudgetMovementsTest extends TestCase
         // A member holds no Edit transactions.
         $member = ['Authorization' => 'Bearer '.$this->loginToken($this->activeMember())];
         $this->patchJson(self::BASE.'budget-transactions/'.$row->id, ['name' => 'x', 'occurredOn' => '2026-10-06'], $member)->assertForbidden();
+    }
+
+    // The reported ask (2026-10-13): an amount edited past the envelope waits for confirmation, and a pending transfer follows it.
+    public function test_editing_an_amount_checks_the_envelope_and_moves_a_pending_transfer_with_it(): void
+    {
+        $nat = $this->account('Seeded Amount Payer', 'amount.payer@example.test', 0.00);
+        $ben = $this->account('Seeded Amount Owner', 'amount.owner@example.test', 1000.00);
+        $envelope = $this->envelope('Seeded Amount Envelope', 300.00, $ben);
+        $this->addTransaction(['type' => 'Expense', 'name' => 'Fuel', 'amount' => 200, 'envelopeId' => $envelope, 'accountId' => $nat])->assertCreated();
+        $row = $this->lastRowOf($nat);
+        // One sign-in for every edit, under the login limit.
+        $admin = $this->admin();
+        $edit = fn (array $fields) => $this->patchJson(self::BASE.'budget-transactions/'.$row->id, ['name' => 'Fuel', 'occurredOn' => '2026-10-06', ...$fields], $admin);
+
+        // A raise past the 100 left waits for confirmation, and nothing moves until then.
+        $edit(['amount' => 350])->assertStatus(422)->assertJsonPath('message', 'Seeded Amount Envelope has only ₱100.00 left. Confirm to go past it.');
+        $this->assertEqualsWithDelta(200.00, (float) DB::connection('tracker')->table('transactions')->where('id', $row->id)->value('amount'), 0.001);
+        $edit(['amount' => 0])->assertStatus(422)->assertJsonPath('message', 'The amount must be more than zero.');
+
+        $edit(['amount' => 350, 'allowOverspend' => true])->assertOk();
+        $this->assertEqualsWithDelta(-50.00, $this->envelopeRemaining($envelope), 0.001);
+        $this->assertSame('350.00', $this->transfersFrom($ben)->sole()->amount);
+
+        // Left out, the amount stays; a cut needs no confirmation.
+        $edit([])->assertOk()->assertJsonPath('data.amount', 350);
+        $edit(['amount' => 90])->assertOk();
+        $this->assertEqualsWithDelta(210.00, $this->envelopeRemaining($envelope), 0.001);
+        $this->assertSame('90.00', $this->transfersFrom($ben)->sole()->amount);
+
+        // Once the transfer is completed it has paid that amount, so the amount stays.
+        $pending = $this->transfersFrom($ben)->sole();
+        $this->postJson(self::BASE.'budget-accounts/transfers/'.$pending->id.'/complete', ['transferredOn' => '2026-10-08'], $admin)->assertOk();
+        $edit(['amount' => 95])->assertStatus(422)
+            ->assertJsonPath('message', 'The transfer this expense left between accounts is already completed, so its amount stays.');
+        $edit(['amount' => 90, 'name' => 'Fuel refill'])->assertOk();
+
+        // Income cut takes the difference back out of the envelope, so it is confirmed past what is left.
+        $this->addTransaction(['type' => 'Income', 'name' => 'Refund', 'amount' => 100, 'envelopeId' => $envelope, 'accountId' => $ben])->assertCreated();
+        $income = $this->lastRowOf($ben);
+        $this->patchJson(self::BASE.'budget-transactions/'.$income->id, ['name' => 'Refund', 'occurredOn' => '2026-10-06', 'amount' => 400], $admin)->assertOk();
+        $this->assertEqualsWithDelta(610.00, $this->envelopeRemaining($envelope), 0.001);
+        $this->addTransaction(['type' => 'Expense', 'name' => 'Tools', 'amount' => 600, 'envelopeId' => $envelope, 'accountId' => $ben])->assertCreated();
+        $this->patchJson(self::BASE.'budget-transactions/'.$income->id, ['name' => 'Refund', 'occurredOn' => '2026-10-06', 'amount' => 100], $admin)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Seeded Amount Envelope has only ₱10.00 left. Confirm to go past it.');
     }
 
     public function test_with_the_tracker_switched_off_nothing_moves(): void
