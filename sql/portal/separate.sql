@@ -1278,6 +1278,31 @@ INSERT INTO job_type_allowed_activities (job_type, department, activity_code_id_
     ('Management', 'General',     '2001,2003,9000,9001,9002'),
     ('Management', 'Admin',       '2001,2003,9000,9001,9002');
 
+-- Manage Scopes (2026-10-13): members assigned to a project's scopes, and the progress they report.
+-- Existing databases: create_portal_scope_assignees_and_progress.
+CREATE TABLE IF NOT EXISTS projects_scope_assignees (
+    project_id  INT         NOT NULL,
+    wbs_code    VARCHAR(32) NOT NULL,
+    employee_id INT         NOT NULL,
+    PRIMARY KEY (project_id, wbs_code, employee_id),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS projects_scope_progress (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    project_id     INT              NOT NULL,
+    wbs_code       VARCHAR(32)      NOT NULL,
+    employee_id    INT              NOT NULL,
+    user_report_id INT              NULL,
+    percent        TINYINT UNSIGNED NOT NULL,
+    created_at     TIMESTAMP        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX projects_scope_progress_latest (project_id, wbs_code, id),
+    INDEX projects_scope_progress_report (user_report_id),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Manage / Map's points: each person's address turned into coordinates once (portal:geocode-homes).
 -- Existing databases: create_portal_employee_home_locations.
 CREATE TABLE IF NOT EXISTS employee_home_locations (

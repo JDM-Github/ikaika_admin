@@ -161,6 +161,7 @@ final class PortalProjectEditor
         private readonly PortalProjectRepositories $repositories,
         private readonly PortalProjectActivities $activities,
         private readonly PortalScopeTree $scopeTree,
+        private readonly PortalScopeWork $scopeWork,
     ) {}
 
     /**
@@ -305,6 +306,9 @@ final class PortalProjectEditor
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
             $this->replaceClient($projectId, $fields['clientId']);
             $this->writeScopes($projectId, $scopeCodes);
+            if ($request->has('scopeAssignees')) {
+                $this->scopeWork->replaceAssignees($projectId, $request->input('scopeAssignees'), $scopeCodes, [...$fields['memberIds'], ...$fields['supportMemberIds']]);
+            }
             $this->activities->replace($projectId, $removedActivities);
             $this->repositories->replace($projectId, $fields['repositories']);
 
@@ -390,6 +394,8 @@ final class PortalProjectEditor
             }
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
+            // Someone off the project is off its scopes too.
+            $this->scopeWork->prune($projectId, $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->pluck('wbs_code')->all(), $this->peopleIds($projectId));
             $this->replaceClient($projectId, $fields['clientId']);
             $this->repositories->replace($projectId, $fields['repositories']);
 
@@ -468,6 +474,8 @@ final class PortalProjectEditor
             $this->connection()->table('projects')->where('id', $projectId)->update(['date_modified' => now()]);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $memberIds);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $supportMemberIds);
+            // Someone off the project is off its scopes too.
+            $this->scopeWork->prune($projectId, $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->pluck('wbs_code')->all(), $this->peopleIds($projectId));
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,
                 self::CORE_TARGET,
@@ -553,6 +561,13 @@ final class PortalProjectEditor
         $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request, $isResubmitted): void {
             $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->delete();
             $this->writeScopes($projectId, $scopeCodes);
+            // Assignees ride with the scopes; a scope taken off takes its assignees along.
+            $people = $this->peopleIds($projectId);
+            if ($request->has('scopeAssignees')) {
+                $this->scopeWork->replaceAssignees($projectId, $request->input('scopeAssignees'), $scopeCodes, $people);
+            } else {
+                $this->scopeWork->prune($projectId, $scopeCodes, $people);
+            }
             if ($isResubmitted) {
                 $this->connection()->table('projects')->where('id', $projectId)->update(self::PENDING_AGAIN);
                 $this->trail->record($projectId, PortalProjectTrail::RESUBMITTED, $actor, $request);
@@ -946,6 +961,19 @@ final class PortalProjectEditor
     /**
      * @param  list<string>  $codes
      */
+    /**
+     * The project's members and support members, the only people a scope may be assigned to.
+     *
+     * @return list<int>
+     */
+    private function peopleIds(int $projectId): array
+    {
+        return array_values(array_unique(array_map('intval', $this->connection()->table('employees_projects')
+            ->where('project_id', $projectId)
+            ->whereIn('role_on_project', [self::MEMBER_ROLE, self::SUPPORT_ROLE])
+            ->pluck('employee_id')->all())));
+    }
+
     private function writeScopes(int $projectId, array $codes): void
     {
         if ($codes === []) {
@@ -1023,6 +1051,9 @@ final class PortalProjectEditor
                 'links' => $links,
                 'repositories' => $this->repositories->forProject($projectId),
                 'scopeCodes' => $this->projects->scopeCodesForProject($projectId, $row->department ?? null),
+                // Who is assigned each scope (employee ids), and each scope's latest progress (percent).
+                'scopeAssignees' => (object) $this->scopeWork->assigneesFor($projectId),
+                'scopeProgress' => (object) ($this->scopeWork->latestProgress([$projectId])[$projectId] ?? []),
                 // What this project took out of its type's allowed activities.
                 'removedActivityCodes' => $this->activities->removedFor($projectId),
                 // The form locks every field but the people for whoever only View Projects reaches.

@@ -166,6 +166,9 @@ final class PortalViewProjects
         $work = (new PortalProjectWork)->byProject($rows, CarbonImmutable::today());
         $code = (new PortalProjectCodeActivity)->summariesByProject($projectIds);
         $repositoryLinks = (new PortalProjectRepositories)->linksByProject($projectIds);
+        $scopeWork = new PortalScopeWork;
+        $scopeProgress = $scopeWork->latestProgress($projectIds);
+        $scopeAssignees = $scopeWork->assigneeNames($projectIds);
         $topMembers = $this->topMembers($rows, $work, (new PortalProjectCodeActivity)->topByProject($projectIds));
 
         $projects = [];
@@ -205,6 +208,9 @@ final class PortalViewProjects
                 'topMember' => $topMembers[$id] ?? null,
                 // Commits from linked Bitbucket repositories (MIS); null when the project links none.
                 'codeActivity' => $code[$id] ?? null,
+                // Manage Scopes: each scope's latest progress (percent) and its assignees by name.
+                'scopeProgress' => (object) ($scopeProgress[$id] ?? []),
+                'scopeAssignees' => (object) ($scopeAssignees[$id] ?? []),
             ];
         }
 

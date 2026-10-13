@@ -72,6 +72,25 @@ final class PortalScopeTree
     }
 
     /**
+     * Every scope's name by its code, across departments.
+     *
+     * @return array<string, string>
+     */
+    public function names(): array
+    {
+        $names = [];
+        $walk = static function (array $nodes) use (&$walk, &$names): void {
+            foreach ($nodes as $node) {
+                $names[$node['code']] = $node['name'];
+                $walk($node['children']);
+            }
+        };
+        $walk($this->roots());
+
+        return $names;
+    }
+
+    /**
      * Every code in one department's tree, for checking what a project of that department may hold.
      *
      * @return list<string>

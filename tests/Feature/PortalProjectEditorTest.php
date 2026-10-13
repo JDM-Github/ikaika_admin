@@ -965,6 +965,40 @@ class PortalProjectEditorTest extends TestCase
         $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk()->assertJsonPath('data.scopeCodes', ['910', '910-01']);
     }
 
+    // The reported ask: a scope is assigned to the project's own people; the record shows who and how far.
+    public function test_scopes_are_assigned_to_the_projects_people_and_show_their_progress(): void
+    {
+        $portal = DB::connection('portal');
+        $id = $this->liveProjectId();
+        $admin = $this->employee('admin');
+        $token = $this->token($admin);
+        $member = $this->employee('user', 3);
+        $stranger = $this->employee('user', 4);
+        $portal->table('employees_projects')->where('project_id', $id)->delete();
+        $portal->table('employees_projects')->insert(['employee_id' => $member->getKey(), 'project_id' => $id, 'role_on_project' => 'member']);
+        $portal->table('projects')->where('id', $id)->update(['department' => 'Engineering']);
+        Cache::flush();
+        [$scope] = $this->scopeCodes();
+
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$scope], 'scopeAssignees' => [$scope => [$stranger->getKey()]]])
+            ->assertStatus(422)->assertJsonPath('message', 'Assign a scope only to the project\'s members and support members.');
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$scope], 'scopeAssignees' => [$scope => [$member->getKey()], '999' => [$member->getKey()]]])->assertOk();
+        $this->assertSame([$scope], $portal->table('projects_scope_assignees')->where('project_id', $id)->pluck('wbs_code')->all());
+
+        $portal->table('projects_scope_progress')->insert(['project_id' => $id, 'wbs_code' => $scope, 'employee_id' => $member->getKey(), 'percent' => 60]);
+        $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk()
+            ->assertJsonPath('data.scopeAssignees.'.$scope, [(string) $member->getKey()])
+            ->assertJsonPath('data.scopeProgress.'.$scope, 60);
+        Cache::flush();
+        $board = collect($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'))->firstWhere('id', (string) $id);
+        $this->assertSame(60, $board['scopeProgress'][$scope]);
+        $this->assertSame([trim($member->first_name.' '.$member->last_name)], $board['scopeAssignees'][$scope]);
+
+        // A scope taken off takes its assignees along.
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => []])->assertOk();
+        $this->assertSame(0, $portal->table('projects_scope_assignees')->where('project_id', $id)->count());
+    }
+
     public function test_writes_are_held_to_twenty_a_minute(): void
     {
         $this->withMiddleware(ThrottleRequests::class);

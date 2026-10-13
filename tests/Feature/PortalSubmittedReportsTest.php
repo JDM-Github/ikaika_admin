@@ -114,7 +114,7 @@ class PortalSubmittedReportsTest extends TestCase
 
         $first = $daily['entries'][0];
         $this->assertSame(
-            ['id', 'projectLabel', 'activityLabel', 'earnCodeLabel', 'hoursRendered', 'elementChange', 'projectId', 'projectDepartment'],
+            ['id', 'projectLabel', 'activityLabel', 'earnCodeLabel', 'hoursRendered', 'elementChange', 'projectId', 'projectDepartment', 'scopeProgress'],
             array_keys($first),
         );
         $this->assertNotSame('Unassigned', $first['projectLabel']);
@@ -552,6 +552,46 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertSame($projectLabel, $log->payload['entries'][0]['projectLabel']);
         $this->assertSame($activityLabel, $log->payload['entries'][0]['activityLabel']);
         $this->assertSame(5.5, $log->payload['entries'][0]['hoursRendered']);
+    }
+
+    // The reported ask: a member assigned to a scope reports its progress with the day; View Reports shows it.
+    public function test_an_assigned_member_reports_scope_progress_with_a_daily_report(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $today = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $portal = DB::connection('portal');
+        $portal->table('projects_wbs_scopes')->insertOrIgnore([['project_id' => $project->id, 'wbs_code' => '100'], ['project_id' => $project->id, 'wbs_code' => '200']]);
+        $portal->table('projects_scope_assignees')->insert(['project_id' => $project->id, 'wbs_code' => '100', 'employee_id' => $actor->getKey()]);
+        Cache::flush();
+
+        // The picker offers the member their own scopes on the project.
+        $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->assertOk()->json('data'))->firstWhere('id', (string) $project->id);
+        $this->assertSame([['code' => '100', 'percent' => null, 'label' => 'Project Initiation']], $picker['scopes']);
+
+        $entry = [
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name ?? null, $activity->id_no ?? null),
+            'hoursRendered' => 4,
+            'elementChange' => 0,
+        ];
+        $file = fn (array $progress) => $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [['reportDate' => $today, 'remarks' => 'Scope work', 'entries' => [$entry], 'scopeProgress' => $progress]],
+        ], $headers);
+
+        $file([['projectId' => $project->id, 'code' => '200', 'percent' => 10]])->assertStatus(422)
+            ->assertJsonPath('message', 'Report progress only on scopes you are assigned.');
+        $file([['projectId' => $project->id, 'code' => '100', 'percent' => 120]])->assertStatus(422);
+        $file([['projectId' => $project->id, 'code' => '100', 'percent' => 40]])->assertCreated()
+            ->assertJsonPath('data.0.entries.0.scopeProgress', [['code' => '100', 'label' => 'Project Initiation', 'percent' => 40]]);
+
+        $this->assertSame(40, (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('wbs_code', '100')->value('percent'));
+        Cache::flush();
+        $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
+        $this->assertSame(40, $picker['scopes'][0]['percent']);
     }
 
     public function test_a_daily_report_is_flagged_when_the_filer_has_an_active_warning(): void

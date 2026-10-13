@@ -62,6 +62,7 @@ final class PortalSubmittedReports
         private readonly PortalRecycleBin $recycleBin,
         private readonly PortalTimezone $timezone,
         private readonly PortalAudit $audit,
+        private readonly PortalScopeWork $scopeWork,
     ) {}
 
     /**
@@ -664,8 +665,17 @@ final class PortalSubmittedReports
         $earnCodeId = $this->regularEarnCodeId();
 
         $resolved = [];
+        $progress = [];
         foreach ($groups as $index => $group) {
             $resolved[$index] = $this->resolveNewEntries($group['entries'], $projects, $activities, $earnCodeId);
+            // Progress on assigned scopes rides with the day, on a project that day has hours on.
+            $progress[$index] = $this->scopeWork->validated($employeeId, $group['scopeProgress']);
+            $reported = array_map('intval', array_column($resolved[$index], 'projectId'));
+            foreach ($progress[$index] as $entry) {
+                if (! in_array($entry['project_id'], $reported, true)) {
+                    abort(422, 'Report scope progress on a project that day has hours on.');
+                }
+            }
         }
 
         // One check per filing, not per line: every group in this request is the same employee.
@@ -686,11 +696,13 @@ final class PortalSubmittedReports
             $isFlagged,
             $kind,
             $actor,
+            $progress,
         ): void {
             foreach ($groups as $index => $group) {
                 $lineIds = [];
+                $lineByProject = [];
                 foreach ($resolved[$index] as $entry) {
-                    $lineIds[] = $this->insertLine(
+                    $lineId = $this->insertLine(
                         $employeeId,
                         $group['date'],
                         $entry,
@@ -703,6 +715,13 @@ final class PortalSubmittedReports
                         $isFlagged,
                         self::NEW_FLAG_STATUS,
                     );
+                    $lineIds[] = $lineId;
+                    $lineByProject[(int) $entry['projectId']] ??= $lineId;
+                }
+
+                // Each progress keeps the day's first line on its project, so View Reports shows it with the day.
+                foreach ($progress[$index] as $entry) {
+                    $this->scopeWork->record($employeeId, $lineByProject[$entry['project_id']] ?? null, [$entry]);
                 }
 
                 // One report is one user_reports row per line; lineIds lets the sync address each.
@@ -988,6 +1007,9 @@ final class PortalSubmittedReports
         $projects = $this->projectLabels($ids, $projectRefs);
         $activities = $this->activityLabels($ids);
         $earnCodes = $this->earnCodeLabels($ids);
+        // Scope progress each line carried (Manage Scopes); names read only when there is any.
+        $progress = $this->scopeWork->forReports($ids);
+        $scopeNames = $progress === [] ? [] : (new PortalScopeTree)->names();
 
         $reference = PortalSubmittedReportPresenter::referenceCode($actor->id_no, $actor->getKey());
         $memberName = PortalSubmittedReportPresenter::memberName(
@@ -1022,15 +1044,21 @@ final class PortalSubmittedReports
                 $groups[$key]['reason'] = $reason;
             }
             $id = (int) $line->id;
-            $groups[$key]['entries'][] = PortalSubmittedReportPresenter::entry(
-                (string) $id,
-                $projects[$id] ?? [],
-                $activities[$id] ?? [],
-                $earnCodes[$id] ?? [],
-                $line->hours_rendered ?? 0,
-                $line->change_in_elements ?? 0,
-                $projectRefs[$id] ?? null,
-            );
+            $groups[$key]['entries'][] = [
+                ...PortalSubmittedReportPresenter::entry(
+                    (string) $id,
+                    $projects[$id] ?? [],
+                    $activities[$id] ?? [],
+                    $earnCodes[$id] ?? [],
+                    $line->hours_rendered ?? 0,
+                    $line->change_in_elements ?? 0,
+                    $projectRefs[$id] ?? null,
+                ),
+                'scopeProgress' => array_map(
+                    static fn (array $entry): array => ['code' => $entry['code'], 'label' => $scopeNames[$entry['code']] ?? $entry['code'], 'percent' => $entry['percent']],
+                    $progress[$id] ?? [],
+                ),
+            ];
         }
 
         $rows = [];
@@ -1587,6 +1615,7 @@ final class PortalSubmittedReports
                 'date' => $date,
                 'remarks' => $this->validatedRemarksValue($item['remarks'] ?? null),
                 'entries' => $this->validatedEntryList($item['entries'] ?? null),
+                'scopeProgress' => $item['scopeProgress'] ?? null,
             ];
         }
 
