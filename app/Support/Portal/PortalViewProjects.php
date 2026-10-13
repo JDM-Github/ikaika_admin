@@ -125,12 +125,15 @@ final class PortalViewProjects
 
     /**
      * One project's effective scope codes: the WBS codes saved from Manage Scopes, else the codes its
-     * pivots or reports name. The editor shows the same list the board does.
+     * pivots or reports name. The editor shows the same list the board does; only Engineering has any.
      *
      * @return list<string>
      */
-    public function scopeCodesForProject(int $projectId): array
+    public function scopeCodesForProject(int $projectId, mixed $department): array
     {
+        if (! PortalProjectWork::isEngineering($department)) {
+            return [];
+        }
         $summaries = $this->scopeSummariesByProject([$projectId]);
 
         return $summaries[$projectId]['scopeCodes'] ?? [];
@@ -155,7 +158,11 @@ final class PortalViewProjects
         $memberNames = $this->namesByProject($members);
         $memberPhotos = $this->photosByProject($members);
         $clientNames = $this->clientNamesByProject($projectIds);
-        $scopeSummaries = $this->scopeSummariesByProject($projectIds);
+        // Only Engineering has scopes; another department's report codes are activities, not scopes.
+        $scopeSummaries = $this->scopeSummariesByProject(array_map(
+            static fn (object $row): int => (int) $row->id,
+            array_values(array_filter($rows, static fn (object $row): bool => PortalProjectWork::isEngineering($row->department ?? null))),
+        ));
         $trails = $this->trailsByProject($projectIds);
         $trailPhotos = $this->actorPhotos($trails);
         $leadsByEmail = $this->leadsByEmail($rows);
@@ -163,7 +170,6 @@ final class PortalViewProjects
         $code = (new PortalProjectCodeActivity)->summariesByProject($projectIds);
         $repositoryLinks = (new PortalProjectRepositories)->linksByProject($projectIds);
         $topMembers = $this->topMembers($rows, $work, (new PortalProjectCodeActivity)->topByProject($projectIds));
-        $activityCodes = PortalActivityScopes::all();
 
         $projects = [];
         foreach ($rows as $row) {
@@ -202,7 +208,6 @@ final class PortalViewProjects
                 'topMember' => $topMembers[$id] ?? null,
                 // Commits from linked Bitbucket repositories (MIS); null when the project links none.
                 'codeActivity' => $code[$id] ?? null,
-                'scopeOptions' => PortalActivityScopes::forDepartment($activityCodes, $row->department ?? null),
             ];
         }
 

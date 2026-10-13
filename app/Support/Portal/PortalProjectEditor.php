@@ -842,7 +842,7 @@ final class PortalProjectEditor
     }
 
     /**
-     * WBS codes for an Engineering project; for any other, its department's and General's activity codes.
+     * WBS codes for an Engineering project; no other department has scopes yet, so it may hold none.
      *
      * @return list<string>
      */
@@ -860,10 +860,10 @@ final class PortalProjectEditor
                 $codes[] = $code;
             }
         }
-        $known = PortalProjectWork::isEngineering($department)
-            ? $this->knownScopeCodes()
-            : array_column(PortalActivityScopes::forDepartment(PortalActivityScopes::all(), $department), 'code');
-        if (array_diff($codes, $known) !== []) {
+        if ($codes !== [] && ! PortalProjectWork::isEngineering($department)) {
+            abort(422, 'Only Engineering projects have scopes.');
+        }
+        if ($codes !== [] && array_diff($codes, $this->knownScopeCodes()) !== []) {
             abort(422, 'Choose scopes from the list.');
         }
 
@@ -995,7 +995,7 @@ final class PortalProjectEditor
                 'levels' => $levels,
                 'links' => $links,
                 'repositories' => $this->repositories->forProject($projectId),
-                'scopeCodes' => $this->projects->scopeCodesForProject($projectId),
+                'scopeCodes' => $this->projects->scopeCodesForProject($projectId, $row->department ?? null),
                 // What this project took out of its type's allowed activities.
                 'removedActivityCodes' => $this->activities->removedFor($projectId),
                 // The form locks every field but the people for whoever only View Projects reaches.
