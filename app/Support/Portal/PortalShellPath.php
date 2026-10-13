@@ -27,6 +27,8 @@ final class PortalShellPath
 
     public const LATE_REPORT = '/reports/late-report';
 
+    public const BUG_REPORTS = '/bug-reports';
+
     /**
      * Where an email's inbox notice may open: pages every member can reach, so a notice never links
      * a recipient to a screen they are not allowed to see.

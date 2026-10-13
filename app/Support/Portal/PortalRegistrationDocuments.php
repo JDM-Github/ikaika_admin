@@ -27,6 +27,8 @@ final class PortalRegistrationDocuments
      */
     private const KINDS = [
         'photo' => ['label' => 'The profile photo', 'extensions' => ['jpg', 'jpeg', 'png'], 'multiple' => false],
+        // A picture of their signature (2026-10-14, user), kept with the photo as a picture only.
+        'signature' => ['label' => 'The signature', 'extensions' => ['jpg', 'jpeg', 'png'], 'multiple' => false],
         'tin' => ['label' => 'The TIN ID', 'extensions' => ['pdf', 'jpg', 'jpeg', 'png'], 'multiple' => false],
         'sss' => ['label' => 'The SSS ID', 'extensions' => ['pdf', 'jpg', 'jpeg', 'png'], 'multiple' => false],
         'philhealth' => ['label' => 'The PhilHealth ID', 'extensions' => ['pdf', 'jpg', 'jpeg', 'png'], 'multiple' => false],
@@ -37,7 +39,7 @@ final class PortalRegistrationDocuments
     ];
 
     /** The kinds a submit must have at least one of. */
-    public const REQUIRED = ['photo', 'tin', 'sss', 'philhealth', 'hdmf', 'bank'];
+    public const REQUIRED = ['photo', 'signature', 'tin', 'sss', 'philhealth', 'hdmf', 'bank'];
 
     /**
      * Stages one document on the registration. A single-file kind replaces what was there; the bank

@@ -748,6 +748,12 @@ class PortalModule implements ProductModule
                                 'label' => 'Mark all read',
                                 'auth' => true,
                             ],
+                            [
+                                'method' => 'DELETE',
+                                'path' => 'user/notifications/{id}',
+                                'label' => 'Delete',
+                                'auth' => true,
+                            ],
                         ],
                     ],
                 ],

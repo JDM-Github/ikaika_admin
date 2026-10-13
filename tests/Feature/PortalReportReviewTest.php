@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Portal\PortalNotificationType;
 use App\Support\Portal\PortalProjectApproval;
 use App\Support\Portal\PortalReportReview;
 use App\Support\Portal\PortalRole;
@@ -52,6 +54,17 @@ class PortalReportReviewTest extends TestCase
         $this->assertSame(0, $this->flagOf($analyst, $analystDay)[0]);
         $this->assertSame(PortalReportReview::PENDING, $this->reviewStatusOf($engineer, $engineerDay.'-daily'));
         $this->assertSame(PortalReportReview::APPROVED, $this->reviewStatusOf($analyst, $analystDay.'-daily'));
+
+        // The reported ask (2026-10-13): the one that waits rings its reviewers' bell, naming its row on Daily Reports.
+        $notices = PortalNotification::query()->where('type', PortalNotificationType::REPORT_TO_REVIEW)->get();
+        $waiting = (string) $this->lines($engineer, $engineerDay)->min('user_reports.id');
+        $approved = (string) $this->lines($analyst, $analystDay)->min('user_reports.id');
+        $rang = $notices->filter(fn (PortalNotification $notice): bool => ($notice->payload['recordId'] ?? null) === $waiting);
+        $this->assertNotEmpty($rang, 'No reviewer was told about the waiting report.');
+        $this->assertSame('/manage/manage-requests', $rang->first()->link_path);
+        $this->assertSame('Daily report to review', $rang->first()->title);
+        $this->assertFalse($rang->contains(fn (PortalNotification $notice): bool => (int) $notice->employee_id === (int) $engineer->getKey()));
+        $this->assertFalse($notices->contains(fn (PortalNotification $notice): bool => ($notice->payload['recordId'] ?? null) === $approved));
     }
 
     // The reported ask (2026-10-13): Steven heads Engineering, so his own daily report is approved when filed.

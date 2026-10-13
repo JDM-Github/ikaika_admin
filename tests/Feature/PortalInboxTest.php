@@ -221,6 +221,32 @@ class PortalInboxTest extends TestCase
         $this->assertSame(0, $unread);
     }
 
+    // The reported ask (2026-10-13): a member deletes a notice of their own, and never another member's.
+    public function test_a_member_deletes_their_own_notice_and_cannot_delete_another_members(): void
+    {
+        $actor = $this->activeMember();
+        $other = $this->otherActiveMember($actor);
+        $token = $this->loginToken($actor);
+        $audit = app(PortalAudit::class);
+        $ownId = $audit->notify((int) $actor->getKey(), 'system', 'Welcome', 'Your portal account is ready.');
+        $otherId = $audit->notify((int) $other->getKey(), 'system', 'Welcome', 'Your portal account is ready.');
+        $this->withToken($token)->getJson('/api/development/portal/user/notifications/unread')->assertOk();
+
+        $this->withToken($token)
+            ->deleteJson('/api/development/portal/user/notifications/'.$ownId)
+            ->assertOk()
+            ->assertJsonPath('deleted', true);
+        $this->assertNull(PortalNotification::query()->find($ownId));
+        // The cached unread list forgets it at once.
+        $unread = $this->withToken($token)->getJson('/api/development/portal/user/notifications/unread')->json('data');
+        $this->assertNotContains((string) $ownId, collect($unread)->pluck('id')->all());
+
+        $this->withToken($token)->deleteJson('/api/development/portal/user/notifications/'.$ownId)->assertNotFound();
+        $this->withToken($token)->deleteJson('/api/development/portal/user/notifications/'.$otherId)->assertNotFound();
+        $this->assertNotNull(PortalNotification::query()->find($otherId));
+        $this->withoutToken()->deleteJson('/api/development/portal/user/notifications/'.$otherId)->assertUnauthorized();
+    }
+
     private function activeMember(): Employee
     {
         $employee = Employee::query()

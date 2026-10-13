@@ -18,5 +18,7 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::patch('user/notifications/{id}/read', [NotificationsController::class, 'markRead'])
             ->whereNumber('id');
         Route::post('user/notifications/read-all', [NotificationsController::class, 'markAllRead']);
+        Route::delete('user/notifications/{id}', [NotificationsController::class, 'destroy'])
+            ->whereNumber('id');
     });
 });

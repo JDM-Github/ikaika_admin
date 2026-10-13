@@ -73,7 +73,29 @@ final class PortalRegistrations
         'bankName' => 'max:150',
         'bankAccountNumber' => 'max:100',
         'bankSwiftCode' => 'max:50',
+        // An address in parts (2026-10-13, user); the whole line above is composed from them.
+        'addressCountry' => 'max:60',
+        'addressProvince' => 'max:120',
+        'addressProvinceCode' => 'max:9',
+        'addressCity' => 'max:120',
+        'addressCityCode' => 'max:9',
+        'addressBarangay' => 'max:120',
+        'addressBarangayCode' => 'max:9',
+        'addressStreet' => 'max:200',
+        'emergencyContactCountry' => 'max:60',
+        'emergencyContactProvince' => 'max:120',
+        'emergencyContactProvinceCode' => 'max:9',
+        'emergencyContactCity' => 'max:120',
+        'emergencyContactCityCode' => 'max:9',
+        'emergencyContactBarangay' => 'max:120',
+        'emergencyContactBarangayCode' => 'max:9',
+        'emergencyContactStreet' => 'max:200',
     ];
+
+    /** Each address's whole line, and the prefix its parts are sent under. */
+    private const ADDRESSES = ['address' => 'address', 'emergencyContactAddress' => 'emergencyContact'];
+
+    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street'];
 
     /** What a submit must have, the old form's required set. */
     private const REQUIRED_DETAILS = [
@@ -90,6 +112,7 @@ final class PortalRegistrations
         private readonly PortalRegistrationInput $input,
         private readonly PortalManageUsers $users,
         private readonly PortalEmployeeDocuments $employeeDocuments,
+        private readonly PortalPlaces $places,
     ) {}
 
     /**
@@ -437,10 +460,42 @@ final class PortalRegistrations
         foreach ($this->input->cleaned($data) as $field => $value) {
             $details[$field] = $value;
         }
+        $details = $this->withAddresses($details, $data);
         $this->connection()->table('registrations')->where('id', (int) $row->id)
             ->update(['details' => json_encode($details)]);
 
         return ['details' => $details];
+    }
+
+    /**
+     * Each address whose parts were sent, resolved and written back as its parts and its whole line:
+     * in the Philippines the picked places are named from the list, and the line waits until every
+     * part is there (2026-10-13, user).
+     *
+     * @param  array<string, mixed>  $details
+     * @param  array<string, mixed>  $sent
+     * @return array<string, mixed>
+     */
+    private function withAddresses(array $details, array $sent): array
+    {
+        foreach (self::ADDRESSES as $line => $prefix) {
+            $keys = array_map(static fn (string $part): string => $prefix.ucfirst($part), self::ADDRESS_PARTS);
+            if (array_intersect($keys, array_keys($sent)) === []) {
+                continue;
+            }
+            $parts = [];
+            foreach (self::ADDRESS_PARTS as $part) {
+                $value = $details[$prefix.ucfirst($part)] ?? null;
+                $parts[$part] = is_string($value) && trim($value) !== '' ? trim($value) : null;
+            }
+            $resolved = $this->places->resolve($parts);
+            foreach ($resolved['parts'] as $part => $value) {
+                $details[$prefix.ucfirst($part)] = $value;
+            }
+            $details[$line] = $resolved['line'];
+        }
+
+        return $details;
     }
 
     /**

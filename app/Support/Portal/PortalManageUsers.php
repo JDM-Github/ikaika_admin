@@ -89,6 +89,7 @@ final class PortalManageUsers
         private readonly PortalSignature $signature,
         private readonly PortalRegistrationInput $input,
         private readonly PortalEmployeeDocuments $employeeDocuments,
+        private readonly PortalEmployeeIdCards $idCards,
     ) {}
 
     /**
@@ -535,6 +536,56 @@ final class PortalManageUsers
         return $this->profileResponse($actor, $target, $request);
     }
 
+    /**
+     * Edit employee information's documents (2026-10-13, user): a file put in one of their slots, by
+     * whoever may change their private details. The log names the slot, never the file.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function uploadDocument(Employee $actor, int $id, Request $request): array
+    {
+        $target = $this->privateTarget($actor, $id, $request);
+        $field = trim((string) $request->input('field', ''));
+        $this->employeeDocuments->upload($target, $field, $request->file('file'));
+        $this->documentsChanged($actor, $target, $request, PortalLogAction::POST, $field);
+
+        return $this->profileResponse($actor, $target, $request);
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function removeDocument(Employee $actor, int $id, int $documentId, Request $request): array
+    {
+        $target = $this->privateTarget($actor, $id, $request);
+        $field = $this->employeeDocuments->remove($target, $documentId);
+        $this->documentsChanged($actor, $target, $request, PortalLogAction::DELETE, $field);
+
+        return $this->profileResponse($actor, $target, $request);
+    }
+
+    /**
+     * An employee's ID card (2026-10-14, user), for whoever sees their employee information, since it
+     * prints their blood type and emergency contact. Making one is logged as a look at those is.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function idCard(Employee $actor, int $id, Request $request): array
+    {
+        $target = $this->privateTarget($actor, $id, $request);
+        $this->audit->record(
+            $actor,
+            PortalLogAction::VIEW,
+            self::INFORMATION_RULE,
+            '{UserName|You} made the ID card of '.PortalAccessGraph::name($target),
+            (string) $target->getKey(),
+            $request,
+            ['employeeId' => (int) $target->getKey()],
+        );
+
+        return ['section' => 'manage', 'resource' => 'users', 'data' => $this->idCards->card($target)];
+    }
+
     public function bumpCache(): void
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
@@ -627,6 +678,20 @@ final class PortalManageUsers
             'resource' => 'users',
             'data' => $this->profileData($actor, $target, $request, $this->seesPrivate($actor, $target, $request)),
         ];
+    }
+
+    private function documentsChanged(Employee $actor, Employee $target, Request $request, string $action, string $field): void
+    {
+        $this->bumpCache();
+        $this->audit->record(
+            $actor,
+            $action,
+            self::INFORMATION_RULE,
+            '{UserName|You} changed the documents of '.PortalAccessGraph::name($target),
+            (string) $target->getKey(),
+            $request,
+            ['field' => $field, 'change' => $action === PortalLogAction::DELETE ? 'removed' : 'uploaded'],
+        );
     }
 
     // The person, when they are inside the viewer's Users reach; 404 otherwise, as if they did not exist.

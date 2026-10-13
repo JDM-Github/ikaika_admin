@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -14,12 +15,17 @@ use Throwable;
  * the field Airtable gives each (photo, tax_identification, ss_id and the rest), as every employee's
  * are. Promotion copies the files a candidate sent at registration there, so a promoted employee's
  * documents and photo sit where everyone's do; the registration keeps its own private copy.
+ *
+ * Whoever may change someone's private details may change their documents too (2026-10-13, user):
+ * a file put in a slot replaces what it held -- a bank certificate joins the others, up to five --
+ * and any of their files can be taken off. A signature is a slot of its own, a picture like the photo.
  */
 final class PortalEmployeeDocuments
 {
     /** The employees attachment field each registration document kind fills, as Airtable names them. */
     public const FIELD_FOR_KIND = [
         'photo' => 'photo',
+        'signature' => 'signature',
         'tin' => 'tax_identification',
         'sss' => 'ss_id',
         'philhealth' => 'philhealth_id',
@@ -29,6 +35,29 @@ final class PortalEmployeeDocuments
     ];
 
     private const FOLDER = 'ikaika-portal/employees';
+
+    private const PICTURES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+    private const PICTURES_OR_PDF = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif', 'application/pdf'];
+
+    // The portal's receipt picker refuses past this too.
+    private const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+    /**
+     * The slots a file may be put in, what each takes, and whether it holds more than one.
+     *
+     * @var array<string, array{label: string, mimes: list<string>, multiple: bool}>
+     */
+    public const EDITABLE = [
+        'photo' => ['label' => 'The profile photo', 'mimes' => self::PICTURES, 'multiple' => false],
+        'signature' => ['label' => 'The signature', 'mimes' => self::PICTURES, 'multiple' => false],
+        'tax_identification' => ['label' => 'The TIN ID', 'mimes' => self::PICTURES_OR_PDF, 'multiple' => false],
+        'ss_id' => ['label' => 'The SSS ID', 'mimes' => self::PICTURES_OR_PDF, 'multiple' => false],
+        'philhealth_id' => ['label' => 'The PhilHealth ID', 'mimes' => self::PICTURES_OR_PDF, 'multiple' => false],
+        'hdmf_id' => ['label' => 'The Pag-IBIG (HDMF) ID', 'mimes' => self::PICTURES_OR_PDF, 'multiple' => false],
+        'national_id' => ['label' => 'The national ID', 'mimes' => self::PICTURES_OR_PDF, 'multiple' => false],
+        'bank_certificate' => ['label' => 'A bank certificate', 'mimes' => self::PICTURES_OR_PDF, 'multiple' => true],
+    ];
 
     public function __construct(
         private readonly PortalRegistrationDocuments $documents,
@@ -130,6 +159,64 @@ final class PortalEmployeeDocuments
         }
 
         return $total;
+    }
+
+    // A file put in one of their slots: it replaces what the slot held, or joins the bank certificates.
+    public function upload(Employee $employee, string $field, mixed $file): void
+    {
+        $slot = self::EDITABLE[$field] ?? abort(422, 'Choose which document this is.');
+        if (! $file instanceof UploadedFile || ! $file->isValid()) {
+            abort(422, 'Choose a file to upload.');
+        }
+        if ((int) $file->getSize() > self::MAX_UPLOAD_BYTES) {
+            abort(422, 'A document cannot be larger than 8 MB.');
+        }
+        $mime = (string) $file->getMimeType();
+        if (! in_array($mime, $slot['mimes'], true)) {
+            abort(422, $slot['label'].($slot['mimes'] === self::PICTURES ? ' has to be a JPG, PNG, WebP or GIF picture.' : ' has to be a picture or a PDF.'));
+        }
+        $held = $this->rowsOf($employee)->where('field_name', $field)->pluck('id')->all();
+        if ($slot['multiple'] && count($held) >= PortalRegistrationDocuments::MAX_BANK_FILES) {
+            abort(422, 'Keep up to '.PortalRegistrationDocuments::MAX_BANK_FILES.' bank certificates. Remove one first.');
+        }
+
+        // Stored before the row changes, so a failed upload leaves the slot as it was.
+        $stored = $this->cloudinary->uploadReceipt($file, self::FOLDER);
+        DB::connection('portal')->transaction(function () use ($employee, $field, $file, $mime, $stored, $slot, $held): void {
+            if (! $slot['multiple'] && $held !== []) {
+                $this->rowsOf($employee)->whereIn('id', $held)->delete();
+            }
+            DB::connection('portal')->table('attachments')->insert([
+                'table_name' => 'employees',
+                'record_id' => (int) $employee->getKey(),
+                'field_name' => $field,
+                'file_url' => $stored['fileUrl'],
+                'file_name' => $file->getClientOriginalName(),
+                'file_size_bytes' => $stored['sizeBytes'],
+                'mime_type' => $mime,
+            ]);
+        });
+        PortalCache::bump();
+    }
+
+    // One of their files taken off, and the slot it was in; another employee's is not found.
+    public function remove(Employee $employee, int $documentId): string
+    {
+        $field = $this->rowsOf($employee)->where('id', $documentId)->value('field_name');
+        if (! is_string($field)) {
+            abort(404, 'That document was not found.');
+        }
+        $this->rowsOf($employee)->where('id', $documentId)->delete();
+        PortalCache::bump();
+
+        return $field;
+    }
+
+    private function rowsOf(Employee $employee): Builder
+    {
+        return DB::connection('portal')->table('attachments')
+            ->where('table_name', 'employees')
+            ->where('record_id', (int) $employee->getKey());
     }
 
     private function hasCopy(Employee $employee, string $field, string $name): bool

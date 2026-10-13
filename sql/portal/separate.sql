@@ -1266,7 +1266,7 @@ INSERT INTO access_permissions
     (permission_key, parent_key, label, description, supports_reach, can_toggle, sort_order)
 VALUES
     ('finance.transactions.edit', 'finance.transactions', 'Edit transactions',
-     'Change a transaction''s name, date, payor or payee, notes and receipt. Its amount, type, envelope and account stay as they were.',
+     'Change a transaction''s name, amount, date, payor or payee, notes and receipt. Its type, envelope and account stay as they were.',
      0, 1, 865);
 INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
     ('admin', 'finance.transactions.edit', NULL, 0),
@@ -1279,3 +1279,26 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
 ALTER TABLE new_employee_data
     ADD COLUMN blood_type     VARCHAR(3)  NULL AFTER date_of_birth,
     ADD COLUMN national_id_no VARCHAR(30) NULL AFTER hdmf_no;
+
+-- The Philippines' provinces, cities and municipalities, and barangays (2026-10-13): the PSGC, for the
+-- registration form's address pickers. The rows come from database/data/psgc, loaded by the migration
+-- or `php artisan portal:import-places`. Metro Manila stands in as a province for its cities.
+-- Existing databases: create_portal_places.
+CREATE TABLE IF NOT EXISTS psgc_provinces (
+    code CHAR(9)      NOT NULL PRIMARY KEY,
+    name VARCHAR(120) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS psgc_cities (
+    code          CHAR(9)      NOT NULL PRIMARY KEY,
+    name          VARCHAR(120) NOT NULL,
+    province_code CHAR(9)      NOT NULL,
+    INDEX psgc_cities_province_code_index (province_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS psgc_barangays (
+    code      CHAR(9)      NOT NULL PRIMARY KEY,
+    name      VARCHAR(120) NOT NULL,
+    city_code CHAR(9)      NOT NULL,
+    INDEX psgc_barangays_city_code_index (city_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

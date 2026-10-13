@@ -676,6 +676,8 @@ final class PortalSubmittedReports
             PortalRole::isDepartmentHead($actor->role, $actor->role_level),
         );
 
+        // Each day's report as the review queue names it: its first line's id, by day.
+        $reviewIds = [];
         $this->ledger->within($this->connection(), function () use (
             $employeeId,
             $groups,
@@ -686,6 +688,7 @@ final class PortalSubmittedReports
             $isFlagged,
             $kind,
             $actor,
+            &$reviewIds,
         ): void {
             foreach ($groups as $index => $group) {
                 $lineIds = [];
@@ -704,6 +707,7 @@ final class PortalSubmittedReports
                         self::NEW_FLAG_STATUS,
                     );
                 }
+                $reviewIds[$group['date']] = (string) min($lineIds);
 
                 // One report is one user_reports row per line; lineIds lets the sync address each.
                 $id = $group['date'].'-'.$kind;
@@ -776,6 +780,26 @@ final class PortalSubmittedReports
                 PortalShellPath::MANAGE_REQUESTS,
                 'Open queue',
                 ['recordId' => $this->lateReportId($employeeId, min($dates))],
+            );
+        }
+
+        // A report that waits for review rings its reviewers' bell, and marks it on Daily Reports (2026-10-13, user).
+        if ($isFlagged && $reviewIds !== []) {
+            ksort($reviewIds);
+            $this->audit->notifyManagers(
+                $actor,
+                'manage.requests.flagged',
+                PortalNotificationType::REPORT_TO_REVIEW,
+                $isLate ? 'Late report to review' : 'Daily report to review',
+                PortalActivityCopy::notifyFiled(
+                    PortalActivityCopy::actorName($actor, $request, true),
+                    $isLate ? 'late report' : 'daily report',
+                    min($dates),
+                    max($dates),
+                ),
+                PortalShellPath::MANAGE_REQUESTS,
+                'Open queue',
+                ['recordId' => reset($reviewIds)],
             );
         }
 

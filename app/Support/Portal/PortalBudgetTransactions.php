@@ -21,10 +21,12 @@ use Illuminate\Support\Str;
  * and named by receiptId when the transaction is added; it is kept in the tracker's attachments table
  * as the receipts migrated from Airtable are.
  *
- * Edit transactions (2026-10-13, user) changes a transaction's details only: its name, date, payor or
- * payee, notes and receipt. Its amount, type, envelope and account stay, so no balance or pending
- * transfer moves; a line a transfer, an allocation, funds received or an approval wrote is changed
- * where it was made, since the ledger reads those by their own names.
+ * Edit transactions (2026-10-13, user) changes a transaction's name, date, payor or payee, notes,
+ * receipt and amount. Its type, envelope and account stay. A new amount moves its envelope by the
+ * difference -- past what is left only once confirmed, as adding does -- and a transfer it left pending
+ * owes the new amount; one already completed keeps the amount where it is. A line a transfer, an
+ * allocation, funds received or an approval wrote is changed where it was made, since the ledger reads
+ * those by their own names.
  */
 final class PortalBudgetTransactions
 {
@@ -212,8 +214,8 @@ final class PortalBudgetTransactions
     }
 
     /**
-     * A transaction's details changed: name, date, payor or payee, notes, and its receipt replaced or
-     * taken off. The money and what it moved through are never touched.
+     * A transaction's details changed: name, date, payor or payee, notes, its receipt replaced or taken
+     * off, and its amount. What it moved through is never touched.
      *
      * @return array{section: string, resource: string, data: array{id: string, name: string}}
      */
@@ -231,6 +233,12 @@ final class PortalBudgetTransactions
         $occurredOn = $this->input->requiredDate($request, 'occurredOn', 'Choose the day of the transaction.');
         $payorPayee = $this->input->validatedText($request, 'payorPayee', 'The payor or payee', PortalBudgetInput::MAX_NAME);
         $notes = $this->input->validatedText($request, 'notes', 'The notes');
+        // Left out, the amount stays as it is.
+        $cents = $this->input->validatedAmount($request, 'amount', 'The amount');
+        if ($cents === 0) {
+            abort(422, 'The amount must be more than zero.');
+        }
+        $isConfirmed = $this->input->confirmed($request, 'allowOverspend');
         $receiptKey = $this->receiptKeyFrom($actor, $request);
         $receipt = $receiptKey === null ? null : Cache::get($receiptKey);
         if ($receiptKey !== null && ! is_array($receipt)) {
@@ -238,7 +246,12 @@ final class PortalBudgetTransactions
         }
         $isRemovingReceipt = $request->boolean('removeReceipt');
 
-        $this->ledger->transaction(function () use ($id, $name, $occurredOn, $payorPayee, $notes, $receipt, $isRemovingReceipt): void {
+        $wasCents = $this->ledger->transaction(function () use ($id, $name, $occurredOn, $payorPayee, $notes, $receipt, $isRemovingReceipt, $cents, $isConfirmed): int {
+            $before = $this->ledger->connection()->table('transactions')->where('id', $id)->lockForUpdate()->first(['amount', 'type']);
+            $wasCents = $this->input->cents($before?->amount);
+            if ($cents !== null && $cents !== $wasCents) {
+                $this->changeAmount($id, (string) $before?->type, $wasCents, $cents, $isConfirmed);
+            }
             $this->ledger->connection()->table('transactions')->where('id', $id)->update([
                 'transaction_name' => $name,
                 'transaction_date' => $occurredOn.' 00:00:00',
@@ -264,27 +277,66 @@ final class PortalBudgetTransactions
                     'mime_type' => $receipt['mimeType'],
                 ]);
             }
+
+            return $wasCents;
         });
 
         if ($receiptKey !== null) {
             Cache::forget($receiptKey);
         }
+        $amountCents = $cents ?? $wasCents;
+        $isAmountChanged = $amountCents !== $wasCents;
 
         $this->audit->record(
             $actor,
             PortalLogAction::PATCH,
             'manage.budget-transactions',
-            PortalActivityCopy::editedTransaction((string) $row->transaction_name, $name),
+            PortalActivityCopy::editedTransaction(
+                (string) $row->transaction_name,
+                $name,
+                $isAmountChanged ? $this->input->peso($wasCents) : null,
+                $isAmountChanged ? $this->input->peso($amountCents) : null,
+            ),
             (string) $id,
             $request,
-            ['occurredOn' => $occurredOn, 'receipt' => is_array($receipt) ? $receipt['fileUrl'] : ($isRemovingReceipt ? null : 'kept')],
+            [
+                'occurredOn' => $occurredOn,
+                'amount' => $this->input->amount($amountCents),
+                'previousAmount' => $isAmountChanged ? $this->input->amount($wasCents) : null,
+                'receipt' => is_array($receipt) ? $receipt['fileUrl'] : ($isRemovingReceipt ? null : 'kept'),
+            ],
         );
 
         return [
             'section' => 'manage',
             'resource' => 'budget-transactions',
-            'data' => ['id' => (string) $id, 'name' => $name],
+            'data' => ['id' => (string) $id, 'name' => $name, 'amount' => (float) $this->input->amount($amountCents)],
         ];
+    }
+
+    /*
+     * A new amount on a line: its envelope moves by the difference, and a raise of an expense or a cut
+     * of income takes that difference out of what the envelope has left, so it is confirmed past it. A
+     * transfer the expense left pending owes the new amount; one already completed has paid the old one.
+     */
+    private function changeAmount(int $id, string $type, int $wasCents, int $cents, bool $isConfirmed): void
+    {
+        $envelopeId = $this->ledger->connection()->table('transactions_envelopes')->where('transaction_id', $id)->value('envelope_id');
+        if ($envelopeId !== null) {
+            $envelope = $this->ledger->lockEnvelope((int) $envelopeId);
+            $this->ledger->assertOpenEnvelope($envelope, 'changing an amount in it');
+            $taken = $type === PortalBudgetLedger::TYPE_EXPENSE ? $cents - $wasCents : $wasCents - $cents;
+            if ($taken > 0) {
+                $this->ledger->assertCovers($this->ledger->envelopeRemainingCents((int) $envelopeId), $taken, $this->ledger->envelopeName($envelope), $isConfirmed);
+            }
+        }
+
+        $transfers = $this->ledger->connection()->table(PortalBudgetTransfers::TABLE)->where('origin_transaction_id', $id);
+        if ((clone $transfers)->where('status', PortalBudgetTransfers::COMPLETED)->exists()) {
+            abort(422, 'The transfer this expense left between accounts is already completed, so its amount stays.');
+        }
+        (clone $transfers)->where('status', PortalBudgetTransfers::PENDING)->update(['amount' => $this->input->decimal($cents)]);
+        $this->ledger->connection()->table('transactions')->where('id', $id)->update(['amount' => $this->input->decimal($cents)]);
     }
 
     // The upload a request names, as the uploader's own: another person's receiptId finds nothing.

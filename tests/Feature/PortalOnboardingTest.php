@@ -4,14 +4,17 @@ namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalEmployeeIdCards;
 use App\Support\Portal\PortalRegistrations;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
@@ -142,7 +145,7 @@ class PortalOnboardingTest extends TestCase
             'middleName' => 'Cruz',
             'lastName' => 'Reyes',
             'nickname' => 'Liz',
-            'startDate' => '2026-11-03',
+            'startDate' => now()->addDays(21)->toDateString(),
             'dateOfBirth' => '1998-04-12',
             'bloodType' => 'O+',
             'address' => '1 Test Street, Manila',
@@ -176,7 +179,7 @@ class PortalOnboardingTest extends TestCase
     }
 
     /**
-     * @param  list<array{0: string, 1: string}>  $files  name, content pairs; defaults to the six kinds
+     * @param  list<array{0: string, 1: string}>  $files  name, content pairs; defaults to the seven kinds
      */
     private function uploadAll(string $token, array $files = []): void
     {
@@ -187,8 +190,9 @@ class PortalOnboardingTest extends TestCase
             ['philhealth.pdf', self::PDF],
             ['hdmf.pdf', self::PDF],
             ['bank.pdf', self::PDF],
+            ['signature.png', $this->png()],
         ] : $files;
-        $kinds = ['photo', 'tin', 'sss', 'philhealth', 'hdmf', 'bank'];
+        $kinds = ['photo', 'tin', 'sss', 'philhealth', 'hdmf', 'bank', 'signature'];
 
         foreach ($files as $index => [$name, $content]) {
             $this->withToken($token)
@@ -361,7 +365,7 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame('Liza', $data->first_name);
         $this->assertSame('Reyes', $data->last_name);
         $this->assertSame('liza.reyes@example.test', $data->email);
-        $this->assertSame('2026-11-03', $data->start_date);
+        $this->assertSame(now()->addDays(21)->toDateString(), $data->start_date);
         $this->assertSame('12-345678901-2', $data->philhealth_no);
         $this->assertSame('O+', $data->blood_type);
         $this->assertSame('1234-5678-9012-3456', $data->national_id_no);
@@ -404,6 +408,61 @@ class PortalOnboardingTest extends TestCase
             ->assertJsonPath('message', 'Enter your SSS No.: 10 digits, numbers and dashes only.');
     }
 
+    // The reported ask (2026-10-13): an address is picked from the PSGC in the Philippines and typed elsewhere.
+    public function test_an_address_is_picked_in_parts_and_written_as_one_line(): void
+    {
+        $created = $this->createRegistration($this->adminToken(), ['slug' => 'places']);
+        $session = $this->signIn('places', $created['password']);
+
+        // The lists the pickers offer: provinces, a province's cities, a city's barangays.
+        $provinces = collect($this->withToken($session)->getJson(self::REGISTER.'/places/provinces')->assertOk()->json('data'));
+        $this->assertCount(82, $provinces);
+        $this->assertSame('Metro Manila', $provinces->firstWhere('code', '130000000')['name']);
+        $cities = collect($this->withToken($session)->getJson(self::REGISTER.'/places/provinces/012800000/cities')->assertOk()->json('data'));
+        $this->assertSame('Adams', $cities->firstWhere('code', '012801000')['name']);
+        $this->assertContains('City of Isabela', collect($this->withToken($session)->getJson(self::REGISTER.'/places/provinces/150700000/cities')->json('data'))->pluck('name'));
+        $barangays = collect($this->withToken($session)->getJson(self::REGISTER.'/places/cities/012801000/barangays')->assertOk()->json('data'));
+        $this->assertSame(['Adams (Pob.)'], $barangays->pluck('name')->all());
+        $this->withToken($session)->getJson(self::REGISTER.'/places/provinces/999999999/cities')->assertNotFound();
+        $this->getJson(self::REGISTER.'/places/provinces', ['Authorization' => ''])->assertUnauthorized();
+
+        // In the Philippines the codes are picked and the names are the list's; the line waits for every part.
+        $home = ['addressCountry' => 'Philippines', 'addressProvinceCode' => '012800000', 'addressCityCode' => '012801000', 'addressProvince' => 'Typed over'];
+        $saved = $this->withToken($session)->patchJson(self::REGISTER.'/details', $home)->assertOk()->json('data.details');
+        $this->assertSame('Ilocos Norte', $saved['addressProvince']);
+        $this->assertNull($saved['address']);
+        $saved = $this->withToken($session)->patchJson(self::REGISTER.'/details', ['addressBarangayCode' => '012801001', 'addressStreet' => ' 12  Rizal Street '])
+            ->assertOk()->json('data.details');
+        $this->assertSame('12 Rizal Street, Adams (Pob.), Adams, Ilocos Norte, Philippines', $saved['address']);
+        $this->assertSame('012801001', $saved['addressBarangayCode']);
+
+        // A city outside the province, or a barangay outside the city, is refused and changes nothing.
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', ['addressCityCode' => '137501000'])
+            ->assertStatus(422)->assertJsonPath('message', 'Choose the city or municipality again; it is not in that province.');
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', ['addressBarangayCode' => '012802001'])
+            ->assertStatus(422)->assertJsonPath('message', 'Choose the barangay again; it is not in that city or municipality.');
+        $this->withToken($session)->getJson(self::REGISTER.'/session')->assertOk()
+            ->assertJsonPath('data.details.address', '12 Rizal Street, Adams (Pob.), Adams, Ilocos Norte, Philippines');
+
+        // Anywhere else every part is typed, and a barangay is not needed.
+        $saved = $this->withToken($session)->patchJson(self::REGISTER.'/details', [
+            'emergencyContactCountry' => 'Japan', 'emergencyContactProvince' => 'Tokyo', 'emergencyContactCity' => 'Shinjuku',
+            'emergencyContactStreet' => '1-2-3 Nishi Shinjuku', 'emergencyContactCityCode' => '012801000',
+        ])->assertOk()->json('data.details');
+        $this->assertSame('1-2-3 Nishi Shinjuku, Shinjuku, Tokyo, Japan', $saved['emergencyContactAddress']);
+        $this->assertNull($saved['emergencyContactCityCode']);
+        $this->assertSame('12 Rizal Street, Adams (Pob.), Adams, Ilocos Norte, Philippines', $saved['address']);
+
+        // The whole lines are what New Employee Data receives.
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', array_diff_key($this->details(), ['address' => 1, 'emergencyContactAddress' => 1]))->assertOk();
+        $this->uploadAll($session);
+        $this->withToken($session)->postJson(self::REGISTER.'/submit')->assertOk();
+        $employeeDataId = (int) DB::connection('portal')->table('registrations')->where('code', 'places')->value('employee_data_id');
+        $data = DB::connection('portal')->table('new_employee_data')->where('id', $employeeDataId)->first();
+        $this->assertSame('12 Rizal Street, Adams (Pob.), Adams, Ilocos Norte, Philippines', $data->address);
+        $this->assertSame('1-2-3 Nishi Shinjuku, Shinjuku, Tokyo, Japan', $data->emergency_contact_address);
+    }
+
     // The reported ask (2026-10-12): the details sheet's QR failed for want of the QR package.
     public function test_the_qr_is_an_svg_of_the_link(): void
     {
@@ -429,6 +488,11 @@ class PortalOnboardingTest extends TestCase
         // The photo is an image kind.
         $this->withToken($session)->post(self::REGISTER.'/documents', ['kind' => 'photo', 'file' => $this->upload('photo.pdf', self::PDF)], ['Accept' => 'application/json'])
             ->assertStatus(422);
+        // The reported ask (2026-10-14): the signature is a picture too.
+        $this->withToken($session)->post(self::REGISTER.'/documents', ['kind' => 'signature', 'file' => $this->upload('signature.pdf', self::PDF)], ['Accept' => 'application/json'])
+            ->assertStatus(422)->assertJsonPath('message', 'The signature is a JPG or JPEG or PNG file.');
+        $this->withToken($session)->post(self::REGISTER.'/documents', ['kind' => 'signature', 'file' => $this->upload('signature.png', $this->png())], ['Accept' => 'application/json'])
+            ->assertOk();
 
         $first = $this->withToken($session)->post(self::REGISTER.'/documents', ['kind' => 'tin', 'file' => $this->upload('tin.pdf', self::PDF)], ['Accept' => 'application/json'])
             ->assertOk()->json('data.document');
@@ -597,7 +661,7 @@ class PortalOnboardingTest extends TestCase
 
         // Each file under the field Airtable gives it, as every employee's documents are kept.
         $this->assertEqualsCanonicalizing(
-            ['photo' => 1, 'tax_identification' => 1, 'ss_id' => 1, 'philhealth_id' => 1, 'hdmf_id' => 1, 'bank_certificate' => 1],
+            ['photo' => 1, 'signature' => 1, 'tax_identification' => 1, 'ss_id' => 1, 'philhealth_id' => 1, 'hdmf_id' => 1, 'bank_certificate' => 1],
             $this->cloudinaryFields($employeeId),
         );
 
@@ -606,7 +670,7 @@ class PortalOnboardingTest extends TestCase
         $this->assertStringStartsWith('https://res.cloudinary.com/demo-cloud/', (string) $profile['photoUrl']);
         $this->assertTrue($profile['canEditInformation']);
         $documents = collect($profile['documents']);
-        $this->assertCount(6, $documents);
+        $this->assertCount(7, $documents);
         $photo = $documents->firstWhere('field', 'photo');
         $this->assertStringStartsWith('https://res.cloudinary.com/demo-cloud/', $photo['url']);
         $this->assertStringContainsString('/upload/c_fill,h_96,w_96', (string) $photo['thumbUrl']);
@@ -645,6 +709,134 @@ class PortalOnboardingTest extends TestCase
         $this->withToken($head)->patchJson($users.'/information', ['bloodType' => null])->assertOk()->assertJsonPath('data.information.bloodType', null);
     }
 
+    // The reported ask (2026-10-13): whoever edits employee information puts files in their slots, a
+    // signature among them, replaces one, adds bank certificates up to five, and takes any off.
+    public function test_whoever_edits_employee_information_changes_their_documents(): void
+    {
+        $this->fakeCloudinary();
+        $plain = $this->plainAdminToken();
+        $id = $this->submittedRegistration($plain);
+        $head = $this->headAdminToken();
+        $employeeId = (int) $this->withToken($head)->postJson(self::BASE.'/'.$id.'/promote', [
+            'idNo' => '991231-9013', 'email' => 'liza.reyes@ikaikabim.test', 'department' => 'MIS',
+        ])->assertOk()->json('data.employee.id');
+        $documents = '/api/development/portal/manage/users/'.$employeeId.'/documents';
+        $put = fn (string $field, string $name, string $content) => $this->withToken($head)
+            ->post($documents, ['field' => $field, 'file' => $this->upload($name, $content)], ['Accept' => 'application/json']);
+
+        // A signature is a slot of its own, and a new photo replaces the old one.
+        $profile = $put('signature', 'signature.png', $this->png())->assertCreated()->json('data');
+        $this->assertSame('signature.png', collect($profile['documents'])->firstWhere('field', 'signature')['name']);
+        $oldPhoto = $profile['photoUrl'];
+        $profile = $put('photo', 'new-photo.png', $this->png())->assertCreated()->json('data');
+        $this->assertNotSame($oldPhoto, $profile['photoUrl']);
+        $this->assertSame(['new-photo.png'], collect($profile['documents'])->where('field', 'photo')->pluck('name')->values()->all());
+        $put('tax_identification', 'tin.pdf', self::PDF)->assertCreated();
+        $this->assertSame(1, $this->cloudinaryFields($employeeId)['tax_identification']);
+
+        // Bank certificates gather, up to five.
+        foreach (range(2, 5) as $count) {
+            $put('bank_certificate', "bank-{$count}.pdf", self::PDF)->assertCreated();
+        }
+        $put('bank_certificate', 'bank-6.pdf', self::PDF)->assertStatus(422)
+            ->assertJsonPath('message', 'Keep up to 5 bank certificates. Remove one first.');
+        $this->assertSame(5, $this->cloudinaryFields($employeeId)['bank_certificate']);
+
+        // A picture slot takes a picture, a slot has to be named, and a file has to come.
+        $put('signature', 'signature.pdf', self::PDF)->assertStatus(422)
+            ->assertJsonPath('message', 'The signature has to be a JPG, PNG, WebP or GIF picture.');
+        $put('tax_identification', 'Setup.pdf', self::PROGRAM)->assertStatus(422)
+            ->assertJsonPath('message', 'The TIN ID has to be a picture or a PDF.');
+        $put('passport', 'passport.png', $this->png())->assertStatus(422)->assertJsonPath('message', 'Choose which document this is.');
+        $this->withToken($head)->postJson($documents, ['field' => 'photo'])->assertStatus(422)->assertJsonPath('message', 'Choose a file to upload.');
+
+        // Any of their files comes off; one that is not theirs is not found.
+        $signatureId = (int) DB::connection('portal')->table('attachments')
+            ->where(['table_name' => 'employees', 'record_id' => $employeeId, 'field_name' => 'signature'])->value('id');
+        $left = $this->withToken($head)->deleteJson($documents.'/'.$signatureId)->assertOk()->json('data.documents');
+        $this->assertNull(collect($left)->firstWhere('field', 'signature'));
+        $this->withToken($head)->deleteJson($documents.'/'.$signatureId)->assertNotFound();
+        $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
+            ->where('message', 'like', '%changed the documents of%')->exists());
+
+        // Without Edit employee information, nothing changes.
+        $photoId = (int) DB::connection('portal')->table('attachments')
+            ->where(['table_name' => 'employees', 'record_id' => $employeeId, 'field_name' => 'photo'])->value('id');
+        $this->withToken($plain)->post($documents, ['field' => 'signature', 'file' => $this->upload('s.png', $this->png())], ['Accept' => 'application/json'])
+            ->assertForbidden();
+        $this->withToken($plain)->deleteJson($documents.'/'.$photoId)->assertForbidden();
+    }
+
+    // The reported ask (2026-10-14): an ID card's front and back, its QR code in the company's format.
+    public function test_an_id_card_carries_what_its_front_and_back_print(): void
+    {
+        config([
+            'services.cloudinary.cloud_name' => 'demo-cloud',
+            'services.cloudinary.api_key' => 'key123',
+            'services.cloudinary.api_secret' => 'secret456',
+        ]);
+        $uploads = 0;
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/demo-cloud/auto/upload' => function () use (&$uploads) {
+                $uploads++;
+
+                return Http::response(['secure_url' => 'https://res.cloudinary.com/demo-cloud/image/upload/v1/ikaika-portal/employees/file'.$uploads]);
+            },
+            'https://res.cloudinary.com/*' => Http::response($this->png(), 200, ['Content-Type' => 'image/png']),
+            '*' => Http::response([], 200),
+        ]);
+        $plain = $this->plainAdminToken();
+        $id = $this->submittedRegistration($plain);
+        $head = $this->headAdminToken();
+        $employeeId = (int) $this->withToken($head)->postJson(self::BASE.'/'.$id.'/promote', [
+            'idNo' => '991231-9014', 'email' => 'liza.reyes@ikaikabim.test', 'department' => 'MIS',
+        ])->assertOk()->json('data.employee.id');
+        $users = '/api/development/portal/manage/users/'.$employeeId;
+
+        $card = $this->withToken($head)->getJson($users.'/id-card')->assertOk()->json('data');
+        $this->assertSame('Liza C. Reyes', $card['name']);
+        $this->assertSame('991231-9014', $card['idNo']);
+        $this->assertSame('O+', $card['bloodType']);
+        $this->assertSame('Ana Reyes', $card['emergencyContactName']);
+        $this->assertStringStartsWith("Name : Liza C. Reyes\nPosition : ", $card['qr']['text']);
+        $this->assertStringEndsWith("ID-No. : 991231-9014\nCompany : IKAIKA OPC\nEmergency Contact : Ana Reyes - 09170000002", $card['qr']['text']);
+        // A square of modules, each row as wide as there are rows.
+        $this->assertGreaterThanOrEqual(21, count($card['qr']['rows']));
+        $this->assertSame([count($card['qr']['rows'])], array_values(array_unique(array_map('strlen', $card['qr']['rows']))));
+        $this->assertMatchesRegularExpression('/^[01]+$/', implode('', $card['qr']['rows']));
+        // The photo, the signature and the mark come in as pictures, the photo cut for the card.
+        foreach (['photo', 'signature', 'logo'] as $image) {
+            $this->assertStringStartsWith('data:image/png;base64,', (string) $card[$image]);
+        }
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_480,f_jpg,q_90/'));
+        $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
+            ->where('message', 'like', '%made the ID card of%')->exists());
+
+        // It prints private details, so someone who cannot see them cannot make it.
+        $this->withToken($plain)->getJson($users.'/id-card')->assertForbidden();
+        $this->assertSame('Jhon Noriel D. Malabanan', PortalEmployeeIdCards::cardName(' Jhon Noriel ', 'dimaculangan', 'Malabanan'));
+        $this->assertSame('Jhon Malabanan', PortalEmployeeIdCards::cardName('Jhon', '  ', 'Malabanan'));
+    }
+
+    // The reported ask (2026-10-14): a photo that could not be fetched left the card blank without a word.
+    public function test_a_card_picture_that_cannot_be_fetched_is_left_blank_and_logged(): void
+    {
+        Log::spy();
+        Http::fake(['https://res.cloudinary.com/*' => fn () => throw new ConnectionException('cURL error 60: SSL certificate problem')]);
+        $employee = $this->employee("LOWER(COALESCE(role, '')) = 'admin'");
+        DB::connection('portal')->table('attachments')->insert([
+            'table_name' => 'employees', 'record_id' => (int) $employee->getKey(), 'field_name' => 'photo',
+            'file_url' => 'https://res.cloudinary.com/demo-cloud/image/upload/v1/ikaika-portal/employees/face.jpg',
+            'file_name' => 'face.jpg', 'file_size_bytes' => 900, 'mime_type' => 'image/jpeg',
+        ]);
+
+        $card = app(PortalEmployeeIdCards::class)->card($employee);
+
+        $this->assertNull($card['photo']);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $message === 'portal.id_card.picture_unavailable'
+            && $context['field'] === 'photo' && str_contains($context['reason'], 'SSL certificate problem'))->once();
+    }
+
     // A file that cannot be stored never stops a promotion; the copy command finishes the job later.
     public function test_files_that_cannot_be_stored_never_stop_a_promotion_and_are_copied_later(): void
     {
@@ -661,7 +853,7 @@ class PortalOnboardingTest extends TestCase
 
         $this->fakeCloudinary();
         $this->artisan('portal:copy-registration-documents')->expectsOutputToContain('copied')->assertExitCode(0);
-        $this->assertCount(6, $this->cloudinaryFields($employeeId));
+        $this->assertCount(7, $this->cloudinaryFields($employeeId));
     }
 
     public function test_a_document_downloads_for_an_admin_and_never_for_a_member(): void

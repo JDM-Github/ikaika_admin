@@ -78,6 +78,10 @@ class PortalRegistrationInputTest extends TestCase
             ['dateOfBirth', '2026-10-05', 'You must be at least 18 years old to register.'],
             ['dateOfBirth', '1900-01-02', 'Check your date of birth.'],
             ['startDate', '2028-01-01', 'Your start date must be within a year of today.'],
+            // The reported ask (2026-10-13): a start date is today or later, and an address part is held to the address's shape.
+            ['startDate', '2026-10-11', 'Your start date cannot be in the past.'],
+            ['addressStreet', 'Rm', 'House number and street needs at least 3 characters.'],
+            ['emergencyContactCity', 'Tokyo {}', 'Contact city can only have letters, numbers, spaces and . , # \' - / ( ) & :'],
         ];
 
         foreach ($refused as [$field, $value, $message]) {

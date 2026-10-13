@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
+use App\Modules\Portal\Models\PortalNotification;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
@@ -72,6 +73,17 @@ class PortalBugReportsTest extends TestCase
         $bodies = Http::recorded()->map(fn (array $pair): string => (string) $pair[0]->body());
         $this->assertCount(2, $bodies);
         $this->assertTrue($bodies->every(fn (string $body): bool => ! str_contains($body, 'jamie-phone') && str_contains($body, 'screenshot-')));
+
+        // The reported ask (2026-10-13): MIS hears of it on the bell, from no one, and nobody outside MIS does.
+        $notices = PortalNotification::query()->where('type', 'bug-reports.filed')->get()
+            ->filter(fn (PortalNotification $notice): bool => ($notice->payload['recordId'] ?? null) === $id);
+        $this->assertNotEmpty($notices);
+        $this->assertTrue($notices->every(fn (PortalNotification $notice): bool => $notice->actor_id === null
+            && $notice->link_path === '/bug-reports'
+            && $notice->message === '"Save does nothing on Transactions" was reported on finance/transactions.'));
+        $departments = Employee::query()->whereIn('id', $notices->pluck('employee_id'))->pluck('department')
+            ->map(fn (?string $department): string => strtolower(trim((string) $department)))->unique()->values()->all();
+        $this->assertSame(['mis'], $departments);
     }
 
     public function test_a_report_needs_a_title_and_a_description_and_three_screenshots_at_most(): void

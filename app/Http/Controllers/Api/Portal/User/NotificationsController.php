@@ -52,4 +52,14 @@ class NotificationsController extends Controller
 
         return response()->json($this->inbox->markAllRead($actor));
     }
+
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $actor = $request->attributes->get('portalEmployee');
+        if (! $actor instanceof Employee) {
+            abort(401, 'Authentication is required.');
+        }
+
+        return response()->json($this->inbox->delete($actor, $id));
+    }
 }

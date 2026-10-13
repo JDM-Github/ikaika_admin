@@ -205,6 +205,14 @@ final class PortalCloudinary
         return str_starts_with($url, 'https://res.cloudinary.com/'.$cloud.'/');
     }
 
+    // A delivery link with a transformation of its own in front of the file (2026-10-14): an ID card's photo, say.
+    public function transformed(string $url, string $transform): string
+    {
+        $changed = preg_replace('#/upload/#', '/upload/'.$transform.'/', $url, 1);
+
+        return is_string($changed) ? $changed : $url;
+    }
+
     public function thumbUrl(string $url, string $mimeType): ?string
     {
         if (! str_starts_with($mimeType, 'image/')) {

@@ -8,7 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * User / Notifications: the signed-in member's inbox for the shell header.
+ * User / Notifications: the signed-in member's inbox for the shell header. A member can delete a
+ * notice of their own from it (2026-10-13, user); it is gone from the bell and every unread mark.
  */
 final class PortalInbox
 {
@@ -163,6 +164,27 @@ final class PortalInbox
             'section' => 'user',
             'resource' => 'notifications',
             'saved' => $saved,
+        ];
+    }
+
+    /**
+     * @return array{section: string, resource: string, deleted: bool}
+     */
+    public function delete(Employee $actor, int $id): array
+    {
+        $deleted = $id > 0 && PortalNotification::query()
+            ->where('id', $id)
+            ->where('employee_id', (int) $actor->getKey())
+            ->delete() > 0;
+        if (! $deleted) {
+            abort(404, 'That notice was not found.');
+        }
+        $this->audit->bumpNotificationCache();
+
+        return [
+            'section' => 'user',
+            'resource' => 'notifications',
+            'deleted' => true,
         ];
     }
 

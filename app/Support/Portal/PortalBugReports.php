@@ -17,6 +17,10 @@ use Illuminate\Support\Facades\DB;
  * drops what a photo carries about the phone that took it. The only trace of the sender is the rate
  * limiter's hour-long counter, which never meets the report it counted.
  *
+ * MIS hears of a new report on the bell (2026-10-13, user). The notice is from no one: it names no
+ * actor, and it goes to everyone who holds Bug Reports -- the sender too, when they do -- so nobody
+ * can tell who sent it by who was left out.
+ *
  * MIS's own changes -- status, internal note, who handles it, the semantic version level the fix needs
  * and the version it shipped in (2026-10-13) -- are theirs, and logged as anyone's are. Any MIS member
  * may be assigned, by anyone who holds the page or by taking it themselves. Nothing else about a report
@@ -53,6 +57,9 @@ final class PortalBugReports
 
     // Who may be assigned: the department that reads the reports.
     private const TEAM = 'mis';
+
+    // The rule that opens Bug Reports, and so who hears of a new one.
+    private const RULE = 'bug-reports';
 
     private const SEMVER = '/^\d+\.\d+\.\d+$/';
 
@@ -118,6 +125,22 @@ final class PortalBugReports
 
             return $id;
         });
+
+        $readers = [];
+        foreach (PortalRules::holders([self::RULE]) as $holder) {
+            if (PortalRole::normalize($holder['employee']->status) === 'active') {
+                $readers[] = (int) $holder['employee']->getKey();
+            }
+        }
+        $this->audit->notifyEach(
+            $readers,
+            PortalNotificationType::BUG_REPORTED,
+            'New bug report',
+            '"'.$title.'" was reported'.($page === null ? '' : ' on '.$page).'.',
+            PortalShellPath::BUG_REPORTS,
+            'Open bug reports',
+            ['recordId' => (string) $id],
+        );
 
         return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => ['id' => (string) $id]];
     }
