@@ -354,9 +354,13 @@ final class PortalReferences
 
         $oldName = trim((string) $row->name);
         $this->connection()->table('job_types')->where('id', $id)->update(['department' => $department, 'name' => $name]);
-        // The report builder keys a type's allowed activities by name, so a rename carries them over.
+        // The report builder keys a type's allowed activities by name, so a rename carries them over: this
+        // department's own row, and the shared row while no other department still uses the old name.
         if ($oldName !== $name) {
-            $this->connection()->table('job_type_allowed_activities')->where('job_type', $oldName)->update(['job_type' => $name]);
+            $this->connection()->table('job_type_allowed_activities')->where('job_type', $oldName)->where('department', trim((string) $row->department))->update(['job_type' => $name]);
+            if (! $this->connection()->table('job_types')->where('name', $oldName)->exists()) {
+                $this->connection()->table('job_type_allowed_activities')->where('job_type', $oldName)->whereNull('department')->update(['job_type' => $name]);
+            }
         }
         $this->bump();
         $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.type', '{UserName|You} changed the project type '.$name, (string) $id, $request);

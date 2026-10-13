@@ -70,12 +70,14 @@ final class PortalReportProjects
             }
         }
 
-        $allowed = $this->allowedInitials($jobTypes);
+        ['shared' => $allowed, 'departments' => $departmental] = $this->allowedInitials($jobTypes);
         $groups = [];
         $needsFallback = false;
         foreach ($projects as $index => $project) {
             $jobType = $project['jobType'];
-            $initials = $jobType === null ? [] : $allowed[$this->key($jobType)] ?? [];
+            // A department's own list for the type wins over the shared one.
+            $own = $jobType === null ? null : ($departmental[$this->key((string) $project['department']).'|'.$this->key($jobType)] ?? null);
+            $initials = $own ?? ($jobType === null ? [] : $allowed[$this->key($jobType)] ?? []);
             // A job type with no rule of its own is not a job type with no activities: the member
             // still has to report the day, so the whole catalogue stands in for the missing list.
             if ($initials === []) {
@@ -86,7 +88,7 @@ final class PortalReportProjects
             }
             // Projects of one type that took out the same codes share a list.
             $takenOut = $project['removed'];
-            $key = $this->key((string) $jobType).($takenOut === [] ? '' : '|-'.implode(',', $takenOut));
+            $key = ($own === null ? '' : $this->key((string) $project['department']).'|').$this->key((string) $jobType).($takenOut === [] ? '' : '|-'.implode(',', $takenOut));
             $projects[$index]['activityGroup'] = $key;
             if (isset($groups[$key])) {
                 continue;
@@ -117,7 +119,7 @@ final class PortalReportProjects
             'section' => 'reports',
             'resource' => 'projects',
             'data' => array_map(static function (array $project): array {
-                unset($project['removed']);
+                unset($project['removed'], $project['department']);
 
                 return $project;
             }, $projects),
@@ -165,6 +167,7 @@ final class PortalReportProjects
                 // A report on this project asks for lines only when it is Engineering's.
                 'hasLines' => PortalProjectWork::isEngineering($row->department ?? null),
                 'removed' => $row->removed_codes === null ? [] : explode(',', (string) $row->removed_codes),
+                'department' => trim((string) ($row->department ?? '')),
             ];
         }
 
@@ -201,21 +204,25 @@ final class PortalReportProjects
      * job_type_allowed_activities stores the leading digits of the codes a job type may use, as
      * one comma-separated string per row.
      *
+     * The shared rows keyed by type, and the department rows keyed "department|type", in lower case;
+     * one read for both.
+     *
      * @param  list<string>  $jobTypes
-     * @return array<string, list<string>>
+     * @return array{shared: array<string, list<string>>, departments: array<string, list<string>>}
      */
     private function allowedInitials(array $jobTypes): array
     {
         if ($jobTypes === []) {
-            return [];
+            return ['shared' => [], 'departments' => []];
         }
 
         $rows = $this->connection()
             ->table('job_type_allowed_activities')
-            ->select(['job_type', 'activity_code_id_initials'])
+            ->select(['job_type', 'department', 'activity_code_id_initials'])
             ->get();
 
         $allowed = [];
+        $departments = [];
         foreach ($rows as $row) {
             $jobType = trim((string) ($row->job_type ?? ''));
             if ($jobType === '') {
@@ -228,10 +235,15 @@ final class PortalReportProjects
                     $initials[] = $value;
                 }
             }
-            $allowed[$this->key($jobType)] = $initials;
+            $department = trim((string) ($row->department ?? ''));
+            if ($department === '') {
+                $allowed[$this->key($jobType)] = $initials;
+            } else {
+                $departments[$this->key($department).'|'.$this->key($jobType)] = $initials;
+            }
         }
 
-        return $allowed;
+        return ['shared' => $allowed, 'departments' => $departments];
     }
 
     /**

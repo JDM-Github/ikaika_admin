@@ -1267,6 +1267,17 @@ VALUES
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT role, 'manage.map', NULL, 0 FROM (SELECT 'admin' AS role UNION ALL SELECT 'developer') AS roles;
 
+-- Allowed activities per department (2026-10-13): Management is a type in four departments, each with
+-- its own list; a row with a department wins over the shared row (no department, as Airtable's are).
+-- Existing databases: add_department_to_portal_allowed_activities.
+ALTER TABLE job_type_allowed_activities
+    ADD COLUMN department VARCHAR(100) NULL AFTER job_type;
+INSERT INTO job_type_allowed_activities (job_type, department, activity_code_id_initials) VALUES
+    ('Management', 'Engineering', '1004'),
+    ('Management', 'MIS',         '2002,2004'),
+    ('Management', 'General',     '2001,2003,9000,9001,9002'),
+    ('Management', 'Admin',       '2001,2003,9000,9001,9002');
+
 -- Manage / Map's points: each person's address turned into coordinates once (portal:geocode-homes).
 -- Existing databases: create_portal_employee_home_locations.
 CREATE TABLE IF NOT EXISTS employee_home_locations (

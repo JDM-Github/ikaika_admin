@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\DB;
  * Which activities a project may report against: its Type of project's list (job_type_allowed_activities,
  * edited on Project Settings), less the ones taken out for this project alone (2026-10-13, user).
  *
+ * A row with a department is that department's list for the type, and wins over the shared row (no
+ * department) -- one name such as Management is a type in several departments, each with its own list.
+ *
  * A project only ever removes: it cannot add a code its type does not allow, so what it stores is what
  * it took out (projects_removed_activities). A project that removed nothing has its type's whole list,
  * including any code the type gains later.
@@ -23,10 +26,51 @@ final class PortalProjectActivities
      */
     public function allowedByType(): array
     {
-        $codes = PortalActivityScopes::all();
-        $rows = $this->connection()->table('job_type_allowed_activities')->get(['job_type', 'activity_code_id_initials']);
+        return $this->lists()['shared'];
+    }
 
-        $allowed = [];
+    /**
+     * The department rows, keyed by department then job type, for a type one department lists apart.
+     *
+     * @return array<string, array<string, list<string>>>
+     */
+    public function allowedByDepartment(): array
+    {
+        return $this->lists()['departments'];
+    }
+
+    /**
+     * A project's whole list: its department's row for its type, else the shared one.
+     *
+     * @return list<string>
+     */
+    public function allowedFor(mixed $department, ?string $jobType): array
+    {
+        if ($jobType === null) {
+            return [];
+        }
+        $lists = $this->lists();
+        $key = PortalPreview::department($department);
+        foreach ($lists['departments'] as $name => $types) {
+            if (PortalPreview::department($name) === $key && isset($types[$jobType])) {
+                return $types[$jobType];
+            }
+        }
+
+        return $lists['shared'][$jobType] ?? [];
+    }
+
+    /**
+     * Every row's prefixes resolved to whole codes, the shared rows apart from the department ones.
+     *
+     * @return array{shared: array<string, list<string>>, departments: array<string, array<string, list<string>>>}
+     */
+    private function lists(): array
+    {
+        $codes = PortalActivityScopes::all();
+        $rows = $this->connection()->table('job_type_allowed_activities')->get(['job_type', 'department', 'activity_code_id_initials']);
+
+        $lists = ['shared' => [], 'departments' => []];
         foreach ($rows as $row) {
             $jobType = trim((string) ($row->job_type ?? ''));
             if ($jobType === '') {
@@ -42,10 +86,15 @@ final class PortalProjectActivities
                     }
                 }
             }
-            $allowed[$jobType] = $chosen;
+            $department = trim((string) ($row->department ?? ''));
+            if ($department === '') {
+                $lists['shared'][$jobType] = $chosen;
+            } else {
+                $lists['departments'][$department][$jobType] = $chosen;
+            }
         }
 
-        return $allowed;
+        return $lists;
     }
 
     /**
@@ -54,7 +103,7 @@ final class PortalProjectActivities
      *
      * @return list<string>|null
      */
-    public function validated(mixed $raw, ?string $jobType): ?array
+    public function validated(mixed $raw, ?string $jobType, mixed $department = null): ?array
     {
         if ($raw === null) {
             return null;
@@ -62,7 +111,7 @@ final class PortalProjectActivities
         if (! is_array($raw)) {
             abort(422, 'Removed activities must be a list.');
         }
-        $allowed = $jobType === null ? [] : ($this->allowedByType()[$jobType] ?? []);
+        $allowed = $this->allowedFor($department, $jobType);
 
         $removed = [];
         foreach ($raw as $value) {

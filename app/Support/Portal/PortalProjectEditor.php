@@ -237,6 +237,8 @@ final class PortalProjectEditor
                 'typesByDepartment' => $this->typesByDepartment(),
                 // Which activity codes each job type may use on a report, keyed by job type.
                 'allowedActivitiesByType' => $this->allowedActivitiesByType(),
+                // A department's own list for a type, which wins over the shared one (Management, 2026-10-13).
+                'allowedActivitiesByDepartment' => $this->activities->allowedByDepartment(),
                 // Editing a job type's allowed activities is a global change, so it needs All reach.
                 'canManageAllowedActivities' => PortalRules::reach($actor, $request, PortalProjectPowers::EDIT) === 'all',
                 // The activity code catalogue, for the allowed activities a project keeps.
@@ -272,7 +274,7 @@ final class PortalProjectEditor
         }
         $scopeCodes = $this->validatedScopeCodes($request, $fields['columns']['department']);
         // A new project has its type's whole list unless the form took some out.
-        $removedActivities = $this->activities->validated($request->input('removedActivityCodes'), $fields['columns']['type_of_job']) ?? [];
+        $removedActivities = $this->activities->validated($request->input('removedActivityCodes'), $fields['columns']['type_of_job'], $fields['columns']['department']) ?? [];
         $employeeId = (int) $actor->getKey();
         $closing = $this->closingColumns($request, null, $fields['columns']);
         // Only Auto-approve passes a new project; approving others' is not approving your own (2026-10-07).
@@ -370,7 +372,7 @@ final class PortalProjectEditor
         [$number] = self::split($row);
         $fields['columns']['project_name'] = $number === null ? $fields['name'] : $number.' '.$fields['name'];
         $parts = $this->changes($projectId, $fields);
-        $removedActivities = $this->removedActivitiesFor($request, $projectId, $row, $fields['columns']['type_of_job']);
+        $removedActivities = $this->removedActivitiesFor($request, $projectId, $row, $fields['columns']['type_of_job'], $fields['columns']['department'] ?? $row->department ?? null);
         if ($removedActivities !== null && $removedActivities !== $this->activities->removedFor($projectId)) {
             $parts[] = 'Allowed activities changed';
         }
@@ -497,14 +499,14 @@ final class PortalProjectEditor
      *
      * @return list<string>|null
      */
-    private function removedActivitiesFor(Request $request, int $projectId, object $row, ?string $jobType): ?array
+    private function removedActivitiesFor(Request $request, int $projectId, object $row, ?string $jobType, mixed $department): ?array
     {
-        $sent = $this->activities->validated($request->input('removedActivityCodes'), $jobType);
+        $sent = $this->activities->validated($request->input('removedActivityCodes'), $jobType, $department);
         if ($sent !== null || $this->text($row->type_of_job ?? null) === $jobType) {
             return $sent;
         }
 
-        return $this->activities->validated($this->activities->removedFor($projectId), $jobType);
+        return $this->activities->validated($this->activities->removedFor($projectId), $jobType, $department);
     }
 
     private function announceEdit(Employee $actor, Request $request, int $projectId, string $name, ?string $department, bool $notifiesUpdate): void
@@ -1326,7 +1328,9 @@ final class PortalProjectEditor
 
     /**
      * Set which activity codes a job type may use. Writes one row, the chosen codes comma-joined; the
-     * report matches them as prefixes, so a stored code allows exactly itself. All reach only.
+     * report matches them as prefixes, so a stored code allows exactly itself. All reach only. A type
+     * whose name more than one department uses (Management) keeps one list per department; any other
+     * keeps the shared row Airtable's are.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
@@ -1337,6 +1341,7 @@ final class PortalProjectEditor
         }
         $data = $request->validate([
             'jobType' => ['required', 'string', 'max:191'],
+            'department' => ['nullable', 'string', 'max:100'],
             'activityCodes' => ['present', 'array', 'max:'.self::MAX_SCOPES],
             'activityCodes.*' => ['string', 'max:32'],
         ]);
@@ -1344,6 +1349,13 @@ final class PortalProjectEditor
         if ($jobType === '' || ! in_array($jobType, $this->jobTypes(), true)) {
             abort(422, 'Choose a project type from the list the form offers.');
         }
+        $byDepartment = $this->typesByDepartment();
+        $department = $this->text($data['department'] ?? null);
+        if ($department !== null && ! in_array($jobType, $byDepartment[$department] ?? [], true)) {
+            abort(422, 'That department has no project type of that name.');
+        }
+        $sharedBy = array_keys(array_filter($byDepartment, static fn (array $types): bool => in_array($jobType, $types, true)));
+        $rowDepartment = $department !== null && count($sharedBy) > 1 ? $department : null;
 
         $known = [];
         foreach (PortalActivityScopes::all() as $code) {
@@ -1357,10 +1369,12 @@ final class PortalProjectEditor
             }
         }
 
-        $this->connection()->table('job_type_allowed_activities')->where('job_type', $jobType)->delete();
+        $row = $this->connection()->table('job_type_allowed_activities')->where('job_type', $jobType);
+        $rowDepartment === null ? $row->whereNull('department')->delete() : $row->where('department', $rowDepartment)->delete();
         if ($codes !== []) {
             $this->connection()->table('job_type_allowed_activities')->insert([
                 'job_type' => $jobType,
+                'department' => $rowDepartment,
                 'activity_code_id_initials' => implode(',', $codes),
             ]);
         }
@@ -1370,7 +1384,7 @@ final class PortalProjectEditor
         return [
             'section' => 'projects',
             'resource' => 'allowed-activities',
-            'data' => ['jobType' => $jobType, 'activityCodes' => $codes],
+            'data' => ['jobType' => $jobType, 'department' => $rowDepartment, 'activityCodes' => $codes],
         ];
     }
 

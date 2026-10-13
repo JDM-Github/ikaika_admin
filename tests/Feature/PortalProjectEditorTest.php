@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalActivityScopes;
+use App\Support\Portal\PortalProjectActivities;
 use App\Support\Portal\PortalReportProjects;
 use App\Support\Portal\PortalViewProjectPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -581,6 +582,40 @@ class PortalProjectEditorTest extends TestCase
         $edit(['leadId' => $payload['leadId'], 'removedActivityCodes' => [$removed, $kept]])->assertOk();
         $edit(['leadId' => $payload['leadId'], 'type' => 'CAD-to-BIM'])->assertOk();
         $this->assertSame([$kept], $stored());
+    }
+
+    // The reported ask: Management is a type in several departments, each with its own allowed activities.
+    public function test_a_departments_own_list_for_a_type_wins_over_the_shared_one(): void
+    {
+        $portal = DB::connection('portal');
+        [$engineeringCode, $misCode, $sharedCode] = array_slice(array_column(PortalActivityScopes::all(), 'code'), 0, 3);
+        $portal->table('job_types')->insertOrIgnore([
+            ['department' => 'Engineering', 'name' => 'Management'],
+            ['department' => 'MIS', 'name' => 'Management'],
+        ]);
+        $portal->table('job_type_allowed_activities')->where('job_type', 'Management')->delete();
+        $portal->table('job_type_allowed_activities')->insert([
+            ['job_type' => 'Management', 'department' => null, 'activity_code_id_initials' => $sharedCode],
+            ['job_type' => 'Management', 'department' => 'Engineering', 'activity_code_id_initials' => $engineeringCode],
+        ]);
+        $activities = app(PortalProjectActivities::class);
+
+        $this->assertSame([$engineeringCode], $activities->allowedFor('engineering', 'Management'));
+        $this->assertSame([$sharedCode], $activities->allowedFor('MIS', 'Management'));
+        $this->assertSame([], $activities->allowedFor('MIS', null));
+
+        $admin = $this->employee('admin');
+        $this->grant($admin, ['projects.edit' => 'all']);
+        $token = $this->token($admin);
+        $options = $this->withToken($token)->getJson(self::BASE.'/options')->assertOk();
+        $this->assertSame([$engineeringCode], $options->json('data.allowedActivitiesByDepartment.Engineering.Management'));
+
+        // A name more than one department uses keeps one list per department.
+        $this->withToken($token)->putJson(self::BASE.'/allowed-activities', ['jobType' => 'Management', 'department' => 'MIS', 'activityCodes' => [$misCode]])
+            ->assertOk()->assertJsonPath('data.department', 'MIS');
+        $this->assertSame([$misCode], $activities->allowedFor('MIS', 'Management'));
+        $this->assertSame([$engineeringCode], $activities->allowedFor('Engineering', 'Management'));
+        $this->withToken($token)->putJson(self::BASE.'/allowed-activities', ['jobType' => 'Management', 'department' => 'Nowhere', 'activityCodes' => []])->assertStatus(422);
     }
 
     public function test_adding_refuses_what_is_not_on_the_lists(): void

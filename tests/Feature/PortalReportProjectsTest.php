@@ -202,13 +202,10 @@ class PortalReportProjectsTest extends TestCase
         $actor = $this->activeMember();
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
 
-        $ruled = DB::connection('portal')->table('job_type_allowed_activities')->pluck('job_type')->all();
-        $project = DB::connection('portal')->table('projects')
-            ->whereNotNull('type_of_job')
-            ->whereNotIn('type_of_job', $ruled)
-            ->whereNotNull('project_name')
-            ->first();
+        // A type no row names, so the real data's lists (Management's included) never stand in for it.
+        $project = DB::connection('portal')->table('projects')->whereNotNull('project_name')->whereNull('deleted_at')->first();
         $this->assertNotNull($project);
+        DB::connection('portal')->table('projects')->where('id', $project->id)->update(['type_of_job' => 'Type With No Rule']);
         DB::connection('portal')->table('employees_projects')->insertOrIgnore([
             'employee_id' => $actor->getKey(),
             'project_id' => $project->id,
