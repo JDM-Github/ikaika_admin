@@ -437,7 +437,7 @@
             "label": "-Drop   [SwitchParameter]",
             "type": "boolean",
             "required": false,
-            "description": "Drop each picked product's database and build it again from nothing: every step, unless -Step names some. Never core.",
+            "description": "Remove each picked product's database completely; nothing is built back. Takes no -Step or -Migrate.",
             "default": ""
           },
           {
@@ -446,6 +446,14 @@
             "type": "boolean",
             "required": false,
             "description": "Bring every database up to date and skip what is already applied, so a second run does nothing.",
+            "default": ""
+          },
+          {
+            "flag": "DropAndRecreate",
+            "label": "-DropAndRecreate   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "-Drop, then -Idempotent: each picked product's database removed, then built up to date - every step, or the -Step ones, and the migrations.",
             "default": ""
           },
           {
@@ -466,7 +474,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Product ${update-database.args.Product} -AllProducts ${update-database.args.AllProducts} -Step ${update-database.args.Step} -Drop ${update-database.args.Drop} -Idempotent ${update-database.args.Idempotent} -Migrate ${update-database.args.Migrate} -DryRun ${update-database.args.DryRun}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Product ${update-database.args.Product} -AllProducts ${update-database.args.AllProducts} -Step ${update-database.args.Step} -Drop ${update-database.args.Drop} -Idempotent ${update-database.args.Idempotent} -DropAndRecreate ${update-database.args.DropAndRecreate} -Migrate ${update-database.args.Migrate} -DryRun ${update-database.args.DryRun}"
         ]
       }
     },

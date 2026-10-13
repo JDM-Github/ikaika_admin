@@ -53,15 +53,18 @@ function Get-ProductDatabase([string]$EnvPath) {
     $catalog = Get-Content -LiteralPath $catalogPath -Raw
     $pattern = "'([a-z0-9-]+)'\s*=>\s*\[\s*'name'\s*=>\s*'([^']+)'.*?'database'\s*=>\s*env\('([A-Z0-9_]+)_DB_DATABASE',\s*'([^']*)'\)"
     $entries = @([regex]::Matches($catalog, $pattern, 'Singleline') | ForEach-Object {
-            @{ Key = $_.Groups[1].Value; Name = $_.Groups[2].Value; Prefix = $_.Groups[3].Value; Fallback = $_.Groups[4].Value }
+            $connection = if ($_.Value -match "'connection'\s*=>\s*'([A-Za-z0-9_]+)'") { $Matches[1] } else { '' }
+            @{ Key = $_.Groups[1].Value; Name = $_.Groups[2].Value; Connection = $connection; Prefix = $_.Groups[3].Value; Fallback = $_.Groups[4].Value }
         })
     if (-not $entries.Count) { throw "No product in $catalogPath has a 'database' => env('<PREFIX>_DB_DATABASE', ...) to read." }
 
     $products = [ordered]@{}
     foreach ($entry in $entries) {
         $products[$entry.Key -replace '-', '_'] = [pscustomobject]@{
-            Key      = $entry.Key
-            Name     = $entry.Name
+            Key        = $entry.Key
+            Name       = $entry.Name
+            # The Laravel connection the catalog gives it, which is how a migration names the database it writes to.
+            Connection = $entry.Connection
             Database = Get-DotEnvValue $EnvPath "$($entry.Prefix)_DB_DATABASE" $entry.Fallback
             DbHost   = Get-DotEnvValue $EnvPath "$($entry.Prefix)_DB_HOST" $host_
             Port     = Get-DotEnvValue $EnvPath "$($entry.Prefix)_DB_PORT" $port

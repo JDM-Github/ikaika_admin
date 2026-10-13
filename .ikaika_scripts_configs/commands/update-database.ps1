@@ -24,13 +24,21 @@
 # duplicate would double every table without a unique key.
 #
 # A REBUILD DESTROYS. Every rebuild file opens with DROP DATABASE, so it is refused on a database
-# that has tables unless -Drop is given; on one that does not exist yet it only creates it.
+# that has tables; on one that does not exist yet it only creates it. -DropAndRecreate is how a
+# database that has tables is built again.
 #
-# -DROP STARTS A PRODUCT FROM NOTHING: each picked product's database is dropped and created empty,
-# then every one of its steps runs in order - or only the ones -Step names - which is what
-# sql/portal/reset.ps1 does for the portal. Core is never dropped: its database also holds Laravel's
-# cache and jobs tables. After a drop or a rebuild, that product's rows leave the core database's
-# actions and recycle tables - they describe rows that are gone.
+# THREE SWITCHES TOUCH A WHOLE DATABASE, each named after what it does:
+#     -Drop             removes each picked product's database completely, as phpMyAdmin's Drop does;
+#                       nothing is built back
+#     -Idempotent       brings databases up to date, skipping what is already applied; never rebuilds
+#     -DropAndRecreate  the two in that order: removed, then built up to date - every step, or the -Step
+#                       ones, and the migrations. -Drop -Idempotent is the same thing.
+# A drop takes only what is named, -Product or -AllProducts, never every database by itself. Core is
+# dropped like any product when it is picked, and its database is Laravel's own - the migrations
+# table among it - which migrate builds back. What described a dropped database goes with it: its
+# entries in the local ledger, its product's rows in the core ledger (actions, recycle), and the
+# record of every migration that writes to it, so the next migrate runs those again. Plain -Drop
+# takes no -Step or -Migrate: a migrate with the database gone would record migrations that skipped it.
 #
 # WITH NOTHING PICKED NOTHING IS APPLIED. Every step is listed with its kind, the database it
 # targets, its size and what it would destroy, and the run stops there.
@@ -42,7 +50,8 @@
 #     .\script.ps1 update-database                                        list everything, change nothing
 #     .\script.ps1 update-database -Product portal -Step data             load the portal rows
 #     .\script.ps1 update-database -Product transaction_tracker -Step patches
-#     .\script.ps1 update-database -Product portal -Drop                    the portal from nothing, every step
+#     .\script.ps1 update-database -Product transaction_tracker -Drop       remove that database, nothing built back
+#     .\script.ps1 update-database -Product portal -DropAndRecreate         the portal from nothing, up to date
 #     .\script.ps1 update-database -Idempotent                            bring every database up to date
 #     .\script.ps1 update-database -Migrate                               php artisan migrate
 #
@@ -56,11 +65,13 @@ param(
     [switch]$AllProducts,
     # The steps to apply, by file name without .sql, or patches; the ones the folders hold are offered.
     [string[]]$Step = @(),
-    # Drop each picked product's database and build it again from nothing: every step, unless -Step names some. Never core.
+    # Remove each picked product's database completely; nothing is built back. Takes no -Step or -Migrate.
     [switch]$Drop,
     # Bring every database up to date and skip what is already applied, so a second run does nothing.
     # Picks every product, every step and the migrations when nothing else is named; never rebuilds.
     [switch]$Idempotent,
+    # -Drop, then -Idempotent: each picked product's database removed, then built up to date - every step, or the -Step ones, and the migrations.
+    [switch]$DropAndRecreate,
     # php artisan migrate: additive, and the supported way to update an existing deployment.
     [switch]$Migrate,
     # List what would run, in order, and run nothing.
@@ -86,7 +97,7 @@ if ($Help) {
 
   Usage
     .\script.ps1 update-database [-Product <folder>[,...] | -AllProducts] [-Step <name>[,...]]
-                                 [-Drop] [-Idempotent] [-Migrate] [-DryRun]
+                                 [-Drop | -DropAndRecreate] [-Idempotent] [-Migrate] [-DryRun]
 
   With nothing picked it lists every product's steps and applies none.
 
@@ -97,21 +108,30 @@ if ($Help) {
     rebuild -> structure -> retrofit -> data -> patch
   and a file's own "-- update-database: after <file>" line moves it later.
 
-  -Drop drops each picked product's database, creates it empty and runs every
-  one of its steps in order (or only the -Step ones). Core is never dropped.
-  A rebuild file - one that opens with DROP DATABASE - is refused on a database
-  that has tables unless -Drop is given. After either, that product's rows
-  leave the core ledger (actions, recycle).
+  -Drop removes each picked product's database completely, as phpMyAdmin's
+  Drop does, and builds nothing back. It takes no -Step or -Migrate.
 
   -Idempotent means everything - every product, every step, the migrations -
   skipping what is already applied and never rebuilding. A second run does
   nothing.
 
+  -DropAndRecreate is the two in that order: each picked product's database
+  removed, then built up to date - every step, or the -Step ones, and the
+  migrations. -Drop -Idempotent is the same thing.
+
+  A drop takes only the products named, and core when it is picked - its
+  database is also Laravel's own, migrations table and all. The product's rows
+  in the core ledger and the record of every migration that writes to a
+  dropped database go with it, so the next migrate runs those again. A rebuild
+  file - one that opens with DROP DATABASE - is refused on a database that has
+  tables; -DropAndRecreate is how one is built again.
+
   Examples
     .\script.ps1 update-database -Product portal -Step data
     .\script.ps1 update-database -Product transaction_tracker -Step patches
-    .\script.ps1 update-database -Product portal -Drop
-    .\script.ps1 update-database -Product portal,transaction_tracker -Drop -DryRun
+    .\script.ps1 update-database -Product transaction_tracker -Drop
+    .\script.ps1 update-database -Product portal -DropAndRecreate
+    .\script.ps1 update-database -Product portal,transaction_tracker -DropAndRecreate -DryRun
     .\script.ps1 update-database -AllProducts -Step indexes,patches -DryRun
 
   The databases and credentials come from .env, as config/products.php reads them.
@@ -241,6 +261,19 @@ function Get-ErrorCode([string]$Line) {
     return 0
 }
 
+# The databases each migration writes to: the product connections it names as a call's first argument
+# or as its $connection, else Laravel's default. One counted against a database it does not touch only
+# runs again, and the migrations that write to a product check before they write.
+function Get-MigrationTarget([hashtable]$ConnectionDatabase, [string]$DefaultDatabase) {
+    $dir = Join-Path $repoRoot 'database\migrations'
+    if (-not (Test-Path -LiteralPath $dir)) { return @() }
+    return @(Get-ChildItem -LiteralPath $dir -Filter '*.php' -File | Sort-Object Name | ForEach-Object {
+            $text = Get-Content -LiteralPath $_.FullName -Raw
+            $named = @($ConnectionDatabase.Keys | Where-Object { $text -match "(\(\s*|\`$connection\s*=\s*)['""]$([regex]::Escape($_))['""]" })
+            [pscustomobject]@{ Name = $_.BaseName; Databases = @(if ($named.Count) { $named | ForEach-Object { $ConnectionDatabase[$_] } } else { $DefaultDatabase }) }
+        })
+}
+
 # ------------------------------------------------------------------------ the ledger
 # What -Idempotent skips: which file, at which content hash, was applied to which database. A local
 # file rather than a table, so no product schema carries a table that belongs to a build tool; the
@@ -283,6 +316,22 @@ if ($unknown.Count) {
 }
 $wantedSteps = @($Step | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() -replace '\.sql$', '' } | Where-Object { $_ })
 if ($AllProducts) { $wantedFolders = $folders }
+$rebuild = $DropAndRecreate -or ($Drop -and $Idempotent)
+$wiping = $Drop -or $DropAndRecreate
+if ($wiping -and -not $wantedFolders.Count) {
+    Write-Host '  A drop takes only what is named: -Product <folder>, or -AllProducts.' -ForegroundColor Red
+    exit 1
+}
+if ($wiping -and -not $rebuild -and $wantedSteps.Count) {
+    Write-Host '  -Drop removes the whole database, so it takes no -Step; -DropAndRecreate builds those steps back.' -ForegroundColor Red
+    exit 1
+}
+if ($wiping -and -not $rebuild -and $Migrate) {
+    Write-Host '  -Drop leaves the database gone, and migrate would record the migrations that skip it as run; -DropAndRecreate migrates once it is built back.' -ForegroundColor Red
+    exit 1
+}
+# Built back up to date means the migrations too: the sql/ files make the tables, and what came since lives in a migration.
+if ($rebuild) { $Idempotent = $true; $Migrate = $true }
 # -Idempotent with nothing else named means everything, migrations included: every column added since
 # the sql/ files were written lives in a migration, and artisan migrate skips what it has already run.
 if ($Idempotent -and -not $wantedFolders.Count -and -not $wantedSteps.Count) {
@@ -290,13 +339,21 @@ if ($Idempotent -and -not $wantedFolders.Count -and -not $wantedSteps.Count) {
     $Migrate = $true
 }
 $everyStep = $Idempotent -and -not $wantedSteps.Count
-if ($Drop -and $Idempotent) {
-    Write-Host '  -Drop builds from nothing and -Idempotent never rebuilds; pick one.' -ForegroundColor Red
-    exit 1
-}
-# A database dropped to nothing needs every one of its steps, so -Drop alone means all of them.
-if ($Drop -and -not $wantedSteps.Count) { $everyStep = $true }
 $drops = @()
+
+# Laravel's own database - the default connection, where the migrations table is - and the database behind each connection.
+$envPath = Join-Path $repoRoot '.env'
+$laravelDb = [pscustomobject]@{
+    Name     = 'Laravel'
+    Key      = ''
+    Database = Get-DotEnvValue $envPath 'DB_DATABASE' 'laravel'
+    DbHost   = Get-DotEnvValue $envPath 'DB_HOST' '127.0.0.1'
+    Port     = Get-DotEnvValue $envPath 'DB_PORT' '3306'
+    Username = Get-DotEnvValue $envPath 'DB_USERNAME' 'root'
+    Password = Get-DotEnvValue $envPath 'DB_PASSWORD' ''
+}
+$connectionDatabase = @{}
+foreach ($entry in $products.Values) { if ($entry.Connection) { $connectionDatabase[$entry.Connection] = $entry.Database } }
 
 # ------------------------------------------------------------------------ the listing
 Write-Host ''
@@ -314,28 +371,29 @@ foreach ($folder in $folders) {
     Write-Host "    .env says $($db.Database) on $($db.DbHost):$($db.Port) as $($db.Username)" -ForegroundColor DarkGray
     $productSteps = Get-ProductStep (Join-Path $sqlRoot $folder)
 
-    if ($Drop -and $wantedFolders -contains $folder) {
-        if ($folder -eq 'core') {
-            Write-Host '    kept     core is never dropped - its database also holds Laravel''s cache and jobs tables' -ForegroundColor DarkGray
-        } else {
-            $databases = @(@($productSteps | ForEach-Object { if ($_.Facts.Target) { $_.Facts.Target } else { $db.Database } }) + @($db.Database) | Select-Object -Unique)
-            $odd = @($databases | Where-Object { $_ -notmatch '^[A-Za-z0-9_]+$' })
-            if ($odd.Count) {
-                Write-Host "  $($odd -join ', ') is not a plain database name, so -Drop will not touch it." -ForegroundColor Red
-                exit 1
-            }
-            $sizes = @($databases | ForEach-Object { $count = Get-DatabaseTableCount $db $_; "$_ ($(if ($count -lt 0) { 'could not ask the server' } elseif ($count -eq 0) { 'no tables' } else { "$count table(s) go" }))" })
-            Write-Host '    DROP     ' -ForegroundColor Yellow -NoNewline
-            Write-Host "$($sizes -join ', ') - dropped and created empty before its steps run"
-            $drops += [pscustomobject]@{ Folder = $folder; Product = $db; Databases = $databases }
+    if ($wiping -and $wantedFolders -contains $folder) {
+        $databases = @(@($productSteps | ForEach-Object { if ($_.Facts.Target) { $_.Facts.Target } else { $db.Database } }) + @($db.Database) | Select-Object -Unique)
+        $odd = @($databases | Where-Object { $_ -notmatch '^[A-Za-z0-9_]+$' })
+        if ($odd.Count) {
+            Write-Host "  $($odd -join ', ') is not a plain database name, so a drop will not touch it." -ForegroundColor Red
+            exit 1
         }
+        $sizes = @($databases | ForEach-Object { $count = Get-DatabaseTableCount $db $_; "$_ ($(if ($count -lt 0) { 'could not ask the server' } elseif ($count -eq 0) { 'no tables' } else { "$count table(s) go" }))" })
+        Write-Host '    DROP     ' -ForegroundColor Yellow -NoNewline
+        Write-Host "$($sizes -join ', ') - $(if ($rebuild) { 'removed, then built up to date' } else { 'removed completely; nothing is built back' })"
+        if ($databases -contains $laravelDb.Database) {
+            Write-Host "             Laravel's own tables go with it, migrations included$(if ($rebuild) { ' - migrate builds them back' } else { " - -Product $folder -DropAndRecreate builds them back" })" -ForegroundColor Yellow
+        }
+        $drops += [pscustomobject]@{ Folder = $folder; Product = $db; Databases = $databases }
     }
 
     foreach ($s in $productSteps) {
         $facts = $s.Facts
         $knownSteps += $s.Name
         $target = if ($facts.Target) { $facts.Target } else { $db.Database }
-        $liveTables = if ($facts.Drops) { Get-DatabaseTableCount $db $target } else { -1 }
+        # Rebuilt after its drop, the database is empty when its steps run: nothing applied, nothing to destroy.
+        $afterDrop = $rebuild -and $drops.Folder -contains $folder
+        $liveTables = if ($afterDrop) { 0 } elseif ($facts.Drops) { Get-DatabaseTableCount $db $target } else { -1 }
         $wouldDestroy = $facts.Drops -and $liveTables -ne 0
 
         $notes = @()
@@ -351,21 +409,21 @@ foreach ($folder in $folders) {
         $key = "$folder/$($s.Label)"
         $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $facts.Path).Hash.ToLower()
         $applied = $false
-        if ($Idempotent -and $picked) {
+        if ($Idempotent -and $picked -and -not $afterDrop) {
             $entry = $ledger["$target|$key"]
             $applied = $entry -and "$($entry.sha256)" -eq $hash -and (Get-DatabaseTableCount $db $target) -gt 0
         }
         # Up to date never means emptied: under -Idempotent a rebuild that would destroy is left alone.
         $kept = $picked -and $wouldDestroy -and $Idempotent
-        $blocked = $picked -and $wouldDestroy -and -not $Idempotent -and -not $Drop
+        $blocked = $picked -and $wouldDestroy -and -not $Idempotent
 
         $state = if ($applied) { 'applied' } elseif ($kept) { 'kept' } elseif ($blocked) { 'blocked' } elseif ($picked) { 'will run' } else { 'listed' }
         if ($applied) { $notes = @('already applied, unchanged since') }
-        if ($kept) { $notes += 'left alone - -Drop on its own asks for a rebuild' }
+        if ($kept) { $notes += 'left alone - -DropAndRecreate rebuilds it' }
         $colour = @{ 'listed' = 'DarkGray'; 'will run' = 'Green'; 'blocked' = 'Yellow'; 'applied' = 'DarkGray'; 'kept' = 'DarkGray' }
         Write-Host ('    {0,-9}' -f $state) -ForegroundColor $colour[$state] -NoNewline
         Write-Host ('{0,-38} {1,-10} {2,-8} {3}' -f $s.Label, $facts.Kind, (Format-Size $facts.Bytes), ($notes -join '; '))
-        if ($blocked) { Write-Host '                 add -Drop to allow it' -ForegroundColor DarkGray }
+        if ($blocked) { Write-Host '                 -DropAndRecreate rebuilds a database that has tables' -ForegroundColor DarkGray }
         if ($picked -and -not $blocked -and -not $applied -and -not $kept) {
             $plan += [pscustomobject]@{ Product = $db; Folder = $folder; Step = $s; Facts = $facts; Target = $target; Key = $key; Hash = $hash }
         }
@@ -374,6 +432,21 @@ foreach ($folder in $folders) {
 foreach ($orphan in $orphans) {
     Write-Host ''
     Write-Host "  sql/$orphan has .sql files but no product in config/products.php, so nothing knows its database; it is skipped." -ForegroundColor Yellow
+}
+
+# The migration records that describe a dropped database, forgotten so migrate runs them again - unless the
+# migrations table is in a dropped database itself, in which case every record goes with it.
+function Get-ForgottenMigration([string[]]$Databases) {
+    if (-not $Databases.Count -or $Databases -contains $laravelDb.Database) { return @() }
+    return @(Get-MigrationTarget $connectionDatabase $laravelDb.Database |
+            Where-Object { @($_.Databases | Where-Object { $Databases -contains $_ }).Count -and $_.Name -match '^[A-Za-z0-9_]+$' } | ForEach-Object Name)
+}
+$droppedDatabases = @($drops | ForEach-Object { $_.Databases } | Select-Object -Unique)
+$coreGone = $products.Contains('core') -and $droppedDatabases -contains $products['core'].Database
+$forget = Get-ForgottenMigration $droppedDatabases
+if ($forget.Count) {
+    Write-Host ''
+    Write-Host "  Migrations  $($forget.Count) record(s) in $($laravelDb.Database).migrations write to a dropped database; they are forgotten, so migrate runs them again" -ForegroundColor DarkGray
 }
 
 $strayStep = @($wantedSteps | Where-Object { $knownSteps -notcontains $_ })
@@ -396,7 +469,8 @@ if (-not $plan.Count -and -not $drops.Count -and -not $Migrate) {
 if ($DryRun) {
     Write-Host ''
     Write-Host '  -DryRun: nothing ran. In order, this would apply:' -ForegroundColor Yellow
-    foreach ($wipe in $drops) { Write-Host "    drop and create $($wipe.Databases -join ', ') ($($wipe.Folder)), then clear its core ledger rows" }
+    foreach ($wipe in $drops) { Write-Host "    drop $($wipe.Databases -join ', ') ($($wipe.Folder))$(if ($rebuild) { ', and create it empty' })$(if ($wipe.Folder -ne 'core' -and -not $coreGone) { ", then clear $($wipe.Product.Key)'s core ledger rows" })" }
+    if ($forget.Count) { Write-Host "    forget $($forget.Count) migration record(s) in $($laravelDb.Database).migrations" }
     foreach ($item in $plan) { Write-Host "    $($item.Folder)/$($item.Step.Label) -> $($item.Target)$(if ($item.Facts.Kind -eq 'rebuild' -and $drops.Folder -notcontains $item.Folder) { ', then clear its core ledger rows' })" }
     if ($Migrate) { Write-Host '    php artisan migrate' }
     Write-Host ''
@@ -436,19 +510,32 @@ function Clear-CoreLedger([object]$Rebuilt) {
 }
 
 $undropped = @()
+$gone = @()
 foreach ($wipe in $drops) {
     Write-Host "    drop $($wipe.Folder): $($wipe.Databases -join ', ')"
-    $statements = ($wipe.Databases | ForEach-Object { "DROP DATABASE IF EXISTS ``$_``; CREATE DATABASE ``$_`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" }) -join ' '
+    # Created again empty only to be built back, so a step with no USE line and migrate have somewhere to write.
+    $statements = ($wipe.Databases | ForEach-Object { "DROP DATABASE IF EXISTS ``$_``;$(if ($rebuild) { " CREATE DATABASE ``$_`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" })" }) -join ' '
     if ($null -eq (Invoke-MysqlQuery $wipe.Product "$statements SELECT 'ok'")) {
-        Write-Host "      FAILED - could not drop and create $($wipe.Databases -join ', '); its steps are skipped" -ForegroundColor Red
+        Write-Host "      FAILED - could not drop $($wipe.Databases -join ', ')$(if ($rebuild) { '; its steps are skipped' })" -ForegroundColor Red
         $undropped += $wipe.Folder
         $failures++
         continue
     }
-    Write-Host "      dropped and created empty" -ForegroundColor Green
+    Write-Host "      $(if ($rebuild) { 'dropped, and created empty for its steps' } else { 'dropped' })" -ForegroundColor Green
+    $gone += $wipe.Databases
     # What the ledger said was applied to these databases went with them.
     foreach ($name in @($ledger.Keys | Where-Object { $wipe.Databases -contains ($_ -split '\|')[0] })) { $ledger.Remove($name); $ledgerTouched = $true }
-    if (-not (Clear-CoreLedger $wipe.Product)) { $failures++ }
+    if ($wipe.Folder -ne 'core' -and -not $coreGone -and -not (Clear-CoreLedger $wipe.Product)) { $failures++ }
+}
+$forgetting = Get-ForgottenMigration $gone
+if ($forgetting.Count -and @(Get-PresentTable $laravelDb $laravelDb.Database) -contains 'migrations') {
+    $names = ($forgetting | ForEach-Object { "'$_'" }) -join ','
+    if ($null -eq (Invoke-MysqlQuery $laravelDb "DELETE FROM ``$($laravelDb.Database)``.migrations WHERE migration IN ($names); SELECT 'ok'")) {
+        Write-Host "      could not forget the migrations that write to what was dropped, in $($laravelDb.Database).migrations" -ForegroundColor Yellow
+        $failures++
+    } else {
+        Write-Host "      forgot $($forgetting.Count) migration record(s) in $($laravelDb.Database).migrations, so migrate runs them again" -ForegroundColor DarkGray
+    }
 }
 
 foreach ($item in $plan) {
@@ -494,7 +581,7 @@ foreach ($item in $plan) {
             continue
         }
         Write-Host '      These rows are already loaded; a data file inserts rather than merges, so it only applies to an empty database:' -ForegroundColor Yellow
-        Write-Host "        .\script.ps1 update-database -Product $($item.Folder) -Drop" -ForegroundColor DarkGray
+        Write-Host "        .\script.ps1 update-database -Product $($item.Folder) -DropAndRecreate" -ForegroundColor DarkGray
     } elseif ((Get-ErrorCode $why) -eq 1049) {
         Write-Host "      $($item.Target) does not exist yet; the product's rebuild step creates it." -ForegroundColor Yellow
     }
