@@ -35,6 +35,8 @@ final class PortalProjectTrail
 
     public const REOPENED = 'Project Creation Reopened';
 
+    public const CLOSED = 'Project Closed';
+
     public function record(int $projectId, string $actionName, Employee $actor, ?Request $request, ?string $remarks = null): void
     {
         $actionId = (int) $this->connection()->table('project_action_history')->insertGetId([

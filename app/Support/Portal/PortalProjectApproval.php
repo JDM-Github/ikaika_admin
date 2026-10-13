@@ -103,6 +103,27 @@ final class PortalProjectApproval
         }
     }
 
+    // A closed project waits for its department heads (Edit closed projects over it) to approve the close.
+    public function notifyDepartmentHeads(Employee $actor, Request $request, object $project, string $name): void
+    {
+        $who = PortalActivityCopy::actorName($actor, $request, true);
+        foreach (PortalRules::holders([PortalProjectPowers::EDIT_CLOSED]) as $holder) {
+            if (! PortalProjectPowers::coversProject($holder['reaches'][PortalProjectPowers::EDIT_CLOSED] ?? null, $holder['employee'], $project)) {
+                continue;
+            }
+            $this->audit->notifyIfOther(
+                $holder['employee'],
+                $actor,
+                PortalNotificationType::PROJECT_REQUESTED,
+                'Project closed',
+                PortalActivityCopy::notifyProjectClosed($who, $name),
+                PortalShellPath::MANAGE_PROJECTS,
+                'Open Manage / Projects',
+                ['recordId' => (string) $project->id],
+            );
+        }
+    }
+
     // The project powers' reading, with own also counting the projects the approver added.
     private static function reachCovers(?string $reach, Employee $approver, object $project): bool
     {

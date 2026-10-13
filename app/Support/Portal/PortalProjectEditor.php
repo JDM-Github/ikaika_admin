@@ -46,6 +46,18 @@ final class PortalProjectEditor
         'project_creation_approver_remarks' => null,
     ];
 
+    /*
+     * Closing a project asks for its completion checklist, every item ticked (2026-10-13, user). Engineering
+     * answers Airtable's three questions, kept in their own columns; any other department confirms once.
+     */
+    private const CLOSING_CHECKLIST = [
+        'accRenamed' => 'is_renamed_with_acc_number',
+        'ledgerMoved' => 'is_ledger_moved_to_for_submission',
+        'ledgerUpdated' => 'is_ledger_details_updated',
+    ];
+
+    private const CLOSING_CONFIRMATION = 'workFinished';
+
     private const CORE_TARGET = 'portal.projects';
 
     private const CORE_RESOURCE = 'projects';
@@ -266,11 +278,12 @@ final class PortalProjectEditor
         // A new project has its type's whole list unless the form took some out.
         $removedActivities = $this->activities->validated($request->input('removedActivityCodes'), $fields['columns']['type_of_job']) ?? [];
         $employeeId = (int) $actor->getKey();
+        $closing = $this->closingColumns($request, null, $fields['columns']);
         // Only Auto-approve passes a new project; approving others' is not approving your own (2026-10-07).
-        $isApproved = PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
+        $isApproved = $closing === null && PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
 
         $numbered = null;
-        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $removedActivities, $actor, $employeeId, $request, $isApproved, &$numbered): int {
+        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $removedActivities, $actor, $employeeId, $request, $isApproved, $closing, &$numbered): int {
             // The client's row is the lock that keeps two projects from taking one number.
             $client = $this->connection()->table('clients')->where('id', $fields['clientId'])->lockForUpdate()->first(['id', 'client_id']);
             if ($client === null) {
@@ -288,6 +301,7 @@ final class PortalProjectEditor
                 'project_approver_email' => $isApproved ? $this->text($actor->email ?? null) : null,
                 'requested_by' => $employeeId,
                 'requested_at' => now(),
+                ...($closing ?? []),
             ]);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
@@ -322,6 +336,9 @@ final class PortalProjectEditor
         );
         if (! $isApproved) {
             $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), (string) $numbered, false);
+        }
+        if ($closing !== null) {
+            $this->approval->notifyDepartmentHeads($actor, $request, $this->liveProjectOrFail($projectId), (string) $numbered);
         }
         $memberIds = array_values(array_diff($fields['memberIds'], [$employeeId]));
         if ($memberIds !== []) {
@@ -362,10 +379,12 @@ final class PortalProjectEditor
             $parts[] = 'Allowed activities changed';
         }
         $changes = $parts === [] ? null : implode('; ', $parts);
-        $isResubmitted = $this->sendsBackForApproval($actor, $request, $row, array_diff($parts, self::PEOPLE_CHANGES) !== []);
-        $columns = $isResubmitted ? [...$fields['columns'], ...self::PENDING_AGAIN] : $fields['columns'];
+        // Closing waits for approval on its own, so it is not also a resubmission.
+        $closing = $this->closingColumns($request, $row, $fields['columns']);
+        $isResubmitted = $closing === null && $this->sendsBackForApproval($actor, $request, $row, array_diff($parts, self::PEOPLE_CHANGES) !== []);
+        $columns = [...$fields['columns'], ...($isResubmitted ? self::PENDING_AGAIN : []), ...($closing ?? [])];
 
-        $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted, $removedActivities): void {
+        $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted, $closing, $removedActivities): void {
             $this->assertNameFree($fields['name'], $fields['columns']['department'], $projectId);
             $this->connection()->table('projects')->where('id', $projectId)->update($columns);
             if ($removedActivities !== null) {
@@ -392,15 +411,45 @@ final class PortalProjectEditor
             if ($isResubmitted) {
                 $this->trail->record($projectId, PortalProjectTrail::RESUBMITTED, $actor, $request);
             }
+            if ($closing !== null) {
+                $this->trail->record($projectId, PortalProjectTrail::CLOSED, $actor, $request);
+            }
         });
         if ($isResubmitted) {
             $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), $fields['name'], true);
         }
+        if ($closing !== null) {
+            $this->approval->notifyDepartmentHeads($actor, $request, $this->liveProjectOrFail($projectId), $fields['name']);
+        }
 
         // A project sent back for approval already told its approvers so; "updated" would be the same news twice.
-        $this->announceEdit($actor, $request, $projectId, $fields['name'], $fields['columns']['department'], ! $isResubmitted);
+        $this->announceEdit($actor, $request, $projectId, $fields['name'], $fields['columns']['department'], ! $isResubmitted && $closing === null);
 
         return $this->response($projectId, false);
+    }
+
+    /**
+     * What a save that closes the project writes besides the form: its checklist answers, and the approval
+     * back to Pending for the department head. Null when the save does not close it.
+     *
+     * @param  array<string, mixed>  $columns
+     * @return array<string, mixed>|null
+     */
+    private function closingColumns(Request $request, ?object $row, array $columns): ?array
+    {
+        $closed = self::STATUSES['closed'];
+        if (($columns['status'] ?? null) !== $closed || ($row !== null && ($row->status ?? null) === $closed)) {
+            return null;
+        }
+        $isEngineering = PortalProjectWork::isEngineering($columns['department'] ?? $row?->department ?? null);
+        $ticked = $request->input('closingChecklist');
+        foreach ($isEngineering ? array_keys(self::CLOSING_CHECKLIST) : [self::CLOSING_CONFIRMATION] as $key) {
+            if (! is_array($ticked) || ($ticked[$key] ?? null) !== true) {
+                abort(422, 'Tick every item on the completion checklist before closing the project.');
+            }
+        }
+
+        return [...self::PENDING_AGAIN, ...($isEngineering ? array_fill_keys(self::CLOSING_CHECKLIST, true) : [])];
     }
 
     /**

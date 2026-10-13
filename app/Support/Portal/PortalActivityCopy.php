@@ -103,6 +103,11 @@ final class PortalActivityCopy
             : $who.' rejected the project '.$name.($remarks === null ? '.' : ': '.$remarks);
     }
 
+    public static function notifyProjectClosed(string $who, string $name): string
+    {
+        return $who.' closed the project '.$name.'. It waits for your approval.';
+    }
+
     public static function notifyProjectReopened(string $who, string $name): string
     {
         return $who.' sent the project '.$name.' back to waiting for approval.';

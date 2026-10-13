@@ -150,6 +150,8 @@ class PortalProjectEditorTest extends TestCase
         Cache::flush();
     }
 
+    private const ENGINEERING_CHECKLIST = ['accRenamed' => true, 'ledgerMoved' => true, 'ledgerUpdated' => true];
+
     private function liveProjectId(): int
     {
         $id = (int) DB::connection('portal')->table('projects')->whereNull('deleted_at')->orderBy('id')->value('id');
@@ -480,7 +482,7 @@ class PortalProjectEditorTest extends TestCase
         $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
         unset($payload['scopeCodes']);
 
-        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'closed'])
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'closed', 'closingChecklist' => self::ENGINEERING_CHECKLIST])
             ->assertOk()
             ->assertJsonPath('data.status', 'closed');
         $this->assertSame('Closed', DB::connection('portal')->table('projects')->where('id', $id)->value('status'));
@@ -491,6 +493,46 @@ class PortalProjectEditorTest extends TestCase
         $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'on-hold'])->assertStatus(422);
         $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'cancelled'])->assertStatus(422);
         $this->assertSame('ongoing', PortalViewProjectPresenter::status('On Hold'));
+    }
+
+    // The reported ask: closing needs every checklist item, waits for approval again, and tells the department heads.
+    public function test_closing_a_project_needs_its_checklist_and_waits_for_the_department_head(): void
+    {
+        $admin = $this->employee('admin');
+        $this->headOfEveryDepartment($admin);
+        $head = $this->employee('admin', 1);
+        $this->headOfEveryDepartment($head);
+        $token = $this->token($admin);
+        $payload = $this->payload();
+        $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
+        unset($payload['scopeCodes']);
+        DB::connection('portal')->table('projects')->where('id', $id)->update(['project_creation_status' => 'Approved']);
+        $close = fn (array $checklist) => $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'closed', 'closingChecklist' => $checklist]);
+        $refused = 'Tick every item on the completion checklist before closing the project.';
+
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'closed'])->assertStatus(422)->assertJsonPath('message', $refused);
+        $close([...self::ENGINEERING_CHECKLIST, 'ledgerUpdated' => false])->assertStatus(422)->assertJsonPath('message', $refused);
+        $this->assertSame('Started', DB::connection('portal')->table('projects')->where('id', $id)->value('status'));
+
+        $close(self::ENGINEERING_CHECKLIST)->assertOk()->assertJsonPath('data.status', 'closed')->assertJsonPath('data.creationStatus', 'pending');
+        $row = DB::connection('portal')->table('projects')->where('id', $id)->first();
+        $this->assertSame([1, 1, 1, 'Pending', null], [
+            (int) $row->is_renamed_with_acc_number, (int) $row->is_ledger_moved_to_for_submission, (int) $row->is_ledger_details_updated,
+            $row->project_creation_status, $row->project_creation_approver,
+        ]);
+        $this->assertContains('Project Closed', array_column($this->trail($id), 'action_name'));
+        $this->assertTrue(DB::connection('portal')->table('notifications')
+            ->where('employee_id', $head->getKey())->where('title', 'Project closed')->where('link_path', '/manage/manage-projects')->exists());
+
+        // Saving it again while Closed asks for nothing more.
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'closed'])->assertOk();
+
+        // Another department confirms once.
+        $mis = $this->payload(['name' => 'Closing Tool '.Str::random(6), 'department' => 'MIS', 'leadId' => $admin->id, 'scopeCodes' => []]);
+        $misId = (int) $this->create($token, $mis)->assertCreated()->json('data.id');
+        $this->withToken($token)->patchJson(self::BASE.'/'.$misId, [...$mis, 'status' => 'closed', 'closingChecklist' => self::ENGINEERING_CHECKLIST])->assertStatus(422);
+        $this->withToken($token)->patchJson(self::BASE.'/'.$misId, [...$mis, 'status' => 'closed', 'closingChecklist' => ['workFinished' => true]])
+            ->assertOk()->assertJsonPath('data.status', 'closed');
     }
 
     // A project starts with its type's whole activity list and may only take codes out of it, never add one.
