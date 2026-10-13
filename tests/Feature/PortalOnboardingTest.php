@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 /**
@@ -808,7 +809,9 @@ class PortalOnboardingTest extends TestCase
         foreach (['photo', 'signature', 'logo'] as $image) {
             $this->assertStringStartsWith('data:image/png;base64,', (string) $card[$image]);
         }
-        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_642,f_jpg,q_90/'));
+        // The photo without its background, so the plain one is never asked for.
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/e_background_removal/c_fill,g_face,w_480,h_642/f_png/'));
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_642,f_jpg,q_90/'));
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/e_trim/c_limit,w_900,h_300,f_png/'));
         $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
             ->where('message', 'like', '%made the ID card of%')->exists());
@@ -834,8 +837,36 @@ class PortalOnboardingTest extends TestCase
         $card = app(PortalEmployeeIdCards::class)->card($employee);
 
         $this->assertNull($card['photo']);
+        // Once without its background and once as taken.
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $message === 'portal.id_card.picture_unavailable'
-            && $context['field'] === 'photo' && str_contains($context['reason'], 'SSL certificate problem'))->once();
+            && $context['field'] === 'photo' && str_contains($context['reason'], 'SSL certificate problem'))->twice();
+    }
+
+    // The reported ask (2026-10-14): a photo's background is taken out; while Cloudinary is still at it, the photo comes as taken.
+    public function test_a_photo_whose_background_is_still_being_removed_comes_as_taken(): void
+    {
+        Sleep::fake();
+        Log::spy();
+        Http::fake([
+            'https://res.cloudinary.com/*e_background_removal*' => Http::response('', 423),
+            'https://res.cloudinary.com/*' => Http::response($this->png(), 200, ['Content-Type' => 'image/png']),
+        ]);
+        $employee = $this->employee("LOWER(COALESCE(role, '')) = 'admin'");
+        DB::connection('portal')->table('attachments')->insert([
+            'table_name' => 'employees', 'record_id' => (int) $employee->getKey(), 'field_name' => 'photo',
+            'file_url' => 'https://res.cloudinary.com/demo-cloud/image/upload/v1/ikaika-portal/employees/face.jpg',
+            'file_name' => 'face.jpg', 'file_size_bytes' => 900, 'mime_type' => 'image/jpeg',
+        ]);
+
+        $card = app(PortalEmployeeIdCards::class)->card($employee);
+
+        $this->assertStringStartsWith('data:image/png;base64,', (string) $card['photo']);
+        // Asked five times, two seconds apart, before the photo as taken is used.
+        $this->assertCount(5, Http::recorded(fn ($request): bool => str_contains($request->url(), '/e_background_removal/')));
+        Sleep::assertSleptTimes(4);
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_642,f_jpg,q_90/'));
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $message === 'portal.id_card.picture_unavailable'
+            && str_starts_with($context['transform'], 'e_background_removal/') && str_starts_with($context['reason'], 'HTTP 423'))->once();
     }
 
     // A file that cannot be stored never stops a promotion; the copy command finishes the job later.
