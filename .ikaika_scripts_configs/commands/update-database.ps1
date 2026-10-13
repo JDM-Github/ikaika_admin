@@ -43,6 +43,17 @@
 # record of every migration that writes to it, so the next migrate runs those again. Plain -Drop
 # takes no -Step or -Migrate: a migrate with the database gone would record migrations that skipped it.
 #
+# -CLEAR EMPTIES TABLES AND KEEPS THEM: TRUNCATE, with foreign key checks off - MySQL refuses to truncate a
+# table other tables point at otherwise - so AUTO_INCREMENT starts again, by the sets update-database.json
+# names: all (every table), necessary (the rows the data files load), non-important (logs, notifications,
+# one-time codes, sessions, caches, jobs), or any set added there. The migrations table is never cleared.
+# Like a drop it takes only the products named, and it runs before any step, so -Clear necessary -Step data
+# loads the data again into the tables it emptied. What described the cleared rows goes with them: the
+# ledger's record of each step that inserts into a cleared table, so -Idempotent runs it again; for a set
+# that says so, the product's rows in the core ledger; and, for a set with migrations, the record of every
+# migration that writes to the cleared database and checks before it writes, so migrate runs them again in
+# order and puts back the rows they seed - Laravel's own only create tables, which are still there.
+#
 # WITH NOTHING PICKED NOTHING IS APPLIED. Every step is listed with its kind, the database it
 # targets, its size and what it would destroy, and the run stops there.
 #
@@ -63,6 +74,7 @@
 #     .\script.ps1 update-database -Product transaction_tracker -Step patches
 #     .\script.ps1 update-database -Product transaction_tracker -Drop       remove that database, nothing built back
 #     .\script.ps1 update-database -Product portal -DropAndRecreate         the portal from nothing, up to date
+#     .\script.ps1 update-database -Product portal -Clear necessary -Step data   the portal's data loaded again
 #     .\script.ps1 update-database -Idempotent                            bring every database up to date
 #     .\script.ps1 update-database -Migrate                               php artisan migrate
 #     .\script.ps1 update-database -Preset portal-from-nothing            a named run from update-database.json
@@ -77,6 +89,8 @@ param(
     [switch]$AllProducts,
     # The steps to apply, by file name without .sql, or patches; the ones the folders hold are offered.
     [string[]]$Step = @(),
+    # Empty tables and keep them, by the sets update-database.json names - all, necessary, non-important; the sets are offered.
+    [string[]]$Clear = @(),
     # Remove each picked product's database completely; nothing is built back. Takes no -Step or -Migrate.
     [switch]$Drop,
     # Bring every database up to date and skip what is already applied, so a second run does nothing.
@@ -132,6 +146,14 @@ function Read-UpdateDatabaseConfig([string]$Path) {
         createDatabase = 'CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
         migrations     = [ordered]@{ path = 'database/migrations'; table = 'migrations'; afterRebuild = $true }
         coreLedger     = [ordered]@{ product = 'core'; tables = @('actions', 'recycle'); column = 'product' }
+        clear          = [ordered]@{
+            keep   = @('migrations')
+            groups = [ordered]@{
+                all             = [ordered]@{ tables = @('*'); coreLedger = $true; migrations = $true }
+                necessary       = [ordered]@{ loadedBy = @('data'); coreLedger = $true }
+                'non-important' = [ordered]@{ tables = @('logs', 'notifications', '*_otps', 'shared_page_visits', 'sessions', 'cache', 'cache_locks', 'jobs', 'job_batches', 'failed_jobs', 'password_reset_tokens') }
+            }
+        }
         products       = [ordered]@{}
         presets        = [ordered]@{}
         _path          = $Path
@@ -149,7 +171,7 @@ function Read-UpdateDatabaseConfig([string]$Path) {
     foreach ($key in @($file.Keys)) {
         if ($key -in @('about', '$schema')) { continue }
         if (-not $config.Contains($key) -or $key.StartsWith('_')) { & $fail "'$key' is not a setting; the settings are $(@($config.Keys | Where-Object { -not $_.StartsWith('_') }) -join ', ')." }
-        if ($key -in @('migrations', 'coreLedger')) {
+        if ($key -in @('migrations', 'coreLedger', 'clear')) {
             if ($file[$key] -isnot [Collections.IDictionary]) { & $fail "$key must be an object." }
             foreach ($inner in @($file[$key].Keys | Where-Object { $_ -ne 'about' })) {
                 if (-not $config[$key].Contains($inner)) { & $fail "$key.$inner is not a setting; $key has $(@($config[$key].Keys) -join ', ')." }
@@ -181,9 +203,33 @@ function Read-UpdateDatabaseConfig([string]$Path) {
         & $fail 'coreLedger needs a product, a column, and a list of tables, each a plain name.'
     }
 
+    $pattern = '^[A-Za-z0-9_*?]+$'
+    if (-not (& $isList $config.clear.keep) -or @($config.clear.keep | Where-Object { "$_" -notmatch $pattern }).Count) {
+        & $fail 'clear.keep must be a list of table names, with * and ? as wildcards.'
+    }
+    if ($config.clear.groups -isnot [Collections.IDictionary]) { & $fail 'clear.groups must be an object, one key per set.' }
+    foreach ($name in @($config.clear.groups.Keys | Where-Object { $_ -ne 'about' })) {
+        $set = $config.clear.groups[$name]
+        if ($set -isnot [Collections.IDictionary]) { & $fail "clear.groups.$name must be an object." }
+        $stray = @($set.Keys | Where-Object { @('about', 'tables', 'loadedBy', 'except', 'coreLedger', 'migrations') -notcontains $_ })
+        if ($stray.Count) { & $fail "clear.groups.$name.$($stray[0]) is not a setting; a set has tables, loadedBy, except, coreLedger, migrations." }
+        if (-not $set.Contains('tables') -and -not $set.Contains('loadedBy')) { & $fail "clear.groups.$name names no tables and no loadedBy, so it would clear nothing." }
+        foreach ($field in 'tables', 'except') {
+            if ($set.Contains($field) -and (-not (& $isList $set[$field]) -or @($set[$field] | Where-Object { "$_" -notmatch $pattern }).Count)) {
+                & $fail "clear.groups.$name.$field must be a list of table names, with * and ? as wildcards."
+            }
+        }
+        if ($set.Contains('loadedBy') -and (-not (& $isList $set['loadedBy']) -or @($set['loadedBy'] | Where-Object { "$_" -notmatch '^[A-Za-z0-9_./-]+$' }).Count)) {
+            & $fail "clear.groups.$name.loadedBy must be a list of step names or kinds."
+        }
+        foreach ($field in 'coreLedger', 'migrations') {
+            if ($set.Contains($field) -and $set[$field] -isnot [bool]) { & $fail "clear.groups.$name.$field must be true or false." }
+        }
+    }
+
     $shapes = [ordered]@{
         products = @('about', 'name', 'database', 'envPrefix', 'connection', 'folder', 'skip', 'drop', 'order', 'steps')
-        presets  = @('about', 'product', 'step', 'drop', 'dropAndRecreate', 'idempotent', 'migrate')
+        presets  = @('about', 'product', 'step', 'clear', 'drop', 'dropAndRecreate', 'idempotent', 'migrate')
     }
     foreach ($section in $shapes.Keys) {
         if ($config[$section] -isnot [Collections.IDictionary]) { & $fail "$section must be an object, one key per $($section.TrimEnd('s'))." }
@@ -222,6 +268,11 @@ function Read-UpdateDatabaseConfig([string]$Path) {
         $set = $config.presets[$name]
         if ($set.Contains('product') -and -not ("$($set['product'])" -eq 'all' -or (& $isList $set['product']))) { & $fail "presets.$name.product must be a list of products, or ""all""." }
         if ($set.Contains('step') -and -not (& $isList $set['step'])) { & $fail "presets.$name.step must be a list of step names." }
+        if ($set.Contains('clear')) {
+            $sets = @($config.clear.groups.Keys | Where-Object { $_ -ne 'about' })
+            $strange = @(@($set['clear']) | Where-Object { $sets -notcontains $_ })
+            if ($strange.Count) { & $fail "presets.$name.clear names $($strange -join ', '); the sets are $($sets -join ', ')." }
+        }
     }
     return $config
 }
@@ -278,6 +329,7 @@ if ($Help) {
 
   Usage
     .\script.ps1 update-database [-Product <folder>[,...] | -AllProducts] [-Step <name>[,...]]
+                                 [-Clear <set>[,...]]
                                  [-Drop | -DropAndRecreate] [-Idempotent] [-Migrate]
                                  [-Preset <name>] [-ConfigFile <file>] [-DryRun]
 
@@ -303,6 +355,16 @@ if ($Help) {
   removed, then built up to date - every step, or the -Step ones, and the
   migrations. -Drop -Idempotent is the same thing.
 
+  -Clear empties tables and keeps them - TRUNCATE, with foreign key checks off,
+  so AUTO_INCREMENT starts again - by the sets update-database.json names: all
+  (every table), necessary (the rows the data files load), non-important (logs,
+  notifications, one-time codes, sessions, caches, jobs), or your own. The
+  migrations table is never cleared. It takes only the products named and runs
+  before any step, so -Clear necessary -Step data loads the data again. The
+  steps that inserted the cleared rows are forgotten, so -Idempotent runs them
+  again; a set with migrations (all, by default) also forgets the cleared
+  database's migrations, so migrate puts back the rows they seed.
+
   A drop takes only the products named, and core when it is picked - its
   database is also Laravel's own, migrations table and all. The product's rows
   in the core ledger and the record of every migration that writes to a
@@ -321,6 +383,8 @@ if ($Help) {
     .\script.ps1 update-database -Product transaction_tracker -Step patches
     .\script.ps1 update-database -Product transaction_tracker -Drop
     .\script.ps1 update-database -Product portal -DropAndRecreate
+    .\script.ps1 update-database -Product portal -Clear necessary -Step data
+    .\script.ps1 update-database -AllProducts -Clear non-important -DryRun
     .\script.ps1 update-database -Product portal,transaction_tracker -DropAndRecreate -DryRun
     .\script.ps1 update-database -AllProducts -Step indexes,patches -DryRun
     .\script.ps1 update-database -Preset portal-from-nothing -DryRun
@@ -351,6 +415,7 @@ if ($Preset) {
         if ("$($set['product'])" -eq 'all') { $AllProducts = $true } else { $Product = @($set['product']) }
     }
     if ($set.Contains('step') -and -not $PSBoundParameters.ContainsKey('Step')) { $Step = @($set['step']) }
+    if ($set.Contains('clear') -and -not $PSBoundParameters.ContainsKey('Clear')) { $Clear = @($set['clear']) }
     foreach ($pair in @(@('drop', 'Drop'), @('dropAndRecreate', 'DropAndRecreate'), @('idempotent', 'Idempotent'), @('migrate', 'Migrate'))) {
         if ($set.Contains($pair[0]) -and -not $PSBoundParameters.ContainsKey($pair[1])) { Set-Variable -Name $pair[1] -Value $set[$pair[0]] }
     }
@@ -390,6 +455,8 @@ function Get-SqlFileFacts([string]$Path, [bool]$IsPatch) {
         CreateTables = & $count '^\s*CREATE\s+TABLE'
         Alters       = (& $count '^\s*ALTER\s+TABLE') + (& $count '^\s*CREATE\s+(UNIQUE\s+)?INDEX')
         Inserts      = & $count '^\s*INSERT'
+        InsertTables = @($lines | Where-Object { $_ -match '^\s*(INSERT(\s+IGNORE)?|REPLACE)\s+INTO\s+' } |
+                ForEach-Object { if ($_ -match 'INTO\s+(?:`?[A-Za-z0-9_]+`?\.)?`?([A-Za-z0-9_]+)`?') { $Matches[1] } } | Select-Object -Unique)
         After        = $after
         Kind         = ''
     }
@@ -499,6 +566,59 @@ function Get-DatabaseTableCount([object]$Product, [string]$Database) {
     return [int]$answer[0]
 }
 
+# The tables a database has, with InnoDB's estimate of their rows - an estimate, which is all a listing needs.
+function Get-TableRow([object]$Product, [string]$Database) {
+    $rows = [ordered]@{}
+    $answer = Invoke-MysqlQuery $Product "SELECT table_name, COALESCE(table_rows, 0) FROM information_schema.tables WHERE table_schema = '$($Database -replace "'", "''")' AND table_type = 'BASE TABLE'"
+    foreach ($line in @($answer)) {
+        $parts = "$line" -split "`t"
+        if ($parts.Count -ge 2 -and $parts[1] -match '^\d+$') { $rows[$parts[0]] = [long]$parts[1] }
+    }
+    return $rows
+}
+
+# What -Clear empties in one database: the tables each set names - by pattern, or as the tables the steps it
+# names (by name or kind) insert into - less what that set excepts, then less what clear.keep always keeps. A
+# table the database lacks is no error; a set names what a product may have.
+function Get-ClearSet([object]$Db, [string]$Database, $Steps, [string[]]$Groups) {
+    $present = Get-TableRow $Db $Database
+    $chosen = [Collections.Generic.List[string]]::new()
+    foreach ($groupName in $Groups) {
+        $set = $Config.clear.groups[$groupName]
+        $names = [Collections.Generic.List[string]]::new()
+        if ($set.Contains('tables')) {
+            foreach ($like in @($set['tables'])) { foreach ($table in @($present.Keys)) { if ($table -like $like -and -not $names.Contains($table)) { $names.Add($table) } } }
+        }
+        if ($set.Contains('loadedBy')) {
+            foreach ($source in @($set['loadedBy'])) {
+                foreach ($s in @($Steps | Where-Object { ($_.Name -eq $source -or $_.Facts.Kind -eq $source) -and $(if ($_.Facts.Target) { $_.Facts.Target } else { $Db.Database }) -eq $Database })) {
+                    foreach ($table in @($s.Facts.InsertTables)) { if ($present.Contains($table) -and -not $names.Contains($table)) { $names.Add($table) } }
+                }
+            }
+        }
+        foreach ($table in $names) {
+            $excepted = $set.Contains('except') -and @($set['except'] | Where-Object { $table -like $_ }).Count
+            if (-not $excepted -and -not $chosen.Contains($table)) { $chosen.Add($table) }
+        }
+    }
+    $tables = @($chosen | Where-Object { $name = $_; -not @($Config.clear.keep | Where-Object { $name -like $_ }).Count } | Sort-Object)
+    $rows = [long]0
+    foreach ($table in $tables) { $rows += $present[$table] }
+    return [pscustomobject]@{ Database = $Database; Tables = $tables; Rows = $rows }
+}
+
+# A few names and how many more, for a line that has to stay a line.
+function Format-Names([string[]]$Names, [int]$Show = 6) {
+    if ($Names.Count -le $Show) { return $Names -join ', ' }
+    return "$(($Names | Select-Object -First $Show) -join ', '), and $($Names.Count - $Show) more"
+}
+
+# The databases a product's steps write to - each file's USE, or the product's .env database - which is what a
+# drop removes and a clear looks through.
+function Get-StepDatabase([object]$Db, $Steps) {
+    return @(@($Steps | ForEach-Object { if ($_.Facts.Target) { $_.Facts.Target } else { $Db.Database } }) + @($Db.Database) | Select-Object -Unique)
+}
+
 function Get-PresentTable([object]$Product, [string]$Database) {
     $answer = Invoke-MysqlQuery $Product "SELECT table_name FROM information_schema.tables WHERE table_schema = '$($Database -replace "'", "''")'"
     if ($null -eq $answer) { return @() }
@@ -534,7 +654,7 @@ function Get-MigrationTarget([hashtable]$ConnectionDatabase, [string]$DefaultDat
     return @(Get-ChildItem -LiteralPath $dir -Filter '*.php' -File | Sort-Object Name | ForEach-Object {
             $text = Get-Content -LiteralPath $_.FullName -Raw
             $named = @($ConnectionDatabase.Keys | Where-Object { $text -match "(\(\s*|\`$connection\s*=\s*)['""]$([regex]::Escape($_))['""]" })
-            [pscustomobject]@{ Name = $_.BaseName; Databases = @(if ($named.Count) { $named | ForEach-Object { $ConnectionDatabase[$_] } } else { $DefaultDatabase }) }
+            [pscustomobject]@{ Name = $_.BaseName; Databases = @(if ($named.Count) { $named | ForEach-Object { $ConnectionDatabase[$_] } } else { $DefaultDatabase }); Text = $text }
         })
 }
 
@@ -588,6 +708,23 @@ if ($wiping -and -not $wantedFolders.Count) {
     Write-Host '  A drop takes only what is named: -Product <folder>, or -AllProducts.' -ForegroundColor Red
     exit 1
 }
+$clearGroups = @($Clear | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+if ($clearGroups.Count) {
+    $sets = @($Config.clear.groups.Keys | Where-Object { $_ -ne 'about' })
+    $strange = @($clearGroups | Where-Object { $sets -notcontains $_ })
+    if ($strange.Count) {
+        Write-Host "  There is no set called $($strange -join ', ') to clear; $(Split-Path -Leaf $Config._path) has $($sets -join ', ')." -ForegroundColor Red
+        exit 1
+    }
+    if (-not $wantedFolders.Count) {
+        Write-Host '  A clear takes only what is named: -Product <folder>, or -AllProducts.' -ForegroundColor Red
+        exit 1
+    }
+    if ($wiping) {
+        Write-Host '  A drop already takes every row with the tables; -Clear empties the tables of a database that stays.' -ForegroundColor Red
+        exit 1
+    }
+}
 if ($wiping -and -not $rebuild -and $wantedSteps.Count) {
     Write-Host '  -Drop removes the whole database, so it takes no -Step; -DropAndRecreate builds those steps back.' -ForegroundColor Red
     exit 1
@@ -606,6 +743,7 @@ if ($Idempotent -and -not $wantedFolders.Count -and -not $wantedSteps.Count) {
 }
 $everyStep = $Idempotent -and -not $wantedSteps.Count
 $drops = @()
+$clears = @()
 
 # Laravel's own database - the default connection, where the migrations table is - and the database behind each connection.
 $laravelDb = [pscustomobject]@{
@@ -647,7 +785,7 @@ foreach ($folder in $folders) {
     if ($wiping -and $wantedFolders -contains $folder -and -not $settings[$folder].Drop) {
         Write-Host "    kept     products.$folder.drop is false in $(Split-Path -Leaf $Config._path), so no drop touches it" -ForegroundColor DarkGray
     } elseif ($wiping -and $wantedFolders -contains $folder) {
-        $databases = @(@($productSteps | ForEach-Object { if ($_.Facts.Target) { $_.Facts.Target } else { $db.Database } }) + @($db.Database) | Select-Object -Unique)
+        $databases = Get-StepDatabase $db $productSteps
         $odd = @($databases | Where-Object { $_ -notmatch '^[A-Za-z0-9_]+$' })
         if ($odd.Count) {
             Write-Host "  $($odd -join ', ') is not a plain database name, so a drop will not touch it." -ForegroundColor Red
@@ -660,6 +798,25 @@ foreach ($folder in $folders) {
             Write-Host "             Laravel's own tables go with it, migrations included$(if ($rebuild) { ' - migrate builds them back' } else { " - -Product $folder -DropAndRecreate builds them back" })" -ForegroundColor Yellow
         }
         $drops += [pscustomobject]@{ Folder = $folder; Product = $db; Databases = $databases }
+    }
+
+    $clearing = @()
+    if ($clearGroups.Count -and $wantedFolders -contains $folder) {
+        $databases = Get-StepDatabase $db $productSteps
+        $odd = @($databases | Where-Object { $_ -notmatch '^[A-Za-z0-9_]+$' })
+        if ($odd.Count) {
+            Write-Host "  $($odd -join ', ') is not a plain database name, so a clear will not touch it." -ForegroundColor Red
+            exit 1
+        }
+        $clearing = @($databases | ForEach-Object { Get-ClearSet $db $_ $productSteps $clearGroups } | Where-Object { $_.Tables.Count })
+        Write-Host '    CLEAR    ' -ForegroundColor Yellow -NoNewline
+        if (-not $clearing.Count) { Write-Host "$($clearGroups -join ', '): no table here is in it" }
+        for ($i = 0; $i -lt $clearing.Count; $i++) {
+            if ($i) { Write-Host '             ' -NoNewline }
+            Write-Host "$($clearGroups -join ', ') in $($clearing[$i].Database): $($clearing[$i].Tables.Count) table(s), about $($clearing[$i].Rows) row(s) - $(Format-Names $clearing[$i].Tables)"
+        }
+        $flag = { param([string]$Field) @($clearGroups | Where-Object { $Config.clear.groups[$_].Contains($Field) -and $Config.clear.groups[$_][$Field] }).Count -gt 0 }
+        $clears += [pscustomobject]@{ Folder = $folder; Product = $db; Sets = $clearing; Steps = $productSteps; CoreLedger = (& $flag 'coreLedger'); Migrations = (& $flag 'migrations') }
     }
 
     foreach ($s in $productSteps) {
@@ -685,7 +842,10 @@ foreach ($folder in $folders) {
         $key = "$folder/$($s.Label)"
         $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $facts.Path).Hash.ToLower()
         $applied = $false
-        if ($Idempotent -and $picked -and -not $afterDrop) {
+        # A step that inserts into a table the clear empties is not applied any more, whatever the ledger says.
+        $emptied = @($clearing | Where-Object { $_.Database -eq $target } | ForEach-Object { $_.Tables })
+        $afterClear = @($facts.InsertTables | Where-Object { $emptied -contains $_ }).Count -gt 0
+        if ($Idempotent -and $picked -and -not $afterDrop -and -not $afterClear) {
             $entry = $ledger["$target|$key"]
             $applied = $entry -and "$($entry.sha256)" -eq $hash -and (Get-DatabaseTableCount $db $target) -gt 0
         }
@@ -721,6 +881,23 @@ function Get-ForgottenMigration([string[]]$Databases) {
     return @(Get-MigrationTarget $connectionDatabase $laravelDb.Database |
             Where-Object { @($_.Databases | Where-Object { $Databases -contains $_ }).Count -and $_.Name -match '^[A-Za-z0-9_]+$' } | ForEach-Object Name)
 }
+# The records of every migration that writes to one of these databases and checks before it writes, forgotten
+# so migrate runs them again in order - as on a fresh machine - and puts back the rows they seed. One that does
+# not check is left alone: Laravel's own only create tables, and a clear leaves the tables there.
+function Get-ClearedMigration([string[]]$Databases) {
+    if (-not $Databases.Count) { return @() }
+    return @(Get-MigrationTarget $connectionDatabase $laravelDb.Database | Where-Object {
+            @($_.Databases | Where-Object { $Databases -contains $_ }).Count -and
+            $_.Text -match 'hasTable|hasColumn|hasIndex|insertOrIgnore|updateOrInsert|upsert\(|->exists\(\)' -and
+            $_.Name -match '^[A-Za-z0-9_]+$'
+        } | ForEach-Object Name)
+}
+$clearForget = Get-ClearedMigration @($clears | Where-Object { $_.Migrations } | ForEach-Object { $_.Sets } | ForEach-Object { $_.Database } | Select-Object -Unique)
+if ($clearForget.Count) {
+    Write-Host ''
+    Write-Host "  Migrations  $($clearForget.Count) record(s) in $($laravelDb.Database).$($Config.migrations.table) write to a cleared database; they are forgotten, so migrate runs them again and puts back the rows they seed$(if (-not $Migrate) { ' - add -Migrate, or run it after' })" -ForegroundColor DarkGray
+}
+
 $droppedDatabases = @($drops | ForEach-Object { $_.Databases } | Select-Object -Unique)
 $coreGone = $products.Contains($coreKey) -and $droppedDatabases -contains $products[$coreKey].Database
 $forget = Get-ForgottenMigration $droppedDatabases
@@ -736,7 +913,7 @@ if ($strayStep.Count) {
     exit 1
 }
 
-if (-not $plan.Count -and -not $drops.Count -and -not $Migrate) {
+if (-not $plan.Count -and -not $drops.Count -and -not $clears.Count -and -not $Migrate) {
     Write-Host ''
     if ($Idempotent) { Write-Host '  Everything is already applied - nothing to do.' -ForegroundColor Green }
     elseif (-not $wantedFolders.Count -or -not $wantedSteps.Count) {
@@ -751,6 +928,11 @@ if ($DryRun) {
     Write-Host '  -DryRun: nothing ran. In order, this would apply:' -ForegroundColor Yellow
     foreach ($wipe in $drops) { Write-Host "    drop $($wipe.Databases -join ', ') ($($wipe.Folder))$(if ($rebuild) { ', and create it empty' })$(if ($wipe.Folder -ne $coreKey -and -not $coreGone) { ", then clear $($wipe.Product.Key)'s core ledger rows" })" }
     if ($forget.Count) { Write-Host "    forget $($forget.Count) migration record(s) in $($laravelDb.Database).$($Config.migrations.table)" }
+    foreach ($c in $clears) {
+        foreach ($set in $c.Sets) { Write-Host "    clear $($set.Tables.Count) table(s) in $($set.Database) ($($c.Folder)) - $(Format-Names $set.Tables)" }
+        if ($c.Sets.Count -and $c.CoreLedger -and $c.Folder -ne $coreKey) { Write-Host "    clear $($c.Product.Key)'s core ledger rows" }
+    }
+    if ($clearForget.Count) { Write-Host "    forget $($clearForget.Count) migration record(s) in $($laravelDb.Database).$($Config.migrations.table)" }
     foreach ($item in $plan) { Write-Host "    $($item.Folder)/$($item.Step.Label) -> $($item.Target)$(if ($item.Facts.Kind -eq 'rebuild' -and $drops.Folder -notcontains $item.Folder) { ', then clear its core ledger rows' })" }
     if ($Migrate) { Write-Host '    php artisan migrate' }
     Write-Host ''
@@ -758,7 +940,7 @@ if ($DryRun) {
 }
 
 # ------------------------------------------------------------------------ applying
-if (($plan.Count -or $drops.Count) -and -not (Get-Command mysql -ErrorAction SilentlyContinue)) {
+if (($plan.Count -or $drops.Count -or $clears.Count) -and -not (Get-Command mysql -ErrorAction SilentlyContinue)) {
     Write-Host ''
     Write-Host '  No mysql client on PATH, so no file can be applied.' -ForegroundColor Red
     Write-Host '    .\script.ps1 environment-variables     put one there' -ForegroundColor DarkGray
@@ -767,7 +949,7 @@ if (($plan.Count -or $drops.Count) -and -not (Get-Command mysql -ErrorAction Sil
 }
 
 $failures = 0
-if ($plan.Count -or $drops.Count) { Write-Host ''; Write-Host '  Applying' -ForegroundColor Cyan }
+if ($plan.Count -or $drops.Count -or $clears.Count) { Write-Host ''; Write-Host '  Applying' -ForegroundColor Cyan }
 
 function Write-Applied([object]$Item, [string]$Note) {
     if (-not $Idempotent) { return }
@@ -819,6 +1001,45 @@ if ($forgetting.Count -and @(Get-PresentTable $laravelDb $laravelDb.Database) -c
         $failures++
     } else {
         Write-Host "      forgot $($forgetting.Count) migration record(s) in $($laravelDb.Database).$migrationsTable, so migrate runs them again" -ForegroundColor DarkGray
+    }
+}
+
+$emptiedSets = @()
+foreach ($c in $clears) {
+    foreach ($set in $c.Sets) {
+        Write-Host "    clear $($c.Folder): $($set.Tables.Count) table(s) in $($set.Database)"
+        $sqlFile = Join-Path ([IO.Path]::GetTempPath()) "update-database-clear-$([guid]::NewGuid().ToString('N').Substring(0, 8)).sql"
+        $truncates = @('SET FOREIGN_KEY_CHECKS=0;') + @($set.Tables | ForEach-Object { "TRUNCATE TABLE ``$($set.Database)``.``$_``;" }) + @('SET FOREIGN_KEY_CHECKS=1;')
+        [IO.File]::WriteAllLines($sqlFile, [string[]]$truncates)
+        try { $run = Invoke-SqlFile $c.Product ([pscustomobject]@{ Path = $sqlFile; Target = $set.Database }) $true }
+        finally { Remove-Item -LiteralPath $sqlFile -Force -ErrorAction SilentlyContinue }
+        if ($run.Errors.Count) {
+            foreach ($line in @($run.Errors | Select-Object -First 5)) { Write-Host "      $line" -ForegroundColor Red }
+            $failures++
+            continue
+        }
+        Write-Host "      emptied $(Format-Names $set.Tables)" -ForegroundColor Green
+        if ($c.Migrations) { $emptiedSets += $set.Database }
+        # The steps that inserted into what was emptied are not applied any more, so -Idempotent runs them again.
+        foreach ($s in @($c.Steps)) {
+            $target = if ($s.Facts.Target) { $s.Facts.Target } else { $c.Product.Database }
+            $key = "$target|$($c.Folder)/$($s.Label)"
+            if ($target -eq $set.Database -and $ledger.Contains($key) -and @($s.Facts.InsertTables | Where-Object { $set.Tables -contains $_ }).Count) {
+                $ledger.Remove($key)
+                $ledgerTouched = $true
+            }
+        }
+    }
+    if ($c.Sets.Count -and $c.CoreLedger -and $c.Folder -ne $coreKey -and -not (Clear-CoreLedger $c.Product)) { $failures++ }
+}
+$seedsForgotten = Get-ClearedMigration @($emptiedSets | Select-Object -Unique)
+if ($seedsForgotten.Count -and @(Get-PresentTable $laravelDb $laravelDb.Database) -contains $Config.migrations.table) {
+    $names = ($seedsForgotten | ForEach-Object { "'$_'" }) -join ','
+    if ($null -eq (Invoke-MysqlQuery $laravelDb "DELETE FROM ``$($laravelDb.Database)``.``$($Config.migrations.table)`` WHERE migration IN ($names); SELECT 'ok'")) {
+        Write-Host "      could not forget the migrations that write to what was cleared, in $($laravelDb.Database).$($Config.migrations.table)" -ForegroundColor Yellow
+        $failures++
+    } else {
+        Write-Host "      forgot $($seedsForgotten.Count) migration record(s), so migrate runs them again and puts back the rows they seed$(if (-not $Migrate) { ' - run it, or add -Migrate next time' })" -ForegroundColor DarkGray
     }
 }
 
@@ -914,7 +1135,7 @@ exit $failures
 
 # Read by the manifest generator and run alone, so it finds the repo from the working directory itself, and
 # reads update-database.json for its presets and its sql folder.
-function Get-DialogChoiceParameters { return , @('Product', 'Step', 'Preset') }
+function Get-DialogChoiceParameters { return , @('Product', 'Step', 'Preset', 'Clear') }
 
 function Get-DialogChoices([string]$Parameter) {
     $dir = (Get-Location).Path
@@ -926,6 +1147,10 @@ function Get-DialogChoices([string]$Parameter) {
     if ($Parameter -eq 'Preset') {
         if (-not $settings -or -not $settings.presets) { return , @() }
         return , @($settings.presets.PSObject.Properties.Name | Where-Object { $_ -ne 'about' })
+    }
+    if ($Parameter -eq 'Clear') {
+        if (-not $settings -or -not $settings.clear -or -not $settings.clear.groups) { return , @('all', 'necessary', 'non-important') }
+        return , @($settings.clear.groups.PSObject.Properties.Name | Where-Object { $_ -ne 'about' })
     }
     $root = Join-Path $dir $(if ($settings -and $settings.sqlRoot) { "$($settings.sqlRoot)" } else { 'sql' })
     if (-not (Test-Path -LiteralPath $root)) { return , @() }

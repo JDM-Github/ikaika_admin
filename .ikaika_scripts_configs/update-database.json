@@ -20,6 +20,27 @@
     "tables": ["actions", "recycle"],
     "column": "product"
   },
+  "clear": {
+    "about": "The sets -Clear empties, keeping the tables: TRUNCATE with foreign key checks off, so AUTO_INCREMENT starts again. A set has tables (names, * and ? as wildcards), loadedBy (the tables these steps insert into, by step name or kind), except (names or patterns it leaves alone), coreLedger (also clear the product's rows from the core ledger) and migrations (forget the cleared database's migrations that check before they write, so migrate runs them again and puts back the rows they seed). keep is never cleared by any set. The sets here are the sets: one left out of this list is gone.",
+    "keep": ["migrations"],
+    "groups": {
+      "all": {
+        "about": "Every table's rows, the tables kept; migrate then puts back the rows the migrations seed.",
+        "tables": ["*"],
+        "coreLedger": true,
+        "migrations": true
+      },
+      "necessary": {
+        "about": "The rows the product's data files load - what a data step needs empty to load again. Tables the product fills itself, such as the portal's logs, rules and pages, are kept.",
+        "loadedBy": ["data"],
+        "coreLedger": true
+      },
+      "non-important": {
+        "about": "What the app makes and can lose: logs, notifications, one-time codes, page visits, sessions, caches, queued and failed jobs, password reset tokens.",
+        "tables": ["logs", "notifications", "*_otps", "shared_page_visits", "sessions", "cache", "cache_locks", "jobs", "job_batches", "failed_jobs", "password_reset_tokens"]
+      }
+    }
+  },
   "products": {
     "about": "Per product, by its -Product name: order (its steps first to last, by step name - a file's name without .sql, or patches for every patch file in name order; a step left out runs after these, by kind, and is flagged), folder (its sql folder), skip (leave it out), drop (false keeps every drop away from it), and steps.<name or file>.{kind, after, skip, strict}. A name the catalog lacks adds a product when it gives a database, with name, envPrefix (read <envPrefix>_DB_* from .env) and connection (the Laravel connection its migrations use).",
     "core": {
@@ -37,7 +58,7 @@
     }
   },
   "presets": {
-    "about": "Named runs for -Preset. Each sets the keys it has - product (a list, or \"all\"), step, drop, dropAndRecreate, idempotent, migrate - and anything typed on the command line wins over it.",
+    "about": "Named runs for -Preset. Each sets the keys it has - product (a list, or \"all\"), step, clear, drop, dropAndRecreate, idempotent, migrate - and anything typed on the command line wins over it.",
     "portal-from-nothing": {
       "about": "The portal dropped and built up to date, as sql/portal/reset.ps1 did.",
       "product": ["portal"],
@@ -51,6 +72,17 @@
       "about": "The index and column retrofits and the patches, on every product.",
       "product": "all",
       "step": ["indexes", "patches"]
+    },
+    "reload-portal-data": {
+      "about": "The rows the portal's data.sql loads emptied, and data.sql loaded again - nothing dropped.",
+      "product": ["portal"],
+      "clear": ["necessary"],
+      "step": ["data"]
+    },
+    "tidy-every-product": {
+      "about": "Logs, notifications, one-time codes, sessions, caches and jobs emptied on every product.",
+      "product": "all",
+      "clear": ["non-important"]
     }
   }
 }
