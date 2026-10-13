@@ -44,6 +44,7 @@ final class PortalLetters
         $context = $context === [] ? ['subject' => $subject] : $context;
         try {
             Queue::push(new SendPortalMail([$to], self::letter($category, $subject, $body, $inlineImages), $failureEvent, $context));
+            PortalQueueNow::afterResponse();
         } catch (Throwable $error) {
             Log::warning($failureEvent, [...$context, 'reason' => $error->getMessage()]);
         }

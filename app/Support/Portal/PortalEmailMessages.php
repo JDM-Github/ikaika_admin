@@ -373,6 +373,7 @@ final class PortalEmailMessages
         ]);
         try {
             Queue::bulk($copies);
+            PortalQueueNow::afterResponse();
         } catch (Throwable $error) {
             // Nothing will deliver it, so the row says so instead of reading Sending for ever.
             $this->closeRow($messageId, 0, count($recipients), $this->failuresFor($recipients, 'The email could not be queued for sending.'));

@@ -1065,17 +1065,13 @@ CREATE TABLE IF NOT EXISTS shared_pages (
     UNIQUE KEY shared_pages_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Existing databases: run the ALTERs below (pre-change rows keep a NULL value until regenerated).
-ALTER TABLE shared_pages
-    ADD COLUMN password_value VARCHAR(32) NULL AFTER password_hash;
+-- Existing databases (the CREATE above already has the column, so a fresh load must not run it):
+-- ALTER TABLE shared_pages ADD COLUMN password_value VARCHAR(32) NULL AFTER password_hash;
 
-ALTER TABLE shared_pages
-    MODIFY COLUMN code VARCHAR(64) NOT NULL,
-    ADD COLUMN guest_name VARCHAR(100) NULL AFTER label;
+-- ALTER TABLE shared_pages MODIFY COLUMN code VARCHAR(64) NOT NULL, ADD COLUMN guest_name VARCHAR(100) NULL AFTER label;
 
 -- Existing databases: migration add_require_otp_to_portal_shared_pages runs this.
-ALTER TABLE shared_pages
-    ADD COLUMN require_otp TINYINT(1) NOT NULL DEFAULT 1 AFTER email;
+-- ALTER TABLE shared_pages ADD COLUMN require_otp TINYINT(1) NOT NULL DEFAULT 1 AFTER email;
 
 CREATE TABLE IF NOT EXISTS shared_page_rules (
     share_id INT          NOT NULL,
