@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalActivityScopes;
+use App\Support\Portal\PortalReportProjects;
 use App\Support\Portal\PortalViewProjectPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
@@ -489,6 +491,54 @@ class PortalProjectEditorTest extends TestCase
         $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'on-hold'])->assertStatus(422);
         $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'cancelled'])->assertStatus(422);
         $this->assertSame('ongoing', PortalViewProjectPresenter::status('On Hold'));
+    }
+
+    // A project starts with its type's whole activity list and may only take codes out of it, never add one.
+    public function test_a_project_takes_activities_out_of_its_type_and_reports_offer_the_rest(): void
+    {
+        $codes = array_slice(array_column(PortalActivityScopes::all(), 'code'), 0, 4);
+        [$kept, $removed, $alsoKept, $outside] = $codes;
+        $portal = DB::connection('portal');
+        foreach (['Scan-to-BIM' => [$kept, $removed, $alsoKept], 'CAD-to-BIM' => [$kept, $alsoKept]] as $type => $allowed) {
+            $portal->table('job_type_allowed_activities')->where('job_type', $type)->delete();
+            $portal->table('job_type_allowed_activities')->insert(['job_type' => $type, 'activity_code_id_initials' => implode(',', $allowed)]);
+        }
+        $admin = $this->employee('admin');
+        $portal->table('access_personal')->insert(['employee_id' => $admin->getKey(), 'permission_key' => 'projects.create.direct', 'reach' => null]);
+        $token = $this->token($admin);
+        $payload = $this->payload(['removedActivityCodes' => [$removed, $outside]]);
+
+        // A code the type does not allow cannot be taken out, as it was never in.
+        $id = (int) $this->create($token, $payload)->assertCreated()
+            ->assertJsonPath('data.removedActivityCodes', [$removed])
+            ->json('data.id');
+        $stored = fn (): array => $portal->table('projects_removed_activities')->where('project_id', $id)->pluck('activity_code')->all();
+        $this->assertSame([$removed], $stored());
+
+        // Daily and Late Reports offer the type's list less what this project took out.
+        $member = Employee::query()->findOrFail($payload['memberIds'][0]);
+        Cache::flush();
+        $picker = app(PortalReportProjects::class)->list($member);
+        $project = collect($picker['data'])->firstWhere('id', (string) $id);
+        $this->assertNotNull($project);
+        $group = collect($picker['activityGroups'])->firstWhere('key', $project['activityGroup']);
+        $offered = implode('|', $group['activities']);
+        $this->assertStringContainsString($kept, $offered);
+        $this->assertStringContainsString($alsoKept, $offered);
+        $this->assertStringNotContainsString($removed, $offered);
+
+        // An edit that does not send the list leaves it; one that sends it replaces it.
+        $edit = fn (array $overrides) => $this->withToken($token)->patchJson(self::BASE.'/'.$id, $this->payload(['name' => $payload['name'], ...$overrides]));
+        $edit(['leadId' => $payload['leadId'], 'memberIds' => $payload['memberIds']])->assertOk();
+        $this->assertSame([$removed], $stored());
+        $edit(['leadId' => $payload['leadId'], 'removedActivityCodes' => []])->assertOk()->assertJsonPath('data.removedActivityCodes', []);
+        $this->assertSame([], $stored());
+        $this->assertContains('Allowed activities changed', array_column($this->trail($id), 'remarks'));
+
+        // A new type keeps only the removals it still allows.
+        $edit(['leadId' => $payload['leadId'], 'removedActivityCodes' => [$removed, $kept]])->assertOk();
+        $edit(['leadId' => $payload['leadId'], 'type' => 'CAD-to-BIM'])->assertOk();
+        $this->assertSame([$kept], $stored());
     }
 
     public function test_adding_refuses_what_is_not_on_the_lists(): void

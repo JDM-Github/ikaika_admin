@@ -154,6 +154,7 @@ final class PortalProjectEditor
         private readonly PortalProjectTrail $trail,
         private readonly PortalProjectApproval $approval,
         private readonly PortalProjectRepositories $repositories,
+        private readonly PortalProjectActivities $activities,
     ) {}
 
     /**
@@ -262,12 +263,14 @@ final class PortalProjectEditor
             abort(403, 'Your Add projects power does not reach that department.');
         }
         $scopeCodes = $this->validatedScopeCodes($request, $fields['columns']['department']);
+        // A new project has its type's whole list unless the form took some out.
+        $removedActivities = $this->activities->validated($request->input('removedActivityCodes'), $fields['columns']['type_of_job']) ?? [];
         $employeeId = (int) $actor->getKey();
         // Only Auto-approve passes a new project; approving others' is not approving your own (2026-10-07).
         $isApproved = PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
 
         $numbered = null;
-        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId, $request, $isApproved, &$numbered): int {
+        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $removedActivities, $actor, $employeeId, $request, $isApproved, &$numbered): int {
             // The client's row is the lock that keeps two projects from taking one number.
             $client = $this->connection()->table('clients')->where('id', $fields['clientId'])->lockForUpdate()->first(['id', 'client_id']);
             if ($client === null) {
@@ -290,6 +293,7 @@ final class PortalProjectEditor
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
             $this->replaceClient($projectId, $fields['clientId']);
             $this->writeScopes($projectId, $scopeCodes);
+            $this->activities->replace($projectId, $removedActivities);
             $this->repositories->replace($projectId, $fields['repositories']);
 
             $this->ledger->recordAdd(
@@ -353,13 +357,20 @@ final class PortalProjectEditor
         [$number] = self::split($row);
         $fields['columns']['project_name'] = $number === null ? $fields['name'] : $number.' '.$fields['name'];
         $parts = $this->changes($projectId, $fields);
+        $removedActivities = $this->removedActivitiesFor($request, $projectId, $row, $fields['columns']['type_of_job']);
+        if ($removedActivities !== null && $removedActivities !== $this->activities->removedFor($projectId)) {
+            $parts[] = 'Allowed activities changed';
+        }
         $changes = $parts === [] ? null : implode('; ', $parts);
         $isResubmitted = $this->sendsBackForApproval($actor, $request, $row, array_diff($parts, self::PEOPLE_CHANGES) !== []);
         $columns = $isResubmitted ? [...$fields['columns'], ...self::PENDING_AGAIN] : $fields['columns'];
 
-        $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted): void {
+        $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted, $removedActivities): void {
             $this->assertNameFree($fields['name'], $fields['columns']['department'], $projectId);
             $this->connection()->table('projects')->where('id', $projectId)->update($columns);
+            if ($removedActivities !== null) {
+                $this->activities->replace($projectId, $removedActivities);
+            }
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
             $this->replaceClient($projectId, $fields['clientId']);
@@ -435,6 +446,22 @@ final class PortalProjectEditor
     }
 
     // The activity log row, and the approvers' "updated" notice unless they already heard it was sent again.
+    /**
+     * The activities an edit takes out: what the form sent, or -- when it sent nothing and the type
+     * changed -- the old removals the new type still allows. Null leaves them as they are.
+     *
+     * @return list<string>|null
+     */
+    private function removedActivitiesFor(Request $request, int $projectId, object $row, ?string $jobType): ?array
+    {
+        $sent = $this->activities->validated($request->input('removedActivityCodes'), $jobType);
+        if ($sent !== null || $this->text($row->type_of_job ?? null) === $jobType) {
+            return $sent;
+        }
+
+        return $this->activities->validated($this->activities->removedFor($projectId), $jobType);
+    }
+
     private function announceEdit(Employee $actor, Request $request, int $projectId, string $name, ?string $department, bool $notifiesUpdate): void
     {
         $this->audit->record(
@@ -969,6 +996,8 @@ final class PortalProjectEditor
                 'links' => $links,
                 'repositories' => $this->repositories->forProject($projectId),
                 'scopeCodes' => $this->projects->scopeCodesForProject($projectId),
+                // What this project took out of its type's allowed activities.
+                'removedActivityCodes' => $this->activities->removedFor($projectId),
                 // The form locks every field but the people for whoever only View Projects reaches.
                 'editsPeopleOnly' => $editsPeopleOnly,
             ],
@@ -1260,43 +1289,14 @@ final class PortalProjectEditor
     }
 
     /**
-     * The activity codes each job type may use on a report, keyed by job type. A type with no rule is
-     * absent, and the report falls back to the whole catalogue for it. Stored prefixes are resolved to
-     * whole codes here, so the form shows ticked codes rather than their digits.
+     * The activity codes each job type may use on a report, keyed by job type; a type with no rule is
+     * absent, and the report falls back to the whole catalogue for it.
      *
      * @return array<string, list<string>>
      */
     private function allowedActivitiesByType(): array
     {
-        $codes = PortalActivityScopes::all();
-        $rows = $this->connection()->table('job_type_allowed_activities')->get(['job_type', 'activity_code_id_initials']);
-
-        $allowed = [];
-        foreach ($rows as $row) {
-            $jobType = $this->text($row->job_type);
-            if ($jobType === null) {
-                continue;
-            }
-            $initials = [];
-            foreach (explode(',', (string) ($row->activity_code_id_initials ?? '')) as $piece) {
-                $value = trim($piece);
-                if ($value !== '') {
-                    $initials[] = $value;
-                }
-            }
-            $chosen = [];
-            foreach ($codes as $code) {
-                foreach ($initials as $prefix) {
-                    if ($code['code'] !== '' && str_starts_with($code['code'], $prefix)) {
-                        $chosen[] = $code['code'];
-                        break;
-                    }
-                }
-            }
-            $allowed[$jobType] = $chosen;
-        }
-
-        return $allowed;
+        return $this->activities->allowedByType();
     }
 
     /**

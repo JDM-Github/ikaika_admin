@@ -442,6 +442,16 @@ CREATE TABLE IF NOT EXISTS projects_wbs_scopes (
     CONSTRAINT fk_projects_wbs_scopes_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
 );
 
+-- The activities a project takes out of its Type of project's allowed list (job_type_allowed_activities).
+-- A project only removes, never adds; no rows means the type's whole list. Existing databases:
+-- create_portal_projects_removed_activities.
+CREATE TABLE IF NOT EXISTS projects_removed_activities (
+    project_id    INT         NOT NULL,
+    activity_code VARCHAR(32) NOT NULL,
+    PRIMARY KEY (project_id, activity_code),
+    CONSTRAINT fk_projects_removed_activities_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
+
 
 
 -- ============================================================================
