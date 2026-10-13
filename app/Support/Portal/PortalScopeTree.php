@@ -45,7 +45,7 @@ final class PortalScopeTree
                 $department = trim((string) ($row->department ?? ''));
                 $nodes[$code] = [
                     'code' => $code,
-                    'name' => trim((string) $row->{$nameColumn}),
+                    'name' => self::plain($row->{$nameColumn}),
                     'department' => $department === '' ? self::DEFAULT_DEPARTMENT : $department,
                     'children' => [],
                 ];
@@ -65,7 +65,7 @@ final class PortalScopeTree
         }
         $roots = array_values($nodes);
         foreach ($roots as &$root) {
-            $root = self::withDepartment($root, $root['department']);
+            $root = self::settle($root, $root['department'], $root['code']);
         }
 
         return $roots;
@@ -158,10 +158,14 @@ final class PortalScopeTree
      * @param  array<string, mixed>  $node
      * @return array<string, mixed>
      */
-    private static function withDepartment(array $node, string $department): array
+    // Every node takes its tree's department; one Airtable left unnamed reads as its parent, as it always has.
+    private static function settle(array $node, string $department, string $parentName): array
     {
         $node['department'] = $department;
-        $node['children'] = array_map(static fn (array $child): array => self::withDepartment($child, $department), $node['children']);
+        if ($node['name'] === '') {
+            $node['name'] = $parentName;
+        }
+        $node['children'] = array_map(static fn (array $child): array => self::settle($child, $department, $node['name']), $node['children']);
 
         return $node;
     }
@@ -186,6 +190,14 @@ final class PortalScopeTree
         $code = trim((string) $raw);
 
         return str_ends_with($code, '-') ? $code.'01' : $code;
+    }
+
+    // Airtable's rich text marks bold with ** and escapes an asterisk; the tree shows the words alone.
+    private static function plain(mixed $raw): string
+    {
+        $text = str_replace(['**', '\*'], ['', '*'], (string) $raw);
+
+        return trim((string) preg_replace('/\s+/u', ' ', $text));
     }
 
     private static function parentOf(string $code): ?string
