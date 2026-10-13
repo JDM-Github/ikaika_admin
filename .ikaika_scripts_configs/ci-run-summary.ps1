@@ -20,15 +20,20 @@ $manifestPath = Join-Path $repoRoot $manifest
 $version = if ($manifest -like '*.json') { "$((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).version)" }
 else { "$(Get-Content -LiteralPath $manifestPath | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1)".Trim() }
 $staging = $env:BUILD_DEBUG -eq 'true'
+# The plan's job variables, which GITHUB_ENV hands every later step; the step's own env wins where it names one.
+$deploys = if ($env:DEPLOYS) { $env:DEPLOYS } else { $env:UPLOADING }
+$bump = if ($env:BUMP) { $env:BUMP } else { $env:VERSION_BUMP }
+$artifactName = if ($env:ARTIFACT) { $env:ARTIFACT } else { $env:ARTIFACT_NAME }
+$retention = if ($env:RETENTION) { $env:RETENTION } else { '?' }
 $kind = if ($staging) { 'debug' } else { 'release' }
 $tag = if ($staging) { "v$version" } else { "v$version-released" }
 $state = @{ success = 'done'; failure = 'failed'; skipped = 'skipped'; cancelled = 'cancelled' }
 function Get-State([string]$Outcome) { if ($state.ContainsKey($Outcome)) { return $state[$Outcome] } return 'did not run' }
 
-$rows = @("| Version | $version$(if ($env:BUMP) { " (bump: $env:BUMP)" } else { ' (unchanged)' }) |")
+$rows = @("| Version | $version$(if ($bump) { " (bump: $bump)" } else { ' (unchanged)' }) |")
 $rows += "| Build | $(Get-State $env:BUILD_OUTCOME) |"
 if ($env:TAGGING -eq 'true') { $rows += "| Changelog filed, version tagged | $(Get-State $env:TAG_OUTCOME) |" }
-if ($env:DEPLOYS -eq 'true') {
+if ($deploys -eq 'true') {
     $origin = Get-ConfigValue "$kind.webOrigin"
     $sitePath = (Get-ConfigValue "$kind.webSitePath").Trim('/')
     $site = if ($origin) { "$origin$(if ($sitePath) { "/$sitePath" })/$((Get-ConfigValue "$kind.webBaseHref").Trim('/'))/" } else { Get-ConfigValue "$kind.healthUrl" }
@@ -49,12 +54,12 @@ if ($env:RELEASE_URL) { $rows += "| GitHub release | $env:RELEASE_URL ($(if ($st
 
 $files = @()
 foreach ($file in @(Get-ChildItem -LiteralPath $(if ([IO.Path]::IsPathRooted($DistDir)) { $DistDir } else { Join-Path $repoRoot $DistDir }) -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '\.sha256$' })) {
-    $files += "| $($file.Name) | $('{0:N1} MB' -f ($file.Length / 1MB)) | $(if ($env:ARTIFACT) { $env:ARTIFACT } else { '-' }) |"
+    $files += "| $($file.Name) | $('{0:N1} MB' -f ($file.Length / 1MB)) | $(if ($artifactName) { $artifactName } else { '-' }) |"
 }
 
 $summary = @('### Result', '', '| | |', '| --- | --- |') + $rows
 if ($files.Count) {
-    $summary += @('', "### Files - artifacts kept $env:RETENTION day(s)", '', '| File | Size | Artifact |', '| --- | --- | --- |') + $files
+    $summary += @('', "### Files - artifacts kept $retention day(s)", '', '| File | Size | Artifact |', '| --- | --- | --- |') + $files
 }
 $summary += ''
 if ($env:GITHUB_STEP_SUMMARY) { Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary }

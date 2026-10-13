@@ -81,6 +81,7 @@ jobs:
 
       # main carries only the workflow files until the CI work is merged into it, so a run from there stops here and names the branches that can run it.
       - name: Check the choices before anything is fetched or built
+        id: plan
         env:
           INPUTS_JSON: ${{ toJSON(inputs) }}
           GH_TOKEN: ${{ github.token }}
@@ -188,9 +189,9 @@ jobs:
         if: ${{ !cancelled() && hashFiles('dist/*.zip') != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ steps.plan.outputs.artifact }}
           path: dist/*.zip*
-          retention-days: ${{ env.RETENTION }}
+          retention-days: ${{ steps.plan.outputs.retention }}
           compression-level: 0
 
       # Every tagged build files its notes under its version, so the next one shows only what is new; a production release takes in the staging builds since the last one.
@@ -274,9 +275,7 @@ jobs:
           BITBUCKET_OUTCOME: ${{ steps.bitbucket.outcome }}
           GITHUB_OUTCOME: ${{ steps.github.outcome }}
           RELEASE_URL: ${{ steps.release.outputs.url }}
-          DEPLOYS: ${{ env.UPLOADING }}
           TARGET: ${{ inputs.target }}
-          ARTIFACT: ${{ env.ARTIFACT_NAME }}
-          RETENTION: ${{ env.RETENTION }}
-          BUMP: ${{ env.VERSION_BUMP }}
+          ARTIFACT: ${{ steps.plan.outputs.artifact }}
+          RETENTION: ${{ steps.plan.outputs.retention }}
         run: ./.ikaika_scripts_configs/ci-run-summary.ps1

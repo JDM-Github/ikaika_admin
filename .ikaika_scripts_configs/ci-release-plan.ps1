@@ -89,8 +89,12 @@ $releasing = $githubRelease -and $tagging
 if ($githubRelease -and -not $tagging) { Write-Output '::notice title=No GitHub release::A release hangs on a new version tag, and version is same, so the build is kept as an artifact instead.' }
 Set-JobVariable 'RELEASING' $(if ($releasing) { 'true' } else { 'false' })
 # A day when the GitHub release keeps the files, three days otherwise, as the estimator's artifacts.
-Set-JobVariable 'RETENTION' $(if ($releasing) { '1' } else { '3' })
-Set-JobVariable 'ARTIFACT_NAME' ("backend-$target-$refName" -replace '[^A-Za-z0-9._-]', '-')
+$retention = if ($releasing) { '1' } else { '3' }
+Set-JobVariable 'RETENTION' $retention
+$artifactName = "backend-$target-$refName" -replace '[^A-Za-z0-9._-]', '-'
+Set-JobVariable 'ARTIFACT_NAME' $artifactName
+# A step's with: reads another step's outputs, as the estimator's reads its plan job's, so these two are step outputs as well.
+if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "retention=$retention", "artifact=$artifactName" }
 
 $stages = @('| 1 - Check | These choices, then GitHub synced from Bitbucket and the toolkit fetched |')
 $stages += "| $($stages.Count + 1) - Build | $(if ($tagging) { "VERSION bumped $bump, uncommitted, then " })the $target archive, its fonts served from $(Get-ConfigValue "$kind.assetUrl") |"
