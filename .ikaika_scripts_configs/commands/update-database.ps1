@@ -24,9 +24,13 @@
 # duplicate would double every table without a unique key.
 #
 # A REBUILD DESTROYS. Every rebuild file opens with DROP DATABASE, so it is refused on a database
-# that has tables unless -DropAndRecreate is given; on one that does not exist yet it only creates it.
-# After a rebuild, that product's rows leave the core database's actions and recycle tables, as
-# sql/portal/reset.ps1 does - they describe rows that are gone.
+# that has tables unless -Drop is given; on one that does not exist yet it only creates it.
+#
+# -DROP STARTS A PRODUCT FROM NOTHING: each picked product's database is dropped and created empty,
+# then every one of its steps runs in order - or only the ones -Step names - which is what
+# sql/portal/reset.ps1 does for the portal. Core is never dropped: its database also holds Laravel's
+# cache and jobs tables. After a drop or a rebuild, that product's rows leave the core database's
+# actions and recycle tables - they describe rows that are gone.
 #
 # WITH NOTHING PICKED NOTHING IS APPLIED. Every step is listed with its kind, the database it
 # targets, its size and what it would destroy, and the run stops there.
@@ -38,7 +42,7 @@
 #     .\script.ps1 update-database                                        list everything, change nothing
 #     .\script.ps1 update-database -Product portal -Step data             load the portal rows
 #     .\script.ps1 update-database -Product transaction_tracker -Step patches
-#     .\script.ps1 update-database -Product portal -Step schema,indexes,data,separate -DropAndRecreate
+#     .\script.ps1 update-database -Product portal -Drop                    the portal from nothing, every step
 #     .\script.ps1 update-database -Idempotent                            bring every database up to date
 #     .\script.ps1 update-database -Migrate                               php artisan migrate
 #
@@ -52,8 +56,8 @@ param(
     [switch]$AllProducts,
     # The steps to apply, by file name without .sql, or patches; the ones the folders hold are offered.
     [string[]]$Step = @(),
-    # Allow a rebuild - a file that begins with DROP DATABASE - on a database that has tables.
-    [switch]$DropAndRecreate,
+    # Drop each picked product's database and build it again from nothing: every step, unless -Step names some. Never core.
+    [switch]$Drop,
     # Bring every database up to date and skip what is already applied, so a second run does nothing.
     # Picks every product, every step and the migrations when nothing else is named; never rebuilds.
     [switch]$Idempotent,
@@ -82,7 +86,7 @@ if ($Help) {
 
   Usage
     .\script.ps1 update-database [-Product <folder>[,...] | -AllProducts] [-Step <name>[,...]]
-                                 [-DropAndRecreate] [-Idempotent] [-Migrate] [-DryRun]
+                                 [-Drop] [-Idempotent] [-Migrate] [-DryRun]
 
   With nothing picked it lists every product's steps and applies none.
 
@@ -93,8 +97,10 @@ if ($Help) {
     rebuild -> structure -> retrofit -> data -> patch
   and a file's own "-- update-database: after <file>" line moves it later.
 
-  A rebuild opens with DROP DATABASE: on a database that has tables it is
-  refused unless -DropAndRecreate is given, and afterwards that product's rows
+  -Drop drops each picked product's database, creates it empty and runs every
+  one of its steps in order (or only the -Step ones). Core is never dropped.
+  A rebuild file - one that opens with DROP DATABASE - is refused on a database
+  that has tables unless -Drop is given. After either, that product's rows
   leave the core ledger (actions, recycle).
 
   -Idempotent means everything - every product, every step, the migrations -
@@ -104,7 +110,8 @@ if ($Help) {
   Examples
     .\script.ps1 update-database -Product portal -Step data
     .\script.ps1 update-database -Product transaction_tracker -Step patches
-    .\script.ps1 update-database -Product portal -Step schema,indexes,data,separate -DropAndRecreate
+    .\script.ps1 update-database -Product portal -Drop
+    .\script.ps1 update-database -Product portal,transaction_tracker -Drop -DryRun
     .\script.ps1 update-database -AllProducts -Step indexes,patches -DryRun
 
   The databases and credentials come from .env, as config/products.php reads them.
@@ -283,6 +290,13 @@ if ($Idempotent -and -not $wantedFolders.Count -and -not $wantedSteps.Count) {
     $Migrate = $true
 }
 $everyStep = $Idempotent -and -not $wantedSteps.Count
+if ($Drop -and $Idempotent) {
+    Write-Host '  -Drop builds from nothing and -Idempotent never rebuilds; pick one.' -ForegroundColor Red
+    exit 1
+}
+# A database dropped to nothing needs every one of its steps, so -Drop alone means all of them.
+if ($Drop -and -not $wantedSteps.Count) { $everyStep = $true }
+$drops = @()
 
 # ------------------------------------------------------------------------ the listing
 Write-Host ''
@@ -298,8 +312,26 @@ foreach ($folder in $folders) {
     Write-Host ''
     Write-Host "  $($db.Name)  (sql/$folder)" -ForegroundColor Cyan
     Write-Host "    .env says $($db.Database) on $($db.DbHost):$($db.Port) as $($db.Username)" -ForegroundColor DarkGray
+    $productSteps = Get-ProductStep (Join-Path $sqlRoot $folder)
 
-    foreach ($s in (Get-ProductStep (Join-Path $sqlRoot $folder))) {
+    if ($Drop -and $wantedFolders -contains $folder) {
+        if ($folder -eq 'core') {
+            Write-Host '    kept     core is never dropped - its database also holds Laravel''s cache and jobs tables' -ForegroundColor DarkGray
+        } else {
+            $databases = @(@($productSteps | ForEach-Object { if ($_.Facts.Target) { $_.Facts.Target } else { $db.Database } }) + @($db.Database) | Select-Object -Unique)
+            $odd = @($databases | Where-Object { $_ -notmatch '^[A-Za-z0-9_]+$' })
+            if ($odd.Count) {
+                Write-Host "  $($odd -join ', ') is not a plain database name, so -Drop will not touch it." -ForegroundColor Red
+                exit 1
+            }
+            $sizes = @($databases | ForEach-Object { $count = Get-DatabaseTableCount $db $_; "$_ ($(if ($count -lt 0) { 'could not ask the server' } elseif ($count -eq 0) { 'no tables' } else { "$count table(s) go" }))" })
+            Write-Host '    DROP     ' -ForegroundColor Yellow -NoNewline
+            Write-Host "$($sizes -join ', ') - dropped and created empty before its steps run"
+            $drops += [pscustomobject]@{ Folder = $folder; Product = $db; Databases = $databases }
+        }
+    }
+
+    foreach ($s in $productSteps) {
         $facts = $s.Facts
         $knownSteps += $s.Name
         $target = if ($facts.Target) { $facts.Target } else { $db.Database }
@@ -325,15 +357,15 @@ foreach ($folder in $folders) {
         }
         # Up to date never means emptied: under -Idempotent a rebuild that would destroy is left alone.
         $kept = $picked -and $wouldDestroy -and $Idempotent
-        $blocked = $picked -and $wouldDestroy -and -not $Idempotent -and -not $DropAndRecreate
+        $blocked = $picked -and $wouldDestroy -and -not $Idempotent -and -not $Drop
 
         $state = if ($applied) { 'applied' } elseif ($kept) { 'kept' } elseif ($blocked) { 'blocked' } elseif ($picked) { 'will run' } else { 'listed' }
         if ($applied) { $notes = @('already applied, unchanged since') }
-        if ($kept) { $notes += 'left alone - -DropAndRecreate on its own asks for a rebuild' }
+        if ($kept) { $notes += 'left alone - -Drop on its own asks for a rebuild' }
         $colour = @{ 'listed' = 'DarkGray'; 'will run' = 'Green'; 'blocked' = 'Yellow'; 'applied' = 'DarkGray'; 'kept' = 'DarkGray' }
         Write-Host ('    {0,-9}' -f $state) -ForegroundColor $colour[$state] -NoNewline
         Write-Host ('{0,-38} {1,-10} {2,-8} {3}' -f $s.Label, $facts.Kind, (Format-Size $facts.Bytes), ($notes -join '; '))
-        if ($blocked) { Write-Host '                 add -DropAndRecreate to allow it' -ForegroundColor DarkGray }
+        if ($blocked) { Write-Host '                 add -Drop to allow it' -ForegroundColor DarkGray }
         if ($picked -and -not $blocked -and -not $applied -and -not $kept) {
             $plan += [pscustomobject]@{ Product = $db; Folder = $folder; Step = $s; Facts = $facts; Target = $target; Key = $key; Hash = $hash }
         }
@@ -351,7 +383,7 @@ if ($strayStep.Count) {
     exit 1
 }
 
-if (-not $plan.Count -and -not $Migrate) {
+if (-not $plan.Count -and -not $drops.Count -and -not $Migrate) {
     Write-Host ''
     if ($Idempotent) { Write-Host '  Everything is already applied - nothing to do.' -ForegroundColor Green }
     elseif (-not $wantedFolders.Count -or -not $wantedSteps.Count) {
@@ -364,14 +396,15 @@ if (-not $plan.Count -and -not $Migrate) {
 if ($DryRun) {
     Write-Host ''
     Write-Host '  -DryRun: nothing ran. In order, this would apply:' -ForegroundColor Yellow
-    foreach ($item in $plan) { Write-Host "    $($item.Folder)/$($item.Step.Label) -> $($item.Target)$(if ($item.Facts.Kind -eq 'rebuild') { ', then clear its core ledger rows' })" }
+    foreach ($wipe in $drops) { Write-Host "    drop and create $($wipe.Databases -join ', ') ($($wipe.Folder)), then clear its core ledger rows" }
+    foreach ($item in $plan) { Write-Host "    $($item.Folder)/$($item.Step.Label) -> $($item.Target)$(if ($item.Facts.Kind -eq 'rebuild' -and $drops.Folder -notcontains $item.Folder) { ', then clear its core ledger rows' })" }
     if ($Migrate) { Write-Host '    php artisan migrate' }
     Write-Host ''
     exit 0
 }
 
 # ------------------------------------------------------------------------ applying
-if ($plan.Count -and -not (Get-Command mysql -ErrorAction SilentlyContinue)) {
+if (($plan.Count -or $drops.Count) -and -not (Get-Command mysql -ErrorAction SilentlyContinue)) {
     Write-Host ''
     Write-Host '  No mysql client on PATH, so no file can be applied.' -ForegroundColor Red
     Write-Host '    .\script.ps1 environment-variables     put one there' -ForegroundColor DarkGray
@@ -380,7 +413,7 @@ if ($plan.Count -and -not (Get-Command mysql -ErrorAction SilentlyContinue)) {
 }
 
 $failures = 0
-if ($plan.Count) { Write-Host ''; Write-Host '  Applying' -ForegroundColor Cyan }
+if ($plan.Count -or $drops.Count) { Write-Host ''; Write-Host '  Applying' -ForegroundColor Cyan }
 
 function Write-Applied([object]$Item, [string]$Note) {
     if (-not $Idempotent) { return }
@@ -388,7 +421,38 @@ function Write-Applied([object]$Item, [string]$Note) {
     $script:ledgerTouched = $true
 }
 
+# The product's rows in the core ledger describe records its rebuilt database no longer has.
+function Clear-CoreLedger([object]$Rebuilt) {
+    $core = $products['core']
+    if (-not $core -or @(Get-PresentTable $core $core.Database) -notcontains 'actions') { return $true }
+    $productKey = $Rebuilt.Key -replace "'", "''"
+    $cleared = Invoke-MysqlQuery $core "DELETE FROM ``$($core.Database)``.actions WHERE product = '$productKey'; DELETE FROM ``$($core.Database)``.recycle WHERE product = '$productKey'; SELECT 'ok'"
+    if ($null -eq $cleared) {
+        Write-Host "      could not clear $($Rebuilt.Key)'s rows from the core ledger in $($core.Database)" -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host "      cleared $($Rebuilt.Key)'s rows from the core ledger (actions, recycle)" -ForegroundColor DarkGray
+    return $true
+}
+
+$undropped = @()
+foreach ($wipe in $drops) {
+    Write-Host "    drop $($wipe.Folder): $($wipe.Databases -join ', ')"
+    $statements = ($wipe.Databases | ForEach-Object { "DROP DATABASE IF EXISTS ``$_``; CREATE DATABASE ``$_`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" }) -join ' '
+    if ($null -eq (Invoke-MysqlQuery $wipe.Product "$statements SELECT 'ok'")) {
+        Write-Host "      FAILED - could not drop and create $($wipe.Databases -join ', '); its steps are skipped" -ForegroundColor Red
+        $undropped += $wipe.Folder
+        $failures++
+        continue
+    }
+    Write-Host "      dropped and created empty" -ForegroundColor Green
+    # What the ledger said was applied to these databases went with them.
+    foreach ($name in @($ledger.Keys | Where-Object { $wipe.Databases -contains ($_ -split '\|')[0] })) { $ledger.Remove($name); $ledgerTouched = $true }
+    if (-not (Clear-CoreLedger $wipe.Product)) { $failures++ }
+}
+
 foreach ($item in $plan) {
+    if ($undropped -contains $item.Folder) { continue }
     Write-Host "    $($item.Folder)/$($item.Step.Label)  ($($item.Facts.Kind))"
     $strict = $item.Facts.Kind -in @('rebuild', 'data')
     $run = Invoke-SqlFile $item.Product $item.Facts (-not $strict)
@@ -414,15 +478,8 @@ foreach ($item in $plan) {
     if ($run.Exit -eq 0) {
         Write-Host "      applied to $($item.Target)" -ForegroundColor Green
         Write-Applied $item 'applied'
-        if ($item.Facts.Kind -eq 'rebuild' -and $item.Folder -ne 'core') {
-            # The rebuilt product's rows in the core ledger describe records that no longer exist.
-            $core = $products['core']
-            if ($core -and @(Get-PresentTable $core $core.Database) -contains 'actions') {
-                $productKey = $item.Product.Key -replace "'", "''"
-                $cleared = Invoke-MysqlQuery $core "DELETE FROM ``$($core.Database)``.actions WHERE product = '$productKey'; DELETE FROM ``$($core.Database)``.recycle WHERE product = '$productKey'; SELECT 'ok'"
-                if ($null -eq $cleared) { Write-Host "      could not clear $($item.Product.Key)'s rows from the core ledger in $($core.Database)" -ForegroundColor Yellow; $failures++ }
-                else { Write-Host "      cleared $($item.Product.Key)'s rows from the core ledger (actions, recycle)" -ForegroundColor DarkGray }
-            }
+        if ($item.Facts.Kind -eq 'rebuild' -and $item.Folder -ne 'core' -and $drops.Folder -notcontains $item.Folder) {
+            if (-not (Clear-CoreLedger $item.Product)) { $failures++ }
         }
         continue
     }
@@ -436,9 +493,8 @@ foreach ($item in $plan) {
             Write-Applied $item 'adopted'
             continue
         }
-        $creator = @(Get-ProductStep (Join-Path $sqlRoot $item.Folder) | Where-Object { $_.Facts.Kind -eq 'rebuild' } | Select-Object -First 1)
         Write-Host '      These rows are already loaded; a data file inserts rather than merges, so it only applies to an empty database:' -ForegroundColor Yellow
-        if ($creator.Count) { Write-Host "        .\script.ps1 update-database -Product $($item.Folder) -Step $($creator[0].Name),$($item.Step.Name) -DropAndRecreate" -ForegroundColor DarkGray }
+        Write-Host "        .\script.ps1 update-database -Product $($item.Folder) -Drop" -ForegroundColor DarkGray
     } elseif ((Get-ErrorCode $why) -eq 1049) {
         Write-Host "      $($item.Target) does not exist yet; the product's rebuild step creates it." -ForegroundColor Yellow
     }

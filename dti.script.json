@@ -433,11 +433,11 @@
             "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/update-database Step"
           },
           {
-            "flag": "DropAndRecreate",
-            "label": "-DropAndRecreate   [SwitchParameter]",
+            "flag": "Drop",
+            "label": "-Drop   [SwitchParameter]",
             "type": "boolean",
             "required": false,
-            "description": "Allow a rebuild - a file that begins with DROP DATABASE - on a database that has tables.",
+            "description": "Drop each picked product's database and build it again from nothing: every step, unless -Step names some. Never core.",
             "default": ""
           },
           {
@@ -466,7 +466,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Product ${update-database.args.Product} -AllProducts ${update-database.args.AllProducts} -Step ${update-database.args.Step} -DropAndRecreate ${update-database.args.DropAndRecreate} -Idempotent ${update-database.args.Idempotent} -Migrate ${update-database.args.Migrate} -DryRun ${update-database.args.DryRun}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Product ${update-database.args.Product} -AllProducts ${update-database.args.AllProducts} -Step ${update-database.args.Step} -Drop ${update-database.args.Drop} -Idempotent ${update-database.args.Idempotent} -Migrate ${update-database.args.Migrate} -DryRun ${update-database.args.DryRun}"
         ]
       }
     },
