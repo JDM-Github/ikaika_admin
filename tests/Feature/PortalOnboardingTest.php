@@ -808,7 +808,8 @@ class PortalOnboardingTest extends TestCase
         foreach (['photo', 'signature', 'logo'] as $image) {
             $this->assertStringStartsWith('data:image/png;base64,', (string) $card[$image]);
         }
-        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_480,f_jpg,q_90/'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_642,f_jpg,q_90/'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/e_trim/c_limit,w_900,h_300,f_png/'));
         $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
             ->where('message', 'like', '%made the ID card of%')->exists());
 

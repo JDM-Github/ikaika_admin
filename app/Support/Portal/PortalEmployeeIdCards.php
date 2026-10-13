@@ -26,10 +26,11 @@ final class PortalEmployeeIdCards
 {
     public const COMPANY = 'IKAIKA OPC';
 
-    // A face-centred square for the photo, and the signature as drawn, each sized for print at 300 dpi.
-    private const PHOTO_TRANSFORM = 'c_fill,g_face,w_480,h_480,f_jpg,q_90';
+    // A face-centred 3:4 portrait for the photo, as the card prints it (2026-10-14, user), and the
+    // signature trimmed to its ink so it stands on its line; each sized for print at 300 dpi.
+    private const PHOTO_TRANSFORM = 'c_fill,g_face,w_480,h_642,f_jpg,q_90';
 
-    private const SIGNATURE_TRANSFORM = 'c_limit,w_900,h_300,f_png';
+    private const SIGNATURE_TRANSFORM = 'e_trim/c_limit,w_900,h_300,f_png';
 
     private const IMAGE_TIMEOUT_SECONDS = 15;
 
