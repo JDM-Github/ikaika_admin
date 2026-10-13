@@ -77,7 +77,7 @@ final class PortalEmployeeIdCards
             'emergencyContactName' => self::text($employee->emergency_contact_person_name),
             'emergencyContactNumber' => self::text($employee->emergency_contact_number),
             'photo' => $this->image($employee, 'photo', self::PHOTO_TRANSFORM, self::PLAIN_PHOTO_TRANSFORM),
-            'signature' => $this->signature($employee),
+            ...$this->signature($employee),
             'logo' => 'data:image/png;base64,'.base64_encode((string) file_get_contents(resource_path('images/ikaika-logo.png'))),
             'qr' => ['text' => $qrText, 'rows' => self::qrRows($qrText)],
         ];
@@ -111,16 +111,32 @@ final class PortalEmployeeIdCards
         return $rows;
     }
 
-    // The signature as its ink alone (2026-10-14, user); as Cloudinary trims it where its ink cannot be read.
-    private function signature(Employee $employee): ?string
+    /**
+     * The signature as its ink alone (2026-10-14, user), or as Cloudinary trims it where its ink cannot be
+     * read here; left blank, and said to be unclear, when the picture on file is not a signature. Its
+     * width over its height comes with it, so the card can give every signature about the same room.
+     *
+     * @return array{signature: ?string, signatureIsUnclear: bool, signatureAspect: ?float}
+     */
+    private function signature(Employee $employee): array
     {
         $picture = $this->image($employee, 'signature', self::SIGNATURE_TRANSFORM);
         if ($picture === null) {
-            return null;
+            return ['signature' => null, 'signatureIsUnclear' => false, 'signatureAspect' => null];
         }
-        $ink = PortalSignatureInk::clean((string) base64_decode(substr($picture, (int) strpos($picture, ',') + 1)));
+        $bytes = (string) base64_decode(substr($picture, (int) strpos($picture, ',') + 1));
+        $read = PortalSignatureInk::clean($bytes);
+        if (! $read['isSignature']) {
+            return ['signature' => null, 'signatureIsUnclear' => true, 'signatureAspect' => null];
+        }
+        $bytes = $read['ink'] ?? $bytes;
+        $size = @getimagesizefromstring($bytes);
 
-        return $ink === null ? $picture : 'data:image/png;base64,'.base64_encode($ink);
+        return [
+            'signature' => $read['ink'] === null ? $picture : 'data:image/png;base64,'.base64_encode($read['ink']),
+            'signatureIsUnclear' => false,
+            'signatureAspect' => $size === false || $size[1] === 0 ? null : round($size[0] / $size[1], 3),
+        ];
     }
 
     // Their newest file in a slot on Cloudinary, read in as a data URI through the first of the transforms
