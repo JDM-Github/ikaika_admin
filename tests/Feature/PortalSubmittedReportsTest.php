@@ -9,6 +9,7 @@ use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreRecycleKey;
 use App\Support\Portal\PortalProjectApproval;
+use App\Support\Portal\PortalScopeWork;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use App\Support\Portal\PortalTimezone;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -569,7 +570,7 @@ class PortalSubmittedReportsTest extends TestCase
 
         // The picker offers the member their own scopes on the project.
         $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->assertOk()->json('data'))->firstWhere('id', (string) $project->id);
-        $this->assertSame([['code' => '100', 'percent' => null, 'label' => 'Project Initiation']], $picker['scopes']);
+        $this->assertSame([['code' => '100', 'percent' => null, 'asOf' => null, 'label' => 'Project Initiation']], $picker['scopes']);
 
         $entry = [
             'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
@@ -577,9 +578,9 @@ class PortalSubmittedReportsTest extends TestCase
             'hoursRendered' => 4,
             'elementChange' => 0,
         ];
-        $file = fn (array $progress) => $this->postJson('/api/development/portal/reports/submitted', [
-            'kind' => 'daily',
-            'reports' => [['reportDate' => $today, 'remarks' => 'Scope work', 'entries' => [$entry], 'scopeProgress' => $progress]],
+        $file = fn (array $progress, string $kind = 'daily', ?string $day = null) => $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => $kind,
+            'reports' => [['reportDate' => $day ?? $today, 'remarks' => 'Scope work', 'entries' => [$entry], 'scopeProgress' => $progress]],
         ], $headers);
 
         $file([['projectId' => $project->id, 'code' => '200', 'percent' => 10]])->assertStatus(422)
@@ -592,6 +593,17 @@ class PortalSubmittedReportsTest extends TestCase
         Cache::flush();
         $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
         $this->assertSame(40, $picker['scopes'][0]['percent']);
+        $this->assertSame($today, $picker['scopes'][0]['asOf']);
+
+        // A late report for an older day keeps its own figure but does not override the newer day's.
+        $older = $this->freeDate($actor, 40);
+        $file([['projectId' => $project->id, 'code' => '100', 'percent' => 10]], 'late', $older)->assertCreated()
+            ->assertJsonPath('data.0.entries.0.scopeProgress', [['code' => '100', 'label' => 'Project Initiation', 'percent' => 10]]);
+        Cache::flush();
+        $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
+        $this->assertSame(['percent' => 40, 'asOf' => $today], ['percent' => $picker['scopes'][0]['percent'], 'asOf' => $picker['scopes'][0]['asOf']]);
+        $this->assertSame([(int) $project->id => ['100' => 40]], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
+        $this->assertEqualsCanonicalizing([$today, $older], $portal->table('projects_scope_progress')->where('project_id', $project->id)->pluck('report_date')->map(fn ($day): string => substr((string) $day, 0, 10))->all());
     }
 
     public function test_a_daily_report_is_flagged_when_the_filer_has_an_active_warning(): void

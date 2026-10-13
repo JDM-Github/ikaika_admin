@@ -1295,10 +1295,13 @@ CREATE TABLE IF NOT EXISTS projects_scope_progress (
     wbs_code       VARCHAR(32)      NOT NULL,
     employee_id    INT              NOT NULL,
     user_report_id INT              NULL,
+    -- The report's day: the newest day wins the scope's progress. Existing databases: add_report_date_to_portal_scope_progress.
+    report_date    DATE             NULL,
     percent        TINYINT UNSIGNED NOT NULL,
     created_at     TIMESTAMP        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX projects_scope_progress_latest (project_id, wbs_code, id),
     INDEX projects_scope_progress_report (user_report_id),
+    INDEX projects_scope_progress_day (project_id, wbs_code, report_date, id),
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

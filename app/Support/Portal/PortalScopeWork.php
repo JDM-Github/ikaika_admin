@@ -96,7 +96,10 @@ final class PortalScopeWork
     }
 
     /**
-     * Each scope's latest progress on these projects.
+     * Each scope's current progress on these projects: from the report with the newest day, the later
+     * filing breaking a tie. A late report for an older day is kept on that day but does not override it.
+     *
+     * ponytail: reads every progress row of these projects; group in SQL once a project holds thousands.
      *
      * @param  list<int>  $projectIds
      * @return array<int, array<string, int>>
@@ -106,38 +109,17 @@ final class PortalScopeWork
         if ($projectIds === []) {
             return [];
         }
-        $latest = $this->connection()->table('projects_scope_progress')
+        $rows = $this->connection()->table('projects_scope_progress')
             ->whereIn('project_id', $projectIds)
-            ->groupBy('project_id', 'wbs_code')
-            ->selectRaw('MAX(id) as id');
+            ->orderByRaw('report_date IS NULL, report_date DESC')
+            ->orderByDesc('id')
+            ->get(['project_id', 'wbs_code', 'percent']);
         $progress = [];
-        foreach ($this->connection()->table('projects_scope_progress')->whereIn('id', $latest)->get(['project_id', 'wbs_code', 'percent']) as $row) {
-            $progress[(int) $row->project_id][(string) $row->wbs_code] = (int) $row->percent;
+        foreach ($rows as $row) {
+            $progress[(int) $row->project_id][(string) $row->wbs_code] ??= (int) $row->percent;
         }
 
         return $progress;
-    }
-
-    /**
-     * The scopes this person is assigned on each of these projects, with their latest progress.
-     *
-     * @param  list<int>  $projectIds
-     * @return array<int, list<array{code: string, percent: ?int}>>
-     */
-    public function assignedTo(int $employeeId, array $projectIds): array
-    {
-        if ($projectIds === []) {
-            return [];
-        }
-        $progress = $this->latestProgress($projectIds);
-        $assigned = [];
-        foreach ($this->connection()->table('projects_scope_assignees')->where('employee_id', $employeeId)->whereIn('project_id', $projectIds)->orderBy('wbs_code')->get() as $row) {
-            $projectId = (int) $row->project_id;
-            $code = (string) $row->wbs_code;
-            $assigned[$projectId][] = ['code' => $code, 'percent' => $progress[$projectId][$code] ?? null];
-        }
-
-        return $assigned;
     }
 
     /**
@@ -179,14 +161,14 @@ final class PortalScopeWork
     /**
      * @param  list<array{project_id: int, wbs_code: string, percent: int}>  $entries
      */
-    public function record(int $employeeId, ?int $reportId, array $entries): void
+    public function record(int $employeeId, ?int $reportId, ?string $reportDate, array $entries): void
     {
         if ($entries === []) {
             return;
         }
         $now = now();
         $this->connection()->table('projects_scope_progress')->insert(array_map(
-            static fn (array $entry): array => [...$entry, 'employee_id' => $employeeId, 'user_report_id' => $reportId, 'created_at' => $now],
+            static fn (array $entry): array => [...$entry, 'employee_id' => $employeeId, 'user_report_id' => $reportId, 'report_date' => $reportDate, 'created_at' => $now],
             $entries,
         ));
         $this->bump();

@@ -144,9 +144,9 @@ final class PortalReportProjects
             // Nor against one that is not approved yet.
             ->tap(PortalProjectApproval::openForWork(...))
             ->select(['projects.id', 'projects.project_number', 'projects.project_name', 'projects.type_of_job', 'projects.department'])
-            // The scopes this member is assigned on it, "code=percent" with the latest progress, same query.
+            // The scopes this member is assigned on it, "code=percent@day" from the newest report day, same query.
             ->selectRaw(
-                "(SELECT GROUP_CONCAT(CONCAT(assigned.wbs_code, '=', COALESCE((SELECT progress.percent FROM projects_scope_progress progress WHERE progress.project_id = assigned.project_id AND progress.wbs_code = assigned.wbs_code ORDER BY progress.id DESC LIMIT 1), '')) ORDER BY assigned.wbs_code SEPARATOR ',') FROM projects_scope_assignees assigned WHERE assigned.project_id = projects.id AND assigned.employee_id = ?) as assigned_scopes",
+                "(SELECT GROUP_CONCAT(CONCAT(assigned.wbs_code, '=', COALESCE((SELECT CONCAT(progress.percent, '@', COALESCE(DATE_FORMAT(progress.report_date, '%Y-%m-%d'), '')) FROM projects_scope_progress progress WHERE progress.project_id = assigned.project_id AND progress.wbs_code = assigned.wbs_code ORDER BY progress.report_date IS NULL, progress.report_date DESC, progress.id DESC LIMIT 1), '')) ORDER BY assigned.wbs_code SEPARATOR ',') FROM projects_scope_assignees assigned WHERE assigned.project_id = projects.id AND assigned.employee_id = ?) as assigned_scopes",
                 [$employeeId],
             )
             // What each project took out of its type's activities, read in the same query.
@@ -202,8 +202,9 @@ final class PortalReportProjects
     {
         $scopes = [];
         foreach (array_filter(explode(',', (string) $raw)) as $pair) {
-            [$code, $percent] = array_pad(explode('=', $pair, 2), 2, '');
-            $scopes[] = ['code' => $code, 'percent' => $percent === '' ? null : (int) $percent];
+            [$code, $latest] = array_pad(explode('=', $pair, 2), 2, '');
+            [$percent, $asOf] = array_pad(explode('@', $latest, 2), 2, '');
+            $scopes[] = ['code' => $code, 'percent' => $percent === '' ? null : (int) $percent, 'asOf' => $asOf === '' ? null : $asOf];
         }
 
         return $scopes;

@@ -721,7 +721,7 @@ final class PortalSubmittedReports
 
                 // Each progress keeps the day's first line on its project, so View Reports shows it with the day.
                 foreach ($progress[$index] as $entry) {
-                    $this->scopeWork->record($employeeId, $lineByProject[$entry['project_id']] ?? null, [$entry]);
+                    $this->scopeWork->record($employeeId, $lineByProject[$entry['project_id']] ?? null, $group['date'], [$entry]);
                 }
 
                 // One report is one user_reports row per line; lineIds lets the sync address each.
