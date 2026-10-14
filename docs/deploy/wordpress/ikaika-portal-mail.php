@@ -17,6 +17,9 @@
  *   The same, plus "attachments": [{ "name": "Quote.pdf", "type": "application/pdf", "content": "<base64>" }].
  *   A route of its own, so a portal that sends files to a bridge without it is refused (rest_no_route)
  *   instead of having its message go out without them.
+ *   An image the body shows itself (a share's QR, as <img src="cid:share-qr">) comes as
+ *   { "name": "share-qr.png", ..., "inline": true, "cid": "share-qr" } and is embedded under that id,
+ *   not attached; without this a mail client shows a broken image and the picture as a loose file.
  *
  * Not an open relay: without the key every request is refused, and the key is compared in constant
  * time. It lives in wp-config.php, never in this file:
@@ -40,6 +43,8 @@ const IKAIKA_PORTAL_MAIL_MAX_HTML = 200000;
 const IKAIKA_PORTAL_MAIL_MAX_FILES = 10;
 const IKAIKA_PORTAL_MAIL_MAX_FILE_BYTES = 12 * 1024 * 1024;
 const IKAIKA_PORTAL_MAIL_FILE_TYPES = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'zip'];
+// Only a picture can sit inside the body.
+const IKAIKA_PORTAL_MAIL_INLINE_TYPES = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
 
 add_action('rest_api_init', function () {
     register_rest_route('ikaika-portal/v1', '/mail', [
@@ -99,17 +104,19 @@ function ikaika_portal_mail_addresses($value): ?array
 
 /**
  * Writes the message's files into a folder of their own under the temp directory, each under its
- * own name, which is what wp_mail attaches it as. Answers with the paths, or with why it refused.
+ * own name, which is what wp_mail attaches it as. An inline image is written the same way but kept
+ * apart, with the content id the body names it by. Answers with the attachment paths, the folder to
+ * remove, why it refused, and each inline image's path, cid and name.
  *
- * @return array{0: list<string>, 1: ?string, 2: ?string} paths, the folder to remove, the refusal
+ * @return array{0: list<string>, 1: ?string, 2: ?string, 3: list<array{0: string, 1: string, 2: string}>}
  */
 function ikaika_portal_mail_files($value): array
 {
     if (! is_array($value) || $value === []) {
-        return [[], null, null];
+        return [[], null, null, []];
     }
     if (count($value) > IKAIKA_PORTAL_MAIL_MAX_FILES) {
-        return [[], null, 'Too many attachments for one message.'];
+        return [[], null, 'Too many attachments for one message.', []];
     }
 
     $files = [];
@@ -118,36 +125,48 @@ function ikaika_portal_mail_files($value): array
         $name = sanitize_file_name(is_array($entry) && is_string($entry['name'] ?? null) ? $entry['name'] : '');
         $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
         if ($name === '' || ! in_array($extension, IKAIKA_PORTAL_MAIL_FILE_TYPES, true)) {
-            return [[], null, 'An attachment is not a type this bridge sends.'];
+            return [[], null, 'An attachment is not a type this bridge sends.', []];
+        }
+        $cid = null;
+        if (! empty($entry['inline'])) {
+            $cid = is_string($entry['cid'] ?? null) ? $entry['cid'] : '';
+            if (preg_match('/^[A-Za-z0-9._-]{1,64}$/', $cid) !== 1 || ! in_array($extension, IKAIKA_PORTAL_MAIL_INLINE_TYPES, true)) {
+                return [[], null, 'An inline image needs a picture type and a plain content id.', []];
+            }
         }
         $content = base64_decode(is_string($entry['content'] ?? null) ? $entry['content'] : '', true);
         if ($content === false || $content === '') {
-            return [[], null, 'An attachment is empty or not base64.'];
+            return [[], null, 'An attachment is empty or not base64.', []];
         }
         $total += strlen($content);
         if ($total > IKAIKA_PORTAL_MAIL_MAX_FILE_BYTES) {
-            return [[], null, 'The attachments are too large for one message.'];
+            return [[], null, 'The attachments are too large for one message.', []];
         }
-        $files[] = [$name, $content];
+        $files[] = [$name, $content, $cid];
     }
 
     $folder = trailingslashit(get_temp_dir()).'ikaika-portal-mail-'.wp_generate_uuid4();
     if (! wp_mkdir_p($folder)) {
-        return [[], null, 'The attachments could not be written to this server.'];
+        return [[], null, 'The attachments could not be written to this server.', []];
     }
     $paths = [];
-    foreach ($files as [$name, $content]) {
+    $inline = [];
+    foreach ($files as [$name, $content, $cid]) {
         // Two files of one name would overwrite each other, so a repeat gets a number.
         $path = $folder.'/'.wp_unique_filename($folder, $name);
         if (file_put_contents($path, $content) === false) {
-            ikaika_portal_mail_clear($paths, $folder);
+            ikaika_portal_mail_clear([...$paths, ...array_column($inline, 0)], $folder);
 
-            return [[], null, 'The attachments could not be written to this server.'];
+            return [[], null, 'The attachments could not be written to this server.', []];
         }
-        $paths[] = $path;
+        if ($cid === null) {
+            $paths[] = $path;
+        } else {
+            $inline[] = [$path, $cid, $name];
+        }
     }
 
-    return [$paths, $folder, null];
+    return [$paths, $folder, null, $inline];
 }
 
 function ikaika_portal_mail_clear(array $paths, ?string $folder): void
@@ -222,7 +241,7 @@ function ikaika_portal_mail_send(WP_REST_Request $request, bool $takesFiles): WP
         $headers[] = 'Bcc: '.$address;
     }
 
-    [$paths, $folder, $refusal] = $takesFiles ? ikaika_portal_mail_files($payload['attachments'] ?? []) : [[], null, null];
+    [$paths, $folder, $refusal, $inline] = $takesFiles ? ikaika_portal_mail_files($payload['attachments'] ?? []) : [[], null, null, []];
     if ($refusal !== null) {
         return ikaika_portal_mail_reply(400, ['ok' => false, 'error' => $refusal]);
     }
@@ -231,9 +250,13 @@ function ikaika_portal_mail_send(WP_REST_Request $request, bool $takesFiles): WP
     $failHook = function (WP_Error $failure) use (&$error) {
         $error = $failure->get_error_message();
     };
-    $textHook = function ($phpmailer) use ($text) {
+    $textHook = function ($phpmailer) use ($text, $inline) {
         if ($text !== '') {
             $phpmailer->AltBody = $text;
+        }
+        // Embedded under the id the body's <img src="cid:..."> names, so it shows in place.
+        foreach ($inline as [$path, $cid, $name]) {
+            $phpmailer->addEmbeddedImage($path, $cid, $name);
         }
     };
     add_action('wp_mail_failed', $failHook);
@@ -244,11 +267,11 @@ function ikaika_portal_mail_send(WP_REST_Request $request, bool $takesFiles): WP
         remove_action('wp_mail_failed', $failHook);
         remove_action('phpmailer_init', $textHook);
         // The files were only ever this message's: gone whether it sent or not.
-        ikaika_portal_mail_clear($paths, $folder);
+        ikaika_portal_mail_clear([...$paths, ...array_column($inline, 0)], $folder);
     }
 
     $id = wp_generate_uuid4();
-    $files = count($paths);
+    $files = count($paths) + count($inline);
     if (! $sent) {
         error_log('[IkaikaPortalMail] '.$id.' failed ('.$count.' recipients, '.$files.' files): '.($error ?: 'wp_mail returned false'));
 

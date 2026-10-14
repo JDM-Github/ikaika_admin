@@ -119,6 +119,55 @@ class PortalManageUsersRulesTest extends TestCase
         $this->assertNull($this->ownPower('default', $this->misAdmin, 'manage.users.access.peers'));
     }
 
+    // The reported ask (2026-10-12): an admin activates and deactivates the accounts in their Users reach.
+    public function test_an_admin_activates_and_deactivates_accounts_in_their_reach(): void
+    {
+        $url = fn (Employee $target): string => "/api/development/portal/manage/users/{$target->id}/status";
+
+        $this->asMode('default', $this->misAdmin)->patchJson($url($this->misMember), ['status' => 'Inactive'])->assertOk();
+        $this->assertSame('Inactive', $this->misMember->fresh()?->status);
+        $this->postJson('/api/development/portal/auth/login', ['id_no' => $this->misMember->id_no])
+            ->assertStatus(401)->assertJsonPath('message', 'This account is not active.');
+        $this->assertTrue(DB::connection('portal')->table('logs')
+            ->where('employee_id', $this->misAdmin->id)->where('record_id', (string) $this->misMember->id)
+            ->where('message', 'like', '%deactivated the account of%')->exists());
+
+        $this->asMode('default', $this->misAdmin)->patchJson($url($this->misMember), ['status' => 'Active'])->assertOk();
+        $this->assertSame('Active', $this->misMember->fresh()?->status);
+        $this->postJson('/api/development/portal/auth/login', ['id_no' => $this->misMember->id_no])->assertOk();
+
+        // A Pending account, such as one promoted before 2026-10-12, is activated the same way.
+        $this->misMember->forceFill(['status' => 'Pending'])->save();
+        $this->asMode('default', $this->misAdmin)->patchJson($url($this->misMember), ['status' => 'Active'])->assertOk();
+        $this->assertSame('Active', $this->misMember->fresh()?->status);
+
+        $this->asMode('default', $this->misAdmin)->patchJson($url($this->misMember), ['status' => 'Pending'])->assertStatus(422);
+        // Outside the reach answers as if they did not exist; never themselves or an executive.
+        $this->asMode('default', $this->misAdmin)->patchJson($url($this->engineeringMember), ['status' => 'Inactive'])->assertNotFound();
+        $this->asMode('default', $this->misAdmin)->patchJson($url($this->misAdmin), ['status' => 'Inactive'])
+            ->assertForbidden()->assertJsonPath('message', 'You cannot change the status of your own account.');
+        $this->asMode('default', $this->executive)->patchJson($url($this->executive), ['status' => 'Inactive'])->assertForbidden();
+        $this->asMode('default', $this->developer)->patchJson($url($this->executive), ['status' => 'Inactive'])->assertNotFound();
+        $this->asMode('dev', $this->developer)->patchJson($url($this->executive), ['status' => 'Inactive'])
+            ->assertForbidden()->assertJsonPath('message', 'An executive\'s account cannot be activated or deactivated here.');
+
+        // A fellow admin needs Manage other admins, which the roster says row by row.
+        $this->asMode('default', $this->misAdmin)->patchJson($url($this->developer), ['status' => 'Inactive'])
+            ->assertForbidden()->assertJsonPath('message', 'A fellow administrator\'s account needs Manage other admins.');
+        $rows = collect($this->asMode('default', $this->misAdmin)->getJson('/api/development/portal/manage/users?per_page=100')->assertOk()->json('data'));
+        $flag = fn (Employee $person): mixed => $rows->first(fn (array $row): bool => (string) $row['id'] === (string) $person->id)['canChangeStatus'] ?? null;
+        $this->assertTrue($flag($this->misMember));
+        $this->assertFalse($flag($this->developer));
+        $this->assertFalse($flag($this->misAdmin));
+        $this->asMode('default', $this->executive)->patchJson($url($this->developer), ['status' => 'Inactive'])->assertOk();
+        $this->assertSame('Inactive', $this->developer->fresh()?->status);
+
+        // Without the power, nothing changes.
+        DB::connection('portal')->table('access_presets')->where('role', 'admin')->where('permission_key', 'manage.users.status')->delete();
+        Cache::flush();
+        $this->asMode('default', $this->misAdmin)->patchJson($url($this->misMember), ['status' => 'Inactive'])->assertForbidden();
+    }
+
     // Someone outside the Users reach cannot be changed or opened, answering as if they did not exist.
     public function test_people_outside_the_reach_are_not_found(): void
     {
@@ -185,21 +234,11 @@ class PortalManageUsersRulesTest extends TestCase
         $this->assertNull($this->ownPower('default', $this->misAdmin, 'manage.users.information'));
     }
 
-    // The seeded defaults: Nathaniel manages other admins, sees developers' activity and syncs to Airtable,
-    // and he and Steven see employee information everywhere and alone auto-approve their projects; Fin and
-    // Audie approve the projects they lead, under the Manage group they hold for it.
-    public function test_the_seeded_personal_defaults_name_nathaniel_and_steven(): void
+    // The seeded defaults: Fin and Audie approve the projects they lead, under the Manage group they hold
+    // for it. What Nathaniel and Steven held here is the department-head presets now (2026-10-14, user).
+    public function test_the_seeded_personal_defaults_name_fin_and_audie(): void
     {
         $this->assertSame([
-            '220202-0002:administration.actions.sync:-',
-            '220202-0002:administration.logs.developers:-',
-            '220202-0002:manage.users.access.peers:-',
-            '220202-0002:manage.users.information:all',
-            '220202-0002:projects.create.direct:-',
-            '220202-0002:projects.lead:all',
-            '220302-0003:manage.users.information:all',
-            '220302-0003:projects.create.direct:-',
-            '220302-0003:projects.lead:all',
             '220825-0004:manage:-',
             '220825-0004:projects.manager:lead',
             '230103-0005:manage:-',

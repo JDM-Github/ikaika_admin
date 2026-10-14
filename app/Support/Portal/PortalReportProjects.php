@@ -12,7 +12,9 @@ use Illuminate\Support\Facades\Cache;
  *
  * Only the signed-in member's own projects, because a report is filed against work they were
  * assigned. Activities are grouped by job type rather than repeated on every project: 45 projects
- * sharing 8 job types would otherwise send the same code list 45 times.
+ * sharing 8 job types would otherwise send the same code list 45 times. A project that took some of
+ * its type's activities out (PortalProjectActivities) gets a list of its own; each project names its
+ * list by `activityGroup`, the list's `key`.
  */
 final class PortalReportProjects
 {
@@ -20,12 +22,15 @@ final class PortalReportProjects
 
     private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
+    // The list a project with no type rule reports from: the whole catalogue.
+    private const FALLBACK_GROUP = '*';
+
     /**
      * @return array{
      *     section: string,
      *     resource: string,
-     *     data: list<array{id: string, label: string, jobType: ?string, hasLines: bool}>,
-     *     activityGroups: list<array{jobType: ?string, activities: list<string>}>
+     *     data: list<array{id: string, label: string, jobType: ?string, hasLines: bool, activityGroup: string}>,
+     *     activityGroups: list<array{key: string, jobType: ?string, activities: list<string>}>
      * }
      */
     public function list(Employee $actor): array
@@ -48,8 +53,8 @@ final class PortalReportProjects
      * @return array{
      *     section: string,
      *     resource: string,
-     *     data: list<array{id: string, label: string, jobType: ?string, hasLines: bool}>,
-     *     activityGroups: list<array{jobType: ?string, activities: list<string>}>
+     *     data: list<array{id: string, label: string, jobType: ?string, hasLines: bool, activityGroup: string}>,
+     *     activityGroups: list<array{key: string, jobType: ?string, activities: list<string>}>
      * }
      */
     private function build(int $employeeId): array
@@ -65,31 +70,43 @@ final class PortalReportProjects
             }
         }
 
-        $allowed = $this->allowedInitials($jobTypes);
+        ['shared' => $allowed, 'departments' => $departmental] = $this->allowedInitials($jobTypes);
         $groups = [];
         $needsFallback = false;
-        foreach ($projects as $project) {
+        foreach ($projects as $index => $project) {
             $jobType = $project['jobType'];
-            $initials = $jobType === null ? [] : $allowed[$this->key($jobType)] ?? [];
+            // A department's own list for the type wins over the shared one.
+            $own = $jobType === null ? null : ($departmental[$this->key((string) $project['department']).'|'.$this->key($jobType)] ?? null);
+            $initials = $own ?? ($jobType === null ? [] : $allowed[$this->key($jobType)] ?? []);
             // A job type with no rule of its own is not a job type with no activities: the member
             // still has to report the day, so the whole catalogue stands in for the missing list.
             if ($initials === []) {
                 $needsFallback = true;
+                $projects[$index]['activityGroup'] = self::FALLBACK_GROUP;
 
                 continue;
             }
-            if (isset($groups[$this->key((string) $jobType)])) {
+            // Projects of one type that took out the same codes share a list.
+            $takenOut = $project['removed'];
+            $key = ($own === null ? '' : $this->key((string) $project['department']).'|').$this->key((string) $jobType).($takenOut === [] ? '' : '|-'.implode(',', $takenOut));
+            $projects[$index]['activityGroup'] = $key;
+            if (isset($groups[$key])) {
                 continue;
             }
-            $groups[$this->key((string) $jobType)] = [
+            $groups[$key] = [
+                'key' => $key,
                 'jobType' => $jobType,
-                'activities' => $this->matching($activities, $initials),
+                'activities' => $this->matching(array_values(array_filter(
+                    $activities,
+                    static fn (array $activity): bool => ! in_array($activity['code'], $takenOut, true),
+                )), $initials),
             ];
         }
 
         $activityGroups = array_values($groups);
         if ($needsFallback) {
             $activityGroups[] = [
+                'key' => self::FALLBACK_GROUP,
                 'jobType' => null,
                 'activities' => array_values(array_map(
                     static fn (array $activity): string => $activity['label'],
@@ -101,7 +118,11 @@ final class PortalReportProjects
         return [
             'section' => 'reports',
             'resource' => 'projects',
-            'data' => $projects,
+            'data' => array_map(static function (array $project): array {
+                unset($project['removed'], $project['department']);
+
+                return $project;
+            }, $projects),
             'activityGroups' => $activityGroups,
         ];
     }
@@ -123,6 +144,18 @@ final class PortalReportProjects
             // Nor against one that is not approved yet.
             ->tap(PortalProjectApproval::openForWork(...))
             ->select(['projects.id', 'projects.project_number', 'projects.project_name', 'projects.type_of_job', 'projects.department'])
+            // The scopes this member is assigned on it, in the same query; their progress is read after.
+            ->selectRaw(
+                '(SELECT GROUP_CONCAT(assigned.wbs_code ORDER BY assigned.wbs_code) FROM projects_scope_assignees assigned WHERE assigned.project_id = projects.id AND assigned.employee_id = ?) as assigned_scopes',
+                [$employeeId],
+            )
+            // What each project took out of its type's activities, read in the same query.
+            ->selectSub(
+                $this->connection()->table('projects_removed_activities')
+                    ->selectRaw('GROUP_CONCAT(activity_code ORDER BY activity_code)')
+                    ->whereColumn('projects_removed_activities.project_id', 'projects.id'),
+                'removed_codes',
+            )
             ->distinct()
             ->get();
 
@@ -138,7 +171,29 @@ final class PortalReportProjects
                 'jobType' => $jobType === '' ? null : $jobType,
                 // A report on this project asks for lines only when it is Engineering's.
                 'hasLines' => PortalProjectWork::isEngineering($row->department ?? null),
+                'removed' => $row->removed_codes === null ? [] : explode(',', (string) $row->removed_codes),
+                'department' => trim((string) ($row->department ?? '')),
+                'scopes' => array_values(array_filter(explode(',', (string) ($row->assigned_scopes ?? '')))),
             ];
+        }
+
+        // Names only when someone is assigned anything, so a member with no scopes costs no extra reads.
+        $assigned = array_filter($projects, static fn (array $project): bool => $project['scopes'] !== []);
+        if ($assigned !== []) {
+            $names = (new PortalScopeTree)->names();
+            // The hint follows the board: the newest approved report's figure, and its day (2026-10-14, user).
+            $latest = (new PortalScopeWork)->latestApproved(array_keys($assigned));
+            foreach ($assigned as $id => $project) {
+                $projects[$id]['scopes'] = array_map(
+                    static fn (string $code): array => [
+                        'code' => $code,
+                        'percent' => $latest[$id][$code]['percent'] ?? null,
+                        'asOf' => $latest[$id][$code]['asOf'] ?? null,
+                        'label' => $names[$code] ?? $code,
+                    ],
+                    $project['scopes'],
+                );
+            }
         }
 
         $ordered = array_values($projects);
@@ -174,21 +229,25 @@ final class PortalReportProjects
      * job_type_allowed_activities stores the leading digits of the codes a job type may use, as
      * one comma-separated string per row.
      *
+     * The shared rows keyed by type, and the department rows keyed "department|type", in lower case;
+     * one read for both.
+     *
      * @param  list<string>  $jobTypes
-     * @return array<string, list<string>>
+     * @return array{shared: array<string, list<string>>, departments: array<string, list<string>>}
      */
     private function allowedInitials(array $jobTypes): array
     {
         if ($jobTypes === []) {
-            return [];
+            return ['shared' => [], 'departments' => []];
         }
 
         $rows = $this->connection()
             ->table('job_type_allowed_activities')
-            ->select(['job_type', 'activity_code_id_initials'])
+            ->select(['job_type', 'department', 'activity_code_id_initials'])
             ->get();
 
         $allowed = [];
+        $departments = [];
         foreach ($rows as $row) {
             $jobType = trim((string) ($row->job_type ?? ''));
             if ($jobType === '') {
@@ -201,10 +260,15 @@ final class PortalReportProjects
                     $initials[] = $value;
                 }
             }
-            $allowed[$this->key($jobType)] = $initials;
+            $department = trim((string) ($row->department ?? ''));
+            if ($department === '') {
+                $allowed[$this->key($jobType)] = $initials;
+            } else {
+                $departments[$this->key($department).'|'.$this->key($jobType)] = $initials;
+            }
         }
 
-        return $allowed;
+        return ['shared' => $allowed, 'departments' => $departments];
     }
 
     /**

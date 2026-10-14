@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
+use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalEmailMessages;
+use App\Support\Portal\PortalQrPng;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -125,6 +127,31 @@ class PortalMailRelayTest extends TestCase
             ]);
         Http::assertNotSent(fn (Request $request): bool => $request->url() === self::URL);
         $this->assertSame('250 relayed id=files-1', PortalEmailMessages::acceptance($sent));
+    }
+
+    // The share QR is shown by the body as cid:share-qr, so the bridge is told to embed it under that id, with a type it knows.
+    public function test_an_inline_image_goes_to_the_bridge_to_be_embedded_under_its_content_id(): void
+    {
+        Http::fake([self::FILES_URL => Http::response(['ok' => true, 'id' => 'qr-1', 'attachments' => 1])]);
+        $png = PortalQrPng::png('https://example.test/share/abc');
+
+        Mail::mailer('wprelay')->to('guest@example.test')->send(new PortalEmailMail(
+            'Your link',
+            '![QR](cid:share-qr)',
+            null,
+            PortalEmailMarkup::FORMAT_LETTER,
+            PortalEmailMarkup::FORMAT_MARKUP,
+            null,
+            null,
+            [],
+            [['name' => 'share-qr', 'data' => base64_encode($png), 'mime' => 'image/png']],
+        ));
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === self::FILES_URL
+            && str_contains((string) $request['html'], 'src="cid:share-qr"')
+            && $request['attachments'] === [
+                ['name' => 'share-qr.png', 'type' => 'image/png', 'content' => base64_encode($png), 'inline' => true, 'cid' => 'share-qr'],
+            ]);
     }
 
     // A bridge from before v2 would drop the files, so it is never handed them: the send fails instead,

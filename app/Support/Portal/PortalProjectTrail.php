@@ -33,6 +33,59 @@ final class PortalProjectTrail
 
     public const RESUBMITTED = 'Project Creation Resubmission';
 
+    public const REOPENED = 'Project Creation Reopened';
+
+    // Closing follows Airtable's own names too; 'Project Closed' is only read, from rows written before 2026-10-14.
+    public const CLOSED = 'Project Closed';
+
+    public const CLOSING_SUBMITTED = 'Project Closing Submission';
+
+    public const CLOSING_APPROVED = 'Project Closing Approved';
+
+    public const CLOSING_REJECTED = 'Project Closing Rejected';
+
+    public const CLOSING_RESUBMITTED = 'Project Closing Resubmission';
+
+    public const CLOSING_REOPENED = 'Project Closing Reopened';
+
+    /**
+     * Each stored action name => what Trail history calls it and the kind its chip shows (2026-10-14, user).
+     * Airtable's older names are here too, so its rows read the same way.
+     */
+    private const DESCRIPTIONS = [
+        'project creation' => ['Project created', 'created'],
+        'project creation approved' => ['Project approved', 'approved'],
+        'project creation rejected' => ['Project rejected', 'rejected'],
+        'project creation resubmission' => ['Sent back for approval', 'pending'],
+        'project creation reopened' => ['Approval reopened, waiting again', 'pending'],
+        'project creation edited' => ['Project edited', 'edited'],
+        'project edited' => ['Project edited', 'edited'],
+        'scopes changed' => ['Scopes changed', 'scopes'],
+        'project deleted' => ['Moved to the Recycle Bin', 'deleted'],
+        'project restored' => ['Restored from the Recycle Bin', 'restored'],
+        'project closed' => ['Closing requested', 'pending'],
+        'project closing submission' => ['Closing requested', 'pending'],
+        'project closing approved' => ['Closing approved, project closed', 'closed'],
+        'project closing rejected' => ['Closing rejected', 'rejected'],
+        'project closing resubmission' => ['Closing sent back for approval', 'pending'],
+        'project closing reopened' => ['Closing approval reopened, waiting again', 'pending'],
+        'checklist submitted' => ['Completion checklist submitted', 'checklist'],
+    ];
+
+    /**
+     * The title and chip kind for a stored action name; an unknown one keeps its own words and no kind.
+     *
+     * @return array{title: string, kind: ?string}
+     */
+    public static function describe(string $action): array
+    {
+        $known = self::DESCRIPTIONS[strtolower(trim($action))] ?? null;
+
+        return $known === null
+            ? ['title' => trim($action) !== '' ? trim($action) : 'Project updated', 'kind' => null]
+            : ['title' => $known[0], 'kind' => $known[1]];
+    }
+
     public function record(int $projectId, string $actionName, Employee $actor, ?Request $request, ?string $remarks = null): void
     {
         $actionId = (int) $this->connection()->table('project_action_history')->insertGetId([

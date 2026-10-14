@@ -19,17 +19,21 @@ From `C:\IKAIKA\ikaika_admin` in PowerShell:
 | Send your local secret settings to the server | `powershell -ExecutionPolicy Bypass -File deployment\push-env.ps1` |
 | Copy your local databases to the Test Server (**replaces its data**) | `powershell -ExecutionPolicy Bypass -File deployment\copy-databases.ps1` |
 | Copy just one database | `... copy-databases.ps1 -Only portal` (or `core`, `tracker`, `estimator`) |
+| **Reset the Test Server databases, then deploy everything** (wipes every table, loads your local databases, backs up the old data on the server) | `powershell -ExecutionPolicy Bypass -File deployment\deploy-all.ps1 -ResetDatabases` (also `-ResetSql`; `-Yes` skips the question) |
 | Change a server setting | see [Changing a setting](#changing-a-setting) |
 
 Each command asks for the SSH key passphrase twice, once for the upload and once for the server step. To type it once per session, see [Optional: passphrase once](#optional-passphrase-once).
 
 **Deploy order:** admin first, then the portal (`ikaika-portal\deployment\deploy.ps1`), because the portal calls the admin. `deploy-all.ps1` does exactly that, after sending the settings (`-SkipSettings` leaves them out, `-SkipBuild` reuses the last builds). It expects the portal repo next to this one (`C:\IKAIKA\ikaika-portal`); `-PortalRepo` points it elsewhere.
 
+**Reset (`-ResetDatabases`)**: for when the Test Server's schema has drifted from what works locally -- a table, column or permission rule that only ever existed as hand-run SQL. It asks you to type RESET, then runs `copy-databases.ps1 -Wipe`: each server database is backed up to `backups/databases-import-<stamp>/` (the newest two kept), every table and view is dropped, and your local dump is loaded, migrations table included, so the deploy's `migrate` then only runs what is newer than your local database. Test Server only: these scripts never reach production.
+
 **What `deploy.ps1` does:**
 1. Runs `build.ps1`: builds CSS and fonts for the subfolder and packs `out/central-platform.zip`.
 2. Uploads the zip and the server scripts.
-3. On the server, `deploy-admin.sh` unpacks the zip, runs `composer install`, and swaps in the new release.
-4. It then migrates, applies the tracker patches (`sql/transaction_tracker/patches/*.sql`, safe to rerun), adds the every-minute scheduler cron if it is missing, republishes the public folder, prunes old backups, and prints the health check.
+3. On the server, `deploy-admin.sh` unpacks the zip, runs `composer install`, dumps the default, portal and tracker databases to `backups/databases-<stamp>/` (a failed dump stops the deploy before anything changes), and swaps in the new release.
+4. It then migrates, applies the tracker patches (`sql/transaction_tracker/patches/*.sql`, safe to rerun), adds the every-minute scheduler cron if it is missing (it also works the mail queue: `QUEUE_CONNECTION=database` is written into the release's `.env`, and without the cron queued email never leaves), republishes the public folder, and prunes old backups.
+5. **Migration health checks** fail the deploy, printing the exact rollback commands (code, public folder, and each database dump): `migrate:status --pending` must show nothing left, and `/health` must answer 200 (the portal database reachable). `deploy.ps1` then stops with "Deploy failed on the server".
 
 Expected last lines:
 
@@ -95,15 +99,16 @@ ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
 
 **Email** goes through the WordPress bridge on ikaikabim.com (`MAIL_MAILER=wprelay`), the same as local. That route arrives in Outlook without the "can't verify sender" banner.
 
-**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
+**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`, `PORTAL_ID_LOGIN_PASSWORD`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
 
 - Cloudinary (email images, reimbursement receipts): until its keys are on the server, uploads answer "Image upload is not configured." / "Receipt upload is not configured.".
+- ID-number sign-in (Settings > Advanced switch) also needs `PORTAL_ID_LOGIN_PASSWORD`; until it is on the server, every ID sign-in is refused.
 - Airtable stays empty on the Test Server so test data is never synced into the real base.
 
 To see which settings the server has (names only, no values):
 
 ```powershell
-ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET MAIL_RELAY_URL MAIL_RELAY_KEY; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
+ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET MAIL_RELAY_URL MAIL_RELAY_KEY PORTAL_ID_LOGIN_PASSWORD; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
 ```
 
 **Tracker tables** (e.g. Finance / Accounts' `account_fund_transfers`): the tracker database is the transaction tracker's own, so no Laravel migration reaches it. Its changes live in `sql/transaction_tracker/patches/` and every admin deploy runs each one, so they must be safe to rerun (`CREATE TABLE IF NOT EXISTS`, ...). A new one: add a dated file there; fresh installs also need it in `schema.sql`. A missing table shows as "We could not load the accounts." or a similar load error.
@@ -157,7 +162,13 @@ rm -rf ~/public_html/website_a85fbf18/central-api
 mv backups/admin-public-<stamp> ~/public_html/website_a85fbf18/central-api
 ```
 
-If the failed release ran migrations, read them before `migrate:rollback`.
+If the failed release ran migrations, restore the dumps the deploy took just before it (a failed check prints these lines with the real paths):
+
+```bash
+gunzip -c ~/apps/test-server/backups/databases-<stamp>/<database>.sql.gz | mysql -u <user> -p <database>
+```
+
+`migrate:rollback` also works for a migration with a sound `down()`; read it first.
 
 ---
 

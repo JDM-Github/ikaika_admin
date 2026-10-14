@@ -2,7 +2,6 @@
 
 namespace App\Support\Portal;
 
-use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
@@ -11,7 +10,6 @@ use BaconQrCode\Writer;
 use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
 
 /**
  * Manage / Onboarding (docs/power/onboarding-plan.md): the candidate entries behind the registration
@@ -41,6 +39,11 @@ final class PortalRegistrations
 
     private const ID_NO = '/^\d{6}-\d{4}$/';
 
+    /** What a candidate reads once HR revoked their link, which is how a registration is turned down. */
+    public const CLOSED = 'HR closed this registration, so it can no longer be opened or changed. Contact HR if you have questions.';
+
+    private const PROMOTED = 'This candidate is already an employee, so the registration can no longer be changed.';
+
     /**
      * The draft fields the candidate fills, in the order the steps ask for them. The email is bound
      * to the link and is never sent from the client.
@@ -54,6 +57,7 @@ final class PortalRegistrations
         'nickname' => 'max:100',
         'startDate' => 'date_format:Y-m-d',
         'dateOfBirth' => 'date_format:Y-m-d',
+        'bloodType' => 'max:3',
         'address' => 'max:500',
         'phoneNumber' => 'max:50',
         'emergencyContactPersonName' => 'max:255',
@@ -63,14 +67,37 @@ final class PortalRegistrations
         'philhealthNo' => 'max:100',
         'sssNo' => 'max:100',
         'hdmfNo' => 'max:100',
+        'nationalIdNo' => 'max:30',
         'bankName' => 'max:150',
         'bankAccountNumber' => 'max:100',
         'bankSwiftCode' => 'max:50',
+        // An address in parts (2026-10-13, user); the whole line above is composed from them.
+        'addressCountry' => 'max:60',
+        'addressProvince' => 'max:120',
+        'addressProvinceCode' => 'max:9',
+        'addressCity' => 'max:120',
+        'addressCityCode' => 'max:9',
+        'addressBarangay' => 'max:120',
+        'addressBarangayCode' => 'max:9',
+        'addressStreet' => 'max:200',
+        'emergencyContactCountry' => 'max:60',
+        'emergencyContactProvince' => 'max:120',
+        'emergencyContactProvinceCode' => 'max:9',
+        'emergencyContactCity' => 'max:120',
+        'emergencyContactCityCode' => 'max:9',
+        'emergencyContactBarangay' => 'max:120',
+        'emergencyContactBarangayCode' => 'max:9',
+        'emergencyContactStreet' => 'max:200',
     ];
+
+    /** Each address's whole line, and the prefix its parts are sent under. */
+    private const ADDRESSES = ['address' => 'address', 'emergencyContactAddress' => 'emergencyContact'];
+
+    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street'];
 
     /** What a submit must have, the old form's required set. */
     private const REQUIRED_DETAILS = [
-        'firstName', 'lastName', 'startDate', 'dateOfBirth', 'address', 'phoneNumber',
+        'firstName', 'lastName', 'startDate', 'dateOfBirth', 'bloodType', 'address', 'phoneNumber',
         'emergencyContactPersonName', 'emergencyContactNumber', 'emergencyContactAddress',
         'taxIdentificationNo', 'philhealthNo', 'sssNo', 'hdmfNo',
         'bankName', 'bankAccountNumber', 'bankSwiftCode',
@@ -81,6 +108,9 @@ final class PortalRegistrations
         private readonly PortalJwt $jwt,
         private readonly PortalRegistrationDocuments $documents,
         private readonly PortalRegistrationInput $input,
+        private readonly PortalManageUsers $users,
+        private readonly PortalEmployeeDocuments $employeeDocuments,
+        private readonly PortalPlaces $places,
     ) {}
 
     /**
@@ -123,7 +153,7 @@ final class PortalRegistrations
      */
     public function update(Employee $actor, Request $request, int $id): array
     {
-        $row = $this->row($id);
+        $row = $this->open($id);
         $data = $this->validated($request);
 
         $update = [
@@ -146,7 +176,7 @@ final class PortalRegistrations
      */
     public function revoke(Employee $actor, Request $request, int $id): array
     {
-        $row = $this->row($id);
+        $row = $this->open($id);
         $this->connection()->table('registrations')->where('id', $id)->update(['revoked_at' => now()]);
         $this->audit->record($actor, PortalLogAction::DELETE, 'manage.onboarding', '{UserName|You} revoked the registration link for '.trim((string) $row->candidate_name), (string) $id, $request);
 
@@ -158,7 +188,7 @@ final class PortalRegistrations
      */
     public function regenerate(Employee $actor, Request $request, int $id): array
     {
-        $row = $this->row($id);
+        $row = $this->open($id);
         $password = PortalCredentials::password();
         $this->connection()->table('registrations')->where('id', $id)->update([
             'password_hash' => Hash::make($password),
@@ -176,7 +206,7 @@ final class PortalRegistrations
      */
     public function markSent(Employee $actor, Request $request, int $id): array
     {
-        $row = $this->row($id);
+        $row = $this->open($id);
         $this->connection()->table('registrations')->where('id', $id)->update(['sent_at' => now()]);
         $this->audit->record($actor, PortalLogAction::PATCH, 'manage.onboarding', '{UserName|You} sent the registration link for '.trim((string) $row->candidate_name), (string) $id, $request);
 
@@ -220,8 +250,34 @@ final class PortalRegistrations
     }
 
     /**
+     * Promote opens Manage / Users' Add user on this (2026-10-12): the name the candidate submitted, the
+     * next free ID No. and the departments; the administrator adds the work email.
+     *
+     * @return array{firstName: string|null, middleName: string|null, lastName: string|null, nextIdNo: string, departments: list<string>}
+     */
+    public function promotion(Employee $actor, int $id): array
+    {
+        $row = $this->row($id);
+        if ($row->submitted_at === null) {
+            abort(422, 'The candidate has not submitted their requirements yet.');
+        }
+        if ($row->promoted_employee_id !== null) {
+            abort(422, 'This candidate is already an employee.');
+        }
+        $details = $this->detailsOf($row);
+
+        return [
+            'firstName' => $this->text($details['firstName'] ?? null),
+            'middleName' => $this->text($details['middleName'] ?? null),
+            'lastName' => $this->text($details['lastName'] ?? null),
+            ...$this->users->promotionOptions($actor),
+        ];
+    }
+
+    /**
      * A submitted entry becomes an employees row, the same rules Add user follows: the ID No pattern,
-     * a unique ID and email, Active, and the private columns from the registration.
+     * a unique ID and work email, and the private columns from the registration. Only the head admins
+     * promote, so the account is active at once and signs in with the ID No. (2026-10-12).
      *
      * @return array{employee: array{id: string, idNo: string, name: string}}
      */
@@ -237,10 +293,11 @@ final class PortalRegistrations
 
         $data = $request->validate([
             'idNo' => ['required', 'string', 'max:20'],
+            'email' => ['required', 'string', 'email', 'max:255'],
             'department' => ['required', 'string', 'max:100'],
             'role' => ['nullable', 'string', 'max:100'],
             'jobTitle' => ['nullable', 'string', 'max:255'],
-        ], [], ['idNo' => 'ID No.', 'jobTitle' => 'job title']);
+        ], [], ['idNo' => 'ID No.', 'email' => 'work email', 'jobTitle' => 'job title']);
 
         $idNo = trim($data['idNo']);
         if (preg_match(self::ID_NO, $idNo) !== 1) {
@@ -253,7 +310,8 @@ final class PortalRegistrations
         if (Employee::query()->where('id_no', $idNo)->exists()) {
             abort(422, 'Someone already has the ID No. '.$idNo.'.');
         }
-        $email = strtolower(trim((string) $row->email));
+        // The work email the admin gives them (2026-10-12); the address the link was bound to is personal.
+        $email = strtolower(trim($data['email']));
         if (Employee::query()->whereRaw('LOWER(TRIM(email)) = ?', [$email])->exists()) {
             abort(422, 'Someone already has that email address.');
         }
@@ -267,12 +325,14 @@ final class PortalRegistrations
             'last_name' => $this->text($details['lastName'] ?? null) ?? 'Employee',
             'nickname' => $this->text($details['nickname'] ?? null),
             'email' => $email,
+            'personal_email' => strtolower(trim((string) $row->email)),
             'job_title' => $this->text($data['jobTitle'] ?? null),
             'department' => $department,
             'role' => $this->text($data['role'] ?? null) ?? 'User',
             'status' => 'Active',
             'start_date' => $this->text($details['startDate'] ?? null),
             'date_of_birth' => $this->text($details['dateOfBirth'] ?? null),
+            'blood_type' => $this->text($details['bloodType'] ?? null),
             'address' => $this->text($details['address'] ?? null),
             'phone_number' => $this->text($details['phoneNumber'] ?? null),
             'emergency_contact_person_name' => $this->text($details['emergencyContactPersonName'] ?? null),
@@ -295,6 +355,8 @@ final class PortalRegistrations
         if ($row->employee_data_id !== null) {
             $this->connection()->table('new_employee_data')->where('id', (int) $row->employee_data_id)->update(['id_no' => $idNo, 'data_approval' => 'Approved']);
         }
+        // Their files go to Cloudinary as their documents, the photo becoming their profile photo (2026-10-12, user).
+        $this->employeeDocuments->copyFromRegistration($employee, $id);
         $this->audit->record($actor, PortalLogAction::INSERT, 'manage.onboarding', '{UserName|You} promoted '.trim((string) $row->candidate_name).' to employee '.$idNo, (string) $id, $request, ['idNo' => $idNo, 'department' => $department]);
 
         return ['employee' => [
@@ -384,9 +446,7 @@ final class PortalRegistrations
     public function saveDetails(PortalRegistrationSession $session, Request $request): array
     {
         $row = $this->row($session->registrationId);
-        if ($row->submitted_at !== null) {
-            abort(422, 'This registration was already submitted.');
-        }
+        $this->assertEditable($row);
 
         $rules = [];
         foreach (self::DETAIL_RULES as $field => $rule) {
@@ -398,10 +458,42 @@ final class PortalRegistrations
         foreach ($this->input->cleaned($data) as $field => $value) {
             $details[$field] = $value;
         }
+        $details = $this->withAddresses($details, $data);
         $this->connection()->table('registrations')->where('id', (int) $row->id)
             ->update(['details' => json_encode($details)]);
 
         return ['details' => $details];
+    }
+
+    /**
+     * Each address whose parts were sent, resolved and written back as its parts and its whole line:
+     * in the Philippines the picked places are named from the list, and the line waits until every
+     * part is there (2026-10-13, user).
+     *
+     * @param  array<string, mixed>  $details
+     * @param  array<string, mixed>  $sent
+     * @return array<string, mixed>
+     */
+    private function withAddresses(array $details, array $sent): array
+    {
+        foreach (self::ADDRESSES as $line => $prefix) {
+            $keys = array_map(static fn (string $part): string => $prefix.ucfirst($part), self::ADDRESS_PARTS);
+            if (array_intersect($keys, array_keys($sent)) === []) {
+                continue;
+            }
+            $parts = [];
+            foreach (self::ADDRESS_PARTS as $part) {
+                $value = $details[$prefix.ucfirst($part)] ?? null;
+                $parts[$part] = is_string($value) && trim($value) !== '' ? trim($value) : null;
+            }
+            $resolved = $this->places->resolve($parts);
+            foreach ($resolved['parts'] as $part => $value) {
+                $details[$prefix.ucfirst($part)] = $value;
+            }
+            $details[$line] = $resolved['line'];
+        }
+
+        return $details;
     }
 
     /**
@@ -412,35 +504,41 @@ final class PortalRegistrations
     public function storeDocument(PortalRegistrationSession $session, Request $request): array
     {
         $row = $this->row($session->registrationId);
-        if ($row->submitted_at !== null) {
-            abort(422, 'This registration was already submitted.');
-        }
+        $this->assertEditable($row);
 
         return ['document' => $this->documents->store($row, $request)];
+    }
+
+    /**
+     * One of the session's own files, read back so the form can preview what was sent (2026-10-12).
+     * Another registration's id is not found, however it was guessed.
+     *
+     * @return array{name: string, mime: string, path: string}
+     */
+    public function ownDocument(PortalRegistrationSession $session, int $documentId): array
+    {
+        return $this->documents->rowFor($session->registrationId, $documentId);
     }
 
     public function destroyDocument(PortalRegistrationSession $session, int $documentId): void
     {
         $row = $this->row($session->registrationId);
-        if ($row->submitted_at !== null) {
-            abort(422, 'This registration was already submitted.');
-        }
+        $this->assertEditable($row);
 
         $this->documents->destroy((int) $row->id, $documentId);
     }
 
     /**
      * The last step: the required details and documents are checked, the row lands in
-     * new_employee_data, and the administrator's entry turns Submitted.
+     * new_employee_data, and the administrator's entry turns Submitted. Sent again after changes
+     * (2026-10-12), it updates the same New Employee Data row rather than adding a second.
      *
      * @return array{submitted: true}
      */
     public function submit(PortalRegistrationSession $session): array
     {
         $row = $this->row($session->registrationId);
-        if ($row->submitted_at !== null) {
-            abort(422, 'This registration was already submitted.');
-        }
+        $this->assertEditable($row);
 
         // Cleaned again, so a draft saved before the details were sanitized is held to the same shapes.
         $details = $this->input->cleaned(array_intersect_key($this->detailsOf($row), self::DETAIL_RULES));
@@ -458,8 +556,7 @@ final class PortalRegistrations
             abort(422, 'Upload every required document before submitting.');
         }
 
-        $employeeDataId = (int) $this->connection()->table('new_employee_data')->insertGetId([
-            'id_no' => null,
+        $record = [
             'first_name' => $this->text($details['firstName'] ?? null),
             'middle_name' => $this->text($details['middleName'] ?? null),
             'last_name' => $this->text($details['lastName'] ?? null),
@@ -467,6 +564,7 @@ final class PortalRegistrations
             'email' => strtolower(trim((string) $row->email)),
             'start_date' => $this->text($details['startDate'] ?? null),
             'date_of_birth' => $this->text($details['dateOfBirth'] ?? null),
+            'blood_type' => $this->text($details['bloodType'] ?? null),
             'status' => 'Active',
             'address' => $this->text($details['address'] ?? null),
             'phone_number' => $this->text($details['phoneNumber'] ?? null),
@@ -477,11 +575,19 @@ final class PortalRegistrations
             'philhealth_no' => $this->text($details['philhealthNo'] ?? null),
             'sss_no' => $this->text($details['sssNo'] ?? null),
             'hdmf_no' => $this->text($details['hdmfNo'] ?? null),
+            'national_id_no' => $this->text($details['nationalIdNo'] ?? null),
             'bank_name' => $this->text($details['bankName'] ?? null),
             'bank_account_number' => $this->text($details['bankAccountNumber'] ?? null),
             'bank_swift_code' => $this->text($details['bankSwiftCode'] ?? null),
             'data_approval' => 'Pending',
-        ]);
+        ];
+        $table = $this->connection()->table('new_employee_data');
+        $employeeDataId = $row->employee_data_id === null ? null : (int) $row->employee_data_id;
+        if ($employeeDataId !== null && $table->clone()->where('id', $employeeDataId)->exists()) {
+            $table->clone()->where('id', $employeeDataId)->update($record);
+        } else {
+            $employeeDataId = (int) $table->clone()->insertGetId(['id_no' => null] + $record);
+        }
         $this->connection()->table('registrations')->where('id', (int) $row->id)->update([
             'submitted_at' => now(),
             'employee_data_id' => $employeeDataId,
@@ -565,6 +671,17 @@ final class PortalRegistrations
         return $slug;
     }
 
+    // A promoted entry is settled (2026-10-12): it is no longer changed, revoked, sent or given a password.
+    private function open(int $id): object
+    {
+        $row = $this->row($id);
+        if ($row->promoted_at !== null) {
+            abort(422, self::PROMOTED);
+        }
+
+        return $row;
+    }
+
     private function row(int $id): object
     {
         $row = $this->connection()->table('registrations')->where('id', $id)->first();
@@ -579,8 +696,12 @@ final class PortalRegistrations
     private function rowByCode(string $code): object
     {
         $row = $this->connection()->table('registrations')->where('code', $code)->first();
-        if ($row === null || $row->revoked_at !== null) {
+        if ($row === null) {
             abort(404, 'This link is not active.');
+        }
+        // Revoke is how HR turns a candidate down (2026-10-12), so the candidate is told it was closed.
+        if ($row->revoked_at !== null) {
+            abort(404, self::CLOSED);
         }
         if ($row->expires_at !== null && strtotime((string) $row->expires_at) <= now()->getTimestamp()) {
             abort(410, 'This link has expired.');
@@ -627,11 +748,17 @@ final class PortalRegistrations
             ['registration_id' => $registration->id],
             ['code_hash' => Hash::make($code), 'attempts' => 0, 'created_at' => now(), 'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES)],
         );
-        Mail::to(strtolower(trim((string) $registration->email)))->send(new PortalEmailMail(
+        // The candidate is on their registration page asking for this code, so the letter carries no link back (2026-10-14, user).
+        PortalLetters::sendAfterResponse(
+            strtolower(trim((string) $registration->email)),
+            PortalEmailMarkup::CATEGORY_SECURITY,
             'Your code for '.trim((string) $registration->candidate_name),
-            'Your code is '.$code.'. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                ."\n\nOpen your registration: ".$this->link((string) $registration->code),
-        ));
+            PortalLetters::body(
+                (string) $registration->candidate_name,
+                'Use this code to open your registration. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
+                    ."\n\n::code ".$code,
+            ),
+        );
     }
 
     /**
@@ -654,7 +781,21 @@ final class PortalRegistrations
             'name' => (string) $registration->candidate_name,
             'details' => (object) $this->detailsOf($registration),
             'documents' => $this->documents->listFor((int) $registration->id),
+            // A submitted candidate may still change everything until HR promotes them (2026-10-12).
+            'submittedAt' => $registration->submitted_at === null ? null : (string) $registration->submitted_at,
+            'isLocked' => $registration->promoted_at !== null,
         ];
+    }
+
+    /*
+     * Changes stop once HR has promoted the candidate: the employee record is made from what was
+     * sent. Turning a candidate down is Revoke (2026-10-12), whose link signs nobody in at all.
+     */
+    private function assertEditable(object $row): void
+    {
+        if ($row->promoted_at !== null) {
+            abort(422, 'HR has already approved this registration, so it can no longer be changed.');
+        }
     }
 
     private function sessionTtl(object $registration): int

@@ -1,16 +1,17 @@
 <?php
 
-use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailMessage;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Portal\PortalBitbucketPreview;
 use App\Support\Portal\PortalBitbucketSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
 use App\Support\Portal\PortalEmailAttachments;
-use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalEmailMessages;
+use App\Support\Portal\PortalEmployeeDocuments;
+use App\Support\Portal\PortalHomeLocations;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
+use App\Support\Portal\PortalPlaces;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Mail;
@@ -143,15 +144,7 @@ Artisan::command('portal:mail-test
 
             return 1;
         }
-        $mail = new PortalEmailMail(
-            (string) $row->subject,
-            (string) $row->body,
-            is_string($row->footer_body) ? $row->footer_body : null,
-            PortalEmailMarkup::format($row->format) ?? PortalEmailMarkup::FORMAT_MARKUP,
-            PortalEmailMarkup::format($row->footer_format) ?? PortalEmailMarkup::FORMAT_MARKUP,
-            is_string($row->from_name) ? $row->from_name : null,
-            is_string($row->reply_to) ? $row->reply_to : null,
-        );
+        $mail = PortalEmailMessages::mailFromRow($row);
         $this->line(sprintf(
             'Resending #%d "%s" (%s, %s, %s)',
             (int) $row->getKey(),
@@ -182,6 +175,22 @@ Artisan::command('portal:mail-test
 
     return 0;
 })->purpose('Send one test email with the current mail settings');
+
+// Promotion copies a candidate's files to Cloudinary since 2026-10-12; this copies them for anyone promoted before.
+Artisan::command('portal:copy-registration-documents', function (PortalEmployeeDocuments $documents): int {
+    $outcome = $documents->copyAllPromoted();
+    $this->info($outcome['copied'].' copied, '.$outcome['skipped'].' already on Cloudinary, '.$outcome['failed'].' failed.');
+
+    return $outcome['failed'] > 0 ? 1 : 0;
+})->purpose('Copy the registration files of promoted employees to Cloudinary as their documents');
+
+// The registration form's address lists (2026-10-13): loaded by their migration, and again from a newer copy.
+Artisan::command('portal:import-places', function (PortalPlaces $places): int {
+    $loaded = $places->import();
+    $this->info($loaded['psgc_provinces'].' provinces, '.$loaded['psgc_cities'].' cities and municipalities, '.$loaded['psgc_barangays'].' barangays.');
+
+    return 0;
+})->purpose('Load the Philippine provinces, cities and barangays from database/data/psgc');
 
 // Each attach clears what was abandoned too; this is for a scheduler, or after a quiet stretch.
 Artisan::command('portal:prune-email-attachments', function (PortalEmailAttachments $attachments): int {
@@ -263,4 +272,17 @@ Artisan::command('portal:bitbucket-preview
 })->purpose('Show what the Bitbucket sync would read for one repository and one day, without saving anything');
 
 // The backstop for a missed push webhook, and what finishes counting a long history; needs the server's schedule:run cron.
+// Manage / Map: places each person's new or changed address; one Nominatim request a second.
+Artisan::command('portal:geocode-homes', function (PortalHomeLocations $homes): int {
+    $counts = $homes->refresh();
+    $this->info("Placed {$counts['placed']}, could not place {$counts['failed']}, unchanged {$counts['unchanged']}.");
+
+    return 0;
+})->purpose('Turn every address into a point for Manage / Map');
+
 Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
+Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();
+
+// The mail queue's worker. The server runs no daemon, so the minute cron starts one that leaves when the queue is
+// empty or after 55 s, before the next one starts; two that do meet cannot take the same job.
+Schedule::command('queue:work --stop-when-empty --max-time=55')->everyMinute()->runInBackground();

@@ -189,10 +189,36 @@ class PortalManageProjectsTest extends TestCase
         $this->assertTrue(DB::connection('core')->table('actions')->where('record_id', (string) $this->projectId)->where('action_type', CoreActionType::EDIT)->exists());
         $this->assertTrue(DB::connection('portal')->table('notifications')
             ->where('employee_id', $this->member->getKey())->where('type', 'projects.approved')->where('link_path', '/projects/projects')->exists());
+    }
 
-        // Decided once: it is no longer waiting.
-        $this->decide($this->admin, ['decision' => 'reject', 'remarks' => 'Late'])->assertStatus(422)
+    // The reported ask: an administrator may change the approval after it was decided; a member approver may not.
+    public function test_an_admin_changes_a_decided_approval_and_a_member_cannot(): void
+    {
+        $this->approverDefault('all');
+        $this->decide($this->admin, ['decision' => 'approve'])->assertOk();
+        $this->assertTrue($this->withToken($this->token($this->admin))->getJson(self::BASE.'?status=approved')->assertOk()->json('canChangeDecided'));
+        $this->assertFalse($this->withToken($this->token($this->member))->getJson(self::BASE.'?status=approved')->assertOk()->json('canChangeDecided'));
+
+        $this->decide($this->member, ['decision' => 'reject', 'remarks' => 'Late'])->assertStatus(422)
             ->assertJsonPath('message', 'This project is not waiting for approval.');
+        $this->decide($this->admin, ['decision' => 'approve'])->assertStatus(422)
+            ->assertJsonPath('message', 'The project is already approved.');
+        $this->decide($this->admin, ['decision' => 'reject'])->assertStatus(422);
+
+        $this->decide($this->admin, ['decision' => 'reject', 'remarks' => 'Wrong client'])->assertOk()
+            ->assertJsonPath('data.creationStatus', 'rejected');
+        $this->assertSame('Project Creation Rejected', $this->latestTrail());
+
+        // Back to waiting clears who decided, and the requester hears of it.
+        $this->decide($this->admin, ['decision' => 'pending'])->assertOk()
+            ->assertJsonPath('data.creationStatus', 'pending');
+        $row = DB::connection('portal')->table('projects')->where('id', $this->projectId)->first();
+        $this->assertSame(['Pending', null, null], [$row->project_creation_status, $row->project_creation_approver, $row->project_approver_email]);
+        $this->assertSame('Project Creation Reopened', $this->latestTrail());
+        $this->assertTrue(DB::connection('portal')->table('notifications')
+            ->where('employee_id', $this->member->getKey())->where('title', 'Project back to waiting')->exists());
+        $this->decide($this->admin, ['decision' => 'pending'])->assertStatus(422)
+            ->assertJsonPath('message', 'The project is already waiting.');
     }
 
     public function test_rejecting_needs_a_reason_and_keeps_it(): void

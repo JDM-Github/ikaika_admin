@@ -72,7 +72,8 @@ final class PortalProjectWork
      */
     private function summary(object $project, array $reports, CarbonImmutable $today): array
     {
-        $isDone = PortalViewProjectPresenter::status($project->status ?? null) === 'completed';
+        // Completed and Closed both end the work; Closed read as Completed until it became its own status.
+        $isDone = in_array(PortalViewProjectPresenter::status($project->status ?? null), ['completed', 'closed'], true);
         $hasLines = self::isEngineering($project->department ?? null);
         $recentFrom = $today->subDays(self::RECENT_DAYS - 1)->toDateString();
 

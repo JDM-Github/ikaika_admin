@@ -138,7 +138,7 @@ class PortalProjectNumbersTest extends TestCase
         $mis = $this->misLead();
         $this->create($mis, ['department' => 'MIS', 'leadId' => (int) $mis->getKey(), 'area' => null, 'levels' => [], 'links' => ['ms-teams' => 'teams.microsoft.com/x']])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Each link must start with http:// or https://.');
+            ->assertJsonPath('message', 'Each link must start with http:// or https://, or be N/A.');
         $this->create($mis, ['department' => 'MIS', 'leadId' => (int) $mis->getKey(), 'area' => null, 'levels' => [], 'links' => []])
             ->assertCreated();
     }

@@ -5,7 +5,8 @@ param(
     [string[]]$Keys = @(
         'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
         'BITBUCKET_TOKEN', 'BITBUCKET_WEBHOOK_SECRET',
-        'MAIL_RELAY_URL', 'MAIL_RELAY_KEY'
+        'MAIL_RELAY_URL', 'MAIL_RELAY_KEY',
+        'PORTAL_ID_LOGIN_PASSWORD'
     ),
     [string]$SshHost = 'bluehost'
 )

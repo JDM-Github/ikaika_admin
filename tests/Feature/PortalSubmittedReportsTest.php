@@ -9,6 +9,7 @@ use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreRecycleKey;
 use App\Support\Portal\PortalProjectApproval;
+use App\Support\Portal\PortalScopeWork;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use App\Support\Portal\PortalTimezone;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -114,7 +115,7 @@ class PortalSubmittedReportsTest extends TestCase
 
         $first = $daily['entries'][0];
         $this->assertSame(
-            ['id', 'projectLabel', 'activityLabel', 'earnCodeLabel', 'hoursRendered', 'elementChange', 'projectId', 'projectDepartment'],
+            ['id', 'projectLabel', 'activityLabel', 'earnCodeLabel', 'hoursRendered', 'elementChange', 'projectId', 'projectDepartment', 'scopeProgress'],
             array_keys($first),
         );
         $this->assertNotSame('Unassigned', $first['projectLabel']);
@@ -552,6 +553,76 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertSame($projectLabel, $log->payload['entries'][0]['projectLabel']);
         $this->assertSame($activityLabel, $log->payload['entries'][0]['activityLabel']);
         $this->assertSame(5.5, $log->payload['entries'][0]['hoursRendered']);
+    }
+
+    // The reported ask: a member assigned to a scope reports its progress with the day; View Reports shows it.
+    public function test_an_assigned_member_reports_scope_progress_with_a_daily_report(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $today = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $portal = DB::connection('portal');
+        $portal->table('projects_wbs_scopes')->insertOrIgnore([['project_id' => $project->id, 'wbs_code' => '100'], ['project_id' => $project->id, 'wbs_code' => '200']]);
+        $portal->table('projects_scope_assignees')->insert(['project_id' => $project->id, 'wbs_code' => '100', 'employee_id' => $actor->getKey()]);
+        Cache::flush();
+
+        // The picker offers the member their own scopes on the project.
+        $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->assertOk()->json('data'))->firstWhere('id', (string) $project->id);
+        $this->assertSame([['code' => '100', 'percent' => null, 'asOf' => null, 'label' => 'Project Initiation']], $picker['scopes']);
+
+        $entry = [
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name ?? null, $activity->id_no ?? null),
+            'hoursRendered' => 4,
+            'elementChange' => 0,
+        ];
+        $file = fn (array $progress, string $kind = 'daily', ?string $day = null) => $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => $kind,
+            'reports' => [['reportDate' => $day ?? $today, 'remarks' => 'Scope work', 'entries' => [$entry], 'scopeProgress' => $progress]],
+        ], $headers);
+
+        $file([['projectId' => $project->id, 'code' => '200', 'percent' => 10]])->assertStatus(422)
+            ->assertJsonPath('message', 'Report progress only on scopes you are assigned.');
+        $file([['projectId' => $project->id, 'code' => '100', 'percent' => 120]])->assertStatus(422);
+        $file([['projectId' => $project->id, 'code' => '100', 'percent' => 40]])->assertCreated()
+            ->assertJsonPath('data.0.entries.0.scopeProgress', [['code' => '100', 'label' => 'Project Initiation', 'percent' => 40]]);
+
+        $this->assertSame(40, (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('wbs_code', '100')->value('percent'));
+        // An Engineering daily report waits for review: the hint, like the board, shows nothing until it is approved.
+        Cache::flush();
+        $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
+        $this->assertSame(['percent' => null, 'asOf' => null], ['percent' => $picker['scopes'][0]['percent'], 'asOf' => $picker['scopes'][0]['asOf']]);
+        $todayLine = (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('report_date', $today)->value('user_report_id');
+        $portal->table('employees_user_reports')->where('user_report_id', $todayLine)->update(['flag_status' => 'Approved']);
+        Cache::flush();
+        $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
+        $this->assertSame(40, $picker['scopes'][0]['percent']);
+        $this->assertSame($today, $picker['scopes'][0]['asOf']);
+
+        // A late report for an older day keeps its own figure but does not override the newer day's.
+        $older = $this->freeDate($actor, 40);
+        $file([['projectId' => $project->id, 'code' => '100', 'percent' => 10]], 'late', $older)->assertCreated()
+            ->assertJsonPath('data.0.entries.0.scopeProgress', [['code' => '100', 'label' => 'Project Initiation', 'percent' => 10]]);
+        Cache::flush();
+        $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
+        $this->assertSame(['percent' => 40, 'asOf' => $today], ['percent' => $picker['scopes'][0]['percent'], 'asOf' => $picker['scopes'][0]['asOf']]);
+        $this->assertSame([(int) $project->id => ['100' => 40]], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
+        $this->assertEqualsCanonicalizing([$today, $older], $portal->table('projects_scope_progress')->where('project_id', $project->id)->pluck('report_date')->map(fn ($day): string => substr((string) $day, 0, 10))->all());
+
+        // The reported ask (2026-10-14, user): a co-assignee's newer figure wins even when it is lower.
+        $other = (int) $portal->table('employees')->where('id', '!=', $actor->getKey())->orderBy('id')->value('id');
+        $portal->table('projects_scope_progress')->insert(['project_id' => $project->id, 'wbs_code' => '100', 'employee_id' => $other, 'user_report_id' => $todayLine, 'report_date' => $today, 'percent' => 20]);
+        $this->assertSame([(int) $project->id => ['100' => 20]], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
+
+        // Only approved reports count: a pending one is skipped, and the late one counts once both its decisions land.
+        $portal->table('employees_user_reports')->where('user_report_id', $todayLine)->update(['is_flag' => 1, 'flag_status' => 'Pending']);
+        $this->assertSame([], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
+        $lateLine = (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('report_date', $older)->value('user_report_id');
+        $portal->table('user_reports')->where('id', $lateLine)->update(['late_submission_approval' => 'Approved']);
+        $portal->table('employees_user_reports')->where('user_report_id', $lateLine)->update(['flag_status' => 'Approved']);
+        $this->assertSame([(int) $project->id => ['100' => 10]], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
     }
 
     public function test_a_daily_report_is_flagged_when_the_filer_has_an_active_warning(): void

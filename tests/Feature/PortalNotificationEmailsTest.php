@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalAdvancedSettings;
+use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalNotificationEmails;
 use App\Support\Portal\PortalNotificationType;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -74,11 +76,22 @@ class PortalNotificationEmailsTest extends TestCase
         Mail::assertSent(PortalEmailMail::class, function (PortalEmailMail $mail) use ($admin, $member): bool {
             $html = $mail->render();
 
+            [$footerBody] = PortalNotificationEmails::companyFooter();
+
             return $mail->hasTo((string) $admin->email)
                 && $mail->subjectLine === 'New leave request'
-                // The Company footer rides under the message, as the composer sends it.
-                && str_contains($html, 'IKAIKA BIM')
+                // The system letter: letter design, the Company footer, greeted by first name, signed off.
+                && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
+                && $mail->category === PortalEmailMarkup::CATEGORY_REQUEST
+                && $mail->envelope()->subject === '[Request] New leave request'
+                && str_contains($mail->body, '::button[Open queue](')
+                && $mail->footerBody === $footerBody
+                && $mail->fromName === PortalNotificationEmails::FROM_NAME
+                && str_starts_with($mail->body, 'Hi '.trim((string) $admin->first_name).',')
+                && ! str_contains($mail->body, 'Best Regards')
                 && str_contains($html, $this->memberName($member))
+                // One day reads "for" the day.
+                && str_contains($html, 'filed a leave request for ')
                 && str_contains($html, '/manage/manage-requests');
         });
 
@@ -183,7 +196,11 @@ class PortalNotificationEmailsTest extends TestCase
 
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo((string) $invitee->email)
             && $mail->subjectLine === 'New event'
-            && str_contains($mail->body, 'Design review'));
+            && str_contains($mail->body, 'Design review')
+            // The reader can open the event from the email.
+            && $mail->category === PortalEmailMarkup::CATEGORY_EVENT
+            && str_contains($mail->body, '::button[Open the calendar](')
+            && str_contains($mail->body, '/event-calendar?notice='));
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo((string) $admin->email)
             && $mail->subjectLine === 'New event'
             && str_contains($mail->body, 'Design review'));

@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Route;
  *   routes/portal/access.php          Access
  *   routes/portal/developer.php       Settings / Developer mode
  *   routes/portal/administration.php  Administration / Recycle Bin
+ *   routes/portal/bug-reports.php     Bug Reports (anyone reports, MIS reads)
  */
 
 // Every write is located (company policy, 2026-10-01); RequirePortalLocation lists the exemptions.
@@ -34,4 +35,5 @@ Route::prefix('portal')->middleware(RequirePortalLocation::class)->group(functio
     require __DIR__.'/administration.php';
     require __DIR__.'/share.php';
     require __DIR__.'/register.php';
+    require __DIR__.'/bug-reports.php';
 });

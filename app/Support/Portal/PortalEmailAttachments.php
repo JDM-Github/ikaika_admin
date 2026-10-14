@@ -176,6 +176,16 @@ final class PortalEmailAttachments
     }
 
     /**
+     * The files a queued email claimed, built as mailFiles builds them, read back when its copy leaves.
+     *
+     * @return list<array{path: string, name: string, mime: string}>
+     */
+    public function mailFilesFor(int $messageId): array
+    {
+        return self::mailFiles($this->table()->where('message_id', $messageId)->orderBy('id')->get(['path', 'name', 'mime'])->all());
+    }
+
+    /**
      * @param  list<object>  $rows
      */
     public static function totalBytes(array $rows): int

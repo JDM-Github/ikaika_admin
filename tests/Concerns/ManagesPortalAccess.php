@@ -22,6 +22,8 @@ trait ManagesPortalAccess
         foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'access_self_reach', 'access_lists', 'developer_modes'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
+        // The department heads' presets would make two of the admins unequal; the scenarios name their own powers.
+        DB::connection('portal')->table('company_departments')->update(['head_employee_id' => null]);
         $this->modeTokens = [];
     }
 

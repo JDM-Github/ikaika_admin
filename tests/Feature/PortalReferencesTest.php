@@ -135,6 +135,43 @@ class PortalReferencesTest extends TestCase
         $this->add($token, ['code' => 'mis-9002', 'name' => 'Second', 'department' => 'MIS'])->assertStatus(422);
     }
 
+    // The reported ask: each department keeps a scope tree like Engineering's, edited here by WBS code.
+    public function test_a_departments_scope_tree_is_added_renamed_and_removed(): void
+    {
+        $token = $this->adminToken();
+        $tree = fn (TestResponse $response): array => $response->json('data.scopeTree');
+        $add = fn (array $body): TestResponse => $this->withToken($token)->postJson(self::BASE.'/tree-scopes', $body);
+
+        // Engineering's tree is the one from Airtable.
+        $engineering = collect($tree($this->withToken($token)->getJson(self::BASE)->assertOk()))->firstWhere('code', '100');
+        $this->assertSame(['Engineering', 'Project Initiation'], [$engineering['department'], $engineering['name']]);
+
+        $root = collect($tree($add(['code' => '910', 'name' => 'MIS Planning', 'department' => 'mis'])->assertOk()))->firstWhere('code', '910');
+        $this->assertSame('MIS', $root['department']);
+        $add(['code' => '910-01', 'name' => 'Sprint planning', 'department' => 'MIS'])->assertOk();
+        $added = $add(['code' => '910-01-01', 'name' => 'Write the sprint goal', 'department' => 'MIS'])->assertOk();
+        $this->assertSame('Write the sprint goal', collect($tree($added))->firstWhere('code', '910')['children'][0]['children'][0]['name']);
+
+        $add(['code' => '910', 'name' => 'Again', 'department' => 'MIS'])->assertStatus(422)->assertJsonPath('message', 'That scope code is already used.');
+        $add(['code' => '91', 'name' => 'Short', 'department' => 'MIS'])->assertStatus(422);
+        $add(['code' => '100-09', 'name' => 'Not MIS', 'department' => 'MIS'])->assertStatus(422);
+        $add(['code' => '920', 'name' => 'Nowhere', 'department' => 'Nowhere'])->assertStatus(422);
+
+        $this->withToken($token)->patchJson(self::BASE.'/tree-scopes/910-01', ['name' => 'Sprints'])->assertOk()
+            ->assertJsonPath('data.scopeTree', fn (array $roots): bool => collect($roots)->firstWhere('code', '910')['children'][0]['name'] === 'Sprints');
+        $this->withToken($token)->patchJson(self::BASE.'/tree-scopes/999', ['name' => 'X'])->assertNotFound();
+
+        // A scope with sub-scopes, or one a project holds, stays.
+        $this->withToken($token)->deleteJson(self::BASE.'/tree-scopes/910-01')->assertStatus(422)->assertJsonPath('message', 'Remove its sub-scopes first.');
+        $projectId = (int) DB::connection('portal')->table('projects')->value('id');
+        DB::connection('portal')->table('projects_wbs_scopes')->insert(['project_id' => $projectId, 'wbs_code' => '910-01-01']);
+        $this->withToken($token)->deleteJson(self::BASE.'/tree-scopes/910-01-01')->assertStatus(422)->assertJsonPath('message', 'Projects use this scope. Take it off them first.');
+        DB::connection('portal')->table('projects_wbs_scopes')->where('wbs_code', '910-01-01')->delete();
+        $this->withToken($token)->deleteJson(self::BASE.'/tree-scopes/910-01-01')->assertOk();
+        $this->withToken($token)->deleteJson(self::BASE.'/tree-scopes/910-01')->assertOk();
+        $this->assertSame([], collect($tree($this->withToken($token)->deleteJson(self::BASE.'/tree-scopes/910')->assertOk()))->where('code', '910')->all());
+    }
+
     public function test_a_missing_scope_cannot_be_changed(): void
     {
         $token = $this->adminToken();

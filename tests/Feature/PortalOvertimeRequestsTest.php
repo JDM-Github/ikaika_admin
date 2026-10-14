@@ -11,11 +11,13 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\NamesDepartmentHeads;
 use Tests\TestCase;
 
 class PortalOvertimeRequestsTest extends TestCase
 {
     use DatabaseTransactions;
+    use NamesDepartmentHeads;
 
     /**
      * @var list<string>
@@ -108,11 +110,11 @@ class PortalOvertimeRequestsTest extends TestCase
         $this->assertSame('QC', $log->payload['entries'][1]['activityLabel']);
     }
 
-    public function test_overtime_is_refused_for_a_day_with_no_report(): void
+    public function test_overtime_is_refused_for_a_weekday_with_no_report(): void
     {
         $actor = $this->activeMember();
         $project = $this->firstOwnProject($actor);
-        $date = $this->freeDate($actor, 0);
+        $date = $this->freeDate($actor, 0, false);
         $token = $this->loginToken($actor);
 
         $this->withToken($token)->postJson('/api/development/portal/requests/overtime', [
@@ -120,6 +122,58 @@ class PortalOvertimeRequestsTest extends TestCase
         ])
             ->assertStatus(422)
             ->assertJsonPath('message', 'There is no report for '.$date.', so there is no day to file overtime against.');
+    }
+
+    // The reported ask (2026-10-13): a weekday's report must reach 8 hours before overtime goes on top.
+    public function test_a_weekday_needs_eight_reported_hours_before_overtime(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $date = $this->reportedDate($actor, 1, $project, 5, false);
+        $token = $this->loginToken($actor);
+
+        $this->withToken($token)->postJson('/api/development/portal/requests/overtime', ['requests' => [$this->group($date, $project)]])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Overtime on '.$date.' needs 8 hours in that day\'s report first; it has 5 hours.');
+
+        // A second line of 3 hours, a late report say, makes the day whole.
+        $this->addReportLine($actor, $date, $project, 3);
+        $this->withToken($token)->getJson('/api/development/portal/reports/submitted/days?from='.$date.'&to='.$date)
+            ->assertOk()
+            ->assertJsonPath('data.0.hours', 8);
+        $this->withToken($token)->postJson('/api/development/portal/requests/overtime', ['requests' => [$this->group($date, $project)]])
+            ->assertCreated();
+    }
+
+    // The reported ask (2026-10-13): Saturday and Sunday are overtime outright, no report needed.
+    public function test_a_weekend_takes_overtime_with_no_report(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $date = $this->freeDate($actor, 0, true);
+
+        $this->withToken($this->loginToken($actor))->postJson('/api/development/portal/requests/overtime', ['requests' => [$this->group($date, $project)]])
+            ->assertCreated()
+            ->assertJsonPath('data.0.requestedFor', $date);
+    }
+
+    // The reported ask (2026-10-13): only the department head is emailed; approvers keep their inbox notice.
+    public function test_filing_overtime_emails_only_the_department_head(): void
+    {
+        $this->turnNotificationEmailsOn();
+        $actor = $this->activeMember();
+        [$head, $admin] = $this->nameDepartmentHead($actor);
+        $project = $this->firstOwnProject($actor);
+        $date = $this->reportedDate($actor, 2, $project);
+
+        $this->withToken($this->loginToken($actor))->postJson('/api/development/portal/requests/overtime', ['requests' => [$this->group($date, $project)]])
+            ->assertCreated();
+
+        $this->assertEmailedOnlyTheHead($head, $admin, 'New overtime request');
+        $this->assertTrue(DB::connection('portal')->table('notifications')
+            ->where('employee_id', $admin->getKey())
+            ->where('type', 'requests.overtime.filed')
+            ->exists());
     }
 
     public function test_one_day_carries_one_overtime_request_unless_the_first_was_refused(): void
@@ -427,12 +481,19 @@ class PortalOvertimeRequestsTest extends TestCase
      * A day inside the window that the member has filed a report for, created here so the fixture
      * database's own timesheets cannot decide whether the test passes.
      */
-    private function reportedDate(Employee $actor, int $daysAgo, object $project): string
+    private function reportedDate(Employee $actor, int $daysAgo, object $project, float $hours = 8, ?bool $weekend = null): string
     {
-        $date = $this->freeDate($actor, $daysAgo);
+        $date = $this->freeDate($actor, $daysAgo, $weekend);
+        $this->addReportLine($actor, $date, $project, $hours);
+
+        return $date;
+    }
+
+    private function addReportLine(Employee $actor, string $date, object $project, float $hours): void
+    {
         $id = (int) DB::connection('portal')->table('user_reports')->insertGetId([
             'report_date' => $date,
-            'hours_rendered' => 8,
+            'hours_rendered' => $hours,
             'change_in_elements' => 0,
             'approval' => 'Approved',
         ]);
@@ -445,8 +506,6 @@ class PortalOvertimeRequestsTest extends TestCase
             'user_report_id' => $id,
         ]);
         Cache::flush();
-
-        return $date;
     }
 
     private function insertOvertime(Employee $actor, string $date, string $status): int
@@ -462,13 +521,18 @@ class PortalOvertimeRequestsTest extends TestCase
     }
 
     /**
-     * A day inside the filing window with no report and no request of any kind on it.
+     * A day inside the filing window with no report and no request of any kind on it; $weekend
+     * true for a Saturday or Sunday, false for a weekday, null for either.
      */
-    private function freeDate(Employee $actor, int $daysAgo): string
+    private function freeDate(Employee $actor, int $daysAgo, ?bool $weekend = null): string
     {
         $name = $this->memberName($actor);
         for ($offset = $daysAgo; $offset <= 7; $offset++) {
-            $candidate = Carbon::today()->subDays($offset)->toDateString();
+            $day = Carbon::today()->subDays($offset);
+            if ($weekend !== null && $day->isWeekend() !== $weekend) {
+                continue;
+            }
+            $candidate = $day->toDateString();
             $reported = DB::connection('portal')->table('user_reports')
                 ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
                 ->where('employees_user_reports.employee_id', $actor->getKey())

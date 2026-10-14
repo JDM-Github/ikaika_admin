@@ -95,7 +95,7 @@ class PortalViewProjectsTest extends TestCase
     {
         $actor = $this->activeMember();
         $led = (int) DB::connection('portal')->table('projects')->whereNull('deleted_at')->value('id');
-        DB::connection('portal')->table('projects')->where('id', $led)->update(['project_lead_email' => $actor->email]);
+        DB::connection('portal')->table('projects')->where('id', $led)->update(['project_lead_email' => $actor->email, 'status' => 'Started']);
         DB::connection('portal')->table('projects')->where('id', '!=', $led)->whereRaw('LOWER(COALESCE(project_lead_email, \'\')) = ?', [strtolower((string) $actor->email)])->update(['project_lead_email' => null]);
         // Members hold no Edit / Manage scopes / Delete by preset: give them at own, the projects they lead.
         $this->grant($actor, ['projects.edit' => 'lead', 'projects.scopes' => 'lead', 'projects.delete' => 'lead']);
@@ -111,7 +111,9 @@ class PortalViewProjectsTest extends TestCase
         $this->assertFalse($row['canDelete']);
 
         $adminRows = collect($this->withToken($this->loginToken($this->activeAdmin()))->getJson('/api/development/portal/projects')->assertOk()->json('data'));
-        $this->assertTrue($adminRows->every(static fn (array $row): bool => $row['canEdit'] && $row['canManageScopes'] && $row['canDelete']));
+        $this->assertTrue($adminRows->every(static fn (array $row): bool => $row['canDelete']));
+        // A Completed or Closed project is shut to edits and scopes for all but its department head (2026-10-12).
+        $this->assertTrue($adminRows->where('status', 'ongoing')->every(static fn (array $row): bool => $row['canEdit'] && $row['canManageScopes']));
     }
 
     // "Only your own" marks a project the person is on, even when somebody else leads it.
@@ -286,7 +288,8 @@ class PortalViewProjectsTest extends TestCase
                 'id' => (string) $historyId,
                 'changedOn' => '2026-09-01T08:00:00+00:00',
                 'actorName' => 'Metrics Tester',
-                'summary' => 'Project Edited: Updated scope totals',
+                'summary' => 'Project edited: Updated scope totals',
+                'kind' => 'edited',
                 'actorPhotoUrl' => null,
             ],
         ], $row['trail']);

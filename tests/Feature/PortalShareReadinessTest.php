@@ -27,17 +27,15 @@ class PortalShareReadinessTest extends TestCase
 
     // The first read each ready page's screen asks for, per page-level rule.
     private const PAGE_READS = [
-        'home' => ['/api/development/portal/home'],
         'projects.view' => ['/api/development/portal/projects'],
         'projects.track' => ['/api/development/portal/projects/track'],
-        'projects.created' => ['/api/development/portal/projects/mine'],
-        'projects.manager' => ['/api/development/portal/manage/projects'],
         'projects.references' => ['/api/development/portal/manage/references'],
-        'reports.submitted' => ['/api/development/portal/reports/submitted'],
         'calendar' => ['/api/development/portal/calendar/events'],
         'manage.requests' => ['/api/development/portal/manage/requests'],
         'manage.reports' => ['/api/development/portal/manage/reports'],
         'manage.users' => ['/api/development/portal/manage/users'],
+        'manage.onboarding' => ['/api/development/portal/manage/registrations'],
+        'manage.map' => ['/api/development/portal/manage/map'],
         'finance.overview' => ['/api/development/portal/manage/budget-codes', '/api/development/portal/manage/budget-transactions'],
         'finance.transactions' => ['/api/development/portal/manage/budget-transactions'],
         'finance.envelopes' => ['/api/development/portal/manage/budget-codes'],
@@ -47,10 +45,8 @@ class PortalShareReadinessTest extends TestCase
         'administration.actions' => ['/api/development/portal/administration/all-actions'],
         'administration.missing' => ['/api/development/portal/administration/missing-reports'],
         'administration.emails' => ['/api/development/portal/administration/emails'],
-        'email.library' => ['/api/development/portal/administration/email-blocks', '/api/development/portal/signature/default'],
-        'user.logs' => ['/api/development/portal/user/logs'],
-        'user.recycle' => ['/api/development/portal/administration/recycle-bin'],
-        'requests.own' => ['/api/development/portal/requests/leave'],
+        // The composer's first read; its send is the one guest write, checked in PortalGuestEmailTest.
+        'email' => ['/api/development/portal/administration/emails/audiences'],
     ];
 
     protected function setUp(): void

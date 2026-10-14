@@ -7,6 +7,7 @@ use App\Support\Core\CoreLedger;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -33,6 +34,38 @@ final class PortalManageUsers
 
     private const DEPARTMENT_RULE = 'manage.users.department';
 
+    // Activate and deactivate (2026-10-12): an account's status, which sign-in and every session call check.
+    private const STATUS_RULE = 'manage.users.status';
+
+    private const PEERS_RULE = 'manage.users.access.peers';
+
+    private const STATUSES = ['Active', 'Inactive'];
+
+    // Edit employee information (2026-10-12): the private details, held by those who may see them.
+    private const INFORMATION_EDIT_RULE = 'manage.users.information.edit';
+
+    /** The private details it changes, by the key the profile sends them under. */
+    private const INFORMATION_COLUMNS = [
+        'dateOfBirth' => 'date_of_birth',
+        'bloodType' => 'blood_type',
+        'address' => 'address',
+        'personalEmail' => 'personal_email',
+        'phoneNumber' => 'phone_number',
+        'taxIdentificationNo' => 'tax_identification_no',
+        'sssNo' => 'sss_no',
+        'philhealthNo' => 'philhealth_no',
+        'hdmfNo' => 'hdmf_no',
+        'bankName' => 'bank_name',
+        'bankAccountNumber' => 'bank_account_number',
+        'bankSwiftCode' => 'bank_swift_code',
+        'emergencyContactName' => 'emergency_contact_person_name',
+        'emergencyContactNumber' => 'emergency_contact_number',
+        'emergencyContactAddress' => 'emergency_contact_address',
+    ];
+
+    /** The registration's name for a key the profile spells differently, so its cleaning applies. */
+    private const REGISTRATION_KEYS = ['emergencyContactName' => 'emergencyContactPersonName'];
+
     // An ID No. is the start date and a running number: 260701-0019.
     private const ID_NO = '/^\d{6}-\d{4}$/';
 
@@ -55,6 +88,9 @@ final class PortalManageUsers
         private readonly CoreLedger $ledger,
         private readonly PortalEmployeeSignature $signatures,
         private readonly PortalSignature $signature,
+        private readonly PortalRegistrationInput $input,
+        private readonly PortalEmployeeDocuments $employeeDocuments,
+        private readonly PortalEmployeeIdCards $idCards,
     ) {}
 
     /**
@@ -82,13 +118,15 @@ final class PortalManageUsers
         $viewerId = (int) $viewer->getKey();
         $live = PortalDeveloperMode::isOn($viewer, $request) ? $viewerId : null;
         $reach = PortalRules::reach($viewer, $request, self::RULE);
+        $holdsStatus = PortalRules::holds($viewer, $request, self::STATUS_RULE);
+        $holdsPeers = PortalRules::holds($viewer, $request, self::PEERS_RULE);
 
-        // The viewer, their Developer mode and their reach are part of the key: who they see and may open differ.
+        // The viewer, their Developer mode, their reach and status powers are part of the key: who they see and may change differ.
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         $key = 'portal:manage:users:'.$version.':'.$viewerId.':'.($live === null ? 'd' : 'dev').':'.($reach ?? '-').':'.md5(PortalPreview::department($viewer->department))
-            .':'.$page.':'.$perPage.':'.md5($search).':'.md5($department).':'.$sort.':'.$dir;
+            .':'.(int) $holdsStatus.(int) $holdsPeers.':'.$page.':'.$perPage.':'.md5($search).':'.md5($department).':'.$sort.':'.$dir;
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($viewer, $viewerId, $live, $reach, $perPage, $page, $search, $department, $sort, $dir): array {
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($viewer, $viewerId, $live, $reach, $holdsStatus, $holdsPeers, $perPage, $page, $search, $department, $sort, $dir): array {
             $query = $this->rosterQuery();
             $this->applyReach($query, $viewer, $reach);
             $this->applyDepartment($query, $department);
@@ -105,6 +143,7 @@ final class PortalManageUsers
                     $rows[] = [
                         ...PortalManageUserPresenter::rosterItem($employee),
                         'canEditAccess' => $graph->canManage($viewerId, (int) $employee->getKey()),
+                        'canChangeStatus' => $holdsStatus && $this->statusRefusal($viewerId, $employee, $holdsPeers) === null,
                     ];
                 }
             }
@@ -230,6 +269,17 @@ final class PortalManageUsers
                 'departments' => $this->departmentChoices($actor, PortalRules::reach($actor, $request, self::RULE)),
             ],
         ];
+    }
+
+    /**
+     * What promoting a candidate starts from (2026-10-12): the next free ID No. and every department,
+     * since HR files a new hire wherever they are going rather than within its own Users reach.
+     *
+     * @return array{nextIdNo: string, departments: list<string>}
+     */
+    public function promotionOptions(Employee $actor): array
+    {
+        return ['nextIdNo' => $this->nextIdNo(), 'departments' => $this->departmentChoices($actor, 'all')];
     }
 
     /**
@@ -371,6 +421,164 @@ final class PortalManageUsers
         ];
     }
 
+    /**
+     * Activate and deactivate (2026-10-12, user): someone in the actor's Users reach turned Active or
+     * Inactive. Inactive cannot sign in, and a session already open stops at its next call. Never the
+     * actor themselves or an executive, and a fellow administrator only with Manage other admins.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function changeStatus(Employee $actor, int $id, Request $request): array
+    {
+        $data = $request->validate(['status' => ['required', 'string', Rule::in(self::STATUSES)]]);
+        $target = $this->inReach($actor, $id, $request);
+        $refusal = $this->statusRefusal((int) $actor->getKey(), $target, PortalRules::holds($actor, $request, self::PEERS_RULE));
+        if ($refusal !== null) {
+            abort(403, $refusal);
+        }
+
+        $status = $data['status'];
+        $previous = self::text($target->status);
+        if ($previous === null || strcasecmp($previous, $status) !== 0) {
+            $target->status = $status;
+            $this->ledger->within($target->getConnection(), function () use ($target, $actor, $previous, $status): void {
+                $target->save();
+                $this->ledger->recordEdit(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreLedger::PRODUCT_PORTAL.'.employees',
+                    [
+                        'table' => 'employees',
+                        'key' => 'id',
+                        'fields' => ['status' => $status],
+                        'changes' => ['status' => ['from' => $previous, 'to' => $status]],
+                    ],
+                    'employees',
+                    (string) $target->getKey(),
+                    null,
+                    (int) $actor->getKey(),
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            });
+            $this->bumpCache();
+            PortalCache::bump();
+            $name = trim(($target->first_name ?? '').' '.($target->last_name ?? ''));
+            $this->audit->record(
+                $actor,
+                PortalLogAction::PATCH,
+                'manage.users',
+                '{UserName|You} '.($status === 'Active' ? 'activated' : 'deactivated').' the account of '.$name,
+                (string) $target->getKey(),
+                $request,
+                ['previousStatus' => $previous, 'newStatus' => $status],
+            );
+        }
+
+        return [
+            'section' => 'manage',
+            'resource' => 'users',
+            'data' => $this->profileData($actor, $target, $request, $this->seesPrivate($actor, $target, $request)),
+        ];
+    }
+
+    /**
+     * Edit employee information (2026-10-12, user): the private details of someone whose information
+     * the actor sees, cleaned the way a registration cleans them. Only the details sent change, so an
+     * older value the registration rules would refuse never blocks another edit. Portal only: Airtable
+     * keeps its own copy of these, and the log names the details changed, never their values.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function updateInformation(Employee $actor, int $id, Request $request): array
+    {
+        $target = $this->privateTarget($actor, $id, $request);
+        $rules = array_fill_keys(array_keys(self::INFORMATION_COLUMNS), ['sometimes', 'nullable', 'string', 'max:255']);
+        $rules['personalEmail'][] = 'email';
+        /** @var array<string, string|null> $data */
+        $data = $request->validate($rules, [], ['personalEmail' => 'personal email']);
+        if ($data === []) {
+            abort(422, 'Change at least one detail.');
+        }
+
+        $sent = [];
+        foreach ($data as $key => $value) {
+            $sent[self::REGISTRATION_KEYS[$key] ?? $key] = $value;
+        }
+        $clean = $this->input->cleaned($sent);
+
+        $changed = [];
+        foreach (array_keys($data) as $key) {
+            $column = self::INFORMATION_COLUMNS[$key];
+            $value = $clean[self::REGISTRATION_KEYS[$key] ?? $key] ?? null;
+            if ($key === 'personalEmail') {
+                $value = self::text($value) === null ? null : strtolower((string) self::text($value));
+            }
+            $current = $key === 'dateOfBirth' ? self::text(substr((string) $target->{$column}, 0, 10)) : self::text($target->{$column});
+            if ($current !== $value) {
+                $target->{$column} = $value;
+                $changed[] = $key;
+            }
+        }
+
+        if ($changed !== []) {
+            $target->save();
+            $this->bumpCache();
+            PortalCache::bump();
+            $this->audit->record(
+                $actor,
+                PortalLogAction::PATCH,
+                self::INFORMATION_RULE,
+                '{UserName|You} changed the employee information of '.PortalAccessGraph::name($target),
+                (string) $target->getKey(),
+                $request,
+                ['fields' => $changed],
+            );
+        }
+
+        return $this->profileResponse($actor, $target, $request);
+    }
+
+    /**
+     * Edit employee information's documents (2026-10-13, user): a file put in one of their slots, by
+     * whoever may change their private details. The log names the slot, never the file.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function uploadDocument(Employee $actor, int $id, Request $request): array
+    {
+        $target = $this->privateTarget($actor, $id, $request);
+        $field = trim((string) $request->input('field', ''));
+        $this->employeeDocuments->upload($target, $field, $request->file('file'));
+        $this->documentsChanged($actor, $target, $request, PortalLogAction::POST, $field);
+
+        return $this->profileResponse($actor, $target, $request);
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function removeDocument(Employee $actor, int $id, int $documentId, Request $request): array
+    {
+        $target = $this->privateTarget($actor, $id, $request);
+        $field = $this->employeeDocuments->remove($target, $documentId);
+        $this->documentsChanged($actor, $target, $request, PortalLogAction::DELETE, $field);
+
+        return $this->profileResponse($actor, $target, $request);
+    }
+
+    /**
+     * An employee's ID card (2026-10-14, user), for whoever sees their employee information, since it
+     * prints their blood type and emergency contact. Making one is logged as a look at those is.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function idCard(Employee $actor, int $id, Request $request): array
+    {
+        $target = $this->privateTarget($actor, $id, $request);
+        $this->recordPrivateView($actor, $request, 'made the ID card of', $target);
+
+        return ['section' => 'manage', 'resource' => 'users', 'data' => $this->idCards->card($target)];
+    }
+
     public function bumpCache(): void
     {
         $current = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
@@ -427,15 +635,7 @@ final class PortalManageUsers
         $target = $this->inReach($viewer, $id, $request);
         $withPrivate = $this->seesPrivate($viewer, $target, $request);
         if ($withPrivate && ! $target->is($viewer)) {
-            $this->audit->record(
-                $viewer,
-                PortalLogAction::VIEW,
-                self::INFORMATION_RULE,
-                '{UserName|You} viewed the employee information of '.PortalAccessGraph::name($target),
-                (string) $target->getKey(),
-                $request,
-                ['employeeId' => (int) $target->getKey()],
-            );
+            $this->recordPrivateView($viewer, $request, 'viewed the employee information of', $target);
         }
 
         return [
@@ -465,6 +665,20 @@ final class PortalManageUsers
         ];
     }
 
+    private function documentsChanged(Employee $actor, Employee $target, Request $request, string $action, string $field): void
+    {
+        $this->bumpCache();
+        $this->audit->record(
+            $actor,
+            $action,
+            self::INFORMATION_RULE,
+            '{UserName|You} changed the documents of '.PortalAccessGraph::name($target),
+            (string) $target->getKey(),
+            $request,
+            ['field' => $field, 'change' => $action === PortalLogAction::DELETE ? 'removed' : 'uploaded'],
+        );
+    }
+
     // The person, when they are inside the viewer's Users reach; 404 otherwise, as if they did not exist.
     private function inReach(Employee $viewer, int $id, Request $request): Employee
     {
@@ -476,6 +690,58 @@ final class PortalManageUsers
         }
 
         return $target;
+    }
+
+    /*
+     * Each look at private details is logged. A shared page's guest has no employee of their own, so the
+     * look is filed under whoever made the share, naming the share (2026-10-14, user).
+     */
+    private function recordPrivateView(Employee $viewer, Request $request, string $verb, Employee $target): void
+    {
+        $owner = $viewer;
+        $who = '{UserName|You}';
+        $guest = $request->attributes->get('portalShare');
+        if ($guest instanceof PortalGuest) {
+            $share = DB::connection('portal')->table('shared_pages')->where('id', $guest->shareId)->first(['label', 'created_by']);
+            $creator = $share === null ? null : Employee::query()->find((int) $share->created_by);
+            if ($creator === null) {
+                return;
+            }
+            $owner = $creator;
+            $who = 'The shared page "'.$share->label.'" of {UserName|You}';
+        }
+        $this->audit->record(
+            $owner,
+            PortalLogAction::VIEW,
+            self::INFORMATION_RULE,
+            $who.' '.$verb.' '.PortalAccessGraph::name($target),
+            (string) $target->getKey(),
+            $request,
+            ['employeeId' => (int) $target->getKey(), ...($guest instanceof PortalGuest ? ['shareId' => $guest->shareId] : [])],
+        );
+    }
+
+    // Someone in the Users reach whose private details the viewer sees; anyone else is refused.
+    private function privateTarget(Employee $viewer, int $id, Request $request): Employee
+    {
+        $target = $this->inReach($viewer, $id, $request);
+        if (! $this->seesPrivate($viewer, $target, $request)) {
+            abort(403, 'This person\'s employee information is not yours to see.');
+        }
+
+        return $target;
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    private function profileResponse(Employee $viewer, Employee $target, Request $request): array
+    {
+        return [
+            'section' => 'manage',
+            'resource' => 'users',
+            'data' => $this->profileData($viewer, $target, $request, true),
+        ];
     }
 
     private function seesPrivate(Employee $viewer, Employee $target, Request $request): bool
@@ -500,7 +766,26 @@ final class PortalManageUsers
             // The department the portal files them under, and where it may move them.
             'canChangeDepartment' => $this->mayChangeDepartment($viewer, $target, $request),
             'departmentOptions' => $this->mayChangeDepartment($viewer, $target, $request) ? $this->departmentChoices($viewer, 'all') : [],
+            // Their documents on Cloudinary, and whether this viewer may change their private details (2026-10-12).
+            'documents' => $withPrivate ? $this->employeeDocuments->listFor($target) : [],
+            'canEditInformation' => $withPrivate && PortalRules::holds($viewer, $request, self::INFORMATION_EDIT_RULE),
         ];
+    }
+
+    // Why the viewer may not change this account's status, or null; the power and the reach are checked apart.
+    private function statusRefusal(int $viewerId, Employee $target, bool $holdsPeers): ?string
+    {
+        if ($viewerId === (int) $target->getKey()) {
+            return 'You cannot change the status of your own account.';
+        }
+        if (PortalRole::isLocked($target->role, $target->role_level)) {
+            return 'An executive\'s account cannot be activated or deactivated here.';
+        }
+        if (PortalRole::isAdmin($target->role, $target->role_level) && ! $holdsPeers) {
+            return 'A fellow administrator\'s account needs Manage other admins.';
+        }
+
+        return null;
     }
 
     // The route checks the power; the person is already inside the viewer's Users reach to be here.
@@ -511,8 +796,7 @@ final class PortalManageUsers
     }
 
     /**
-     * Every department the portal knows -- the Project Settings list, and any a person or project is
-     * in -- cut to the actor's own at department reach.
+     * The departments people work in (company_departments), cut to the actor's own at department reach.
      *
      * @return list<string>
      */
@@ -521,14 +805,9 @@ final class PortalManageUsers
         if ($reach !== 'all' && $reach !== 'department') {
             return [];
         }
-        $portal = Employee::query()->getConnection();
-        $values = [
-            ...($portal->getSchemaBuilder()->hasTable('departments') ? $portal->table('departments')->pluck('name')->all() : []),
-            ...Employee::query()->whereNotNull('department')->distinct()->pluck('department')->all(),
-            ...$portal->table('projects')->whereNotNull('department')->distinct()->pluck('department')->all(),
-        ];
+        // Only the departments people work in (2026-10-14, user): Admin and General are project buckets.
         $names = [];
-        foreach ($values as $value) {
+        foreach (PortalDepartments::names() as $value) {
             $name = self::text(is_string($value) ? $value : null);
             if ($name !== null) {
                 $names[PortalPreview::department($name)] ??= $name;

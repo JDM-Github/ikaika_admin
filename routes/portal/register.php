@@ -21,8 +21,13 @@ Route::middleware(AuthenticateRegistrationJwt::class)->group(function (): void {
     Route::get('register/session', [RegisterController::class, 'session']);
     Route::patch('register/details', [RegisterController::class, 'details']);
     Route::post('register/documents', [RegisterController::class, 'storeDocument']);
+    Route::get('register/documents/{id}', [RegisterController::class, 'showDocument'])->whereNumber('id');
     Route::delete('register/documents/{id}', [RegisterController::class, 'destroyDocument'])->whereNumber('id');
     Route::post('register/submit', [RegisterController::class, 'submit']);
+    // The address pickers' lists (2026-10-13): the provinces, then a province's cities, then a city's barangays.
+    Route::get('register/places/provinces', [RegisterController::class, 'provinces']);
+    Route::get('register/places/provinces/{code}/cities', [RegisterController::class, 'cities'])->where('code', '[0-9]{9}');
+    Route::get('register/places/cities/{code}/barangays', [RegisterController::class, 'barangays'])->where('code', '[0-9]{9}');
 });
 
 // Last, so the fixed paths above are never read as a code.

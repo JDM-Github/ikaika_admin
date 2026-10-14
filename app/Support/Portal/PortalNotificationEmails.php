@@ -2,27 +2,24 @@
 
 namespace App\Support\Portal;
 
-use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailBlock;
 use App\Modules\Portal\Models\Employee;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
-use Throwable;
 
 /**
- * The email a mapped inbox notice also sends: the notice's title and message as a letter built by
- * PortalEmailMarkup, the Company footer under it, from the portal's own address. The
+ * The email a mapped inbox notice also sends: a letter (PortalLetters) greeting the person by name,
+ * the notice's message and its link, the Company footer under it, from the portal's own address. The
  * notification_emails setting turns the whole thing off, so a local run that must not reach real
  * inboxes sends nothing, and the inbox row is written either way: a send that fails is logged and
- * dropped, never allowed to fail the write it was telling about.
+ * dropped, never allowed to fail the write it was telling about. The email waits in the mail queue,
+ * so a notice to several managers no longer holds the action for a relay round trip each. A submission
+ * on the report pages (a daily or late report, an overtime or offset request) emails only the head of
+ * the submitter's department instead, whoever else its inbox notice reaches (2026-10-13, user).
  */
 final class PortalNotificationEmails
 {
     // The notices that also go by email; every other type stays in the portal.
     public const TYPES = [
         PortalNotificationType::REQUEST_FILED_LEAVE => true,
-        PortalNotificationType::REQUEST_FILED_OVERTIME => true,
-        PortalNotificationType::REQUEST_FILED_OFFSET => true,
         PortalNotificationType::REQUEST_FILED_REIMBURSEMENT => true,
         'requests.leave.approved' => true,
         'requests.leave.rejected' => true,
@@ -43,6 +40,8 @@ final class PortalNotificationEmails
         PortalNotificationType::CALENDAR_EVENT_CREATED => true,
     ];
 
+    private const FAILED = 'portal.notification.email.failed';
+
     // Shared with the shared-page emails, which go out as the same letter from the same sender.
     public const FROM_NAME = 'IKAIKA Portal';
 
@@ -56,42 +55,80 @@ final class PortalNotificationEmails
         }
 
         $employee = $employeeId instanceof Employee ? $employeeId : Employee::query()->find($employeeId);
-        $email = $employee instanceof Employee ? strtolower(trim((string) ($employee->email ?? ''))) : '';
-        if ($employee === null || $email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-            return;
-        }
-
-        try {
-            [$footerBody, $footerFormat] = self::companyFooter();
-            Mail::to($email)->send(new PortalEmailMail(
-                $title,
-                $this->body($title, $message, $linkPath, $linkLabel),
-                $footerBody,
-                PortalEmailMarkup::FORMAT_MARKUP,
-                $footerFormat,
-                self::FROM_NAME,
-                null,
-            ));
-        } catch (Throwable) {
-            // The inbox row is already there, so a transport failure is only ever a warning.
-            Log::warning('portal.notification.email.failed', [
-                'employee_id' => (int) $employee->getKey(),
-                'type' => $type,
-            ]);
+        if ($employee instanceof Employee) {
+            $this->deliver($employee, $type, $title, $message, $linkPath, $linkLabel);
         }
     }
 
-    // The letter's message: the notice's title as a heading, its message under it, and its link last.
-    private function body(string $title, string $message, ?string $linkPath, ?string $linkLabel): string
+    /**
+     * A report-page submission's email, to the head of the submitter's department alone, as
+     * company_departments names them. A department without one sends none; the submitter never
+     * mails themselves.
+     */
+    public function sendToDepartmentHeads(Employee $actor, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
     {
-        $lines = ['# '.$title, '', $message];
-        $url = $this->linkUrl($linkPath);
-        if ($url !== null && $linkLabel !== null && trim($linkLabel) !== '') {
-            $lines[] = '';
-            $lines[] = '['.trim($linkLabel).']('.$url.')';
+        if (! PortalAdvancedSettings::notificationEmails()) {
+            return;
+        }
+        foreach (self::departmentHeads($actor) as $head) {
+            $this->deliver($head, $type, $title, $message, $linkPath, $linkLabel);
+        }
+    }
+
+    /**
+     * The active head of the actor's department, the actor aside (2026-10-14, user: heads are named in
+     * company_departments, not read from a role level).
+     *
+     * @return list<Employee>
+     */
+    public static function departmentHeads(Employee $actor): array
+    {
+        $head = PortalDepartments::headOf($actor->department ?? null);
+
+        return $head === null || $head->is($actor) ? [] : [$head];
+    }
+
+    private function deliver(Employee $employee, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
+    {
+        $email = strtolower(trim((string) ($employee->email ?? '')));
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return;
         }
 
-        return implode("\n", $lines);
+        // The inbox row is already there, so a mail that fails is only ever a warning.
+        PortalLetters::send(
+            $email,
+            self::category($type),
+            $title,
+            PortalLetters::body((string) $employee->first_name, $this->message($message, $linkPath, $linkLabel)),
+            [],
+            self::FAILED,
+            ['employee_id' => (int) $employee->getKey(), 'type' => $type],
+        );
+    }
+
+    // Requests, projects and events each wear their own category; anything else is a notice.
+    private static function category(string $type): string
+    {
+        return match (true) {
+            str_starts_with($type, 'requests.') => PortalEmailMarkup::CATEGORY_REQUEST,
+            str_starts_with($type, 'projects.') => PortalEmailMarkup::CATEGORY_PROJECT,
+            str_starts_with($type, 'calendar.') => PortalEmailMarkup::CATEGORY_EVENT,
+            default => PortalEmailMarkup::CATEGORY_NOTICE,
+        };
+    }
+
+    // The notice's own words, then its link as a button. Names and titles are people's text, so markup in them stays text.
+    private function message(string $message, ?string $linkPath, ?string $linkLabel): string
+    {
+        $text = PortalEmailMarkup::escape($message);
+        $url = $this->linkUrl($linkPath);
+        $label = trim((string) $linkLabel);
+        if ($url !== null && $label !== '') {
+            $text .= "\n\n::button[".str_replace([']', '['], '', $label).']('.$url.')';
+        }
+
+        return $text;
     }
 
     // The same base PortalSharedPages::link uses; empty locally, so the link stays a path.

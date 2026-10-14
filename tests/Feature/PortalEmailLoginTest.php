@@ -4,11 +4,15 @@ namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
 use App\Support\Portal\PortalEmailMarkup;
+use App\Support\Portal\PortalLetters;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Support\Defer\DeferredCallbackCollection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -49,52 +53,41 @@ class PortalEmailLoginTest extends TestCase
     {
         $mail = Mail::sent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo($address))->last();
         $this->assertNotNull($mail);
-        preg_match('/\*\*(\d{6})\*\*/', $mail->body, $match);
+        // The code sits on a ::code line of its own, which the letter draws as a box.
+        preg_match('/^::code (\d{6})$/m', $mail->body, $match);
 
         return $match[1];
     }
 
-    public function test_both_addresses_get_their_own_code_and_both_must_be_typed(): void
+    // Work email only (supervisor, 2026-10-12): one code to it; a personal address neither starts nor receives.
+    public function test_the_work_email_gets_the_one_code_and_a_personal_one_is_refused(): void
     {
         $id = $this->employee('kelly.home@example.test');
 
-        // The personal address starts it just as well; the answer names both, masked.
-        $this->postJson(self::BASE.'/email/start', ['email' => ' Kelly.Home@Example.test '])
-            ->assertOk()
-            ->assertJsonPath('targets.0.kind', 'work')
-            ->assertJsonPath('targets.0.hint', 'ke***@example.test')
-            ->assertJsonPath('targets.1.kind', 'personal');
-        Mail::assertSent(PortalEmailMail::class, 2);
-        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
-            && str_contains($mail->body, 'A second code went to your'));
-        $work = $this->codeSentTo('kelly.login@example.test');
-        $personal = $this->codeSentTo('kelly.home@example.test');
+        $this->postJson(self::BASE.'/email/start', ['email' => 'kelly.home@example.test'])
+            ->assertStatus(422)->assertJsonPath('message', 'No active portal account uses that email.');
+        Mail::assertNothingSent();
 
-        // One code alone, or the two swapped, does not sign in; each miss counts.
-        $this->postJson(self::BASE.'/email/verify', ['email' => 'kelly.login@example.test', 'codes' => ['work' => $work]])
-            ->assertStatus(422)->assertJsonPath('message', 'One of the codes is not right.');
+        $this->postJson(self::BASE.'/email/start', ['email' => ' Kelly.Login@Example.test '])
+            ->assertOk()
+            ->assertJsonCount(1, 'targets')
+            ->assertJsonPath('targets.0.kind', 'work')
+            ->assertJsonPath('targets.0.hint', 'ke***@example.test');
+        Mail::assertSent(PortalEmailMail::class, 1);
+        Mail::assertNotSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('kelly.home@example.test'));
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
+            && $mail->subjectLine === 'Your IKAIKA Portal sign-in code');
+        $code = $this->codeSentTo('kelly.login@example.test');
+
+        // A wrong code counts a try; the right one signs in and spends the code.
+        $this->postJson(self::BASE.'/email/verify', ['email' => 'kelly.login@example.test', 'codes' => ['work' => $code === '000000' ? '111111' : '000000']])
+            ->assertStatus(422)->assertJsonPath('message', 'That code is not right.');
         $this->assertSame(1, (int) DB::connection('portal')->table('login_otps')->where('employee_id', $id)->value('attempts'));
 
-        $this->postJson(self::BASE.'/email/verify', ['email' => 'kelly.login@example.test', 'codes' => ['work' => $work, 'personal' => $personal]])
+        $this->postJson(self::BASE.'/email/verify', ['email' => 'kelly.login@example.test', 'codes' => ['work' => $code]])
             ->assertOk()
             ->assertJsonStructure(['token', 'expires_at', 'employee']);
         $this->assertNull(DB::connection('portal')->table('login_otps')->where('employee_id', $id)->first());
-    }
-
-    public function test_one_address_on_record_means_one_code(): void
-    {
-        $this->employee(null);
-
-        $this->postJson(self::BASE.'/email/start', ['email' => 'kelly.login@example.test'])
-            ->assertOk()
-            ->assertJsonCount(1, 'targets')
-            ->assertJsonPath('targets.0.kind', 'work');
-        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => ! str_contains($mail->body, 'second code'));
-
-        $this->postJson(self::BASE.'/email/verify', [
-            'email' => 'kelly.login@example.test',
-            'codes' => ['work' => $this->codeSentTo('kelly.login@example.test')],
-        ])->assertOk();
     }
 
     public function test_unknown_and_inactive_read_alike_and_a_quick_second_start_waits(): void
@@ -123,11 +116,27 @@ class PortalEmailLoginTest extends TestCase
 
         DB::connection('portal')->table('login_otps')->where('employee_id', $id)->update(['attempts' => 5]);
         $this->postJson(self::BASE.'/email/verify', ['email' => 'kelly.login@example.test', 'codes' => ['work' => $code]])
-            ->assertStatus(422)->assertJsonPath('message', 'Too many tries. Ask for new codes.');
+            ->assertStatus(422)->assertJsonPath('message', 'Too many tries. Ask for a new code.');
 
         DB::connection('portal')->table('login_otps')->where('employee_id', $id)->update(['attempts' => 0, 'expires_at' => now()->subMinute()]);
         $this->postJson(self::BASE.'/email/verify', ['email' => 'kelly.login@example.test', 'codes' => ['work' => $code]])
-            ->assertStatus(422)->assertJsonPath('message', 'Ask for new codes.');
+            ->assertStatus(422)->assertJsonPath('message', 'Ask for a new code.');
+    }
+
+    // A code is a relay round trip; it waits for the answer, so two codes never hold the screen.
+    public function test_a_code_goes_out_after_the_answer_and_a_failed_one_is_only_logged(): void
+    {
+        PortalLetters::sendAfterResponse('kelly.login@example.test', PortalEmailMarkup::CATEGORY_SECURITY, 'Subject', 'Body');
+        Mail::assertNothingSent();
+
+        app(DeferredCallbackCollection::class)->invoke();
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('kelly.login@example.test'));
+
+        Mail::shouldReceive('to')->andThrow(new RuntimeException('relay down'));
+        Log::spy();
+        PortalLetters::sendAfterResponse('kelly.login@example.test', PortalEmailMarkup::CATEGORY_SECURITY, 'Subject', 'Body');
+        app(DeferredCallbackCollection::class)->invoke();
+        Log::shouldHaveReceived('warning')->with('portal.letter.failed', ['subject' => 'Subject', 'reason' => 'relay down']);
     }
 
     // ID-number sign-in is for local development and the suite; staging and production answer 404.

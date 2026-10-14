@@ -6,9 +6,13 @@ namespace App\Support\Portal;
  * Daily report review (2026-10-07): which reports wait for an approver, and where a filed one stands.
  *
  * Every Engineering member's daily report waits for review on Manage / Requests' Flag Reports, which an
- * admin reaches for their own department. MIS's daily reports are approved the moment they are filed, a
- * warning or not. Any other department, and every late report, keeps the older rule: a report waits only
- * while its author is on an active warning (Flagged users). A late report answers to its late approval too.
+ * admin reaches for their own department. Every other department, MIS included, and every late report
+ * keeps the older rule: a report is approved the moment it is filed unless its author is on an active
+ * warning (Flagged users), when it waits (2026-10-13, user). A late report answers to its late approval too.
+ *
+ * The department's own head -- a management-level admin, Steven for Engineering -- is approved at once
+ * (2026-10-13, user): the queue is theirs to review, and nobody would be reviewing their report but
+ * themselves. A warning still holds a head's report like anyone's.
  *
  * A report that never waited reads as approved, so nothing has to be stored for it.
  */
@@ -23,19 +27,13 @@ final class PortalReportReview
     // Departments as PortalPreview::department() keys them.
     private const REVIEWED_DEPARTMENTS = ['engineering'];
 
-    private const AUTO_APPROVED_DEPARTMENTS = ['mis'];
-
-    // Whether a report filed now waits for review: its kind, its author's department, and their warning.
-    public static function waits(string $kind, mixed $department, bool $isOnWarning): bool
+    // Whether a report filed now waits for review: its kind, its author's department and standing, and their warning.
+    public static function waits(string $kind, mixed $department, bool $isOnWarning, bool $isDepartmentHead = false): bool
     {
-        if ($kind === PortalSubmittedReportPresenter::KIND_DAILY) {
-            $key = PortalPreview::department($department);
-            if (in_array($key, self::REVIEWED_DEPARTMENTS, true)) {
-                return true;
-            }
-            if (in_array($key, self::AUTO_APPROVED_DEPARTMENTS, true)) {
-                return false;
-            }
+        if ($kind === PortalSubmittedReportPresenter::KIND_DAILY
+            && ! $isDepartmentHead
+            && in_array(PortalPreview::department($department), self::REVIEWED_DEPARTMENTS, true)) {
+            return true;
         }
 
         return $isOnWarning;

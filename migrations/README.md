@@ -1,7 +1,10 @@
 # Airtable → SQL migration
 
 Run `migrate.ps1`. It asks which base you want and whether you want schema,
-data, or both, then writes everything for that base into one folder.
+data, or both, then writes everything for that base into one folder. After
+generating, it verifies `data.sql` against the export (`verify_migration.py`)
+and stops before the import commands if anything fails. The full picture is in
+**HOW-IT-WORKS.md**.
 
 ```powershell
 .\migrate.ps1
@@ -83,13 +86,30 @@ install — concatenating it would fail with `Duplicate key name` and abort
 everything after it in the file.
 
 **Data is pulled live from Airtable** for the bases that have a generator under
-`generate/` (`fetch` → Cloudinary `upload` → `generate`). Project Estimator is
-the one base with no generator: it falls back to copying the checked-in
-`sql/project_estimator/data.sql` snapshot and says so. Its schema is also the
-one that still uses the Postgres inline `REFERENCES` shorthand, which parses in
+`generate/` (`fetch` → Cloudinary `upload` → `generate`). Every base has one
+now (Project Estimator included); a base without one would fall back to copying
+its checked-in `sql/<base>/data.sql` snapshot and say so. Project Estimator's
+schema still uses the Postgres inline `REFERENCES` shorthand, which parses in
 MySQL but creates no constraint — it enforces zero foreign keys. Follow
 `sql/portal/schema.sql` or `sql/transaction_tracker/schema.sql` instead, which
 declare foreign keys as explicit table-level clauses.
+
+## Verification
+
+`verify_migration.py` re-derives every row from the raw export (using the
+generator's own COLUMNS lists) and compares `data.sql` cell by cell: row
+counts, every mapped value, field coverage, link/junction counts, attachments,
+and whether every written column exists in the checked-in schema. Run it
+standalone when needed:
+
+```powershell
+python verify_migration.py --export-dir outputs\users_projects_prod\export --data-sql outputs\users_projects_prod\data.sql
+```
+
+Exit code 0 = pass (warnings are informational), 1 = failure. `migrate.ps1`
+runs it automatically and refuses to print the import commands on failure.
+Which check catches what, and how to re-check against the live base, is in
+HOW-IT-WORKS.md §4.
 
 ## Credentials
 
@@ -145,8 +165,10 @@ anything it does not cover:
 | `fetch_airtable.py` | Exports any base via `--base-id`. Auto-discovers tables and fields, paginates properly, self-throttles to 5 req/s, downloads attachments, resumable. |
 | `inspect_schema.py` | Prints real field display names from an export's `_base_schema.json`. The public API keys fields by display **name**, which can be renamed in the UI at any time — always check against a fresh export. |
 | `upload_attachments_to_cloudinary.py` | Uploads what `fetch` downloaded, using the same signed-upload scheme as `PortalCloudinary.php`. |
+| `verify_migration.py` | Health check: re-derives every mapped row from the export and compares it cell by cell against `data.sql`; checks junctions, attachments and schema columns. See HOW-IT-WORKS.md. |
 | `generate/generate_sql_users_projects.py` | Turns a Users & Projects export into SQL matching `sql/portal/schema.sql`. All 20 tables and every junction table are implemented. |
 | `generate/generate_sql_transaction_tracker.py` | Turns a Transaction Tracker export into SQL matching `sql/transaction_tracker/schema.sql`. All 5 tables plus 7 junctions and the shared `attachments` table. |
+| `generate/generate_sql_project_estimator.py` | Turns a Project Estimator export into SQL matching `sql/project_estimator/schema.sql`. All 10 tables plus 7 junctions. |
 
 `NOTE.md` has the base inventory, the known schema bug in
 `projects_activity_scope`, and the Transaction Tracker table breakdown.

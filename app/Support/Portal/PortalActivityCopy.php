@@ -103,6 +103,16 @@ final class PortalActivityCopy
             : $who.' rejected the project '.$name.($remarks === null ? '.' : ': '.$remarks);
     }
 
+    public static function notifyProjectClosed(string $who, string $name): string
+    {
+        return $who.' closed the project '.$name.'. It waits for your approval.';
+    }
+
+    public static function notifyProjectReopened(string $who, string $name): string
+    {
+        return $who.' sent the project '.$name.' back to waiting for approval.';
+    }
+
     public static function notifyProjectModified(string $who, string $name): string
     {
         return $who.' edited the project '.$name.'.';
@@ -135,6 +145,11 @@ final class PortalActivityCopy
     public static function decidedProject(string $name, bool $isApproved): string
     {
         return self::YOU.($isApproved ? ' approved' : ' rejected').' the project '.$name;
+    }
+
+    public static function reopenedProject(string $name): string
+    {
+        return self::YOU.' sent the project '.$name.' back to waiting';
     }
 
     public static function addedProject(string $name): string
@@ -238,6 +253,36 @@ final class PortalActivityCopy
     public static function cancelledTransfer(string $amount): string
     {
         return self::YOU.' cancelled a pending transfer of '.$amount;
+    }
+
+    // MIS moving a bug report along; the reporter is anonymous, so only the report is named.
+    public static function updatedBugReport(string $title, ?string $statusLabel): string
+    {
+        return $statusLabel === null
+            ? self::YOU.' updated the bug report '.$title
+            : self::YOU.' marked the bug report '.$title.' '.$statusLabel;
+    }
+
+    // Who handles a bug report: taken by the person themselves, given to someone, or let go.
+    public static function assignedBugReport(string $title, ?string $assigneeName, bool $isTaken): string
+    {
+        if ($isTaken) {
+            return self::YOU.' took the bug report '.$title;
+        }
+
+        return $assigneeName === null
+            ? self::YOU.' unassigned the bug report '.$title
+            : self::YOU.' assigned the bug report '.$title.' to '.$assigneeName;
+    }
+
+    // An amount changed reads from what it was to what it is (2026-10-13).
+    public static function editedTransaction(string $before, string $after, ?string $wasAmount = null, ?string $amount = null): string
+    {
+        $edited = $before === $after
+            ? self::YOU.' edited the transaction '.$after
+            : self::YOU.' edited the transaction '.$before.', now '.$after;
+
+        return $wasAmount === null || $amount === null ? $edited : $edited.', from '.$wasAmount.' to '.$amount;
     }
 
     public static function addedTransaction(string $kind, string $name, string $amount, ?string $envelopeName): string
@@ -359,14 +404,20 @@ final class PortalActivityCopy
         return self::YOU.' added '.$label.' '.self::span($from, $to);
     }
 
+    // "filed a leave request for Monday, ..." or "filed an overtime request from ... to ...".
     public static function notifyFiled(string $actorName, string $kind, string $from, string $to): string
     {
-        return $actorName.' filed a '.$kind.' '.self::span($from, $to).'.';
+        return $actorName.' filed '.self::article($kind).' '.$kind.' '.($from === $to ? 'for ' : '').self::span($from, $to).'.';
     }
 
     public static function notifyCancelled(string $actorName, string $kind, string $date): string
     {
-        return $actorName.' cancelled a '.$kind.' for '.self::date($date).'.';
+        return $actorName.' cancelled '.self::article($kind).' '.$kind.' for '.self::date($date).'.';
+    }
+
+    private static function article(string $noun): string
+    {
+        return preg_match('/^[aeiou]/i', $noun) === 1 ? 'an' : 'a';
     }
 
     public static function notifyDecided(string $kind, string $date, string $verb, string $by): string

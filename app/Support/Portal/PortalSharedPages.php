@@ -9,6 +9,7 @@ use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Writer;
 use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
@@ -50,22 +51,32 @@ final class PortalSharedPages
     ) {}
 
     /**
-     * The panel: every share, newest first, and the pages a share may grant.
+     * The panel: every share, newest first, and the pages a share may grant. The actor and request
+     * are read only to say, per page, the reach the actor holds for it -- the form offers no more.
      *
-     * @return array{shares: list<array<string, mixed>>, pages: list<array{key: string, label: string, isReady: bool}>}
+     * @return array{shares: list<array<string, mixed>>, pages: list<array<string, mixed>>, departments: list<string>, ownDepartment: ?string}
      */
-    public function index(): array
+    public function index(?Employee $actor = null, ?Request $request = null): array
     {
         $rows = $this->connection()->table('shared_pages')->orderByDesc('id')->get();
         $rulesByShare = $this->connection()->table('shared_page_rules')->get()->groupBy('share_id');
+        // One lookup for every creator, so each share can name who holds its password.
+        $creatorNames = $this->creatorNames($rows->pluck('created_by')->all());
+        $viewerId = $actor === null ? null : (int) $actor->getKey();
 
         $shares = [];
         foreach ($rows as $row) {
-            $rules = $rulesByShare->get($row->id, collect())->pluck('rule_key')->all();
-            $shares[] = $this->present($row, $rules);
+            $shareRules = $rulesByShare->get($row->id, collect());
+            $shares[] = $this->present($row, $shareRules->pluck('rule_key')->all(), self::reachesFrom($shareRules), $viewerId, $creatorNames[(int) $row->created_by] ?? null);
         }
 
-        return ['shares' => $shares, 'pages' => $this->pages()];
+        return [
+            'shares' => $shares,
+            'pages' => $this->pages($actor, $request),
+            // The reach picker names departments (2026-10-14, user): every one, and which is the actor's own.
+            'departments' => $this->departmentNames(),
+            'ownDepartment' => $actor === null ? null : (trim((string) $actor->department) ?: null),
+        ];
     }
 
     /**
@@ -73,7 +84,7 @@ final class PortalSharedPages
      */
     public function create(Employee $actor, Request $request): array
     {
-        $data = $this->validated($request);
+        $data = $this->validated($request, $actor);
         $password = self::password();
         $code = $this->codeFor($data['slug']);
 
@@ -87,16 +98,17 @@ final class PortalSharedPages
             'require_otp' => $data['requireOtp'],
             'expires_at' => $data['expiresAt'],
             'rate_per_minute' => $data['ratePerMinute'],
+            'reach_department' => $data['reachDepartment'],
             'created_by' => (int) $actor->getKey(),
         ]);
-        $this->writeRules($id, $data['rules']);
+        $this->writeRules($id, $data['rules'], $data['reaches']);
         $this->audit->record($actor, PortalLogAction::INSERT, 'manage.shares', '{UserName|You} created the shared page '.$data['label'], (string) $id, $request);
 
         if ($data['email'] !== null) {
             $this->mailPassword($code, $data['email'], $data['label'], $data['guestName'] ?? $data['label'], $password, $data['expiresAt'], false);
         }
 
-        return ['share' => $this->present($this->row($id), $data['rules']), 'password' => $password];
+        return ['share' => $this->present($this->row($id), $data['rules'], $data['reaches'], (int) $actor->getKey(), $this->creatorNameOf($id)), 'password' => $password];
     }
 
     /**
@@ -105,7 +117,7 @@ final class PortalSharedPages
     public function update(Employee $actor, Request $request, int $id): array
     {
         $row = $this->row($id);
-        $data = $this->validated($request);
+        $data = $this->validated($request, $actor);
 
         $update = [
             'label' => $data['label'],
@@ -114,16 +126,17 @@ final class PortalSharedPages
             'require_otp' => $data['requireOtp'],
             'expires_at' => $data['expiresAt'],
             'rate_per_minute' => $data['ratePerMinute'],
+            'reach_department' => $data['reachDepartment'],
         ];
         // A slug left blank keeps the link the share already has; a typed one replaces it.
         if ($data['slug'] !== null) {
             $update['code'] = $this->codeFor($data['slug'], $id);
         }
         $this->connection()->table('shared_pages')->where('id', $id)->update($update);
-        $this->writeRules($id, $data['rules']);
+        $this->writeRules($id, $data['rules'], $data['reaches']);
         $this->audit->record($actor, PortalLogAction::PATCH, 'manage.shares', '{UserName|You} changed the shared page '.$data['label'], (string) $id, $request);
 
-        return ['share' => $this->present($this->row($id), $data['rules'])];
+        return ['share' => $this->present($this->row($id), $data['rules'], $data['reaches'], (int) $actor->getKey(), $this->creatorNameOf($id))];
     }
 
     /**
@@ -137,7 +150,7 @@ final class PortalSharedPages
         $this->connection()->table('shared_page_otps')->where('share_id', $id)->delete();
         $this->audit->record($actor, PortalLogAction::DELETE, 'manage.shares', '{UserName|You} revoked the shared page '.trim((string) $row->label), (string) $id, $request);
 
-        return ['share' => $this->present($this->row($id), $this->rulesFor($id))];
+        return ['share' => $this->present($this->row($id), $this->rulesFor($id), $this->reachesFor($id), (int) $actor->getKey(), $this->creatorNameOf($id))];
     }
 
     /**
@@ -239,13 +252,13 @@ final class PortalSharedPages
      */
     public function session(PortalGuest $guest): array
     {
-        return ['label' => $this->displayName($this->row($guest->shareId)), 'rules' => array_values($guest->rules)];
+        return ['label' => $this->displayName($this->row($guest->shareId)), 'rules' => array_keys($guest->rules)];
     }
 
     /**
-     * @return array{label: string, guestName: ?string, slug: ?string, email: ?string, requireOtp: bool, expiresAt: ?string, ratePerMinute: int, rules: list<string>}
+     * @return array{label: string, guestName: ?string, slug: ?string, email: ?string, requireOtp: bool, expiresAt: ?string, ratePerMinute: int, reachDepartment: ?string, rules: list<string>, reaches: array<string, string>}
      */
-    private function validated(Request $request): array
+    private function validated(Request $request, Employee $actor): array
     {
         $data = $request->validate([
             'label' => ['required', 'string', 'max:100'],
@@ -259,6 +272,9 @@ final class PortalSharedPages
             'ratePerMinute' => ['nullable', 'integer', 'min:'.self::MIN_RATE_PER_MINUTE, 'max:'.self::MAX_RATE_PER_MINUTE],
             'rules' => ['required', 'array', 'min:1'],
             'rules.*' => ['string', 'max:100'],
+            'reaches' => ['nullable', 'array'],
+            'reaches.*' => ['nullable', 'string', 'max:16'],
+            'reachDepartment' => ['nullable', 'string', 'max:100'],
         ]);
 
         $label = trim($data['label']);
@@ -269,16 +285,79 @@ final class PortalSharedPages
         $guestName = isset($data['guestName']) && trim((string) $data['guestName']) !== '' ? trim((string) $data['guestName']) : null;
         $slug = PortalCredentials::slug($data['slug'] ?? null);
 
-        // Only pages that have been verified guest-safe can be granted.
+        // Only pages that have been verified guest-safe can be granted; a page's option rides only with its page.
         $ready = $this->readyRules();
         $rules = array_values(array_unique(array_map(static fn (mixed $key): string => (string) $key, $data['rules'])));
+        $options = [];
         foreach ($rules as $key) {
+            $page = self::optionPage($key);
+            if ($page !== null) {
+                if (! in_array($page, $rules, true)) {
+                    abort(422, 'Turn on the page an option belongs to first.');
+                }
+                if (! self::mayShare($actor, $request, $key)) {
+                    abort(422, 'You cannot share a power you do not hold.');
+                }
+                $options[$key] = $page;
+
+                continue;
+            }
             if (! in_array($key, $ready, true)) {
                 abort(422, 'That page is not ready to share yet.');
+            }
+            // A page without a reach was never checked against the maker before (2026-10-14).
+            if (! self::mayShare($actor, $request, $key)) {
+                abort(422, 'You cannot share a page you do not hold.');
             }
         }
         if ($rules === []) {
             abort(422, 'Choose at least one page.');
+        }
+
+        // A reach rule is handed out at a reach the actor holds: never wider than their own, and
+        // never at all when they do not hold the page. Other pages carry no reach.
+        $catalog = PortalAccessGraph::load()->catalog();
+        $provided = is_array($data['reaches'] ?? null) ? $data['reaches'] : [];
+        $reaches = [];
+        $needsDepartment = false;
+        // The one department every department-reach page of the share uses; the actor's own unless named.
+        $own = trim((string) $actor->department);
+        $named = isset($data['reachDepartment']) ? trim((string) $data['reachDepartment']) : '';
+        $department = $named !== '' ? $named : $own;
+        foreach ($rules as $key) {
+            if (isset($options[$key]) || ! (bool) ($catalog[$key]->supports_reach ?? false)) {
+                continue;
+            }
+            $held = self::shareableReach($actor, $request, $key);
+            if ($held === null) {
+                abort(422, 'You cannot share a page you do not hold.');
+            }
+            $chosen = isset($provided[$key]) && is_string($provided[$key]) ? $provided[$key] : $held;
+            if (! in_array($chosen, self::REACHES, true)) {
+                abort(422, 'That reach is not one a shared page may carry.');
+            }
+            $reach = PortalRules::narrower($held, $chosen) ?? $held;
+            // A guest has no records of their own, so a share reaches a department or every department.
+            if ($reach !== 'department' && $reach !== 'all') {
+                abort(422, 'A shared page reaches a department or every department; it cannot be only the person.');
+            }
+            $reaches[$key] = $reach;
+            if ($reach === 'department') {
+                $needsDepartment = true;
+                // Held for one's own department only: that is the only department it may name.
+                if ($held !== 'all' && strcasecmp($department, $own) !== 0) {
+                    abort(422, 'You can only share your own department on a page you hold for your department.');
+                }
+            }
+        }
+        if ($needsDepartment && ($department === '' || ! in_array(strtolower($department), array_map('strtolower', [...$this->departmentNames(), $own]), true))) {
+            abort(422, 'Choose a department for the pages set to one department.');
+        }
+        // An option reaches no further than its page, nor than the actor holds it.
+        foreach ($options as $key => $page) {
+            if ((bool) ($catalog[$key]->supports_reach ?? false)) {
+                $reaches[$key] = PortalRules::narrower(self::shareableReach($actor, $request, $key), $reaches[$page] ?? 'all') ?? 'department';
+            }
         }
 
         return [
@@ -290,9 +369,15 @@ final class PortalSharedPages
             'requireOtp' => (bool) ($data['requireOtp'] ?? true),
             'expiresAt' => $this->expiresAt($data),
             'ratePerMinute' => (int) ($data['ratePerMinute'] ?? self::DEFAULT_RATE_PER_MINUTE),
+            // The department a department-reach share is scoped to, snapshotted so the guest stands in with it.
+            'reachDepartment' => $needsDepartment ? $department : null,
             'rules' => $rules,
+            'reaches' => $reaches,
         ];
     }
+
+    // Every reach a shared page may carry, widest last.
+    private const REACHES = ['lead', 'own', 'team', 'department', 'all'];
 
     /**
      * @param  array<string, mixed>  $data
@@ -311,28 +396,110 @@ final class PortalSharedPages
     }
 
     /**
-     * @return list<array{key: string, label: string, isReady: bool}>
+     * @return list<array{key: string, label: string, group: ?string, isReady: bool, supportsReach: bool, reach: ?string, options: list<array{key: string, label: string}>}>
      */
-    private function pages(): array
+    private function pages(?Employee $actor = null, ?Request $request = null): array
     {
         $catalog = PortalAccessGraph::load()->catalog();
         $pages = [];
         foreach ($this->connection()->table('shared_page_shareable')->get() as $row) {
             $key = (string) $row->rule_key;
             $entry = $catalog[$key] ?? null;
+            $placement = self::SIDEBAR_PLACEMENT[$key] ?? null;
+            $supportsReach = (bool) ($entry?->supports_reach ?? false);
             $pages[] = [
                 'key' => $key,
                 'label' => $entry?->label ?? $key,
+                'group' => $placement['group'] ?? self::groupOf($catalog, $key),
                 'isReady' => (bool) $row->is_ready,
-                'sortOrder' => (int) ($entry?->sort_order ?? 0),
+                // The reach the actor holds, so the form offers no more than they may hand out.
+                'supportsReach' => $supportsReach,
+                'reach' => $supportsReach && $actor !== null && $request !== null ? self::shareableReach($actor, $request, $key) : null,
+                'sortOrder' => (int) ($placement['order'] ?? $entry?->sort_order ?? 0),
+                // Its options, each only when the actor may hand it out.
+                'options' => array_values(array_map(
+                    static fn (string $option): array => ['key' => $option, 'label' => $catalog[$option]->label ?? $option],
+                    array_filter(
+                        self::OPTIONS[$key] ?? [],
+                        static fn (string $option): bool => isset($catalog[$option]) && $actor !== null && $request !== null && self::mayShare($actor, $request, $option),
+                    ),
+                )),
             ];
         }
         usort($pages, static fn (array $left, array $right): int => $left['sortOrder'] <=> $right['sortOrder']);
 
         return array_map(
-            static fn (array $page): array => ['key' => $page['key'], 'label' => $page['label'], 'isReady' => $page['isReady']],
+            static fn (array $page): array => ['key' => $page['key'], 'label' => $page['label'], 'group' => $page['group'], 'isReady' => $page['isReady'], 'supportsReach' => $page['supportsReach'], 'reach' => $page['reach'], 'options' => $page['options']],
             $pages,
         );
+    }
+
+    /*
+     * Powers a page may lend a guest beside the page itself (2026-10-14, user): Users may also show employee
+     * information, so a boss's share can open private details. Stored as rules of the share like pages.
+     */
+    private const OPTIONS = [
+        'manage.users' => ['manage.users.information'],
+    ];
+
+    // The page an option belongs to, or null for a key that is not an option.
+    private static function optionPage(string $key): ?string
+    {
+        foreach (self::OPTIONS as $page => $keys) {
+            if (in_array($key, $keys, true)) {
+                return $page;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The departments people work in, by name; Admin and General are project buckets, not departments.
+     *
+     * @return list<string>
+     */
+    private function departmentNames(): array
+    {
+        return PortalDepartments::names();
+    }
+
+    /*
+     * Share any page (2026-10-14, user): its holder hands out any ready page at any reach, even one they
+     * switched off or never held. The MIS head holds everything in truth and only narrows himself.
+     */
+    public const SHARE_ANY = 'manage.shares.any';
+
+    // Whether the actor may put this page or power on a share.
+    private static function mayShare(Employee $actor, Request $request, string $key): bool
+    {
+        return PortalRules::holds($actor, $request, self::SHARE_ANY) || PortalRules::holds($actor, $request, $key);
+    }
+
+    // The widest reach the actor may hand this page out at, or null when they may not share it.
+    private static function shareableReach(Employee $actor, Request $request, string $key): ?string
+    {
+        return PortalRules::holds($actor, $request, self::SHARE_ANY) ? 'all' : PortalRules::reach($actor, $request, $key);
+    }
+
+    // The sidebar's own filing, where the catalog differs: References sits under Manage there, after Users.
+    private const SIDEBAR_PLACEMENT = [
+        'projects.references' => ['group' => 'Manage', 'order' => 860],
+    ];
+
+    // The section a page reads under: its top-level rule's label, unless the page is that rule itself.
+    private static function groupOf(array $catalog, string $key): ?string
+    {
+        $root = $key;
+        for ($hops = 0; $hops < 8; $hops += 1) {
+            $parent = $catalog[$root]->parent_key ?? null;
+            if ($parent === null) {
+                break;
+            }
+            $root = $parent;
+        }
+
+        return $root === $key ? null : ($catalog[$root]->label ?? null);
     }
 
     /**
@@ -352,21 +519,54 @@ final class PortalSharedPages
     }
 
     /**
-     * @param  list<string>  $rules
+     * The reach stored per granted page, for the pages that carry one.
+     *
+     * @return array<string, string>
      */
-    private function writeRules(int $shareId, array $rules): void
+    private function reachesFor(int $shareId): array
+    {
+        $reaches = [];
+        foreach ($this->connection()->table('shared_page_rules')->where('share_id', $shareId)->whereNotNull('reach')->get() as $row) {
+            $reaches[(string) $row->rule_key] = (string) $row->reach;
+        }
+
+        return $reaches;
+    }
+
+    /**
+     * @param  Collection<int, object>  $ruleRows
+     * @return array<string, string>
+     */
+    private static function reachesFrom(Collection $ruleRows): array
+    {
+        $reaches = [];
+        foreach ($ruleRows as $row) {
+            if ($row->reach !== null) {
+                $reaches[(string) $row->rule_key] = (string) $row->reach;
+            }
+        }
+
+        return $reaches;
+    }
+
+    /**
+     * @param  list<string>  $rules
+     * @param  array<string, string>  $reaches
+     */
+    private function writeRules(int $shareId, array $rules, array $reaches = []): void
     {
         $this->connection()->table('shared_page_rules')->where('share_id', $shareId)->delete();
         foreach ($rules as $key) {
-            $this->connection()->table('shared_page_rules')->insert(['share_id' => $shareId, 'rule_key' => $key]);
+            $this->connection()->table('shared_page_rules')->insert(['share_id' => $shareId, 'rule_key' => $key, 'reach' => $reaches[$key] ?? null]);
         }
     }
 
     /**
      * @param  list<string>  $rules
+     * @param  array<string, string>  $reaches
      * @return array<string, mixed>
      */
-    private function present(object $row, array $rules): array
+    private function present(object $row, array $rules, array $reaches = [], ?int $viewerId = null, ?string $creatorName = null): array
     {
         return [
             'id' => (string) (int) $row->id,
@@ -374,9 +574,11 @@ final class PortalSharedPages
             'guestName' => $row->guest_name === null ? null : (string) $row->guest_name,
             'code' => (string) $row->code,
             'link' => $this->link((string) $row->code),
-            // The readable password, so the developer can send it again. Null for a share made before
+            // The kept password is its creator's alone: anyone else who may open the page reads
+            // null and the name of who holds it (2026-10-14, user). Null for a share made before
             // the value was kept, until its password is regenerated.
-            'password' => $row->password_value === null ? null : (string) $row->password_value,
+            'password' => $row->password_value === null || (int) $row->created_by !== $viewerId ? null : (string) $row->password_value,
+            'createdByName' => $creatorName,
             'email' => $row->email === null ? null : (string) $row->email,
             'requireOtp' => (bool) $row->require_otp,
             'expiresAt' => $row->expires_at === null ? null : (string) $row->expires_at,
@@ -384,7 +586,39 @@ final class PortalSharedPages
             'isRevoked' => $row->revoked_at !== null,
             'lastUsedAt' => $row->last_used_at === null ? null : (string) $row->last_used_at,
             'rules' => array_values($rules),
+            // Only the pages that carry a reach; the rest read as they always did.
+            'reaches' => (object) $reaches,
+            // The department those set to one department are scoped to.
+            'reachDepartment' => $row->reach_department === null ? null : (string) $row->reach_department,
         ];
+    }
+
+    /**
+     * The name of each creator id, in one query.
+     *
+     * @param  list<int>  $ids
+     * @return array<int, string>
+     */
+    private function creatorNames(array $ids): array
+    {
+        $wanted = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if ($wanted === []) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($this->connection()->table('employees')->whereIn('id', $wanted)->get(['id', 'first_name', 'last_name']) as $row) {
+            $names[(int) $row->id] = trim((string) $row->first_name.' '.(string) $row->last_name);
+        }
+
+        return $names;
+    }
+
+    private function creatorNameOf(int $shareId): ?string
+    {
+        $row = $this->connection()->table('shared_pages')->where('id', $shareId)->first(['created_by']);
+
+        return $row === null ? null : ($this->creatorNames([(int) $row->created_by])[(int) $row->created_by] ?? null);
     }
 
     private function row(int $id): object
@@ -462,13 +696,16 @@ final class PortalSharedPages
             ['code_hash' => Hash::make($code), 'attempts' => 0, 'issued_at' => now(), 'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES)],
         );
         $link = $this->link((string) $share->code);
-        PortalLetters::send(
+        PortalLetters::sendAfterResponse(
             trim((string) $share->email),
+            PortalEmailMarkup::CATEGORY_SECURITY,
             'Your code for '.trim((string) $share->label),
-            'Hi '.$this->displayName($share).','
-                ."\n\nYour code is **".$code.'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
-                ."\n\nOpen the shared page: [".$link.']('.$link.')'
-                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
+            PortalLetters::body(
+                $this->displayName($share),
+                'Use this code to open **'.PortalEmailMarkup::escape(trim((string) $share->label)).'**. It is good for '.self::OTP_TTL_MINUTES.' minutes.'
+                    ."\n\n::code ".$code
+                    ."\n\n::button[Open the shared page](".$link.')',
+            ),
         );
     }
 
@@ -553,20 +790,24 @@ final class PortalSharedPages
             : 'It is good until '.date('j M Y, g:i a', strtotime($expiresAt)).'.';
         $link = $this->link($code);
 
+        $shown = PortalEmailMarkup::escape($label);
         PortalLetters::send(
             $email,
+            PortalEmailMarkup::CATEGORY_SECURITY,
             ($isNewPassword ? 'Your new password for ' : 'Your link and password for ').$label,
-            'Hi '.$name.','
-                ."\n\n".($isNewPassword
-                    ? 'The password for your read-only shared page, **'.$label.'**, was changed. The old one no longer works.'
-                    : 'A read-only shared page is ready for you: **'.$label.'**.')
-                ."\n\nLink: [".$link.']('.$link.')'
-                ."\nPassword: **".$password.'**'
-                ."\n\nOr scan this code with your phone to open the link:"
-                ."\n\n![QR code for the link](cid:".self::QR_IMAGE.')'
-                ."\n\n".$expiry.' It is read-only: you can look, not change anything.'
-                ."\n\nBest Regards,\n".PortalNotificationEmails::FROM_NAME,
-            [['name' => self::QR_IMAGE, 'data' => PortalQrPng::png($link), 'mime' => 'image/png']],
+            PortalLetters::body(
+                $name,
+                ($isNewPassword
+                    ? 'The password for your read-only shared page, **'.$shown.'**, was changed. The old one no longer works.'
+                    : 'A read-only shared page is ready for you: **'.$shown.'**.')
+                    ."\n\n::button[Open the shared page](".$link.')'
+                    ."\n\nYour password:"
+                    ."\n\n::code ".$password
+                    ."\n\nOr scan this code with your phone to open it:"
+                    ."\n\n![QR code for the link](cid:".self::QR_IMAGE.')'
+                    ."\n\n".$expiry.' It is read-only: you can look, not change anything.',
+            ),
+            [['name' => self::QR_IMAGE, 'data' => base64_encode(PortalQrPng::png($link)), 'mime' => 'image/png']],
         );
     }
 

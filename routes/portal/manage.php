@@ -10,9 +10,11 @@ use App\Http\Controllers\Api\Portal\Manage\ReferencesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
 use App\Http\Controllers\Api\Portal\Manage\RequestsController;
 use App\Http\Controllers\Api\Portal\Manage\SharedPagesController;
+use App\Http\Controllers\Api\Portal\Manage\TeamMapController;
 use App\Http\Controllers\Api\Portal\Manage\UsersController;
 use App\Http\Middleware\AuthenticatePortalJwt;
 use App\Support\Portal\PortalFlaggedMembers;
+use App\Support\Portal\PortalTeamMap;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
@@ -36,6 +38,12 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
             ->whereNumber('id');
         Route::delete('manage/references/scopes/{id}', [ReferencesController::class, 'destroyScope'])
             ->whereNumber('id');
+        // A department's scope tree, by its WBS code (100, 100-01, 100-01-01, 100-01-01-01).
+        Route::post('manage/references/tree-scopes', [ReferencesController::class, 'storeTreeScope']);
+        Route::patch('manage/references/tree-scopes/{code}', [ReferencesController::class, 'updateTreeScope'])
+            ->where('code', '[0-9-]+');
+        Route::delete('manage/references/tree-scopes/{code}', [ReferencesController::class, 'destroyTreeScope'])
+            ->where('code', '[0-9-]+');
         Route::post('manage/references/job-types', [ReferencesController::class, 'storeJobType']);
         Route::patch('manage/references/job-types/{id}', [ReferencesController::class, 'updateJobType'])
             ->whereNumber('id');
@@ -92,6 +100,11 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
             ->whereNumber('id');
         Route::post('manage/registrations/{id}/sent', [OnboardingController::class, 'sent'])
             ->whereNumber('id');
+    });
+    // Promote candidates: the head admins' alone (2026-10-12); the account it makes is active at once.
+    Route::middleware(['portal.rule:manage.onboarding.promote', 'throttle:portal-projects-write'])->group(function (): void {
+        Route::get('manage/registrations/{id}/promotion', [OnboardingController::class, 'promotion'])
+            ->whereNumber('id');
         Route::post('manage/registrations/{id}/promote', [OnboardingController::class, 'promote'])
             ->whereNumber('id');
     });
@@ -115,6 +128,25 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->post('manage/users', [UsersController::class, 'store']);
     Route::middleware(['portal.rule:manage.users.department', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/department', [UsersController::class, 'updateDepartment'])
+        ->whereNumber('id');
+    // Edit employee information: the private details of the people whose information someone sees (2026-10-12).
+    Route::middleware(['portal.rule:manage.users.information.edit', 'throttle:portal-manage-users-write'])
+        ->patch('manage/users/{id}/information', [UsersController::class, 'updateInformation'])
+        ->whereNumber('id');
+    // An ID card prints private details, so it is made for the people whose information someone sees (2026-10-14).
+    Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
+        ->get('manage/users/{id}/id-card', [UsersController::class, 'idCard'])
+        ->whereNumber('id');
+    // Their documents follow the same power: a file into one of their slots, or one taken off (2026-10-13).
+    Route::middleware(['portal.rule:manage.users.information.edit', 'throttle:portal-manage-users-write'])->group(function (): void {
+        Route::post('manage/users/{id}/documents', [UsersController::class, 'storeDocument'])
+            ->whereNumber('id');
+        Route::delete('manage/users/{id}/documents/{documentId}', [UsersController::class, 'destroyDocument'])
+            ->whereNumber(['id', 'documentId']);
+    });
+    // Activate and deactivate: an account Active or Inactive, which sign-in follows (2026-10-12).
+    Route::middleware(['portal.rule:manage.users.status', 'throttle:portal-manage-users-write'])
+        ->patch('manage/users/{id}/status', [UsersController::class, 'updateStatus'])
         ->whereNumber('id');
     // Edit profiles: the portal's own copy of an employee's signature details (Airtable is read only).
     Route::middleware(['portal.rule:manage.users.profile', 'throttle:portal-manage-users-write'])
@@ -146,11 +178,15 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->whereNumber('id');
     Route::middleware(['portal.rule:finance.envelopes.transfer', 'throttle:portal-manage-budget-write'])
         ->post('manage/budget-envelopes/transfers', [BudgetEnvelopesController::class, 'storeTransfer']);
-    Route::middleware(['portal.rule:finance.transactions.add', 'throttle:portal-manage-budget-write'])->group(function (): void {
-        Route::post('manage/budget-transactions', [BudgetEnvelopesController::class, 'storeTransaction']);
-        // A receipt photo is uploaded first and named by the transaction it goes with.
-        Route::post('manage/budget-transactions/receipts', [BudgetEnvelopesController::class, 'storeTransactionReceipt']);
-    });
+    Route::middleware(['portal.rule:finance.transactions.add', 'throttle:portal-manage-budget-write'])
+        ->post('manage/budget-transactions', [BudgetEnvelopesController::class, 'storeTransaction']);
+    // A receipt photo is uploaded first and named by the transaction it goes with, a new one or an edited one.
+    Route::middleware(['portal.rule:finance.transactions.add|finance.transactions.edit', 'throttle:portal-manage-budget-write'])
+        ->post('manage/budget-transactions/receipts', [BudgetEnvelopesController::class, 'storeTransactionReceipt']);
+    // Edit transactions: a transaction's details, never its money (2026-10-13).
+    Route::middleware(['portal.rule:finance.transactions.edit', 'throttle:portal-manage-budget-write'])
+        ->patch('manage/budget-transactions/{id}', [BudgetEnvelopesController::class, 'updateTransaction'])
+        ->whereNumber('id');
     // Finance / Accounts: reading them is one power; adding, moving and settling money between them another.
     Route::middleware(['portal.rule:finance.accounts', 'throttle:portal-manage-requests'])
         ->get('manage/budget-accounts', [BudgetAccountsController::class, 'index']);
@@ -167,6 +203,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     });
     Route::middleware(['portal.rule:manage.requests', 'throttle:portal-manage-requests-write'])
         ->patch('manage/requests', [RequestsController::class, 'update']);
+    // Manage / Map: where each person last saved something; an administrator's power.
+    Route::middleware(['portal.rule:'.PortalTeamMap::RULE, 'throttle:portal-manage-requests'])
+        ->get('manage/map', [TeamMapController::class, 'index']);
     // Flagged users: whoever may approve or reject flagged reports puts people on review and takes them off.
     Route::middleware(['portal.rule:'.PortalFlaggedMembers::RULE, 'throttle:portal-manage-requests'])
         ->get('manage/flagged-members', [FlaggedMembersController::class, 'index']);

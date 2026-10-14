@@ -11,6 +11,8 @@ final class PortalShellPath
 
     public const MANAGE_REQUESTS = '/manage/manage-requests';
 
+    public const MANAGE_REPORTS = '/manage/manage-reports';
+
     public const USER_MANAGEMENT = '/manage/user-management';
 
     public const MANAGE_PROJECTS = '/manage/manage-projects';
@@ -24,6 +26,11 @@ final class PortalShellPath
     public const DAILY_REPORT = '/reports/daily-report';
 
     public const LATE_REPORT = '/reports/late-report';
+
+    // A top-level page, so it has no group in front of it.
+    public const EVENT_CALENDAR = '/event-calendar';
+
+    public const BUG_REPORTS = '/bug-reports';
 
     /**
      * Where an email's inbox notice may open: pages every member can reach, so a notice never links

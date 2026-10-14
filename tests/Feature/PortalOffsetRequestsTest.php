@@ -12,11 +12,13 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\NamesDepartmentHeads;
 use Tests\TestCase;
 
 class PortalOffsetRequestsTest extends TestCase
 {
     use DatabaseTransactions;
+    use NamesDepartmentHeads;
 
     /**
      * @var list<string>
@@ -113,6 +115,26 @@ class PortalOffsetRequestsTest extends TestCase
         $this->assertCount(2, $log->payload['entries']);
     }
 
+    // The reported ask (2026-10-13): only the department head is emailed; approvers keep their inbox notice.
+    public function test_filing_offset_emails_only_the_department_head(): void
+    {
+        $this->turnNotificationEmailsOn();
+        $actor = $this->activeMember();
+        [$head, $admin] = $this->nameDepartmentHead($actor);
+        $project = $this->firstOwnProject($actor);
+        $work = $this->freeDate($actor, 2);
+
+        $this->withToken($this->loginToken($actor))->postJson('/api/development/portal/requests/offset', [
+            'requests' => [$this->group($work, $this->freeDayOff($actor, $work, 1), $project)],
+        ])->assertCreated();
+
+        $this->assertEmailedOnlyTheHead($head, $admin, 'New offset request');
+        $this->assertTrue(DB::connection('portal')->table('notifications')
+            ->where('employee_id', $admin->getKey())
+            ->where('type', 'requests.offset.filed')
+            ->exists());
+    }
+
     public function test_offset_is_refused_when_either_day_is_already_taken(): void
     {
         $actor = $this->activeMember();
@@ -179,7 +201,8 @@ class PortalOffsetRequestsTest extends TestCase
         $token = $this->loginToken($actor);
         // Two distinct work days inside the window, so the pair reads as two offsets rather than one.
         $days = [];
-        for ($offset = 0; count($days) < 2 && $offset <= PortalOffsetRequests::WORK_LOOKAHEAD_DAYS; $offset++) {
+        // Today and back, since the day worked is never ahead (2026-10-13).
+        for ($offset = 0; count($days) < 2 && $offset >= -PortalOffsetRequests::WORK_LOOKBACK_DAYS; $offset--) {
             $days[$this->freeDate($actor, $offset)] = true;
         }
         $days = array_keys($days);
@@ -216,25 +239,25 @@ class PortalOffsetRequestsTest extends TestCase
             ->assertJsonPath('message', 'You have leave filed for '.$work.'.');
     }
 
-    // The reported ask (2026-10-07): the day worked is the last seven days, today or the next seven; the
-    // day off is any day at all.
-    public function test_the_day_worked_is_a_week_either_side_and_the_day_off_is_any_day(): void
+    // The reported ask: the day worked is today or the last seven days, never ahead (2026-10-13); the day
+    // off is any day at all.
+    public function test_the_day_worked_is_today_or_the_last_week_and_the_day_off_is_any_day(): void
     {
         $actor = $this->activeMember();
         $project = $this->firstOwnProject($actor);
         $token = $this->loginToken($actor);
         $dayOff = Carbon::today()->addDays(3)->toDateString();
 
-        foreach ([Carbon::today()->subDays(8), Carbon::today()->addDays(8)] as $day) {
+        foreach ([Carbon::today()->subDays(8), Carbon::today()->addDay(), Carbon::today()->addDays(7)] as $day) {
             $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
                 'requests' => [$this->group($day->toDateString(), $dayOff, $project)],
             ])
                 ->assertStatus(422)
-                ->assertJsonPath('message', 'The day to work must be within seven days of today, before or after.');
+                ->assertJsonPath('message', 'The day to work must be today or one of the last seven days.');
         }
 
         // Both ends of the window are open to the day worked.
-        foreach ([-7, 7] as $edge) {
+        foreach ([-7, 0] as $edge) {
             $this->withToken($token)->postJson('/api/development/portal/requests/offset', [
                 'requests' => [$this->group($this->freeDate($actor, $edge), Carbon::today()->addDays(30)->toDateString(), $project)],
             ])->assertStatus(201);

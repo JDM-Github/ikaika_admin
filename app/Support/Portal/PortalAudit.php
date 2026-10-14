@@ -223,6 +223,18 @@ final class PortalAudit
         }
     }
 
+    // A report-page submission's email, which only the head of the submitter's department receives.
+    public function emailDepartmentHeads(
+        Employee $actor,
+        string $type,
+        string $title,
+        string $message,
+        ?string $linkPath = null,
+        ?string $linkLabel = null,
+    ): void {
+        $this->notificationEmails->sendToDepartmentHeads($actor, $type, $title, $message, self::emailLink($linkPath, $type, []), $linkLabel);
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
@@ -262,9 +274,25 @@ final class PortalAudit
         $notification->save();
         $this->bumpNotificationCache();
         // Mapped notices also go by email; the mailer itself decides whether anything leaves.
-        $this->notificationEmails->send($employeeId, $type, $title, $message, $linkPath, $notification->link_label);
+        $this->notificationEmails->send($employeeId, $type, $title, $message, self::emailLink($linkPath, $type, $payload), $notification->link_label);
 
         return (int) $notification->id;
+    }
+
+    // An email's button opens what the bell's notice opens: the notice's type (the request tab) and its
+    // record ride on the page link, and the portal opens them once the reader is signed in.
+    private static function emailLink(?string $linkPath, string $type, array $payload): ?string
+    {
+        if ($linkPath === null) {
+            return null;
+        }
+        $query = ['notice' => $type];
+        $record = trim((string) ($payload['recordId'] ?? ''));
+        if ($record !== '') {
+            $query['record'] = $record;
+        }
+
+        return $linkPath.'?'.http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
 
     /**
@@ -331,7 +359,7 @@ final class PortalAudit
         }
         $this->bumpNotificationCache();
         foreach ($recipients as $employeeId) {
-            $this->notificationEmails->send($employeeId, $type, $title, $message, $linkPath, $linkLabel);
+            $this->notificationEmails->send($employeeId, $type, $title, $message, self::emailLink($linkPath, $type, $payload), $linkLabel);
         }
 
         return count($rows);

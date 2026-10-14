@@ -137,6 +137,15 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(20)->by('manage-requests-write:'.$this->portalLimiterKey($request));
         });
 
+        // Ten reports an hour each. The counter is the only place the sender is known, and it never meets the report.
+        RateLimiter::for('portal-bug-report', function (Request $request) {
+            return Limit::perHour(10)->by('bug-report:'.$this->portalLimiterKey($request));
+        });
+
+        RateLimiter::for('portal-bug-report-write', function (Request $request) {
+            return Limit::perMinute(30)->by('bug-report-write:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-manage-budget-write', function (Request $request) {
             return Limit::perMinute(20)->by('manage-budget-write:'.$this->portalLimiterKey($request));
         });

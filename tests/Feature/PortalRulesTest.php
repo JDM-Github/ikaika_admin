@@ -44,12 +44,13 @@ class PortalRulesTest extends TestCase
     }
 
     // Executives start with every department, less the developer tools, a member's own pages, the housekeeping
-    // pages and See developers' activity and Auto-approve projects, which are given person by person.
+    // pages and See developers' activity and Auto-approve projects, which are given person by person,
+    // Edit closed projects, and Bug Reports, which is MIS's own (2026-10-13).
     public function test_executives_start_with_everything_but_the_left_out_pages_at_every_department(): void
     {
         $catalog = DB::connection('portal')->table('access_permissions')->get()->keyBy('permission_key');
         $presets = DB::connection('portal')->table('access_presets')->where('role', 'executive')->get()->keyBy('permission_key');
-        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.references', 'projects.create.direct', 'manage.shares', 'manage.onboarding'];
+        $leftOut = ['developer', 'home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.references', 'projects.create.direct', 'projects.edit.closed', 'manage.shares', 'manage.onboarding', 'manage.map', 'bug-reports'];
 
         foreach ($catalog as $key => $rule) {
             $isLeftOut = collect($leftOut)->contains(static fn (string $root): bool => $key === $root || str_starts_with((string) $key, $root.'.'));
@@ -98,12 +99,13 @@ class PortalRulesTest extends TestCase
         $this->assertSame(['developer'], DB::connection('portal')->table('access_presets')->where('permission_key', 'administration.recycle.unlisted')->pluck('role')->all());
     }
 
-    // Grouping rows scope nothing themselves, so they offer no reach: each page or kind under them has its own.
+    // Grouping rows scope nothing themselves, so they offer no reach; Requests carries one now
+    // because a shared grant is scoped by it, while its kinds keep their own reaches.
     public function test_grouping_rows_carry_no_reach(): void
     {
-        $reach = DB::connection('portal')->table('access_permissions')->whereIn('permission_key', ['manage', 'manage.requests', 'administration'])->pluck('supports_reach', 'permission_key');
+        $reach = DB::connection('portal')->table('access_permissions')->whereIn('permission_key', ['manage', 'administration'])->pluck('supports_reach', 'permission_key');
 
-        $this->assertSame(['administration' => 0, 'manage' => 0, 'manage.requests' => 0], $reach->map(static fn ($value): int => (int) $value)->sortKeys()->all());
+        $this->assertSame(['administration' => 0, 'manage' => 0], $reach->map(static fn ($value): int => (int) $value)->sortKeys()->all());
     }
 
     // Manage / Requests switches over without changing an admin's queue: every kind and decision, for their department.

@@ -250,7 +250,7 @@ class PortalSharedPagesTest extends TestCase
             && count($mail->inlineImages) === 1
             && $mail->inlineImages[0]['name'] === 'share-qr'
             && $mail->inlineImages[0]['mime'] === 'image/png'
-            && $mail->inlineImages[0]['data'] === PortalQrPng::png((string) $created->json('data.share.link')));
+            && $mail->inlineImages[0]['data'] === base64_encode(PortalQrPng::png((string) $created->json('data.share.link'))));
 
         // A new password says so in its own subject.
         $this->withToken($token)->postJson(self::BASE.'/'.$created->json('data.share.id').'/regenerate')->assertOk();
@@ -278,8 +278,9 @@ class PortalSharedPagesTest extends TestCase
 
     public function test_a_page_that_is_not_ready_is_refused(): void
     {
-        $rule = DB::connection('portal')->table('shared_page_shareable')->where('is_ready', 0)->value('rule_key');
-        $this->assertIsString($rule, 'The catalog has no not-ready page left to refuse.');
+        // Every seeded page is ready now, so the gate is checked against one switched off on purpose.
+        $rule = 'calendar';
+        DB::connection('portal')->table('shared_page_shareable')->where('rule_key', $rule)->update(['is_ready' => 0]);
 
         $this->withToken($this->developerToken())
             ->postJson(self::BASE, $this->payload(['rules' => [$rule]]))
@@ -335,5 +336,147 @@ class PortalSharedPagesTest extends TestCase
         $svg = $this->withToken($token)->getJson(self::BASE.'/'.$share['id'].'/qr')->assertOk()->json('data.svg');
         $this->assertIsString($svg);
         $this->assertStringContainsString('<svg', $svg);
+    }
+
+    // The reported ask (2026-10-14, user): the kept password is its creator's alone.
+    public function test_the_password_is_visible_only_to_the_person_who_made_the_share(): void
+    {
+        $token = $this->developerToken();
+        $created = $this->createShare($token);
+        $id = (string) $created->json('data.share.id');
+        $password = (string) $created->json('data.password');
+        $this->assertNotSame('', $password);
+        $this->assertSame($password, $created->json('data.share.password'));
+
+        // The creator reads it back from the list, with the name the page can show.
+        $mine = collect($this->withToken($token)->getJson(self::BASE)->json('data.shares'))->firstWhere('id', $id);
+        $this->assertSame($password, $mine['password']);
+        $this->assertNotEmpty($mine['createdByName']);
+
+        // Another administrator sees the row, but never the password.
+        $other = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $theirs = collect($this->withToken($this->token($other))->getJson(self::BASE)->assertOk()->json('data.shares'))->firstWhere('id', $id);
+        $this->assertNull($theirs['password']);
+        $this->assertSame($mine['createdByName'], $theirs['createdByName']);
+    }
+
+    // The reported ask (2026-10-14, user): a granted page carries a reach, never wider than the
+    // actor holds, and a page the actor does not hold cannot be handed out at all.
+    public function test_a_granted_page_carries_a_reach_never_wider_than_the_actor_holds(): void
+    {
+        $developer = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->where('is_developer', true)
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->orderBy('id')->firstOrFail();
+        $token = $this->developerModeOn($this->token($developer));
+        // Share any page set aside, so what the developer holds is what they may hand out.
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $developer->getKey(), 'permission_key' => 'manage.shares.any']);
+
+        // Narrowed to their department themselves: an asked-for Every department lands as department.
+        DB::connection('portal')->table('access_self_reach')->updateOrInsert(
+            ['employee_id' => $developer->getKey(), 'permission_key' => 'projects.view'],
+            ['reach' => 'department'],
+        );
+        $created = $this->createShare($token, ['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'all']]);
+        $this->assertSame(['projects.view' => 'department'], (array) $created->json('data.share.reaches'));
+        $id = (int) $created->json('data.share.id');
+        $this->assertSame('department', DB::connection('portal')->table('shared_page_rules')->where('share_id', $id)->value('reach'));
+        // The department scope is snapshotted from the actor, for the guest's stand-in.
+        $this->assertSame(trim((string) $developer->department), trim((string) DB::connection('portal')->table('shared_pages')->where('id', $id)->value('reach_department')));
+
+        // The list tells the form the reach the actor holds for each page.
+        $pages = collect($this->withToken($token)->getJson(self::BASE)->json('data.pages'))->keyBy('key');
+        $this->assertSame('department', $pages['projects.view']['reach']);
+        $this->assertTrue($pages['projects.view']['supportsReach']);
+        $this->assertNull($pages['finance.envelopes']['reach']);
+
+        // Held for their own department only: naming another one is refused, their own is fine (2026-10-14, user).
+        $other = trim((string) DB::connection('portal')->table('company_departments')->whereRaw('LOWER(name) != ?', [strtolower(trim((string) $developer->department))])->value('name'));
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'department'], 'reachDepartment' => $other]))
+            ->assertStatus(422)->assertJsonPath('message', 'You can only share your own department on a page you hold for your department.');
+        $this->assertSame(trim((string) $developer->department), $this->createShare($token, ['rules' => ['projects.view'], 'reachDepartment' => trim((string) $developer->department)])->json('data.share.reachDepartment'));
+
+        // The list names every department for the picker, and the actor's own.
+        $list = $this->withToken($token)->getJson(self::BASE)->json('data');
+        $this->assertContains($other, $list['departments']);
+        $this->assertSame(trim((string) $developer->department), $list['ownDepartment']);
+
+        // Held for every department: any department may be named, and it is what the guest stands in with.
+        DB::connection('portal')->table('access_self_reach')->where('employee_id', $developer->getKey())->delete();
+        $named = $this->createShare($token, ['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'department'], 'reachDepartment' => $other])->json('data.share');
+        $this->assertSame([$other, 'department'], [$named['reachDepartment'], $named['reaches']['projects.view']]);
+        $this->assertSame($other, DB::connection('portal')->table('shared_pages')->where('id', $named['id'])->value('reach_department'));
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'department'], 'reachDepartment' => 'Nowhere']))
+            ->assertStatus(422)->assertJsonPath('message', 'Choose a department for the pages set to one department.');
+
+        // A guest has no records of their own: only the person is refused, whatever was asked.
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'own']]))->assertStatus(422);
+
+        // Switched off for themselves: the page cannot be handed out at all.
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $developer->getKey(), 'permission_key' => 'projects.view']);
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view']]))->assertStatus(422);
+    }
+
+    // The reported ask (2026-10-14, user): the MIS head shares any page at any reach, even one he switched off,
+    // and the reach picker names only the departments people work in.
+    public function test_the_mis_head_shares_any_page_and_the_picker_names_real_departments(): void
+    {
+        $nathaniel = Employee::query()->where('id_no', '220202-0002')->firstOrFail();
+        $nathaniel->forceFill(['is_developer' => false])->save();
+        $token = $this->token($nathaniel);
+        $portal = DB::connection('portal');
+        foreach (['projects.view', 'finance.envelopes', 'manage.users.information'] as $key) {
+            $portal->table('access_toggles')->insert(['employee_id' => $nathaniel->getKey(), 'permission_key' => $key]);
+        }
+        Cache::flush();
+
+        $list = $this->withToken($token)->getJson(self::BASE)->assertOk()->json('data');
+        $this->assertSame(['Engineering', 'MIS'], $list['departments']);
+        $pages = collect($list['pages'])->keyBy('key');
+        $this->assertSame('all', $pages['projects.view']['reach']);
+        $this->assertSame('manage.users.information', $pages['manage.users']['options'][0]['key'] ?? null);
+
+        $share = $this->createShare($token, [
+            'rules' => ['projects.view', 'finance.envelopes', 'manage.users', 'manage.users.information'],
+            'reaches' => ['projects.view' => 'department'],
+            'reachDepartment' => 'Engineering',
+        ])->json('data.share');
+        $this->assertSame(['department', 'Engineering'], [$share['reaches']['projects.view'], $share['reachDepartment']]);
+
+        // Without the power, a page with no reach is checked against the maker like any other.
+        $portal->table('access_toggles')->insert(['employee_id' => $nathaniel->getKey(), 'permission_key' => 'manage.shares.any']);
+        Cache::flush();
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['finance.envelopes']]))
+            ->assertStatus(422)->assertJsonPath('message', 'You cannot share a page you do not hold.');
+    }
+
+    // The reported ask (2026-10-14, user): Users can lend Show employee information, so a boss's share opens private details.
+    public function test_users_can_lend_employee_information_to_a_guest(): void
+    {
+        $token = $this->developerToken();
+        $users = collect($this->withToken($token)->getJson(self::BASE)->json('data.pages'))->firstWhere('key', 'manage.users');
+        $this->assertSame([['key' => 'manage.users.information', 'label' => 'Show employee information']], $users['options']);
+
+        // An option rides only with its page.
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view', 'manage.users.information']]))
+            ->assertStatus(422)->assertJsonPath('message', 'Turn on the page an option belongs to first.');
+
+        $target = $this->employee("LOWER(COALESCE(role_level, '')) != 'executive'");
+        $plain = $this->createShare($token, ['rules' => ['manage.users']])->json('data');
+        $lent = $this->createShare($token, ['label' => 'Boss view', 'rules' => ['manage.users', 'manage.users.information']])->json('data');
+        $this->assertSame('all', DB::connection('portal')->table('shared_page_rules')->where('share_id', $lent['share']['id'])->where('rule_key', 'manage.users.information')->value('reach'));
+
+        $guest = fn (array $share): string => (string) $this->postJson('/api/development/portal/share/'.$share['share']['code'].'/access', ['password' => $share['password']])->assertOk()->json('data.token');
+        $profile = '/api/development/portal/manage/users/'.$target->getKey();
+        $this->withToken($guest($plain))->getJson($profile)->assertOk()->assertJsonPath('data.information', null);
+        $this->withToken($guest($plain))->getJson($profile.'/id-card')->assertForbidden();
+
+        // With the option the guest sees the private details, and the look is logged under the share's maker.
+        $this->assertIsArray($this->withToken($guest($lent))->getJson($profile)->assertOk()->json('data.information'));
+        $log = DB::connection('portal')->table('logs')->where('resource', 'manage.users.information')->where('record_id', (string) $target->getKey())->orderByDesc('id')->first();
+        $this->assertNotNull($log);
+        $this->assertSame((int) DB::connection('portal')->table('shared_pages')->where('id', $lent['share']['id'])->value('created_by'), (int) $log->employee_id);
+        $this->assertStringContainsString('The shared page "Boss view"', (string) $log->message);
     }
 }

@@ -27,6 +27,26 @@ final class PortalManageProjects
 
     private const DECIDED_LIMIT = 200;
 
+    /** The decision sent => the approval it writes; pending sends a decided project back to waiting. */
+    private const DECISIONS = [
+        'approve' => PortalProjectApproval::APPROVED,
+        'reject' => PortalProjectApproval::REJECTED,
+        'pending' => PortalProjectApproval::PENDING,
+    ];
+
+    private const TRAILS = [
+        PortalProjectApproval::APPROVED => PortalProjectTrail::APPROVED,
+        PortalProjectApproval::REJECTED => PortalProjectTrail::REJECTED,
+        PortalProjectApproval::PENDING => PortalProjectTrail::REOPENED,
+    ];
+
+    // A Closed project's approval is its closing, so its trail says so rather than "creation".
+    private const CLOSING_TRAILS = [
+        PortalProjectApproval::APPROVED => PortalProjectTrail::CLOSING_APPROVED,
+        PortalProjectApproval::REJECTED => PortalProjectTrail::CLOSING_REJECTED,
+        PortalProjectApproval::PENDING => PortalProjectTrail::CLOSING_REOPENED,
+    ];
+
     /** The tab => the word projects.project_creation_status holds. */
     private const STATUSES = [
         'pending' => PortalProjectApproval::PENDING,
@@ -60,13 +80,20 @@ final class PortalManageProjects
         $query = $tab === 'pending'
             ? $query->orderByRaw('requested_at IS NULL')->orderBy('requested_at')->orderBy('id')
             : $query->orderByDesc('date_modified')->orderByDesc('id')->limit(self::DECIDED_LIMIT);
-        $rows = $query->get();
+        $rows = $query->get()->values();
+        // A completed or closed project's approval is its department head's alone (2026-10-13, user).
+        $items = $this->items($rows->all());
+        foreach ($rows as $index => $row) {
+            $items[$index]['canDecide'] = ! PortalProjectPowers::isLocked($actor, $request, $row);
+        }
 
         return [
             'section' => 'manage',
             'resource' => 'projects',
-            'data' => $this->items($rows->all()),
+            'data' => $items,
             'counts' => $counts,
+            // An administrator may change a project's approval after it was decided (2026-10-13, user).
+            'canChangeDecided' => PortalRole::isAdmin($actor->role, $actor->role_level),
         ];
     }
 
@@ -102,12 +129,14 @@ final class PortalManageProjects
     public function decide(Employee $actor, Request $request, int $projectId): array
     {
         $validated = $request->validate([
-            'decision' => ['required', 'string', Rule::in(['approve', 'reject'])],
+            'decision' => ['required', 'string', Rule::in(array_keys(self::DECISIONS))],
             'remarks' => ['nullable', 'string', 'max:1000'],
         ]);
-        $isApproved = $validated['decision'] === 'approve';
+        $status = self::DECISIONS[$validated['decision']];
+        $isApproved = $status === PortalProjectApproval::APPROVED;
+        $isReopened = $status === PortalProjectApproval::PENDING;
         $remarks = $this->text($validated['remarks'] ?? null);
-        if (! $isApproved && $remarks === null) {
+        if ($status === PortalProjectApproval::REJECTED && $remarks === null) {
             abort(422, 'Say why the project is rejected, so whoever asked can fix it.');
         }
 
@@ -118,16 +147,27 @@ final class PortalManageProjects
         if (! $this->approval->covers($actor, $request, $row)) {
             abort(403, 'Deciding on this project needs Project Approver over it.');
         }
-        if ($row->project_creation_status !== PortalProjectApproval::PENDING) {
+        if (PortalProjectPowers::isLocked($actor, $request, $row)) {
+            abort(403, 'This project is completed or closed. Only its department head can change its approval.');
+        }
+        // Only an administrator changes a project that was already decided; anyone else decides waiting ones.
+        if ($row->project_creation_status !== PortalProjectApproval::PENDING && ! PortalRole::isAdmin($actor->role, $actor->role_level)) {
             abort(422, 'This project is not waiting for approval.');
         }
+        if ($row->project_creation_status === $status) {
+            abort(422, 'The project is already '.strtolower($status === PortalProjectApproval::PENDING ? 'waiting' : $status).'.');
+        }
         $name = $this->text($row->project_name ?? null) ?? 'Project';
+        $decision = $isReopened ? 'pending' : ($isApproved ? 'approved' : 'rejected');
 
-        $this->ledger->within($this->connection(), function () use ($actor, $request, $projectId, $isApproved, $remarks, $name): void {
+        $trail = (($row->status ?? null) === 'Closed' ? self::CLOSING_TRAILS : self::TRAILS)[$status];
+
+        $this->ledger->within($this->connection(), function () use ($actor, $request, $projectId, $status, $isReopened, $decision, $remarks, $name, $trail): void {
+            // Back to waiting clears who decided, as a project that was never decided has no approver.
             $written = [
-                'project_creation_status' => $isApproved ? PortalProjectApproval::APPROVED : PortalProjectApproval::REJECTED,
-                'project_creation_approver' => $this->personName($actor),
-                'project_approver_email' => $this->text($actor->email ?? null),
+                'project_creation_status' => $status,
+                'project_creation_approver' => $isReopened ? null : $this->personName($actor),
+                'project_approver_email' => $isReopened ? null : $this->text($actor->email ?? null),
                 'project_creation_approver_remarks' => $remarks,
                 'date_modified' => now(),
             ];
@@ -136,27 +176,38 @@ final class PortalManageProjects
                 CoreLedger::PRODUCT_PORTAL,
                 self::CORE_TARGET,
                 // The sync sends changed columns only, so it needs them as a column map, not as prose.
-                ['id' => (string) $projectId, 'projectName' => $name, 'decision' => $isApproved ? 'approved' : 'rejected', 'remarks' => $remarks, 'fields' => $written],
+                ['id' => (string) $projectId, 'projectName' => $name, 'decision' => $decision, 'remarks' => $remarks, 'fields' => $written],
                 self::CORE_RESOURCE,
                 (string) $projectId,
                 CoreRecycleKey::project($projectId),
                 (int) $actor->getKey(),
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
-            $this->trail->record($projectId, $isApproved ? PortalProjectTrail::APPROVED : PortalProjectTrail::REJECTED, $actor, $request, $remarks);
+            $this->trail->record($projectId, $trail, $actor, $request, $remarks);
         });
 
         $this->audit->record(
             $actor,
             PortalLogAction::PATCH,
             self::CORE_RESOURCE,
-            PortalActivityCopy::decidedProject($name, $isApproved),
+            $isReopened ? PortalActivityCopy::reopenedProject($name) : PortalActivityCopy::decidedProject($name, $isApproved),
             (string) $projectId,
             $request,
-            ['projectName' => $name, 'decision' => $isApproved ? 'approved' : 'rejected'],
+            ['projectName' => $name, 'decision' => $decision],
         );
         $requester = ($row->requested_by ?? null) === null ? null : Employee::query()->find((int) $row->requested_by);
-        if ($requester instanceof Employee) {
+        if ($requester instanceof Employee && $isReopened) {
+            $this->audit->notifyIfOther(
+                $requester,
+                $actor,
+                PortalNotificationType::PROJECT_MODIFIED,
+                'Project back to waiting',
+                PortalActivityCopy::notifyProjectReopened(PortalActivityCopy::actorName($actor, $request), $name),
+                PortalShellPath::CREATED_PROJECTS,
+                'Open Created Projects',
+                ['recordId' => (string) $projectId],
+            );
+        } elseif ($requester instanceof Employee) {
             $this->audit->notifyIfOther(
                 $requester,
                 $actor,
@@ -199,7 +250,8 @@ final class PortalManageProjects
         return [
             'section' => 'manage',
             'resource' => 'projects',
-            'data' => $this->detail($row),
+            // The sheet's Edit button: a completed or closed project stays shut to all but its department head.
+            'data' => [...$this->detail($row), 'canEdit' => PortalProjectPowers::opensEditor($actor, $request, $row)],
         ];
     }
 

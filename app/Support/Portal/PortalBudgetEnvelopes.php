@@ -237,6 +237,8 @@ final class PortalBudgetEnvelopes
                 'isPortalCharge' => str_starts_with((string) ($row->source_key ?? ''), self::SOURCE_PREFIX),
                 // Half of an allocation: listed with its envelope, never as money in or out (2026-10-08).
                 'isAllocation' => $isAllocation,
+                // Entered by hand, so Edit transactions may change its details (2026-10-13).
+                'isEditable' => PortalBudgetTransactions::isEditable($row->transaction_name, $row->source_key),
             ];
         }
 

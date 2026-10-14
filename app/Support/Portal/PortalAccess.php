@@ -37,9 +37,10 @@ final class PortalAccess
                 'reach' => PortalRules::narrower($rule['reach'], $narrowed[$key] ?? null),
                 'heldReach' => $rule['reach'],
                 'includeExecutives' => $rule['executives'],
-                'canToggle' => (bool) $row->can_toggle,
-                'isSwitchedOn' => ! isset($off[$key]),
-                'isActive' => PortalRules::isSwitchedOn($catalog, $off, $key),
+                'canToggle' => (bool) $row->can_toggle && ! isset($rule['impliedBy']),
+                'isSwitchedOn' => ! isset($off[$rule['impliedBy'] ?? $key]),
+                'isActive' => PortalRules::isSwitchedOn($catalog, $off, $rule['impliedBy'] ?? $key),
+                'impliedBy' => isset($rule['impliedBy']) ? $catalog[$rule['impliedBy']]->label : null,
                 'fromRole' => $rule['fromRole'],
                 'fromDefault' => $rule['personal'] ?? false,
                 'givenBy' => $graph->makerNames(PortalAccessGraph::givers($rule), $viewerIsDeveloper),
@@ -86,6 +87,10 @@ final class PortalAccess
         }
         if (! (bool) $graph->catalog()[$key]->can_toggle) {
             abort(422, 'That power always stays on.');
+        }
+        $carrier = $graph->effective((int) $actor->getKey())[$key]['impliedBy'] ?? null;
+        if ($carrier !== null) {
+            abort(422, 'That power comes with '.$graph->catalog()[$carrier]->label.', so it stays on while you hold it.');
         }
 
         $toggles = DB::connection('portal')->table('access_toggles');

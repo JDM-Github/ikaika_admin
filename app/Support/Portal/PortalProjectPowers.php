@@ -11,7 +11,9 @@ use Illuminate\Support\Facades\DB;
  * project, department the actor's department's plus the ones they lead, own the ones they are on,
  * lead only the ones they lead. Those three reaches are given, not a member's own, so a lead's own
  * project is theirs until a manager limits it or they switch it off. Whoever asked for a project may
- * still edit it while it is not approved.
+ * still edit it while it is not approved. Whoever View Projects reaches may change the project's members
+ * and support members, and nothing else. A Completed or Closed project is locked for all of them; only
+ * Edit closed projects (the department heads) still edits it.
  */
 final class PortalProjectPowers
 {
@@ -29,6 +31,14 @@ final class PortalProjectPowers
 
     public const LEAD = 'projects.lead';
 
+    public const VIEW = 'projects.view';
+
+    // Taking someone assigned to a scope off the project through the members-only edit; Project Lead carries it (2026-10-14, user).
+    public const REMOVE_ASSIGNEES = 'projects.assignees.remove';
+
+    // Department heads only (2026-10-12, supervisor): the head preset, at their own department.
+    public const EDIT_CLOSED = 'projects.edit.closed';
+
     // Not a form power: Manage / References reads the same project options the form does, so its
     // own rule must open that read too.
     public const REFERENCES = 'projects.references';
@@ -42,23 +52,30 @@ final class PortalProjectPowers
     // Whether the rule, at the reach the actor holds it now, covers this project row.
     public static function allows(Employee $actor, Request $request, string $key, object $project): bool
     {
+        if ($key !== self::DELETE && self::isLocked($actor, $request, $project)) {
+            return false;
+        }
+
         return self::coversProject(PortalRules::reach($actor, $request, $key), $actor, $project)
-            || ($key !== self::DELETE && self::isWaitingRequest($actor, $project));
+            || ($key !== self::DELETE && self::isRequester($actor, $project));
     }
 
     /**
      * The three answers for the project board, from reaches read once per request.
      *
      * @param  array<string, ?string>  $reaches
-     * @return array{canEdit: bool, canManageScopes: bool, canDelete: bool}
+     * @return array{canEdit: bool, canEditMembers: bool, canManageScopes: bool, canDelete: bool}
      */
     public static function flags(array $reaches, Employee $actor, object $project): array
     {
-        $isRequest = self::isWaitingRequest($actor, $project);
+        $isRequest = self::isRequester($actor, $project);
+        $isOpen = ! self::isFinished($project) || self::coversProject($reaches[self::EDIT_CLOSED] ?? null, $actor, $project);
+        $canEdit = $isOpen && (self::coversProject($reaches[self::EDIT] ?? null, $actor, $project) || $isRequest);
 
         return [
-            'canEdit' => self::coversProject($reaches[self::EDIT] ?? null, $actor, $project) || $isRequest,
-            'canManageScopes' => self::coversProject($reaches[self::SCOPES] ?? null, $actor, $project) || $isRequest,
+            'canEdit' => $canEdit,
+            'canEditMembers' => $canEdit || ($isOpen && self::coversProject($reaches[self::VIEW] ?? null, $actor, $project)),
+            'canManageScopes' => $isOpen && (self::coversProject($reaches[self::SCOPES] ?? null, $actor, $project) || $isRequest),
             'canDelete' => self::coversProject($reaches[self::DELETE] ?? null, $actor, $project),
         ];
     }
@@ -72,8 +89,35 @@ final class PortalProjectPowers
         foreach (self::KEYS as $key) {
             $reaches[$key] = PortalRules::reach($actor, $request, $key);
         }
+        $reaches[self::VIEW] = PortalRules::reach($actor, $request, self::VIEW);
+        $reaches[self::EDIT_CLOSED] = PortalRules::reach($actor, $request, self::EDIT_CLOSED);
 
         return $reaches;
+    }
+
+    // Members and support members (2026-10-12, user): View Projects' reach is enough, and no approval follows.
+    public static function reachesPeople(Employee $actor, Request $request, object $project): bool
+    {
+        return ! self::isLocked($actor, $request, $project)
+            && self::coversProject(PortalRules::reach($actor, $request, self::VIEW), $actor, $project);
+    }
+
+    // Whether the edit form opens at all for this person: the whole project, or its people.
+    public static function opensEditor(Employee $actor, Request $request, object $project): bool
+    {
+        return self::allows($actor, $request, self::EDIT, $project) || self::reachesPeople($actor, $request, $project);
+    }
+
+    // Completed or Closed, whatever its approval (2026-10-12, supervisor), and outside the actor's Edit closed projects.
+    public static function isLocked(Employee $actor, Request $request, object $project): bool
+    {
+        return self::isFinished($project)
+            && ! self::coversProject(PortalRules::reach($actor, $request, self::EDIT_CLOSED), $actor, $project);
+    }
+
+    private static function isFinished(object $project): bool
+    {
+        return in_array(PortalViewProjectPresenter::status($project->status ?? null), ['completed', 'closed'], true);
     }
 
     // Add projects and Project Lead reach departments: all is any, department (or own) only the person's own.
@@ -158,9 +202,10 @@ final class PortalProjectPowers
         return $lead !== '' && $lead === $own;
     }
 
-    private static function isWaitingRequest(Employee $actor, object $project): bool
+    // The creator edits and scopes their own project at any status (2026-10-12, user); once it is approved,
+    // their edit sends it back for approval (PortalProjectEditor::sendsBackForApproval). Never delete.
+    private static function isRequester(Employee $actor, object $project): bool
     {
-        return (int) ($project->requested_by ?? 0) === (int) $actor->getKey()
-            && ($project->project_creation_status ?? null) !== PortalProjectApproval::APPROVED;
+        return (int) ($project->requested_by ?? 0) === (int) $actor->getKey();
     }
 }

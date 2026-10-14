@@ -38,6 +38,26 @@ use Illuminate\Validation\Rule;
  */
 final class PortalProjectEditor
 {
+    // What a project sent back for approval clears: it waits again, with no approver or remarks.
+    private const PENDING_AGAIN = [
+        'project_creation_status' => PortalProjectApproval::PENDING,
+        'project_creation_approver' => null,
+        'project_approver_email' => null,
+        'project_creation_approver_remarks' => null,
+    ];
+
+    /*
+     * Closing a project asks for its completion checklist, every item ticked (2026-10-13, user). Engineering
+     * answers Airtable's three questions, kept in their own columns; any other department confirms once.
+     */
+    private const CLOSING_CHECKLIST = [
+        'accRenamed' => 'is_renamed_with_acc_number',
+        'ledgerMoved' => 'is_ledger_moved_to_for_submission',
+        'ledgerUpdated' => 'is_ledger_details_updated',
+    ];
+
+    private const CLOSING_CONFIRMATION = 'workFinished';
+
     private const CORE_TARGET = 'portal.projects';
 
     private const CORE_RESOURCE = 'projects';
@@ -46,12 +66,32 @@ final class PortalProjectEditor
 
     private const SUPPORT_ROLE = 'support';
 
-    /** The portal's status => the word projects.status holds, which is Airtable's. */
+    private const PEOPLE_RULES = [
+        'memberIds' => ['nullable', 'array', 'max:'.self::MAX_PEOPLE],
+        'memberIds.*' => ['integer', 'distinct'],
+        'supportMemberIds' => ['nullable', 'array', 'max:'.self::MAX_PEOPLE],
+        'supportMemberIds.*' => ['integer', 'distinct'],
+    ];
+
+    private const PEOPLE_ATTRIBUTES = [
+        'memberIds' => 'members',
+        'memberIds.*' => 'member',
+        'supportMemberIds' => 'support members',
+        'supportMemberIds.*' => 'support member',
+    ];
+
+    // The trail's words for a change of people; an edit of only these never needs approval again.
+    private const PEOPLE_CHANGES = [self::MEMBER_ROLE => 'Members changed', self::SUPPORT_ROLE => 'Support members changed'];
+
+    /*
+     * The portal's status => the word projects.status holds, which is Airtable's Project/s Status:
+     * Started, Done and Closed are its only choices. On Hold and Cancelled were dropped (2026-10-12, user);
+     * Airtable never had them, so a project saved with either could not sync.
+     */
     private const STATUSES = [
         'ongoing' => 'Started',
         'completed' => 'Done',
-        'on-hold' => 'On Hold',
-        'cancelled' => 'Cancelled',
+        'closed' => 'Closed',
     ];
 
     /** Stored as 'LOD 300'; 'N/A' is stored as it is. */
@@ -60,8 +100,7 @@ final class PortalProjectEditor
     private const STATUS_LABELS = [
         'ongoing' => 'Ongoing',
         'completed' => 'Completed',
-        'on-hold' => 'On Hold',
-        'cancelled' => 'Cancelled',
+        'closed' => 'Closed',
     ];
 
     public const LEVEL_COLUMNS = [
@@ -87,13 +126,6 @@ final class PortalProjectEditor
 
     /** A drive path is a folder path people paste, not always a URL. */
     private const FREE_TEXT_LINKS = ['google-drive'];
-
-    private const SCOPE_TABLES = [
-        'project_scope_t1_processes',
-        'project_scope_t2_procedures',
-        'project_scope_t3_activities',
-        'project_scope_t4_tasks',
-    ];
 
     private const LEVEL_LABELS = [
         'structural' => 'Structural',
@@ -127,6 +159,9 @@ final class PortalProjectEditor
         private readonly PortalProjectTrail $trail,
         private readonly PortalProjectApproval $approval,
         private readonly PortalProjectRepositories $repositories,
+        private readonly PortalProjectActivities $activities,
+        private readonly PortalScopeTree $scopeTree,
+        private readonly PortalScopeWork $scopeWork,
     ) {}
 
     /**
@@ -141,20 +176,24 @@ final class PortalProjectEditor
          * Read by the project form (Add projects, or Edit projects at own for a lead) and by
          * Manage / References, which maps activities onto the same project options. The page's own
          * power opens it too: limiting Add projects must not break References for an admin
-         * (2026-10-12, reported live).
+         * (2026-10-12, reported live). View Projects opens it for the members-only edit (2026-10-12).
          */
         $editReach = PortalRules::reach($actor, $request, PortalProjectPowers::EDIT);
         if (! PortalRules::holds($actor, $request, PortalProjectPowers::CREATE)
             && ! PortalRules::holds($actor, $request, PortalProjectPowers::REFERENCES)
+            && ! PortalRules::holds($actor, $request, PortalProjectPowers::VIEW)
             && ! in_array($editReach, ['department', 'all'], true)
             && ($editReach === null || ! $this->leadsAnyProject($actor))) {
-            abort(403, 'The project options need Add projects, Edit projects or References.');
+            abort(403, 'The project options need View Projects, Add projects, Edit projects or References.');
         }
 
         // Who may lead, and where: Project Lead at all leads anywhere, at department (or own) their own department's.
         $leadReaches = PortalProjectPowers::leadReaches();
         $employees = [];
-        foreach ($this->activeEmployees() as $row) {
+        $people = [...$this->activeEmployees()];
+        // Scope assignees show as heads in Manage Scopes, so each person carries their photo.
+        $photos = PortalEmployeePresenter::photoUrls(array_map(static fn (object $row): int => (int) $row->id, $people));
+        foreach ($people as $row) {
             $reach = $this->text($row->email) === null ? null : ($leadReaches[(int) $row->id] ?? null);
             $employees[] = [
                 'id' => (string) (int) $row->id,
@@ -163,6 +202,7 @@ final class PortalProjectEditor
                 'canLead' => $reach !== null,
                 'leadsAnywhere' => $reach === 'all',
                 'leadDepartment' => $reach === null || $reach === 'all' ? null : $this->text($row->department),
+                'photoUrl' => $photos[(int) $row->id] ?? null,
             ];
         }
         $departments = $this->departments();
@@ -202,10 +242,14 @@ final class PortalProjectEditor
                 'typesByDepartment' => $this->typesByDepartment(),
                 // Which activity codes each job type may use on a report, keyed by job type.
                 'allowedActivitiesByType' => $this->allowedActivitiesByType(),
+                // A department's own list for a type, which wins over the shared one (Management, 2026-10-13).
+                'allowedActivitiesByDepartment' => $this->activities->allowedByDepartment(),
                 // Editing a job type's allowed activities is a global change, so it needs All reach.
                 'canManageAllowedActivities' => PortalRules::reach($actor, $request, PortalProjectPowers::EDIT) === 'all',
-                // A project that is not Engineering's picks its scopes from these, by its department.
+                // The activity code catalogue, for the allowed activities a project keeps.
                 'activityCodes' => PortalActivityScopes::all(),
+                // Each department's scope tree; a project picks from its own department's.
+                'scopeTree' => $this->scopeTree->roots(),
             ],
         ];
     }
@@ -216,9 +260,8 @@ final class PortalProjectEditor
     public function show(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMay($actor, $row, $request, PortalProjectPowers::EDIT);
 
-        return $this->response($projectId);
+        return $this->response($projectId, $this->editsPeopleOnly($actor, $row, $request));
     }
 
     /**
@@ -235,12 +278,15 @@ final class PortalProjectEditor
             abort(403, 'Your Add projects power does not reach that department.');
         }
         $scopeCodes = $this->validatedScopeCodes($request, $fields['columns']['department']);
+        // A new project has its type's whole list unless the form took some out.
+        $removedActivities = $this->activities->validated($request->input('removedActivityCodes'), $fields['columns']['type_of_job'], $fields['columns']['department']) ?? [];
         $employeeId = (int) $actor->getKey();
+        $closing = $this->closingColumns($request, null, $fields['columns']);
         // Only Auto-approve passes a new project; approving others' is not approving your own (2026-10-07).
-        $isApproved = PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
+        $isApproved = $closing === null && PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
 
         $numbered = null;
-        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $actor, $employeeId, $request, $isApproved, &$numbered): int {
+        $projectId = $this->ledger->within($this->connection(), function () use ($fields, $scopeCodes, $removedActivities, $actor, $employeeId, $request, $isApproved, $closing, &$numbered): int {
             // The client's row is the lock that keeps two projects from taking one number.
             $client = $this->connection()->table('clients')->where('id', $fields['clientId'])->lockForUpdate()->first(['id', 'client_id']);
             if ($client === null) {
@@ -258,11 +304,16 @@ final class PortalProjectEditor
                 'project_approver_email' => $isApproved ? $this->text($actor->email ?? null) : null,
                 'requested_by' => $employeeId,
                 'requested_at' => now(),
+                ...($closing ?? []),
             ]);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
             $this->replaceClient($projectId, $fields['clientId']);
             $this->writeScopes($projectId, $scopeCodes);
+            if ($request->has('scopeAssignees')) {
+                $this->scopeWork->replaceAssignees($projectId, $request->input('scopeAssignees'), $scopeCodes, [...$fields['memberIds'], ...$fields['supportMemberIds']]);
+            }
+            $this->activities->replace($projectId, $removedActivities);
             $this->repositories->replace($projectId, $fields['repositories']);
 
             $this->ledger->recordAdd(
@@ -275,7 +326,7 @@ final class PortalProjectEditor
                 $employeeId,
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
-            $this->trail->record($projectId, PortalProjectTrail::CREATED, $actor, $request);
+            $this->trail->record($projectId, PortalProjectTrail::CREATED, $actor, $request, $isApproved ? 'Approved at once' : 'Waiting for approval');
 
             return $projectId;
         });
@@ -292,6 +343,9 @@ final class PortalProjectEditor
         if (! $isApproved) {
             $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), (string) $numbered, false);
         }
+        if ($closing !== null) {
+            $this->approval->notifyDepartmentHeads($actor, $request, $this->liveProjectOrFail($projectId), (string) $numbered);
+        }
         $memberIds = array_values(array_diff($fields['memberIds'], [$employeeId]));
         if ($memberIds !== []) {
             $this->audit->notifyEach(
@@ -307,7 +361,7 @@ final class PortalProjectEditor
         }
         $this->projects->bumpCache();
 
-        return $this->response($projectId);
+        return $this->response($projectId, false);
     }
 
     /**
@@ -318,27 +372,34 @@ final class PortalProjectEditor
     public function update(Employee $actor, Request $request, int $projectId): array
     {
         $row = $this->liveProjectOrFail($projectId);
-        $this->assertMay($actor, $row, $request, PortalProjectPowers::EDIT);
+        if ($this->editsPeopleOnly($actor, $row, $request)) {
+            return $this->updatePeople($actor, $request, $projectId, $row);
+        }
 
         $fields = $this->validatedFields($request, $projectId);
         [$number] = self::split($row);
         $fields['columns']['project_name'] = $number === null ? $fields['name'] : $number.' '.$fields['name'];
-        $changes = $this->changes($projectId, $fields);
-        $isResubmitted = $row->project_creation_status === PortalProjectApproval::REJECTED
-            && ! PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT);
-        $columns = $isResubmitted ? [
-            ...$fields['columns'],
-            'project_creation_status' => PortalProjectApproval::PENDING,
-            'project_creation_approver' => null,
-            'project_approver_email' => null,
-            'project_creation_approver_remarks' => null,
-        ] : $fields['columns'];
+        $parts = $this->changes($projectId, $fields);
+        $removedActivities = $this->removedActivitiesFor($request, $projectId, $row, $fields['columns']['type_of_job'], $fields['columns']['department'] ?? $row->department ?? null);
+        if ($removedActivities !== null && $removedActivities !== $this->activities->removedFor($projectId)) {
+            $parts[] = 'Allowed activities changed';
+        }
+        $changes = $parts === [] ? null : implode('; ', $parts);
+        // Closing waits for approval on its own, so it is not also a resubmission.
+        $closing = $this->closingColumns($request, $row, $fields['columns']);
+        $isResubmitted = $closing === null && $this->sendsBackForApproval($actor, $request, $row, array_diff($parts, self::PEOPLE_CHANGES) !== []);
+        $columns = [...$fields['columns'], ...($isResubmitted ? self::PENDING_AGAIN : []), ...($closing ?? [])];
 
-        $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted): void {
+        $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted, $closing, $removedActivities, $row): void {
             $this->assertNameFree($fields['name'], $fields['columns']['department'], $projectId);
             $this->connection()->table('projects')->where('id', $projectId)->update($columns);
+            if ($removedActivities !== null) {
+                $this->activities->replace($projectId, $removedActivities);
+            }
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
+            // Someone off the project is off its scopes too.
+            $this->scopeWork->prune($projectId, $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->pluck('wbs_code')->all(), $this->peopleIds($projectId));
             $this->replaceClient($projectId, $fields['clientId']);
             $this->repositories->replace($projectId, $fields['repositories']);
 
@@ -356,35 +417,174 @@ final class PortalProjectEditor
                 $this->trail->record($projectId, PortalProjectTrail::EDITED, $actor, $request, $changes);
             }
             if ($isResubmitted) {
-                $this->trail->record($projectId, PortalProjectTrail::RESUBMITTED, $actor, $request);
+                $this->recordResubmission($projectId, $row, $actor, $request);
+            }
+            if ($closing !== null) {
+                $this->trail->record($projectId, PortalProjectTrail::CLOSING_SUBMITTED, $actor, $request, 'Completion checklist ticked, waiting for the department head');
             }
         });
         if ($isResubmitted) {
             $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), $fields['name'], true);
         }
+        if ($closing !== null) {
+            $this->approval->notifyDepartmentHeads($actor, $request, $this->liveProjectOrFail($projectId), $fields['name']);
+        }
 
+        // A project sent back for approval already told its approvers so; "updated" would be the same news twice.
+        $this->announceEdit($actor, $request, $projectId, $fields['name'], $fields['columns']['department'], ! $isResubmitted && $closing === null);
+
+        return $this->response($projectId, false);
+    }
+
+    /**
+     * What a save that closes the project writes besides the form: its checklist answers, and the approval
+     * back to Pending for the department head. Null when the save does not close it.
+     *
+     * @param  array<string, mixed>  $columns
+     * @return array<string, mixed>|null
+     */
+    private function closingColumns(Request $request, ?object $row, array $columns): ?array
+    {
+        $closed = self::STATUSES['closed'];
+        if (($columns['status'] ?? null) !== $closed || ($row !== null && ($row->status ?? null) === $closed)) {
+            return null;
+        }
+        $isEngineering = PortalProjectWork::isEngineering($columns['department'] ?? $row?->department ?? null);
+        $ticked = $request->input('closingChecklist');
+        foreach ($isEngineering ? array_keys(self::CLOSING_CHECKLIST) : [self::CLOSING_CONFIRMATION] as $key) {
+            if (! is_array($ticked) || ($ticked[$key] ?? null) !== true) {
+                abort(422, 'Tick every item on the completion checklist before closing the project.');
+            }
+        }
+
+        return [...self::PENDING_AGAIN, ...($isEngineering ? array_fill_keys(self::CLOSING_CHECKLIST, true) : [])];
+    }
+
+    /**
+     * Members and support members only, for whoever View Projects reaches without Edit projects
+     * (2026-10-12, user): the rest of the project is not theirs, and a change of people needs no approval.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    private function updatePeople(Employee $actor, Request $request, int $projectId, object $row): array
+    {
+        $data = $request->validate(self::PEOPLE_RULES, [], self::PEOPLE_ATTRIBUTES);
+        $memberIds = $this->validatedPeople($data['memberIds'] ?? [], $projectId, self::MEMBER_ROLE);
+        $supportMemberIds = $this->validatedPeople($data['supportMemberIds'] ?? [], $projectId, self::SUPPORT_ROLE);
+        $changes = $this->peopleChanges($projectId, $memberIds, $supportMemberIds);
+        $this->refuseRemovingAssignees($actor, $request, $projectId, [...$memberIds, ...$supportMemberIds]);
+        $name = $this->text(self::split($row)[1]) ?? 'Project';
+
+        $this->ledger->within($this->connection(), function () use ($projectId, $memberIds, $supportMemberIds, $changes, $name, $actor, $request): void {
+            $this->connection()->table('projects')->where('id', $projectId)->update(['date_modified' => now()]);
+            $this->replacePeople($projectId, self::MEMBER_ROLE, $memberIds);
+            $this->replacePeople($projectId, self::SUPPORT_ROLE, $supportMemberIds);
+            // Someone off the project is off its scopes too.
+            $this->scopeWork->prune($projectId, $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->pluck('wbs_code')->all(), $this->peopleIds($projectId));
+            $this->ledger->recordEdit(
+                CoreLedger::PRODUCT_PORTAL,
+                self::CORE_TARGET,
+                [
+                    'id' => (string) $projectId,
+                    'projectName' => $name,
+                    'memberIds' => array_map('strval', $memberIds),
+                    'supportMemberIds' => array_map('strval', $supportMemberIds),
+                ],
+                self::CORE_RESOURCE,
+                (string) $projectId,
+                CoreRecycleKey::project($projectId),
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+            if ($changes !== []) {
+                $this->trail->record($projectId, PortalProjectTrail::EDITED, $actor, $request, implode('; ', $changes));
+            }
+        });
+        $this->announceEdit($actor, $request, $projectId, $name, $this->text($row->department ?? null), true);
+
+        return $this->response($projectId, true);
+    }
+
+    /**
+     * Off the project is off its scopes too, so taking off someone assigned to one needs Remove scope
+     * assignees (Project Lead carries it); the refusal names who is assigned (2026-10-14, user).
+     *
+     * @param  list<int>  $keptIds
+     */
+    private function refuseRemovingAssignees(Employee $actor, Request $request, int $projectId, array $keptIds): void
+    {
+        if (PortalRules::holds($actor, $request, PortalProjectPowers::REMOVE_ASSIGNEES)) {
+            return;
+        }
+        $names = $this->connection()->table('projects_scope_assignees as assigned')
+            ->join('employees', 'employees.id', '=', 'assigned.employee_id')
+            ->where('assigned.project_id', $projectId)
+            ->whereNotIn('assigned.employee_id', $keptIds === [] ? [0] : $keptIds)
+            ->orderBy('employees.first_name')
+            ->distinct()
+            ->get(['employees.first_name', 'employees.last_name'])
+            ->map(static fn (object $person): string => trim($person->first_name.' '.$person->last_name))
+            ->all();
+        if ($names !== []) {
+            abort(403, "You do not have the power to remove someone assigned to this project's scopes (".implode(', ', $names).'). Ask a Project Lead.');
+        }
+    }
+
+    // Why an edit put the project back to waiting, on the closing trail when it is a closing that waits again.
+    private function recordResubmission(int $projectId, object $row, Employee $actor, Request $request): void
+    {
+        $isClosing = ($row->status ?? null) === self::STATUSES['closed'];
+        $wasRejected = ($row->project_creation_status ?? null) === PortalProjectApproval::REJECTED;
+        $this->trail->record(
+            $projectId,
+            $isClosing ? PortalProjectTrail::CLOSING_RESUBMITTED : PortalProjectTrail::RESUBMITTED,
+            $actor,
+            $request,
+            ($wasRejected ? 'Edited after it was rejected' : 'Edited after it was approved').', waiting for approval again',
+        );
+    }
+
+    // The activity log row, and the approvers' "updated" notice unless they already heard it was sent again.
+    /**
+     * The activities an edit takes out: what the form sent, or -- when it sent nothing and the type
+     * changed -- the old removals the new type still allows. Null leaves them as they are.
+     *
+     * @return list<string>|null
+     */
+    private function removedActivitiesFor(Request $request, int $projectId, object $row, ?string $jobType, mixed $department): ?array
+    {
+        $sent = $this->activities->validated($request->input('removedActivityCodes'), $jobType, $department);
+        if ($sent !== null || $this->text($row->type_of_job ?? null) === $jobType) {
+            return $sent;
+        }
+
+        return $this->activities->validated($this->activities->removedFor($projectId), $jobType, $department);
+    }
+
+    private function announceEdit(Employee $actor, Request $request, int $projectId, string $name, ?string $department, bool $notifiesUpdate): void
+    {
         $this->audit->record(
             $actor,
             PortalLogAction::PATCH,
             self::CORE_RESOURCE,
-            PortalActivityCopy::editedProject($fields['name']),
+            PortalActivityCopy::editedProject($name),
             (string) $projectId,
             $request,
-            ['projectName' => $fields['name'], 'department' => $fields['columns']['department']],
+            ['projectName' => $name, 'department' => $department],
         );
-        $this->audit->notifyManagers(
-            $actor,
-            PortalProjectApproval::RULE,
-            PortalNotificationType::PROJECT_MODIFIED,
-            'Project updated',
-            PortalActivityCopy::notifyProjectModified(PortalActivityCopy::actorName($actor, $request, true), $fields['name']),
-            PortalShellPath::MANAGE_PROJECTS,
-            'Open Manage / Projects',
-            ['recordId' => (string) $projectId],
-        );
+        if ($notifiesUpdate) {
+            $this->audit->notifyManagers(
+                $actor,
+                PortalProjectApproval::RULE,
+                PortalNotificationType::PROJECT_MODIFIED,
+                'Project updated',
+                PortalActivityCopy::notifyProjectModified(PortalActivityCopy::actorName($actor, $request, true), $name),
+                PortalShellPath::MANAGE_PROJECTS,
+                'Open Manage / Projects',
+                ['recordId' => (string) $projectId],
+            );
+        }
         $this->projects->bumpCache();
-
-        return $this->response($projectId);
     }
 
     /**
@@ -399,10 +599,23 @@ final class PortalProjectEditor
 
         $scopeCodes = $this->validatedScopeCodes($request, $row->department ?? null);
         $name = $this->text($row->project_name) ?? 'Project';
+        // Scopes are an edit too, so the creator cannot change an approved project around its approval.
+        $isResubmitted = $this->sendsBackForApproval($actor, $request, $row, true);
 
-        $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request): void {
+        $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request, $isResubmitted, $row): void {
             $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->delete();
             $this->writeScopes($projectId, $scopeCodes);
+            // Assignees ride with the scopes; a scope taken off takes its assignees along.
+            $people = $this->peopleIds($projectId);
+            if ($request->has('scopeAssignees')) {
+                $this->scopeWork->replaceAssignees($projectId, $request->input('scopeAssignees'), $scopeCodes, $people);
+            } else {
+                $this->scopeWork->prune($projectId, $scopeCodes, $people);
+            }
+            if ($isResubmitted) {
+                $this->connection()->table('projects')->where('id', $projectId)->update(self::PENDING_AGAIN);
+                $this->recordResubmission($projectId, $row, $actor, $request);
+            }
 
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,
@@ -419,6 +632,9 @@ final class PortalProjectEditor
                 ? 'Scopes cleared'
                 : $count.' '.($count === 1 ? 'scope' : 'scopes'));
         });
+        if ($isResubmitted) {
+            $this->approval->notifyManagers($actor, $request, $this->liveProjectOrFail($projectId), $name, true);
+        }
 
         $this->audit->record(
             $actor,
@@ -431,7 +647,7 @@ final class PortalProjectEditor
         );
         $this->projects->bumpCache();
 
-        return $this->response($projectId);
+        return $this->response($projectId, false);
     }
 
     /**
@@ -455,10 +671,7 @@ final class PortalProjectEditor
             'type' => ['nullable', 'string', 'max:100'],
             'area' => ['nullable', 'numeric', 'min:0', 'max:9999999999'],
             'status' => ['required', 'string', Rule::in(array_keys(self::STATUSES))],
-            'memberIds' => ['nullable', 'array', 'max:'.self::MAX_PEOPLE],
-            'memberIds.*' => ['integer', 'distinct'],
-            'supportMemberIds' => ['nullable', 'array', 'max:'.self::MAX_PEOPLE],
-            'supportMemberIds.*' => ['integer', 'distinct'],
+            ...self::PEOPLE_RULES,
             'levels' => ['nullable', 'array'],
             'levels.*' => ['nullable', 'string', Rule::in(self::LEVELS)],
             'links' => ['nullable', 'array'],
@@ -469,10 +682,7 @@ final class PortalProjectEditor
             'leadId' => 'project lead',
             'clientId' => 'client',
             'type' => 'type of project',
-            'memberIds' => 'members',
-            'memberIds.*' => 'member',
-            'supportMemberIds' => 'support members',
-            'supportMemberIds.*' => 'support member',
+            ...self::PEOPLE_ATTRIBUTES,
             'levels.*' => 'level of detail',
             'links.*' => 'link',
             'repositories.*' => 'repository',
@@ -577,16 +787,17 @@ final class PortalProjectEditor
     }
 
     /**
-     * What an edit changes, read before the write, as the Trail history row's remarks; null when
+     * What an edit changes, read before the write, as the Trail history row's remarks; empty when
      * nothing changed. Plain values show old to new; people, levels and links only say they changed.
      *
      * @param  array{clientId: int, memberIds: list<int>, supportMemberIds: list<int>, repositories: list<string>, columns: array<string, mixed>}  $fields
+     * @return list<string>
      */
-    private function changes(int $projectId, array $fields): ?string
+    private function changes(int $projectId, array $fields): array
     {
         $before = $this->connection()->table('projects')->where('id', $projectId)->first();
         if ($before === null) {
-            return null;
+            return [];
         }
         $after = $fields['columns'];
         $parts = [];
@@ -617,14 +828,7 @@ final class PortalProjectEditor
         if ($clientIds !== [$fields['clientId']]) {
             $parts[] = 'Client changed';
         }
-        foreach ([self::MEMBER_ROLE => ['memberIds', 'Members changed'], self::SUPPORT_ROLE => ['supportMemberIds', 'Support members changed']] as $role => [$key, $message]) {
-            $old = $this->connection()->table('employees_projects')->where('project_id', $projectId)->where('role_on_project', $role)->pluck('employee_id')->map(static fn (mixed $id): int => (int) $id)->sort()->values()->all();
-            $new = $fields[$key];
-            sort($new);
-            if ($old !== $new) {
-                $parts[] = $message;
-            }
-        }
+        $parts = [...$parts, ...$this->peopleChanges($projectId, $fields['memberIds'], $fields['supportMemberIds'])];
         $oldRepositories = $this->repositories->forProject($projectId);
         $newRepositories = $fields['repositories'];
         sort($oldRepositories);
@@ -641,7 +845,26 @@ final class PortalProjectEditor
             }
         }
 
-        return $parts === [] ? null : implode('; ', $parts);
+        return $parts;
+    }
+
+    /**
+     * @param  list<int>  $memberIds
+     * @param  list<int>  $supportMemberIds
+     * @return list<string>
+     */
+    private function peopleChanges(int $projectId, array $memberIds, array $supportMemberIds): array
+    {
+        $parts = [];
+        foreach ([self::MEMBER_ROLE => $memberIds, self::SUPPORT_ROLE => $supportMemberIds] as $role => $new) {
+            $old = $this->connection()->table('employees_projects')->where('project_id', $projectId)->where('role_on_project', $role)->pluck('employee_id')->map(static fn (mixed $id): int => (int) $id)->sort()->values()->all();
+            sort($new);
+            if ($old !== $new) {
+                $parts[] = self::PEOPLE_CHANGES[$role];
+            }
+        }
+
+        return $parts;
     }
 
     // An active employee with an email whose Project Lead reaches the department, or on an edit the lead the project already has.
@@ -717,15 +940,19 @@ final class PortalProjectEditor
         if ($link === null || in_array($kind, self::FREE_TEXT_LINKS, true)) {
             return $link;
         }
+        // Temporary (2026-10-13, user): N/A stands for a link the project does not have yet; View Projects hides it.
+        if (strtolower($link) === 'n/a') {
+            return 'N/A';
+        }
         if (filter_var($link, FILTER_VALIDATE_URL) === false || preg_match('#^https?://#i', $link) !== 1) {
-            abort(422, 'Each link must start with http:// or https://.');
+            abort(422, 'Each link must start with http:// or https://, or be N/A.');
         }
 
         return $link;
     }
 
     /**
-     * WBS codes for an Engineering project; for any other, its department's and General's activity codes.
+     * Codes from the project's department's scope tree, which Manage / References edits.
      *
      * @return list<string>
      */
@@ -743,32 +970,8 @@ final class PortalProjectEditor
                 $codes[] = $code;
             }
         }
-        $known = PortalProjectWork::isEngineering($department)
-            ? $this->knownScopeCodes()
-            : array_column(PortalActivityScopes::forDepartment(PortalActivityScopes::all(), $department), 'code');
-        if (array_diff($codes, $known) !== []) {
+        if ($codes !== [] && array_diff($codes, $this->scopeTree->codesFor($department)) !== []) {
             abort(422, 'Choose scopes from the list.');
-        }
-
-        return $codes;
-    }
-
-    /**
-     * Every WBS code across the four tiers. Airtable holds one task code with its number missing
-     * ('200-03-02-'), which the portal's catalogue reads as the first task, '-01'.
-     *
-     * @return list<string>
-     */
-    private function knownScopeCodes(): array
-    {
-        $codes = [];
-        foreach (self::SCOPE_TABLES as $table) {
-            foreach ($this->connection()->table($table)->pluck('wbs_code') as $raw) {
-                $code = trim((string) $raw);
-                if ($code !== '') {
-                    $codes[] = str_ends_with($code, '-') ? $code.'01' : $code;
-                }
-            }
         }
 
         return $codes;
@@ -802,6 +1005,19 @@ final class PortalProjectEditor
     /**
      * @param  list<string>  $codes
      */
+    /**
+     * The project's members and support members, the only people a scope may be assigned to.
+     *
+     * @return list<int>
+     */
+    private function peopleIds(int $projectId): array
+    {
+        return array_values(array_unique(array_map('intval', $this->connection()->table('employees_projects')
+            ->where('project_id', $projectId)
+            ->whereIn('role_on_project', [self::MEMBER_ROLE, self::SUPPORT_ROLE])
+            ->pluck('employee_id')->all())));
+    }
+
     private function writeScopes(int $projectId, array $codes): void
     {
         if ($codes === []) {
@@ -818,7 +1034,7 @@ final class PortalProjectEditor
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    private function response(int $projectId): array
+    private function response(int $projectId, bool $editsPeopleOnly): array
     {
         $row = $this->connection()->table('projects')->where('id', $projectId)->first();
         if ($row === null) {
@@ -878,7 +1094,14 @@ final class PortalProjectEditor
                 'levels' => $levels,
                 'links' => $links,
                 'repositories' => $this->repositories->forProject($projectId),
-                'scopeCodes' => $this->projects->scopeCodesForProject($projectId),
+                'scopeCodes' => $this->projects->scopeCodesForProject($projectId, $row->department ?? null),
+                // Who is assigned each scope (employee ids), and each scope's latest progress (percent).
+                'scopeAssignees' => (object) $this->scopeWork->assigneesFor($projectId),
+                'scopeProgress' => (object) ($this->scopeWork->latestProgress([$projectId])[$projectId] ?? []),
+                // What this project took out of its type's allowed activities.
+                'removedActivityCodes' => $this->activities->removedFor($projectId),
+                // The form locks every field but the people for whoever only View Projects reaches.
+                'editsPeopleOnly' => $editsPeopleOnly,
             ],
         ];
     }
@@ -895,9 +1118,53 @@ final class PortalProjectEditor
         return in_array($level, self::LEVELS, true) ? $level : null;
     }
 
-    // Edit projects and Manage scopes reach this project, or the actor asked for it and it is not approved yet.
+    /*
+     * Whether a save sends the project back to the approvers (2026-10-12, user): a rejected project saved
+     * by anyone without Auto-approve, as before, and now also an approved one edited by its own creator --
+     * unless that creator may approve it themselves (Auto-approve, or a Project Approver reach that covers
+     * it), or changed only its members and support members. Anyone else holding Edit projects saves an
+     * approved project straight through.
+     */
+    private function sendsBackForApproval(Employee $actor, Request $request, object $row, bool $touchesProject): bool
+    {
+        if (PortalRules::holds($actor, $request, PortalProjectPowers::DIRECT)) {
+            return false;
+        }
+        $status = $row->project_creation_status ?? null;
+        if ($status === PortalProjectApproval::REJECTED) {
+            return true;
+        }
+
+        return $status === PortalProjectApproval::APPROVED
+            && $touchesProject
+            && (int) ($row->requested_by ?? 0) === (int) $actor->getKey()
+            && ! $this->approval->covers($actor, $request, $row);
+    }
+
+    // Edit projects opens the whole project, View Projects alone only its people; anyone else is refused.
+    private function editsPeopleOnly(Employee $actor, object $row, Request $request): bool
+    {
+        $this->assertNotLocked($actor, $row, $request);
+        if (PortalProjectPowers::allows($actor, $request, PortalProjectPowers::EDIT, $row)) {
+            return false;
+        }
+        if (PortalProjectPowers::reachesPeople($actor, $request, $row)) {
+            return true;
+        }
+        abort(403, 'Your Edit projects power does not reach this project.');
+    }
+
+    private function assertNotLocked(Employee $actor, object $row, Request $request): void
+    {
+        if (PortalProjectPowers::isLocked($actor, $request, $row)) {
+            abort(403, 'This project is completed or closed. Only its department head can change it.');
+        }
+    }
+
+    // Edit projects and Manage scopes reach this project, or the actor is the one who asked for it.
     private function assertMay(Employee $actor, object $row, Request $request, string $key): void
     {
+        $this->assertNotLocked($actor, $row, $request);
         if (! PortalProjectPowers::allows($actor, $request, $key, $row)) {
             abort(403, $key === PortalProjectPowers::SCOPES
                 ? 'Your Manage scopes power does not reach this project.'
@@ -922,7 +1189,7 @@ final class PortalProjectEditor
             ->table('projects')
             ->where('id', $projectId)
             ->whereNull('deleted_at')
-            ->first(['id', 'project_number', 'project_name', 'department', 'project_lead_email', 'project_creation_status', 'requested_by']);
+            ->first(['id', 'project_number', 'project_name', 'department', 'project_lead_email', 'project_creation_status', 'requested_by', 'status']);
         if ($row === null) {
             abort(404, 'That project was not found.');
         }
@@ -1124,48 +1391,21 @@ final class PortalProjectEditor
     }
 
     /**
-     * The activity codes each job type may use on a report, keyed by job type. A type with no rule is
-     * absent, and the report falls back to the whole catalogue for it. Stored prefixes are resolved to
-     * whole codes here, so the form shows ticked codes rather than their digits.
+     * The activity codes each job type may use on a report, keyed by job type; a type with no rule is
+     * absent, and the report falls back to the whole catalogue for it.
      *
      * @return array<string, list<string>>
      */
     private function allowedActivitiesByType(): array
     {
-        $codes = PortalActivityScopes::all();
-        $rows = $this->connection()->table('job_type_allowed_activities')->get(['job_type', 'activity_code_id_initials']);
-
-        $allowed = [];
-        foreach ($rows as $row) {
-            $jobType = $this->text($row->job_type);
-            if ($jobType === null) {
-                continue;
-            }
-            $initials = [];
-            foreach (explode(',', (string) ($row->activity_code_id_initials ?? '')) as $piece) {
-                $value = trim($piece);
-                if ($value !== '') {
-                    $initials[] = $value;
-                }
-            }
-            $chosen = [];
-            foreach ($codes as $code) {
-                foreach ($initials as $prefix) {
-                    if ($code['code'] !== '' && str_starts_with($code['code'], $prefix)) {
-                        $chosen[] = $code['code'];
-                        break;
-                    }
-                }
-            }
-            $allowed[$jobType] = $chosen;
-        }
-
-        return $allowed;
+        return $this->activities->allowedByType();
     }
 
     /**
      * Set which activity codes a job type may use. Writes one row, the chosen codes comma-joined; the
-     * report matches them as prefixes, so a stored code allows exactly itself. All reach only.
+     * report matches them as prefixes, so a stored code allows exactly itself. All reach only. A type
+     * whose name more than one department uses (Management) keeps one list per department; any other
+     * keeps the shared row Airtable's are.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
@@ -1176,6 +1416,7 @@ final class PortalProjectEditor
         }
         $data = $request->validate([
             'jobType' => ['required', 'string', 'max:191'],
+            'department' => ['nullable', 'string', 'max:100'],
             'activityCodes' => ['present', 'array', 'max:'.self::MAX_SCOPES],
             'activityCodes.*' => ['string', 'max:32'],
         ]);
@@ -1183,6 +1424,13 @@ final class PortalProjectEditor
         if ($jobType === '' || ! in_array($jobType, $this->jobTypes(), true)) {
             abort(422, 'Choose a project type from the list the form offers.');
         }
+        $byDepartment = $this->typesByDepartment();
+        $department = $this->text($data['department'] ?? null);
+        if ($department !== null && ! in_array($jobType, $byDepartment[$department] ?? [], true)) {
+            abort(422, 'That department has no project type of that name.');
+        }
+        $sharedBy = array_keys(array_filter($byDepartment, static fn (array $types): bool => in_array($jobType, $types, true)));
+        $rowDepartment = $department !== null && count($sharedBy) > 1 ? $department : null;
 
         $known = [];
         foreach (PortalActivityScopes::all() as $code) {
@@ -1196,10 +1444,12 @@ final class PortalProjectEditor
             }
         }
 
-        $this->connection()->table('job_type_allowed_activities')->where('job_type', $jobType)->delete();
+        $row = $this->connection()->table('job_type_allowed_activities')->where('job_type', $jobType);
+        $rowDepartment === null ? $row->whereNull('department')->delete() : $row->where('department', $rowDepartment)->delete();
         if ($codes !== []) {
             $this->connection()->table('job_type_allowed_activities')->insert([
                 'job_type' => $jobType,
+                'department' => $rowDepartment,
                 'activity_code_id_initials' => implode(',', $codes),
             ]);
         }
@@ -1209,7 +1459,7 @@ final class PortalProjectEditor
         return [
             'section' => 'projects',
             'resource' => 'allowed-activities',
-            'data' => ['jobType' => $jobType, 'activityCodes' => $codes],
+            'data' => ['jobType' => $jobType, 'department' => $rowDepartment, 'activityCodes' => $codes],
         ];
     }
 

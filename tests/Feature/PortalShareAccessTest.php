@@ -55,10 +55,15 @@ class PortalShareAccessTest extends TestCase
             'expires_at' => $overrides['expiresAt'] ?? now()->addDays(7),
             'rate_per_minute' => $overrides['ratePerMinute'] ?? 60,
             'revoked_at' => $overrides['revokedAt'] ?? null,
+            'reach_department' => $overrides['reachDepartment'] ?? null,
             'created_by' => 1,
         ]);
         foreach ($rules as $key) {
-            DB::connection('portal')->table('shared_page_rules')->insert(['share_id' => $id, 'rule_key' => $key]);
+            DB::connection('portal')->table('shared_page_rules')->insert([
+                'share_id' => $id,
+                'rule_key' => $key,
+                'reach' => $overrides['reach'] ?? null,
+            ]);
         }
 
         return ['id' => $id, 'code' => $code, 'password' => $password];
@@ -195,5 +200,18 @@ class PortalShareAccessTest extends TestCase
 
         $this->assertSame(1, DB::connection('portal')->table('shared_page_visits')->where('share_id', $share['id'])->count());
         $this->assertNotNull(DB::connection('portal')->table('shared_pages')->where('id', $share['id'])->value('last_used_at'));
+    }
+
+    // The reported ask (2026-10-14, user): a Requests share reads the queue at the share's reach --
+    // the page lends its kinds, and a department-reach share scopes them to its department.
+    public function test_a_guest_granted_the_requests_page_reads_the_queue_at_the_shares_reach(): void
+    {
+        $share = $this->share(['manage.requests'], ['reach' => 'department', 'reachDepartment' => 'Engineering']);
+        $token = $this->tokenFor($share['code'], $share['password']);
+
+        $rows = collect($this->withToken($token)->getJson('/api/development/portal/manage/requests')->assertOk()->json('data'));
+
+        $this->assertGreaterThan(0, $rows->count());
+        $this->assertTrue($rows->every(static fn (array $row): bool => ($row['department'] ?? null) === 'Engineering'));
     }
 }

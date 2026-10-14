@@ -51,12 +51,18 @@ final class PortalAccessGraph
     /**
      * @var array<string, int>
      */
+    // A power another one carries: on, and locked on, for as long as its holder holds that one.
+    public const IMPLIED = [PortalProjectPowers::REMOVE_ASSIGNEES => PortalProjectPowers::LEAD];
+
     private const TIER_RANK = [self::TIER_MEMBER => 1, self::TIER_ADMIN => 2, self::TIER_EXECUTIVE => 3, self::TIER_DEVELOPER => 4];
 
     /**
      * @var array<string, int>
      */
     private const REACH_RANK = ['lead' => 1, 'own' => 2, 'team' => 3, 'department' => 4, 'all' => 5];
+
+    // A department head's presets, laid over their role's: 'head' for every head, 'head:<department>' for one (2026-10-14, user).
+    public const HEAD_PRESET = 'head';
 
     /**
      * @var array<string, array<string, array{reach: ?string, executives: bool, fromRole: bool, givenBy: list<int>, givenByDeveloper: list<int>}>>
@@ -79,6 +85,7 @@ final class PortalAccessGraph
      * @param  list<object>  $limits
      * @param  list<object>  $lists
      * @param  array<int, array<string, ?string>>  $personal  Employee => rule => reach: their own defaults.
+     * @param  array<int, string>  $heads  Employee => the department they head.
      */
     private function __construct(
         private readonly array $catalog,
@@ -89,6 +96,7 @@ final class PortalAccessGraph
         private readonly array $lists,
         private readonly array $personal,
         private readonly ?int $liveDeveloper,
+        private readonly array $heads = [],
     ) {}
 
     // The graph as this viewer sees it: every rule when their Developer mode is on.
@@ -119,9 +127,15 @@ final class PortalAccessGraph
             $personal[(int) $row->employee_id][(string) $row->permission_key] = $row->reach;
         }
 
+        // Who heads a department rides on the same read, so the graph costs no extra query.
         $employees = [];
-        foreach (Employee::query()->get(['id', 'first_name', 'last_name', 'id_no', 'department', 'role', 'role_level', 'is_developer', 'status']) as $employee) {
+        $heads = [];
+        $columns = ['employees.id', 'employees.first_name', 'employees.last_name', 'employees.id_no', 'employees.department', 'employees.role', 'employees.role_level', 'employees.is_developer', 'employees.status', 'company_departments.name as headed_department'];
+        foreach (Employee::query()->leftJoin('company_departments', 'company_departments.head_employee_id', '=', 'employees.id')->get($columns) as $employee) {
             $employees[(int) $employee->getKey()] = $employee;
+            if ($employee->headed_department !== null) {
+                $heads[(int) $employee->getKey()] = (string) $employee->headed_department;
+            }
         }
 
         return new self(
@@ -133,6 +147,7 @@ final class PortalAccessGraph
             $connection->table('access_lists')->orderBy('id')->get()->all(),
             $personal,
             $liveDeveloper,
+            $heads,
         );
     }
 
@@ -256,6 +271,21 @@ final class PortalAccessGraph
         foreach ($this->presets[self::tier($employee)] ?? [] as $key => $preset) {
             if ($this->canHold($employeeId, $key)) {
                 $rules[$key] = ['reach' => $preset['reach'], 'executives' => $preset['executives'], 'personal' => false];
+            }
+        }
+        // A head's presets count as their role's too, the wider reach winning.
+        $department = $this->heads[$employeeId] ?? null;
+        foreach ($department === null ? [] : [self::HEAD_PRESET, self::HEAD_PRESET.':'.PortalPreview::department($department)] as $role) {
+            foreach ($this->presets[$role] ?? [] as $key => $preset) {
+                if (! $this->canHold($employeeId, $key)) {
+                    continue;
+                }
+                $current = $rules[$key] ?? null;
+                $rules[$key] = [
+                    'reach' => self::reachRank($preset['reach']) > self::reachRank($current['reach'] ?? null) ? $preset['reach'] : ($current['reach'] ?? null),
+                    'executives' => ($current['executives'] ?? false) || $preset['executives'],
+                    'personal' => false,
+                ];
             }
         }
         foreach ($this->personal[$employeeId] ?? [] as $key => $reach) {
@@ -385,6 +415,12 @@ final class PortalAccessGraph
                 foreach ($this->subtree((string) $limit->permission_key) as $key) {
                     unset($rules[$key]);
                 }
+            }
+        }
+
+        foreach (self::IMPLIED as $key => $carrier) {
+            if (isset($rules[$carrier], $this->catalog[$key])) {
+                $rules[$key] = ['reach' => null, 'executives' => false, 'fromRole' => $rules[$carrier]['fromRole'], 'givenBy' => $rules[$carrier]['givenBy'], 'givenByDeveloper' => $rules[$carrier]['givenByDeveloper'], 'impliedBy' => $carrier];
             }
         }
 
@@ -629,7 +665,7 @@ final class PortalAccessGraph
             return $this;
         }
 
-        return $this->asRoles ??= new self($this->catalog, $this->presets, $this->employees, $this->grants, $this->limits, $this->lists, $this->personal, null);
+        return $this->asRoles ??= new self($this->catalog, $this->presets, $this->employees, $this->grants, $this->limits, $this->lists, $this->personal, null, $this->heads);
     }
 
     // Still a developer and still active: what they made in Developer mode keeps counting.

@@ -3,10 +3,13 @@
 namespace App\Http\Controllers\Api\Portal\Register;
 
 use App\Http\Controllers\Controller;
+use App\Support\Portal\PortalPlaces;
+use App\Support\Portal\PortalPrivateFiles;
 use App\Support\Portal\PortalRegistrations;
 use App\Support\Portal\PortalRegistrationSession;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * The public side of a registration link: the password and the mailed code open a session, and the
@@ -15,7 +18,10 @@ use Illuminate\Http\Request;
  */
 class RegisterController extends Controller
 {
-    public function __construct(private readonly PortalRegistrations $registrations) {}
+    public function __construct(
+        private readonly PortalRegistrations $registrations,
+        private readonly PortalPlaces $places,
+    ) {}
 
     public function info(string $code): JsonResponse
     {
@@ -52,6 +58,14 @@ class RegisterController extends Controller
         return response()->json(['data' => $this->registrations->storeDocument($this->current($request), $request)]);
     }
 
+    // The candidate's own file, so the form can show what they sent (2026-10-12).
+    public function showDocument(Request $request, int $id): StreamedResponse
+    {
+        $row = $this->registrations->ownDocument($this->current($request), $id);
+
+        return PortalPrivateFiles::download($row['path'], $row['name'], $row['mime']);
+    }
+
     public function destroyDocument(Request $request, int $id): JsonResponse
     {
         $this->registrations->destroyDocument($this->current($request), $id);
@@ -62,6 +76,28 @@ class RegisterController extends Controller
     public function submit(Request $request): JsonResponse
     {
         return response()->json(['data' => $this->registrations->submit($this->current($request))]);
+    }
+
+    // The address pickers' lists, for a signed-in candidate (2026-10-13).
+    public function provinces(Request $request): JsonResponse
+    {
+        $this->current($request);
+
+        return response()->json(['data' => $this->places->provinces()]);
+    }
+
+    public function cities(Request $request, string $code): JsonResponse
+    {
+        $this->current($request);
+
+        return response()->json(['data' => $this->places->cities($code)]);
+    }
+
+    public function barangays(Request $request, string $code): JsonResponse
+    {
+        $this->current($request);
+
+        return response()->json(['data' => $this->places->barangays($code)]);
     }
 
     private function current(Request $request): PortalRegistrationSession

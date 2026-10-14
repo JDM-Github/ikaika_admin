@@ -17,9 +17,9 @@ class SharedPagesController extends Controller
 {
     public function __construct(private readonly PortalSharedPages $shares) {}
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        return response()->json(['data' => $this->shares->index()]);
+        return response()->json(['data' => $this->shares->index($this->editor($request), $request)]);
     }
 
     public function store(Request $request): JsonResponse

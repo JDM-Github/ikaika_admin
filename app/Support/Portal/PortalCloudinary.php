@@ -26,7 +26,7 @@ final class PortalCloudinary
     /**
      * @return array{fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}
      */
-    public function uploadReceipt(UploadedFile $file, string $folder = self::FOLDER): array
+    public function uploadReceipt(UploadedFile $file, string $folder = self::FOLDER, ?string $asName = null): array
     {
         $cloud = $this->cloudName();
         $key = $this->apiKey();
@@ -46,7 +46,8 @@ final class PortalCloudinary
             abort(422, 'Choose an image or PDF receipt.');
         }
 
-        $name = $file->getClientOriginalName();
+        // A name the caller gives instead of the device's: a bug report's screenshot must not carry its sender's.
+        $name = $asName ?? $file->getClientOriginalName();
         $uploadName = $name !== '' ? $name : 'receipt';
 
         try {
@@ -202,6 +203,14 @@ final class PortalCloudinary
         }
 
         return str_starts_with($url, 'https://res.cloudinary.com/'.$cloud.'/');
+    }
+
+    // A delivery link with a transformation of its own in front of the file (2026-10-14): an ID card's photo, say.
+    public function transformed(string $url, string $transform): string
+    {
+        $changed = preg_replace('#/upload/#', '/upload/'.$transform.'/', $url, 1);
+
+        return is_string($changed) ? $changed : $url;
     }
 
     public function thumbUrl(string $url, string $mimeType): ?string

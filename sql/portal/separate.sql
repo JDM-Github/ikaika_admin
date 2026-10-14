@@ -95,6 +95,29 @@ CREATE TABLE calendar_event_members (
 
 
 -- ============================================================================
+-- REPORT TEMPLATES -- the report forms' Use a Template panel
+-- report_templates: one person's saved recipe for a report day, per user: the
+-- builder's rows as labels (a project, its activities with hours) plus the
+-- remarks, so it refills the picker as text. body is JSON:
+-- {projects: [{projectLabel, activities: [{activityLabel, hours}]}]}.
+-- Only its owner reads, changes or removes a row.
+-- Existing databases: create_portal_report_templates.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS report_templates (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id  INT          NOT NULL,
+    name         VARCHAR(100) NOT NULL,
+    notes        TEXT         NULL,
+    body         JSON         NOT NULL,
+    date_created DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    date_updated DATETIME     NULL,
+    INDEX idx_report_templates_employee (employee_id, name),
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ============================================================================
 -- ADMIN EMAIL — the Send Email page
 -- email_blocks: what the composer reuses. kind 'template' carries a category and
 -- subject; kind 'footer' is a signature or disclaimer appended under the body.
@@ -151,13 +174,15 @@ CREATE TABLE email_messages (
     failed_count    INT          NOT NULL DEFAULT 0,
     failures        JSON         NULL,
     status          VARCHAR(16)  NOT NULL DEFAULT 'sent',
-    sent_by         INT          NOT NULL,
+    -- Null for a guest's send: the Email page is shareable, and a guest is no employee.
+    -- Existing databases: allow_guest_email_sends.
+    sent_by         INT          NULL,
     date_sent       DATETIME     NULL,
     date_created    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_email_messages_created (date_created),
     INDEX idx_email_messages_sent_by (sent_by),
     FOREIGN KEY (footer_id) REFERENCES email_blocks(id) ON DELETE SET NULL,
-    FOREIGN KEY (sent_by)   REFERENCES employees(id)    ON DELETE CASCADE
+    FOREIGN KEY (sent_by)   REFERENCES employees(id)    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE email_attachments (
@@ -180,89 +205,96 @@ CREATE TABLE email_attachments (
 -- Built-in blocks: the company footer and the Portal email test template. The HTML is
 -- database/seeders/email/*.html, inlined here; its logo is in Cloudinary's global folder.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
-SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;color:#374151;">
+SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
   <tr>
-    <!-- Logo -->
-    <td width="95" valign="middle" style="width:95px;padding:2px 4px 2px 0;border-right:2px solid #1f4e8c;">
-      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="82" style="display:block;width:82px;max-width:82px;height:auto;border:0;outline:none;text-decoration:none;" />
+    <!-- Brand: logo, divider, IKAIKA BIM over IKAIKA PORTAL, then the website and the mailbox -->
+    <td class="pl-foot-col" valign="middle" style="padding:6px 26px 18px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+        <tr>
+          <!-- The logo sits on a white tile: unseen on white, a badge where a mail client turns the page dark -->
+          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;">
+            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_136/c_lpad,w_176,h_184,b_white/r_28/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="88" style="display:block;width:88px;max-width:88px;height:auto;border:0;outline:none;text-decoration:none;" />
+          </td>
+          <td valign="middle" width="1" height="72" style="width:1px;height:72px;background-color:#4a74a1;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="pl-foot-text" valign="middle" style="padding:0 0 0 17px;">
+            <div style="font-size:17px;line-height:20px;font-weight:700;letter-spacing:0.25px;color:#174d87;">IKAIKA BIM</div>
+            <div style="margin-top:5px;font-size:10px;line-height:12px;font-weight:700;letter-spacing:2.4px;color:#658bbd;">IKAIKA PORTAL</div>
+            <div style="margin-top:4px;font-size:11px;line-height:15px;letter-spacing:0.15px;color:#245b99;">Automated communication</div>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;border-collapse:collapse;">
+              <tr>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871370/email-design/icon-globe.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="https://ikaikabim.com" style="color:#245b99;text-decoration:none;">ikaikabim.com</a></td>
+                <td valign="middle" style="padding:0 12px;"><div style="width:1px;height:17px;background-color:#bfd0e5;font-size:0;line-height:0;">&nbsp;</div></td>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871371/email-design/icon-mail.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="mailto:info@ikaikabim.com" style="color:#245b99;text-decoration:none;">info@ikaikabim.com</a></td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
     </td>
-    <!-- Company Information -->
-    <td valign="middle" style="padding:2px 0 2px 14px;">
-      <!-- Company -->
-      <div style="font-size:18px;line-height:22px;font-weight:700;color:#1f4e8c;">IKAIKA BIM</div>
-      <!-- Company Contact -->
-      <div style="font-size:12px;line-height:18px;color:#64748b;">
-        <a href="https://ikaikabim.com" style="color:#64748b;text-decoration:none;">ikaikabim.com</a>
-        &nbsp;&middot;&nbsp;
-        <a href="mailto:info@ikaikabim.com" style="color:#64748b;text-decoration:none;">info@ikaikabim.com</a>
-      </div>
-      <!-- Source -->
-      <div style="margin-top:6px;font-size:12px;line-height:18px;color:#64748b;">
-        <span style="font-weight:600;color:#1f4e8c;">IKAIKA Portal</span>
-        &nbsp;&middot;&nbsp;
-        Automated communication
-      </div>
-      <!-- Location -->
-      <div style="margin-top:3px;font-size:11px;line-height:16px;color:#64748b;">
-        11th Floor, SM Aura Office Tower &nbsp;&middot;&nbsp; 26th St. corner McKinley Parkway
-      </div>
-      <div style="font-size:11px;line-height:16px;color:#64748b;">
-        Fort Bonifacio, Taguig City, Metro Manila, Philippines
-      </div>
+    <!-- Office: the pin and the address, a link of its own so a mail client does not underline it -->
+    <td class="pl-foot-col" valign="middle" width="250" style="width:250px;padding:6px 0 18px 0;">
+      <table role="presentation" class="pl-foot-address" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-left:1px solid #b7cbe4;">
+        <tr>
+          <td valign="top" style="padding:5px 12px 5px 22px;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865761/email-design/icon-pin.png" alt="" width="19" height="23" style="display:block;width:19px;height:23px;border:0;" /></td>
+          <td valign="top" style="padding:5px 0;font-size:11px;line-height:19px;color:#6682a8;white-space:nowrap;">
+            <a href="https://www.google.com/maps/search/?api=1&amp;query=SM+Aura+Office+Tower+Taguig" style="color:#6682a8;text-decoration:none;">11th Floor, SM Aura Office Tower<br />26th St. corner McKinley Parkway<br />Fort Bonifacio, Taguig City,<br />Metro Manila, Philippines</a>
+          </td>
+        </tr>
+      </table>
     </td>
   </tr>
-  <!-- Divider -->
+  <!-- Confidentiality notice -->
   <tr>
-    <td colspan="2" style="padding-top:12px;border-bottom:1px solid #d1d9e2;font-size:0;line-height:0;">&nbsp;</td>
-  </tr>
-  <!-- Confidentiality Notice -->
-  <tr>
-    <td colspan="2" style="padding-top:6px;font-size:10px;line-height:14px;color:#94a3b8;">
-      This message may contain confidential information and is meant only for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
+    <td colspan="2" style="padding:11px 0 16px;border-top:1px solid #d5e0ee;font-size:10px;line-height:16px;color:#7f99bb;">
+      This message may contain confidential information and is meant only for the people it is addressed to.<br />
+      If you received it by mistake, please let the sender know and delete it.
     </td>
   </tr>
 </table>', 'html', id
 FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
--- A signature footer: the $SIGNATURE token is replaced with the person's own details when it is used
+-- A signature footer (database/seeders/email/company-signature.html): the $SIGNATURE token is replaced with the person's own details when it is used
 -- as an email signature (Manage / Signatures, and each employee's Settings). The plain Company footer
 -- above has no token, so it is usable in email but cannot be a signature.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
-SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;color:#374151;">
+SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
   <tr>
-    <!-- Logo -->
-    <td width="95" valign="middle" style="width:95px;padding:2px 4px 2px 0;border-right:2px solid #1f4e8c;">
-      <img src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_112,f_auto,q_auto/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="82" style="display:block;width:82px;max-width:82px;height:auto;border:0;outline:none;text-decoration:none;" />
+    <td class="pl-foot-col" valign="middle" style="padding:6px 26px 18px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+        <tr>
+          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;"><img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_136/c_lpad,w_176,h_184,b_white/r_28/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="88" style="display:block;width:88px;max-width:88px;height:auto;border:0;" /></td>
+          <td valign="middle" width="1" height="72" style="width:1px;height:72px;background-color:#4a74a1;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="pl-foot-text" valign="middle" style="padding:0 0 0 17px;">
+            <div style="font-size:19px;line-height:22px;font-weight:700;letter-spacing:0.25px;color:#174d87;">{name}</div>
+            <div style="margin-top:4px;font-size:12px;line-height:16px;color:#245b99;">{title}&nbsp;&middot;&nbsp;{department}</div>
+            <div style="margin-top:8px;font-size:11px;line-height:15px;color:#245b99;white-space:nowrap;"><a href="mailto:{email}" style="color:#245b99;text-decoration:none;">{email}</a>&nbsp;&middot;&nbsp;{phone}&nbsp;&middot;&nbsp;{location}</div>
+          </td>
+        </tr>
+      </table>
     </td>
-    <!-- Information -->
-    <td valign="middle" style="padding:2px 0 2px 14px;">
-      <!-- Name -->
-      <div style="font-size:18px;line-height:22px;font-weight:700;color:#1f4e8c;">{name}</div>
-      <!-- Position -->
-      <div style="font-size:13px;line-height:18px;color:#64748b;">{title}&nbsp;&middot;&nbsp;{department}</div>
-      <!-- Personal Contact -->
-      <div style="font-size:12px;line-height:18px;color:#475569;white-space:nowrap;">
-        <a href="mailto:{email}" style="color:#475569;text-decoration:none;">{email}</a>
-        &nbsp;&middot;&nbsp;{phone}
-        &nbsp;&middot;&nbsp;{location}
-      </div>
-      <!-- Company -->
-      <div style="margin-top:8px;">
-        <div style="font-size:15px;line-height:19px;font-weight:700;color:#1f4e8c;">IKAIKA BIM</div>
-        <div style="font-size:12px;line-height:17px;white-space:nowrap;">
-          <a href="https://ikaikabim.com" style="color:#64748b;text-decoration:none;">ikaikabim.com</a>
-          &nbsp;&middot;&nbsp;
-          <a href="mailto:info@ikaikabim.com" style="color:#64748b;text-decoration:none;">info@ikaikabim.com</a>
-        </div>
-      </div>
+    <td class="pl-foot-col" valign="middle" width="230" style="width:230px;padding:6px 0 18px 0;">
+      <table role="presentation" class="pl-foot-address" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-left:1px solid #b7cbe4;">
+        <tr>
+          <td style="padding:5px 0 5px 22px;">
+            <div style="font-size:15px;line-height:19px;font-weight:700;letter-spacing:0.2px;color:#174d87;">IKAIKA BIM</div>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;border-collapse:collapse;">
+              <tr>
+                <td valign="middle" style="padding:0 7px 4px 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871370/email-design/icon-globe.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="padding:0 0 4px;font-size:11px;line-height:15px;white-space:nowrap;"><a href="https://ikaikabim.com" style="color:#245b99;text-decoration:none;">ikaikabim.com</a></td>
+              </tr>
+              <tr>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871371/email-design/icon-mail.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="mailto:info@ikaikabim.com" style="color:#245b99;text-decoration:none;">info@ikaikabim.com</a></td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
     </td>
   </tr>
-  <!-- Divider -->
   <tr>
-    <td colspan="2" style="padding-top:12px;border-bottom:1px solid #d1d9e2;font-size:0;line-height:0;">&nbsp;</td>
-  </tr>
-  <!-- Confidentiality Notice -->
-  <tr>
-    <td colspan="2" style="padding-top:6px;font-size:10px;line-height:14px;color:#94a3b8;">
+    <td colspan="2" style="padding:11px 0 16px;border-top:1px solid #d5e0ee;font-size:10px;line-height:16px;color:#7f99bb;">
       This message may contain confidential information and is meant only for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
     </td>
   </tr>
@@ -298,6 +330,56 @@ SELECT 'template', 'Portal email test', 'notice', 'Portal email test', '<table r
     <td style="font-size:15px;line-height:24px;color:#374151;">
       Thank you,<br>
       <strong style="font-weight:600;color:#111827;">IKAIKA BIM</strong>
+    </td>
+  </tr>
+</table>', 'html', id
+FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+
+-- The IKAIKA BIM footer: the company writing as itself (From: IKAIKA BIM), without the portal's lines.
+INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
+SELECT 'footer', 'IKAIKA BIM footer', NULL, NULL, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
+  <tr>
+    <!-- Brand: logo, divider, IKAIKA BIM, then the website and the mailbox; the company itself, not the portal -->
+    <td class="pl-foot-col" valign="middle" style="padding:6px 26px 18px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+        <tr>
+          <!-- The logo sits on a white tile: unseen on white, a badge where a mail client turns the page dark -->
+          <td class="pl-foot-logo-cell" valign="middle" style="padding:0 10px 0 0;">
+            <img class="pl-foot-logo" src="https://res.cloudinary.com/ezmjw0z8/image/upload/c_limit,w_136/c_lpad,w_176,h_184,b_white/r_28/f_png/v1790630829/email-upload/global/e653c017-1c81-4427-95b5-225b7ee753e4.png" alt="IKAIKA BIM" width="88" style="display:block;width:88px;max-width:88px;height:auto;border:0;outline:none;text-decoration:none;" />
+          </td>
+          <td valign="middle" width="1" height="72" style="width:1px;height:72px;background-color:#4a74a1;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="pl-foot-text" valign="middle" style="padding:0 0 0 17px;">
+            <div style="font-size:19px;line-height:22px;font-weight:700;letter-spacing:0.25px;color:#174d87;">IKAIKA BIM</div>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;border-collapse:collapse;">
+              <tr>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871370/email-design/icon-globe.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="https://ikaikabim.com" style="color:#245b99;text-decoration:none;">ikaikabim.com</a></td>
+                <td valign="middle" style="padding:0 12px;"><div style="width:1px;height:17px;background-color:#bfd0e5;font-size:0;line-height:0;">&nbsp;</div></td>
+                <td valign="middle" style="padding:0 7px 0 0;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791871371/email-design/icon-mail.png" alt="" width="16" height="16" style="display:block;width:16px;height:16px;border:0;" /></td>
+                <td valign="middle" style="font-size:11px;line-height:15px;white-space:nowrap;"><a href="mailto:info@ikaikabim.com" style="color:#245b99;text-decoration:none;">info@ikaikabim.com</a></td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+    <!-- Office: the pin and the address, a link of its own so a mail client does not underline it -->
+    <td class="pl-foot-col" valign="middle" width="250" style="width:250px;padding:6px 0 18px 0;">
+      <table role="presentation" class="pl-foot-address" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border-left:1px solid #b7cbe4;">
+        <tr>
+          <td valign="top" style="padding:5px 12px 5px 22px;"><img src="https://res.cloudinary.com/ezmjw0z8/image/upload/v1791865761/email-design/icon-pin.png" alt="" width="19" height="23" style="display:block;width:19px;height:23px;border:0;" /></td>
+          <td valign="top" style="padding:5px 0;font-size:11px;line-height:19px;color:#6682a8;white-space:nowrap;">
+            <a href="https://www.google.com/maps/search/?api=1&amp;query=SM+Aura+Office+Tower+Taguig" style="color:#6682a8;text-decoration:none;">11th Floor, SM Aura Office Tower<br />26th St. corner McKinley Parkway<br />Fort Bonifacio, Taguig City,<br />Metro Manila, Philippines</a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <!-- Confidentiality notice -->
+  <tr>
+    <td colspan="2" style="padding:11px 0 16px;border-top:1px solid #d5e0ee;font-size:10px;line-height:16px;color:#7f99bb;">
+      This message may contain confidential information and is meant only for the people it is addressed to.<br />
+      If you received it by mistake, please let the sender know and delete it.
     </td>
   </tr>
 </table>', 'html', id
@@ -346,6 +428,7 @@ WHERE id_no IN (
     '260701-0020', -- John Dave Pega
     '260701-0019', -- Jhon Noriel Malabanan
     '260701-0018', -- Jolas Mendez
+    '250407-0009', -- Jolas Mendez
     '220101-0001', -- Don De Guzman, the president
     '220202-0002'  -- Nathaniel Tanglao, the MIS manager
 );
@@ -386,6 +469,16 @@ CREATE TABLE IF NOT EXISTS projects_wbs_scopes (
     wbs_code   VARCHAR(32) NOT NULL,
     PRIMARY KEY (project_id, wbs_code),
     CONSTRAINT fk_projects_wbs_scopes_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
+
+-- The activities a project takes out of its Type of project's allowed list (job_type_allowed_activities).
+-- A project only removes, never adds; no rows means the type's whole list. Existing databases:
+-- create_portal_projects_removed_activities.
+CREATE TABLE IF NOT EXISTS projects_removed_activities (
+    project_id    INT         NOT NULL,
+    activity_code VARCHAR(32) NOT NULL,
+    PRIMARY KEY (project_id, activity_code),
+    CONSTRAINT fk_projects_removed_activities_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
 );
 
 
@@ -595,7 +688,10 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.edit', 'projects.view', 'Edit projects', 'Edit the details of {UserName|Your} department''s projects or every project. On Only your own, the projects {UserName|You} lead.', 1, 1, 211),
 ('projects.scopes', 'projects.view', 'Manage scopes', 'Choose the WBS scopes of {UserName|Your} department''s projects or every project. On Only your own, the projects {UserName|You} lead.', 1, 1, 212),
 ('projects.delete', 'projects.view', 'Delete projects', 'Move {UserName|Your} department''s projects or any project to the recycle bin. On Only your own, the projects {UserName|You} lead.', 1, 1, 213),
+('projects.edit.closed', 'projects.edit', 'Edit closed projects', 'Change a Completed or Closed project, approved or not: {UserName|Your} department''s or every one. Nobody else can.', 1, 1, 215),
 ('projects.lead', 'projects.view', 'Project Lead', 'Be chosen as the lead of {UserName|Your} department''s projects or of any project.', 1, 1, 214),
+-- Project Lead carries it, on and locked (2026-10-14, user): PortalAccessGraph::IMPLIED. Existing databases: add_portal_remove_scope_assignees_rule.
+('projects.assignees.remove', 'projects.view', 'Remove scope assignees', 'Take someone assigned to a project''s scopes off its Members or Support members. Comes with Project Lead.', 0, 1, 216),
 ('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project, for {UserName|Your} department or every department.', 1, 1, 220),
 ('projects.create.direct', 'projects.create', 'Auto-approve projects', 'A project {UserName|You} add is approved at once, without waiting for a Project Approver.', 0, 1, 221),
 -- Created Projects is its own power (2026-10-09, user): a person may be barred from adding projects
@@ -639,7 +735,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('access', NULL, 'Access', 'See {UserName|Your} powers and switch them off and on. This page itself always stays on.', 0, 0, 700),
 
 ('manage', NULL, 'Manage', 'Work on other people''s records.', 0, 1, 800),
-('manage.requests', 'manage', 'Requests', 'Review other people''s requests. Each kind below reaches only as far as its own setting.', 0, 1, 810),
+('manage.requests', 'manage', 'Requests', 'Review other people''s requests. Each kind below reaches only as far as its own setting.', 1, 1, 810),
 ('manage.requests.leave', 'manage.requests', 'Leave Requests', 'See leave requests.', 1, 1, 811),
 ('manage.requests.leave.decide', 'manage.requests.leave', 'Approve or reject', 'Approve or reject leave requests, with remarks.', 0, 1, 812),
 ('manage.requests.overtime', 'manage.requests', 'Overtime Requests', 'See overtime requests.', 1, 1, 813),
@@ -753,6 +849,9 @@ UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key LIKE 'proj
 -- Auto-approve is an admin's at most, and only a named one's (2026-10-07, supervisor): being an admin
 -- is not enough, so no role but developer starts with it. Existing databases: split_portal_project_auto_approval.
 UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key = 'projects.create.direct';
+-- A Completed or Closed project is its department head's alone (2026-10-12, supervisor): no role but
+-- developer starts with Edit closed projects. Existing databases: add_portal_edit_closed_projects_rule.
+UPDATE access_permissions SET min_tier = 'admin' WHERE permission_key = 'projects.edit.closed';
 
 -- Members: their own work only. View Projects and Track Projects show only the projects they are on.
 -- Leading, editing, scoping and deleting projects are powers an admin (or a lead) gives, not a
@@ -801,6 +900,7 @@ WHERE permission_key NOT LIKE 'developer%'
   AND permission_key <> 'administration.logs.developers'
   AND permission_key <> 'email.images.global'
   AND permission_key <> 'projects.create.direct'
+  AND permission_key <> 'projects.edit.closed'
   AND permission_key NOT LIKE '%.unlisted';
 
 -- Executives: every department and executives' logs, without the developer tools and without the
@@ -812,7 +912,7 @@ SELECT 'executive', permission_key,
        permission_key = 'administration.logs'
 FROM access_permissions
 WHERE permission_key NOT LIKE 'developer%'
-  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.create.direct')
+  AND permission_key NOT IN ('home', 'reports', 'requests', 'user', 'administration.recycle', 'administration.actions', 'administration.backup', 'administration.logs.developers', 'projects.create.direct', 'projects.edit.closed')
   AND permission_key NOT LIKE 'projects.references%'
   AND permission_key NOT LIKE 'reports.%'
   AND permission_key NOT LIKE 'requests.%'
@@ -828,35 +928,9 @@ SELECT 'developer', permission_key,
        permission_key = 'administration.logs'
 FROM access_permissions;
 
--- Personal defaults (access_personal), matched on id_no like is_developer.
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'manage.users.access.peers', NULL FROM employees WHERE id_no = '220202-0002'; -- Nathaniel Tanglao
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'administration.logs.developers', NULL FROM employees WHERE id_no = '220202-0002'; -- Nathaniel Tanglao
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'administration.actions.sync', NULL FROM employees WHERE id_no = '220202-0002'; -- Nathaniel Tanglao
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'manage.users.information', 'all' FROM employees WHERE id_no IN (
-    '220202-0002', -- Nathaniel Tanglao
-    '220302-0003'  -- Steven Gaurano
-);
-
--- Admins lead only their own department by preset. Nathaniel (MIS) and Steven (Engineering) manage
--- their departments, so they alone lead at every department; anyone else is a department-only lead
--- until a power-holder gives them more on Manage / Users.
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'projects.lead', 'all' FROM employees WHERE id_no IN (
-    '220202-0002', -- Nathaniel Tanglao
-    '220302-0003'  -- Steven Gaurano
-);
-
--- Only Nathaniel and Steven auto-approve the projects they add (2026-10-07, supervisor); every other
--- admin's new project waits for a Project Approver like anyone's.
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'projects.create.direct', NULL FROM employees WHERE id_no IN (
-    '220202-0002', -- Nathaniel Tanglao
-    '220302-0003'  -- Steven Gaurano
-);
+-- Personal defaults (access_personal), matched on id_no like is_developer. What the department heads
+-- hold beyond an admin (Nathaniel for MIS, Steven for Engineering) is no longer here: it is the head
+-- presets, seeded with company_departments at the end of this file (2026-10-14, user).
 
 -- Project Approver: every admin by preset, and Fin Donasco and Audie Gantuangko over the projects they
 -- lead (2026-10-07, supervisor). Their own defaults rather than Steven's gift, so it does not hang on his.
@@ -920,7 +994,7 @@ WHERE department IS NOT NULL AND TRIM(department) <> ''
 
 -- A sentence on what a department does, shown and edited on Manage / References.
 -- Portal-only: Airtable's Employees table has no such field, and the sync never sends it.
--- Existing databases: run the ALTER below.
+-- Existing databases: migration add_description_to_portal_departments adds it (and the first sentences).
 ALTER TABLE departments
     ADD COLUMN description VARCHAR(255) NULL AFTER name;
 
@@ -963,7 +1037,7 @@ CREATE TABLE IF NOT EXISTS employee_signatures (
 -- A developer picks pages; the server issues a link (/share/<code>) and a
 -- password. The guest signs in with the password, plus a code emailed when a
 -- bound email is set, and browses those pages read-only. Guests are GET-only.
--- Existing databases: run the CREATEs, the seed and the catalog row below.
+-- Existing databases: migration create_portal_shared_pages adds whatever is missing (tables, seed, rules, presets).
 -- Plan: docs/power/shared-pages-plan.md.
 -- ============================================================================
 
@@ -981,6 +1055,9 @@ CREATE TABLE IF NOT EXISTS shared_pages (
     require_otp     TINYINT(1)   NOT NULL DEFAULT 1,
     expires_at      TIMESTAMP    NULL,           -- NULL only when the developer clears it
     rate_per_minute SMALLINT     NOT NULL DEFAULT 60,
+    -- The department a department-reach share is scoped to, snapshotted at save.
+    -- Existing databases: add_reach_to_shared_page_rules.
+    reach_department VARCHAR(100) NULL,
     revoked_at      TIMESTAMP    NULL,
     created_by      INT          NOT NULL,       -- employees.id, the developer
     created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -988,27 +1065,26 @@ CREATE TABLE IF NOT EXISTS shared_pages (
     UNIQUE KEY shared_pages_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Existing databases: run the ALTERs below (pre-change rows keep a NULL value until regenerated).
-ALTER TABLE shared_pages
-    ADD COLUMN password_value VARCHAR(32) NULL AFTER password_hash;
+-- Existing databases (the CREATE above already has the column, so a fresh load must not run it):
+-- ALTER TABLE shared_pages ADD COLUMN password_value VARCHAR(32) NULL AFTER password_hash;
 
-ALTER TABLE shared_pages
-    MODIFY COLUMN code VARCHAR(64) NOT NULL,
-    ADD COLUMN guest_name VARCHAR(100) NULL AFTER label;
+-- ALTER TABLE shared_pages MODIFY COLUMN code VARCHAR(64) NOT NULL, ADD COLUMN guest_name VARCHAR(100) NULL AFTER label;
 
 -- Existing databases: migration add_require_otp_to_portal_shared_pages runs this.
-ALTER TABLE shared_pages
-    ADD COLUMN require_otp TINYINT(1) NOT NULL DEFAULT 1 AFTER email;
+-- ALTER TABLE shared_pages ADD COLUMN require_otp TINYINT(1) NOT NULL DEFAULT 1 AFTER email;
 
 CREATE TABLE IF NOT EXISTS shared_page_rules (
     share_id INT          NOT NULL,
     rule_key VARCHAR(100) NOT NULL,
+    -- How far the granted page reaches for the guest; null for a rule that carries no reach.
+    -- Existing databases: add_reach_to_shared_page_rules.
+    reach    VARCHAR(16)  NULL,
     PRIMARY KEY (share_id, rule_key),
     FOREIGN KEY (share_id) REFERENCES shared_pages(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Email sign-in (2026-10-12): one code per address the employee has, work and personal; both must
--- be typed. Existing databases: migration create_portal_login_otps runs this.
+-- Email sign-in (2026-10-12): one code to the work email (work only, per the supervisor; personal_code_hash
+-- is left from the two-inbox version and stays empty). Existing databases: migration create_portal_login_otps.
 CREATE TABLE IF NOT EXISTS login_otps (
     employee_id        INT          NOT NULL PRIMARY KEY,
     work_code_hash     VARCHAR(255) NULL,
@@ -1039,35 +1115,22 @@ CREATE TABLE IF NOT EXISTS shared_page_visits (
 -- check is run against that page (a guest has no person, so reach pages read all and own pages read
 -- empty), and the command that flips a key is the one that maps its guest read in
 -- tests/Feature/PortalShareReadinessTest.php. The page keys are the ones RouteRuleConstant maps on
--- the portal side, plus home.
+-- the portal side.
 CREATE TABLE IF NOT EXISTS shared_page_shareable (
     rule_key VARCHAR(100) NOT NULL PRIMARY KEY,
     is_ready TINYINT(1)   NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
-    ('home', 1),
     ('projects.view', 1),
     ('projects.track', 1),
-    ('projects.created', 1),
-    ('projects.manager', 1),
     ('projects.references', 1),
-    ('reports.daily', 0),
-    ('reports.late', 0),
-    ('reports.submitted', 1),
-    ('reports.submitted.edit', 0),
-    ('requests.own', 1),
-    ('requests.leave', 0),
-    ('requests.overtime', 0),
-    ('requests.offset', 0),
-    ('requests.reimbursement', 0),
-    ('requests.own.edit', 0),
-    ('user.logs', 1),
-    ('user.recycle', 1),
     ('calendar', 1),
     ('manage.requests', 1),
     ('manage.reports', 1),
     ('manage.users', 1),
+    ('manage.onboarding', 1),
+    ('manage.map', 1),
     ('finance.overview', 1),
     ('finance.transactions', 1),
     ('finance.envelopes', 1),
@@ -1077,10 +1140,9 @@ INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('administration.actions', 1),
     ('administration.missing', 1),
     ('administration.emails', 1),
-    -- Held back: the composer is a form, and its own-scope image controls follow the same rule.
-    ('email', 0),
-    ('email.library', 1),
-    ('administration.backup', 0);
+    -- A guest may open the composer read-only and send: the send is the one write they make,
+    -- and it lands in All Emails like anyone's.
+    ('email', 1);
 
 -- Manage / Shared Pages: a fine-grained, administrator-tier power. The page opens and reads with
 -- manage.shares (which shows the link, its QR and the kept password); creating, editing and revoking
@@ -1151,7 +1213,7 @@ CREATE TABLE IF NOT EXISTS register_otps (
 CREATE TABLE IF NOT EXISTS register_documents (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     registration_id INT          NOT NULL,
-    kind            VARCHAR(24)  NOT NULL,          -- photo|tin|sss|philhealth|hdmf|bank
+    kind            VARCHAR(24)  NOT NULL,          -- photo|tin|sss|philhealth|hdmf|national_id|bank
     name            VARCHAR(191) NOT NULL,          -- the candidate's file name
     mime            VARCHAR(127) NOT NULL,
     size_bytes      INT          NOT NULL,
@@ -1170,7 +1232,7 @@ VALUES
      'Guest-free candidate registration: send a bound link, collect details and requirements.',
      0, 1, 'admin', 870),
     ('manage.onboarding.manage', 'manage.onboarding', 'Create and revoke',
-     'Create a candidate entry, change it, revoke it, and promote a submitted one.',
+     'Create a candidate entry, change it and revoke it.',
      0, 1, 'admin', 871),
     ('manage.onboarding.password', 'manage.onboarding', 'New passwords',
      'Give a candidate link a new password, whose old one stops working at once.',
@@ -1182,3 +1244,241 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'admin', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'developer', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';
+
+-- Manage / Map: where each person last saved something. An administrator's power, at every
+-- department by preset so the map opens on everyone; a narrower reach narrows it.
+-- Existing databases: add_portal_team_map_rule, reach_for_requests_and_map.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.map', 'manage', 'Map',
+     'See on a world map where each person last saved something in the portal.',
+     1, 1, 'admin', 880);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('admin', 'manage.map', 'all', 0),
+    ('developer', 'manage.map', 'all', 0);
+
+-- Allowed activities per department (2026-10-13): Management is a type in four departments, each with
+-- its own list; a row with a department wins over the shared row (no department, as Airtable's are).
+-- Existing databases: add_department_to_portal_allowed_activities.
+ALTER TABLE job_type_allowed_activities
+    ADD COLUMN department VARCHAR(100) NULL AFTER job_type;
+INSERT INTO job_type_allowed_activities (job_type, department, activity_code_id_initials) VALUES
+    ('Management', 'Engineering', '1004'),
+    ('Management', 'MIS',         '2002,2004'),
+    ('Management', 'General',     '2001,2003,9000,9001,9002'),
+    ('Management', 'Admin',       '2001,2003,9000,9001,9002');
+
+-- Manage Scopes (2026-10-13): members assigned to a project's scopes, and the progress they report.
+-- Existing databases: create_portal_scope_assignees_and_progress.
+CREATE TABLE IF NOT EXISTS projects_scope_assignees (
+    project_id  INT         NOT NULL,
+    wbs_code    VARCHAR(32) NOT NULL,
+    employee_id INT         NOT NULL,
+    PRIMARY KEY (project_id, wbs_code, employee_id),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS projects_scope_progress (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    project_id     INT              NOT NULL,
+    wbs_code       VARCHAR(32)      NOT NULL,
+    employee_id    INT              NOT NULL,
+    user_report_id INT              NULL,
+    -- The report's day: the newest day wins the scope's progress. Existing databases: add_report_date_to_portal_scope_progress.
+    report_date    DATE             NULL,
+    percent        TINYINT UNSIGNED NOT NULL,
+    created_at     TIMESTAMP        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX projects_scope_progress_latest (project_id, wbs_code, id),
+    INDEX projects_scope_progress_report (user_report_id),
+    INDEX projects_scope_progress_day (project_id, wbs_code, report_date, id),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Manage / Map's points: each person's address turned into coordinates once (portal:geocode-homes).
+-- Existing databases: create_portal_employee_home_locations.
+CREATE TABLE IF NOT EXISTS employee_home_locations (
+    employee_id INT          NOT NULL PRIMARY KEY,
+    query       VARCHAR(500) NOT NULL,
+    source      VARCHAR(16)  NOT NULL,
+    latitude    DECIMAL(10,7) NOT NULL,
+    longitude   DECIMAL(10,7) NOT NULL,
+    geocoded_at TIMESTAMP    NULL,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Only the head admins promote a submitted candidate, whose account is active at once (2026-10-12):
+-- their own defaults, matched on id_no like is_developer, and Developer mode's like every rule.
+-- Existing databases: add_portal_onboarding_promote_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.onboarding.promote', 'manage.onboarding', 'Promote candidates',
+     'Turn a candidate who submitted their requirements into an employee on the work email given, able to sign in at once.',
+     0, 1, 'admin', 873);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('developer', 'manage.onboarding.promote', NULL, 0);
+
+-- Activate and deactivate (2026-10-12): an admin turns someone in their Users reach Active or Inactive,
+-- never themselves or an executive, a fellow admin only with Manage other admins. Admins, executives and
+-- developers hold it. Existing databases: add_portal_users_status_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.users.status', 'manage.users', 'Activate and deactivate',
+     'Turn the account of someone in {UserName|Your} reach active or inactive. An inactive account cannot sign in.',
+     0, 1, 'admin', 851);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('admin', 'manage.users.status', NULL, 0),
+    ('executive', 'manage.users.status', NULL, 0),
+    ('developer', 'manage.users.status', NULL, 0);
+
+-- Edit employee information (2026-10-12): the private details of the people whose information someone
+-- sees; held by those who see it. Portal only.
+-- Existing databases: add_portal_users_information_edit_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.users.information.edit', 'manage.users.information', 'Edit employee information',
+     'Change the private details of the people whose information {UserName|You} can see. Airtable keeps its own copy.',
+     0, 1, 'admin', 848);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('executive', 'manage.users.information.edit', NULL, 0),
+    ('developer', 'manage.users.information.edit', NULL, 0);
+
+-- Bug reports (2026-10-13): anyone reports a bug with up to three screenshots; MIS reads and tracks
+-- them. Anonymous by design: no employee column and no time finer than the day.
+-- Existing databases: create_portal_bug_reports.
+CREATE TABLE IF NOT EXISTS bug_reports (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    title       VARCHAR(160) NOT NULL,
+    description TEXT         NOT NULL,
+    page        VARCHAR(200) NULL,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'new',
+    note        TEXT         NULL,
+    -- Who in MIS handles it, the semantic version level its fix needs, and the version it shipped in.
+    -- Existing databases: add_portal_bug_report_assignee_and_version.
+    assignee_id   INT UNSIGNED NULL,
+    version_level VARCHAR(10)  NULL,
+    fixed_in      VARCHAR(20)  NULL,
+    reported_on DATE         NOT NULL,
+    updated_at  TIMESTAMP    NULL,
+    INDEX bug_reports_status_reported_on_index (status, reported_on)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS bug_report_images (
+    id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    bug_report_id INT UNSIGNED NOT NULL,
+    file_url      VARCHAR(500) NOT NULL,
+    mime_type     VARCHAR(100) NOT NULL,
+    size_bytes    INT UNSIGNED NOT NULL,
+    FOREIGN KEY (bug_report_id) REFERENCES bug_reports(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The Bug Reports page: every MIS member and admin (only_department), and developers.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, only_department, sort_order)
+VALUES
+    ('bug-reports', NULL, 'Bug Reports',
+     'Read the bugs people report, never who sent them, and track each one to fixed.',
+     0, 1, 'MIS', 990);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('member', 'bug-reports', NULL, 0),
+    ('admin', 'bug-reports', NULL, 0),
+    ('developer', 'bug-reports', NULL, 0);
+
+-- Edit transactions (2026-10-13): a transaction's name, date, payor or payee, notes and receipt, never
+-- its money; admins, executives and developers hold it like the rest of Finance.
+-- Existing databases: add_portal_finance_transactions_edit_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, sort_order)
+VALUES
+    ('finance.transactions.edit', 'finance.transactions', 'Edit transactions',
+     'Change a transaction''s name, amount, date, payor or payee, notes and receipt. Its type, envelope and account stay as they were.',
+     0, 1, 865);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('admin', 'finance.transactions.edit', NULL, 0),
+    ('executive', 'finance.transactions.edit', NULL, 0),
+    ('developer', 'finance.transactions.edit', NULL, 0);
+
+-- The blood type and the optional national ID (PhilSys) number a registration asks for (2026-10-12).
+-- Portal-only: Airtable's table has neither, and the sync never sends them.
+-- Existing databases: add_blood_type_and_national_id_to_portal_new_employee_data.
+ALTER TABLE new_employee_data
+    ADD COLUMN blood_type     VARCHAR(3)  NULL AFTER date_of_birth,
+    ADD COLUMN national_id_no VARCHAR(30) NULL AFTER hdmf_no;
+
+-- The Philippines' provinces, cities and municipalities, and barangays (2026-10-13): the PSGC, for the
+-- registration form's address pickers. The rows come from database/data/psgc, loaded by the migration
+-- or `php artisan portal:import-places`. Metro Manila stands in as a province for its cities.
+-- Existing databases: create_portal_places.
+CREATE TABLE IF NOT EXISTS psgc_provinces (
+    code CHAR(9)      NOT NULL PRIMARY KEY,
+    name VARCHAR(120) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS psgc_cities (
+    code          CHAR(9)      NOT NULL PRIMARY KEY,
+    name          VARCHAR(120) NOT NULL,
+    province_code CHAR(9)      NOT NULL,
+    INDEX psgc_cities_province_code_index (province_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS psgc_barangays (
+    code      CHAR(9)      NOT NULL PRIMARY KEY,
+    name      VARCHAR(120) NOT NULL,
+    city_code CHAR(9)      NOT NULL,
+    INDEX psgc_barangays_city_code_index (city_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- COMPANY DEPARTMENTS AND THEIR HEADS (2026-10-14, user)
+-- The departments people work in, one head each. Only MIS and Engineering are departments: Admin and
+-- General are project buckets and stay in the departments table above, which the project form,
+-- References, scopes and types read. People's department lists (Shared Pages reach, Manage / Users)
+-- read this one. A head is found here, not from role_level (PortalDepartments).
+-- Existing databases: add_portal_company_departments_and_head_presets.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS company_departments (
+    id               INT AUTO_INCREMENT PRIMARY KEY,
+    name             VARCHAR(100) NOT NULL,
+    head_employee_id INT          NULL,
+    created_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY company_departments_name (name),
+    FOREIGN KEY (head_employee_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO company_departments (name, head_employee_id)
+SELECT 'MIS', id FROM employees WHERE id_no = '220202-0002'; -- Nathaniel Tanglao
+INSERT IGNORE INTO company_departments (name, head_employee_id)
+SELECT 'Engineering', id FROM employees WHERE id_no = '220302-0003'; -- Steven Gaurano
+
+-- Share any page: put any ready page on a guest link at any reach, even one the maker switched off or
+-- never held. The MIS head holds everything in truth and only narrows himself day to day.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.shares.any', 'manage.shares', 'Share any page',
+     'Put any ready page on a shared link, at any department or all, even one {UserName|You} switched off or never held.',
+     0, 1, 'admin', 863);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('developer', 'manage.shares.any', NULL, 0);
+
+-- The head presets, laid over a head's admin preset (PortalAccessGraph::startingRules): 'head' for every
+-- department head, 'head:<department>' for one department's head. Heads lead and see employee
+-- information at every department, auto-approve what they add, alone change a Completed or Closed
+-- project of their department, promote candidates and edit employee information. The MIS head also
+-- manages other admins, sees developers' activity, runs the Airtable sync and shares any page.
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('head', 'manage.users.information', 'all', 0),
+    ('head', 'manage.users.information.edit', NULL, 0),
+    ('head', 'manage.onboarding.promote', NULL, 0),
+    ('head', 'projects.lead', 'all', 0),
+    ('head', 'projects.create.direct', NULL, 0),
+    ('head', 'projects.edit.closed', 'department', 0),
+    ('head:mis', 'manage.users.access.peers', NULL, 0),
+    ('head:mis', 'administration.logs.developers', NULL, 0),
+    ('head:mis', 'administration.actions.sync', NULL, 0),
+    ('head:mis', 'manage.shares.any', NULL, 0);

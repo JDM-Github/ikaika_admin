@@ -21,7 +21,8 @@ use Symfony\Component\Mime\Email;
  * sender checks rather than looking like a spoofed personal address.
  *
  * Attached files come off the private disk under the names they were attached with. Inline images
- * (a share's QR) are embedded under their name, so the body shows them as cid:<name>.
+ * (a share's QR) are embedded under their name, so the body shows them as cid:<name>. They are held
+ * as base64 and embedded only at send time, so a queued copy stores as JSON with no closure in it.
  */
 class PortalEmailMail extends Mailable
 {
@@ -35,11 +36,17 @@ class PortalEmailMail extends Mailable
         public readonly ?string $replyToAddress = null,
         /** @var list<array{path: string, name: string, mime: string}> */
         public readonly array $attachedFiles = [],
-        /** @var list<array{name: string, data: string, mime: string}> */
+        /** @var list<array{name: string, data: string, mime: string}> data is base64 */
         public readonly array $inlineImages = [],
-    ) {
+        // What it is about (notice, security, ...): in front of the subject, and a letter's pill.
+        public readonly ?string $category = null,
+    ) {}
+
+    // Called by the mailer just before it sends, after the queue has rebuilt this mail.
+    public function build(): void
+    {
         foreach ($this->inlineImages as $image) {
-            $this->withSymfonyMessage(static fn (Email $message): Email => $message->embed($image['data'], $image['name'], $image['mime']));
+            $this->withSymfonyMessage(static fn (Email $message): Email => $message->embed((string) base64_decode($image['data'], true), $image['name'], $image['mime']));
         }
     }
 
@@ -48,13 +55,21 @@ class PortalEmailMail extends Mailable
         return new Envelope(
             from: $this->fromName === null ? null : new Address((string) config('mail.from.address'), $this->fromName),
             replyTo: $this->replyToAddress === null ? [] : [new Address($this->replyToAddress, $this->fromName)],
-            subject: $this->subjectLine,
+            subject: PortalEmailMarkup::subject($this->category, $this->subjectLine),
         );
     }
 
     public function content(): Content
     {
-        return new Content(htmlString: PortalEmailMarkup::document($this->body, $this->footerBody, $this->bodyFormat, $this->footerFormat));
+        return new Content(htmlString: PortalEmailMarkup::document(
+            $this->body,
+            $this->footerBody,
+            $this->bodyFormat,
+            $this->footerFormat,
+            $this->category,
+            $this->subjectLine,
+            $this->fromName === PortalEmailMarkup::COMPANY_SENDER,
+        ));
     }
 
     /**

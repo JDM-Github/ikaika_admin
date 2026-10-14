@@ -273,8 +273,9 @@ class PortalEmailTest extends TestCase
         $this->assertSame('Portal maintenance tonight', $log->payload['subject']);
         $this->assertSame('everyone', $log->payload['audience']);
         $this->assertSame($expected, $log->payload['recipientCount']);
-        $this->assertSame($expected, $log->payload['sent']);
-        $this->assertSame(0, $log->payload['failed']);
+        // The log is written when the copies are queued; how each fared lives on the outbox row.
+        $this->assertSame($expected, $log->payload['copies']);
+        $this->assertArrayNotHasKey('sent', $log->payload);
         $this->assertArrayNotHasKey('body', $log->payload);
     }
 
@@ -408,14 +409,14 @@ class PortalEmailTest extends TestCase
 
         $all = $this->getJson($days, $headers)->assertOk();
         $this->assertSame([$partial, $event, $sent], array_map('intval', array_column($all->json('data'), 'id')));
-        $all->assertJsonPath('counts', ['total' => 3, 'sent' => 1, 'partial' => 1, 'failed' => 1]);
+        $all->assertJsonPath('counts', ['total' => 3, 'sent' => 1, 'partial' => 1, 'failed' => 1, 'sending' => 0]);
 
         $failed = $this->getJson($days.'&status=failed', $headers)->assertOk();
         $this->assertSame([$event], array_map('intval', array_column($failed->json('data'), 'id')));
         $failed->assertJsonPath('counts.total', 3)->assertJsonPath('meta.total', 1);
 
         $this->getJson($days.'&category=notice', $headers)->assertOk()
-            ->assertJsonPath('counts', ['total' => 2, 'sent' => 1, 'partial' => 1, 'failed' => 0]);
+            ->assertJsonPath('counts', ['total' => 2, 'sent' => 1, 'partial' => 1, 'failed' => 0, 'sending' => 0]);
         $this->assertCount(1, $this->getJson(self::BASE.'/administration/emails?from=2031-03-05&to=2031-03-05&status=partial', $headers)->json('data'));
         // An unknown status is no filter at all; a malformed day is refused.
         $this->assertCount(3, $this->getJson($days.'&status=lost', $headers)->json('data'));
@@ -639,7 +640,7 @@ class PortalEmailTest extends TestCase
         // The footer sits at the foot of the sheet, inside the design rather than under it.
         $this->assertStringNotContainsString(PortalEmailMarkup::FOOTER_SLOT, $letter);
         $this->assertMatchesRegularExpression(
-            '#<!-- Footer:.*?<td[^>]*>\s*<hr[^>]*>.*<strong>MIS</strong>.*?</td>\s*</tr>\s*</table>\s*</td>\s*</tr>\s*</table>\s*</body>#s',
+            '#<!-- Footer:.*?<td[^>]*>\s*<hr[^>]*>.*<strong>MIS</strong>.*?</td>\s*</tr>\s*</table>\s*</div>\s*<!--\[if mso\]></td></tr></table><!\[endif\]-->\s*</td>\s*</tr>\s*</table>\s*</body>#s',
             $letter,
         );
 
@@ -649,16 +650,60 @@ class PortalEmailTest extends TestCase
         $this->assertSame($letter, PortalEmailMarkup::document($html, "Regards,\n**MIS**", PortalEmailMarkup::FORMAT_HTML));
     }
 
+    // From: IKAIKA BIM sends as the company, with no one to reply to, under its own letterhead; every category the composer offers is taken.
+    public function test_an_email_goes_out_as_the_company_in_any_offered_category(): void
+    {
+        Mail::fake();
+        $headers = $this->authHeaders();
+        $member = $this->administrator();
+
+        foreach (['reminder', 'request', 'project', 'security', 'warning'] as $category) {
+            $sent = $this->postJson(self::BASE.'/administration/emails', [
+                'category' => $category,
+                'subject' => 'Company '.$category,
+                'body' => 'From the company.',
+                'format' => 'letter',
+                'audience' => 'members',
+                'memberIds' => [(int) $member->getKey()],
+                'sender' => 'company',
+            ], $headers)->assertCreated()->assertJsonPath('data.category', $category);
+
+            $row = EmailMessage::query()->findOrFail($sent->json('data.id'));
+            $this->assertSame('IKAIKA BIM', $row->from_name);
+            $this->assertNull($row->reply_to);
+        }
+
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->subjectLine === 'Company reminder'
+            && $mail->fromName === 'IKAIKA BIM'
+            && $mail->replyToAddress === null
+            && $mail->envelope()->subject === '[Reminder] Company reminder'
+            && ! str_contains($mail->render(), 'IKAIKA PORTAL'));
+
+        // The preview draws the same letterhead when told the email is the company's.
+        $html = $this->postJson(self::BASE.'/administration/emails/preview', ['body' => 'Hi', 'format' => 'letter', 'sender' => 'company'], $headers)
+            ->assertOk()->json('data.html');
+        $this->assertStringNotContainsString('IKAIKA PORTAL', (string) $html);
+        $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'gossip', 'subject' => 'x', 'body' => 'x', 'audience' => 'everyone',
+        ], $headers)->assertStatus(422);
+    }
+
     public function test_a_letter_is_previewed_sent_and_saved_as_a_letter(): void
     {
         Mail::fake();
         $headers = $this->authHeaders();
         $body = "Dear Team,\n\nThe office is closed on **Friday**.";
 
-        $html = $this->postJson(self::BASE.'/administration/emails/preview', ['body' => $body, 'format' => 'letter'], $headers)
-            ->assertOk()
-            ->json('data.html');
-        $this->assertSame(PortalEmailMarkup::document($body, null, 'letter'), $html);
+        // A letter carries its category and subject over the message, in the preview as in the send.
+        $html = $this->postJson(self::BASE.'/administration/emails/preview', [
+            'body' => $body,
+            'format' => 'letter',
+            'category' => 'notice',
+            'subject' => 'Closed on Friday',
+        ], $headers)->assertOk()->json('data.html');
+        $this->assertSame(PortalEmailMarkup::document($body, null, 'letter', 'markup', 'notice', 'Closed on Friday'), $html);
+        $this->assertStringContainsString('>Notice</td>', $html);
+        $this->assertStringContainsString('>Closed on Friday</h1>', $html);
 
         $this->postJson(self::BASE.'/administration/emails', [
             'category' => 'notice',
@@ -667,7 +712,8 @@ class PortalEmailTest extends TestCase
             'format' => 'letter',
             'audience' => 'everyone',
         ], $headers)->assertCreated()->assertJsonPath('data.format', 'letter');
-        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->render() === $html);
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->render() === $html
+            && $mail->envelope()->subject === '[Notice] Closed on Friday');
 
         $this->postJson(self::BASE.'/administration/email-blocks', [
             'kind' => 'template',
@@ -768,8 +814,9 @@ class PortalEmailTest extends TestCase
         $member = $this->administrator();
         Mail::shouldReceive('to')->andReturnUsing(function ($to) {
             $pending = Mockery::mock();
+            $pending->shouldReceive('cc')->andReturnSelf();
+            $pending->shouldReceive('bcc')->andReturnSelf();
             if ($to === ['boss@ikaika.test']) {
-                $pending->shouldReceive('bcc')->andReturnSelf();
                 $pending->shouldReceive('send')->andThrow(new RuntimeException('550 relay denied for boss@ikaika.test'));
             } else {
                 $pending->shouldReceive('send')->andReturnNull();
@@ -949,7 +996,9 @@ class PortalEmailTest extends TestCase
 
         Mail::shouldReceive('to')->andReturnUsing(function ($to) use ($address) {
             $pending = Mockery::mock();
-            if (is_string($to) && trim($to) === $address) {
+            $pending->shouldReceive('cc')->andReturnSelf();
+            $pending->shouldReceive('bcc')->andReturnSelf();
+            if ($to === [$address]) {
                 $pending->shouldReceive('send')->andThrow(
                     new RuntimeException('550 mailbox unavailable for '.$address),
                 );
