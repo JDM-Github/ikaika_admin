@@ -135,6 +135,22 @@ class PortalAdvancedSettingsTest extends TestCase
         $this->getJson($public)->assertOk()->assertJsonPath('data.idLogin', false);
     }
 
+    // The reported bug (2026-10-14, user): the box showed on the Test Server but the sign-in itself answered 404.
+    public function test_a_deployed_portal_signs_in_by_id_only_while_the_switch_is_on(): void
+    {
+        $this->app['env'] = 'production';
+        $url = '/api/development/portal/auth/login';
+
+        $this->postJson($url, ['id_no' => $this->member->id_no])->assertNotFound();
+
+        DB::connection('core')->table('settings')->insert([
+            'product' => 'portal',
+            'setting_key' => PortalAdvancedSettings::ID_LOGIN,
+            'setting_value' => '1',
+        ]);
+        $this->postJson($url, ['id_no' => $this->member->id_no])->assertOk()->assertJsonStructure(['token']);
+    }
+
     private function developerToken(): string
     {
         return $this->developerModeOn($this->login($this->developer));

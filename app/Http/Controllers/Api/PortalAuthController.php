@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalActivityCopy;
+use App\Support\Portal\PortalAdvancedSettings;
 use App\Support\Portal\PortalAudit;
 use App\Support\Portal\PortalEmailLogin;
 use App\Support\Portal\PortalEmployeePresenter;
@@ -27,7 +28,8 @@ class PortalAuthController extends Controller
     // ID-number sign-in is a development aid (2026-10-12, user): local and the test suite only.
     public function login(Request $request): JsonResponse
     {
-        if (! app()->environment(['local', 'testing'])) {
+        // A deployed portal accepts ID sign-in only while the Advanced settings switch offers it.
+        if (! app()->environment(['local', 'testing']) && ! PortalAdvancedSettings::idLogin()) {
             abort(404);
         }
 
