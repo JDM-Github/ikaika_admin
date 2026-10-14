@@ -703,7 +703,11 @@ class PortalOnboardingTest extends TestCase
         $this->assertStringStartsWith('https://res.cloudinary.com/demo-cloud/', $photo['url']);
         $this->assertStringContainsString('/upload/c_fill,h_96,w_96', (string) $photo['thumbUrl']);
         $this->assertSame('image/png', $photo['mimeType']);
-        $this->assertNull($documents->firstWhere('field', 'tax_identification')['thumbUrl']);
+        $this->assertNull($photo['pagesUrl']);
+        // A PDF previews as pictures of its pages, its first page as its thumbnail (2026-10-14).
+        $tin = $documents->firstWhere('field', 'tax_identification');
+        $this->assertStringContainsString('/upload/pg_1,c_fill,h_96,w_96,f_jpg,q_auto/', (string) $tin['thumbUrl']);
+        $this->assertStringContainsString('/upload/pg_{page},f_jpg,w_1400,q_auto/', (string) $tin['pagesUrl']);
 
         // Copying again finds theirs all there already, so nothing doubles.
         $this->artisan('portal:copy-registration-documents')->expectsOutputToContain('already on Cloudinary')->assertExitCode(0);

@@ -419,7 +419,7 @@ Sidebar: **Manage → Requests**. Laravel: `app/Http/Controllers/Api/Portal/Mana
 
 `GET /api/development/portal/manage/requests`
 
-Bearer plus Admin or Executive. Members receive `403`. Optional `from` / `to` as YYYY-MM-DD, same 24-month window as own leave (plus 12 months ahead). Response: `data` (queue rows), `leave`, `overtime`, `offset`, `reimbursements`, and `range`.
+Bearer plus Admin or Executive. Members receive `403`. Optional `from` / `to` as YYYY-MM-DD, inclusive; either end may be left open, and with neither the queue is every year on file (no 24-month window). `from` after `to` is `422`. Response: `data` (queue rows), `leave`, `overtime`, `offset`, `reimbursements`, and `range` (`null` for an open end).
 
 Queue rows: `id`, `createdOn`, `requestedOn`, `kind` (`leave` / `overtime` / `offset` / `holiday-work`), `memberName`, `offsetFromOn`, `offsetToOn`, `projectLabel`, `activityLabel`, `earnCodeLabel`, `hours`, `elementChange`, `remarks`, `status`, `approverRemarks`. Typed lists match the own-request payloads plus `memberName`. Claims match own claims (`id`, `referenceCode`, `memberName`, `submittedOn`, `status`, `approverRemarks`, `items`) without receipt URLs. Do not return bank, tax, or identity documents. Cached 30s. Rate limit 60/min.
 
