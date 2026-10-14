@@ -320,12 +320,13 @@ final class PortalSharedPages
         foreach ($this->connection()->table('shared_page_shareable')->get() as $row) {
             $key = (string) $row->rule_key;
             $entry = $catalog[$key] ?? null;
+            $placement = self::SIDEBAR_PLACEMENT[$key] ?? null;
             $pages[] = [
                 'key' => $key,
                 'label' => $entry?->label ?? $key,
-                'group' => self::groupOf($catalog, $key),
+                'group' => $placement['group'] ?? self::groupOf($catalog, $key),
                 'isReady' => (bool) $row->is_ready,
-                'sortOrder' => (int) ($entry?->sort_order ?? 0),
+                'sortOrder' => (int) ($placement['order'] ?? $entry?->sort_order ?? 0),
             ];
         }
         usort($pages, static fn (array $left, array $right): int => $left['sortOrder'] <=> $right['sortOrder']);
@@ -335,6 +336,11 @@ final class PortalSharedPages
             $pages,
         );
     }
+
+    // The sidebar's own filing, where the catalog differs: References sits under Manage there, after Users.
+    private const SIDEBAR_PLACEMENT = [
+        'projects.references' => ['group' => 'Manage', 'order' => 860],
+    ];
 
     // The section a page reads under: its top-level rule's label, unless the page is that rule itself.
     private static function groupOf(array $catalog, string $key): ?string

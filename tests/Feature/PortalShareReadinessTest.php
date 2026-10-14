@@ -29,7 +29,6 @@ class PortalShareReadinessTest extends TestCase
     private const PAGE_READS = [
         'projects.view' => ['/api/development/portal/projects'],
         'projects.track' => ['/api/development/portal/projects/track'],
-        'projects.manager' => ['/api/development/portal/manage/projects'],
         'projects.references' => ['/api/development/portal/manage/references'],
         'calendar' => ['/api/development/portal/calendar/events'],
         'manage.requests' => ['/api/development/portal/manage/requests'],
@@ -44,7 +43,6 @@ class PortalShareReadinessTest extends TestCase
         'administration.actions' => ['/api/development/portal/administration/all-actions'],
         'administration.missing' => ['/api/development/portal/administration/missing-reports'],
         'administration.emails' => ['/api/development/portal/administration/emails'],
-        'email.library' => ['/api/development/portal/administration/email-blocks', '/api/development/portal/signature/default'],
     ];
 
     protected function setUp(): void

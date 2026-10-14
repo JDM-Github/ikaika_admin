@@ -1121,7 +1121,6 @@ CREATE TABLE IF NOT EXISTS shared_page_shareable (
 INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('projects.view', 1),
     ('projects.track', 1),
-    ('projects.manager', 1),
     ('projects.references', 1),
     ('calendar', 1),
     ('manage.requests', 1),
@@ -1137,9 +1136,7 @@ INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('administration.missing', 1),
     ('administration.emails', 1),
     -- Held back: the composer is a form, and its own-scope image controls follow the same rule.
-    ('email', 0),
-    ('email.library', 1),
-    ('administration.backup', 0);
+    ('email', 0);
 
 -- Manage / Shared Pages: a fine-grained, administrator-tier power. The page opens and reads with
 -- manage.shares (which shows the link, its QR and the kept password); creating, editing and revoking
