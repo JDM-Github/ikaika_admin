@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 /**
@@ -178,6 +179,18 @@ class PortalOnboardingTest extends TestCase
     private function png(): string
     {
         return (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+    }
+
+    // A stroke of ink across white paper, as a signature's picture.
+    private function signaturePng(): string
+    {
+        $picture = imagecreatetruecolor(200, 80);
+        imagefill($picture, 0, 0, imagecolorallocate($picture, 255, 255, 255));
+        imagefilledrectangle($picture, 40, 50, 159, 55, imagecolorallocate($picture, 0, 0, 0));
+        ob_start();
+        imagepng($picture);
+
+        return (string) ob_get_clean();
     }
 
     /**
@@ -794,6 +807,7 @@ class PortalOnboardingTest extends TestCase
 
                 return Http::response(['secure_url' => 'https://res.cloudinary.com/demo-cloud/image/upload/v1/ikaika-portal/employees/file'.$uploads]);
             },
+            'https://res.cloudinary.com/*e_trim*' => Http::response($this->signaturePng(), 200, ['Content-Type' => 'image/png']),
             'https://res.cloudinary.com/*' => Http::response($this->png(), 200, ['Content-Type' => 'image/png']),
             '*' => Http::response([], 200),
         ]);
@@ -820,7 +834,15 @@ class PortalOnboardingTest extends TestCase
         foreach (['photo', 'signature', 'logo'] as $image) {
             $this->assertStringStartsWith('data:image/png;base64,', (string) $card[$image]);
         }
-        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_480,f_jpg,q_90/'));
+        // The signature as its ink alone, cut to its stroke.
+        $this->assertFalse($card['signatureIsUnclear']);
+        $this->assertSame([124, 10], array_slice((array) getimagesizefromstring((string) base64_decode(substr((string) $card['signature'], 22))), 0, 2));
+        // Its shape, so the card gives it about the same room as any other.
+        $this->assertSame(12.4, $card['signatureAspect']);
+        // The photo without its background, so the plain one is never asked for.
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/e_background_removal/c_fill,g_face,w_480,h_642/f_png/'));
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_642,f_jpg,q_90/'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/e_trim/c_limit,w_1000,h_1000,f_png/'));
         $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
             ->where('message', 'like', '%made the ID card of%')->exists());
 
@@ -845,8 +867,64 @@ class PortalOnboardingTest extends TestCase
         $card = app(PortalEmployeeIdCards::class)->card($employee);
 
         $this->assertNull($card['photo']);
+        // Once without its background and once as taken.
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $message === 'portal.id_card.picture_unavailable'
-            && $context['field'] === 'photo' && str_contains($context['reason'], 'SSL certificate problem'))->once();
+            && $context['field'] === 'photo' && str_contains($context['reason'], 'SSL certificate problem'))->twice();
+    }
+
+    // The reported ask (2026-10-14): a random picture uploaded as a signature printed on the card, shrunk onto the line.
+    public function test_a_signature_on_file_that_is_no_signature_is_left_blank_and_said_to_be_unclear(): void
+    {
+        // A page of many separate marks, as a page of text or a QR code is.
+        $page = imagecreatetruecolor(400, 400);
+        imagefill($page, 0, 0, imagecolorallocate($page, 255, 255, 255));
+        for ($row = 0; $row < 10; $row++) {
+            for ($column = 0; $column < 10; $column++) {
+                imagefilledrectangle($page, 20 + $column * 36, 20 + $row * 36, 28 + $column * 36, 28 + $row * 36, imagecolorallocate($page, 0, 0, 0));
+            }
+        }
+        ob_start();
+        imagepng($page);
+        Http::fake(['https://res.cloudinary.com/*' => Http::response((string) ob_get_clean(), 200, ['Content-Type' => 'image/png'])]);
+        $employee = $this->employee("LOWER(COALESCE(role, '')) = 'admin'");
+        DB::connection('portal')->table('attachments')->insert([
+            'table_name' => 'employees', 'record_id' => (int) $employee->getKey(), 'field_name' => 'signature',
+            'file_url' => 'https://res.cloudinary.com/demo-cloud/image/upload/v1/ikaika-portal/employees/page.png',
+            'file_name' => 'page.png', 'file_size_bytes' => 900, 'mime_type' => 'image/png',
+        ]);
+
+        $card = app(PortalEmployeeIdCards::class)->card($employee);
+
+        $this->assertNull($card['signature']);
+        $this->assertTrue($card['signatureIsUnclear']);
+        $this->assertNull($card['signatureAspect']);
+    }
+
+    // The reported ask (2026-10-14): a photo's background is taken out; while Cloudinary is still at it, the photo comes as taken.
+    public function test_a_photo_whose_background_is_still_being_removed_comes_as_taken(): void
+    {
+        Sleep::fake();
+        Log::spy();
+        Http::fake([
+            'https://res.cloudinary.com/*e_background_removal*' => Http::response('', 423),
+            'https://res.cloudinary.com/*' => Http::response($this->png(), 200, ['Content-Type' => 'image/png']),
+        ]);
+        $employee = $this->employee("LOWER(COALESCE(role, '')) = 'admin'");
+        DB::connection('portal')->table('attachments')->insert([
+            'table_name' => 'employees', 'record_id' => (int) $employee->getKey(), 'field_name' => 'photo',
+            'file_url' => 'https://res.cloudinary.com/demo-cloud/image/upload/v1/ikaika-portal/employees/face.jpg',
+            'file_name' => 'face.jpg', 'file_size_bytes' => 900, 'mime_type' => 'image/jpeg',
+        ]);
+
+        $card = app(PortalEmployeeIdCards::class)->card($employee);
+
+        $this->assertStringStartsWith('data:image/png;base64,', (string) $card['photo']);
+        // Asked five times, two seconds apart, before the photo as taken is used.
+        $this->assertCount(5, Http::recorded(fn ($request): bool => str_contains($request->url(), '/e_background_removal/')));
+        Sleep::assertSleptTimes(4);
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/upload/c_fill,g_face,w_480,h_642,f_jpg,q_90/'));
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $message === 'portal.id_card.picture_unavailable'
+            && str_starts_with($context['transform'], 'e_background_removal/') && str_starts_with($context['reason'], 'HTTP 423'))->once();
     }
 
     // A file that cannot be stored never stops a promotion; the copy command finishes the job later.

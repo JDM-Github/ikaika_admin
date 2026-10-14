@@ -6,6 +6,7 @@ use App\Modules\Portal\Models\Employee;
 use BaconQrCode\Common\ErrorCorrectionLevel;
 use BaconQrCode\Encoder\Encoder;
 use Composer\CaBundle\CaBundle;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -20,18 +21,30 @@ use Throwable;
  * the browser without reaching another site; the QR code comes as its rows of modules, and the text
  * it holds is the company's own format. A picture is fetched from Cloudinary with the system's CA
  * bundle, as uploads are, since PHP on Windows has none of its own (2026-10-14); one that cannot be
- * fetched is logged and left blank on the card.
+ * fetched is logged and left blank on the card. The photo comes without its background, Cloudinary's
+ * AI taking it out once per photo and keeping the result; until it can, the photo comes as taken.
  */
 final class PortalEmployeeIdCards
 {
     public const COMPANY = 'IKAIKA OPC';
 
-    // A face-centred square for the photo, and the signature as drawn, each sized for print at 300 dpi.
-    private const PHOTO_TRANSFORM = 'c_fill,g_face,w_480,h_480,f_jpg,q_90';
+    // A face-centred 3:4 portrait for the photo, as the card prints it, its background taken out so the
+    // person stands on the card's white (2026-10-14, user), and the signature trimmed to its ink so it
+    // stands on its line; each sized for print at 300 dpi.
+    private const PHOTO_TRANSFORM = 'e_background_removal/c_fill,g_face,w_480,h_642/f_png';
 
-    private const SIGNATURE_TRANSFORM = 'c_limit,w_900,h_300,f_png';
+    // The photo as taken, for when its background cannot be taken out yet.
+    private const PLAIN_PHOTO_TRANSFORM = 'c_fill,g_face,w_480,h_642,f_jpg,q_90';
+
+    // Large enough to cut to its ink here and still print sharp.
+    private const SIGNATURE_TRANSFORM = 'e_trim/c_limit,w_1000,h_1000,f_png';
 
     private const IMAGE_TIMEOUT_SECONDS = 15;
+
+    // Cloudinary answers 423 while it first takes a background out, so it is asked again before giving up.
+    private const PROCESSING_TRIES = 5;
+
+    private const PROCESSING_WAIT_MILLISECONDS = 2000;
 
     public function __construct(private readonly PortalCloudinary $cloudinary) {}
 
@@ -63,8 +76,8 @@ final class PortalEmployeeIdCards
             'bloodType' => self::text($employee->blood_type),
             'emergencyContactName' => self::text($employee->emergency_contact_person_name),
             'emergencyContactNumber' => self::text($employee->emergency_contact_number),
-            'photo' => $this->image($employee, 'photo', self::PHOTO_TRANSFORM),
-            'signature' => $this->image($employee, 'signature', self::SIGNATURE_TRANSFORM),
+            'photo' => $this->image($employee, 'photo', self::PHOTO_TRANSFORM, self::PLAIN_PHOTO_TRANSFORM),
+            ...$this->signature($employee),
             'logo' => 'data:image/png;base64,'.base64_encode((string) file_get_contents(resource_path('images/ikaika-logo.png'))),
             'qr' => ['text' => $qrText, 'rows' => self::qrRows($qrText)],
         ];
@@ -98,8 +111,37 @@ final class PortalEmployeeIdCards
         return $rows;
     }
 
-    // Their newest file in a slot on Cloudinary, resized for the card and read in as a data URI; null when there is none.
-    private function image(Employee $employee, string $field, string $transform): ?string
+    /**
+     * The signature as its ink alone (2026-10-14, user), or as Cloudinary trims it where its ink cannot be
+     * read here; left blank, and said to be unclear, when the picture on file is not a signature. Its
+     * width over its height comes with it, so the card can give every signature about the same room.
+     *
+     * @return array{signature: ?string, signatureIsUnclear: bool, signatureAspect: ?float}
+     */
+    private function signature(Employee $employee): array
+    {
+        $picture = $this->image($employee, 'signature', self::SIGNATURE_TRANSFORM);
+        if ($picture === null) {
+            return ['signature' => null, 'signatureIsUnclear' => false, 'signatureAspect' => null];
+        }
+        $bytes = (string) base64_decode(substr($picture, (int) strpos($picture, ',') + 1));
+        $read = PortalSignatureInk::clean($bytes);
+        if (! $read['isSignature']) {
+            return ['signature' => null, 'signatureIsUnclear' => true, 'signatureAspect' => null];
+        }
+        $bytes = $read['ink'] ?? $bytes;
+        $size = @getimagesizefromstring($bytes);
+
+        return [
+            'signature' => $read['ink'] === null ? $picture : 'data:image/png;base64,'.base64_encode($read['ink']),
+            'signatureIsUnclear' => false,
+            'signatureAspect' => $size === false || $size[1] === 0 ? null : round($size[0] / $size[1], 3),
+        ];
+    }
+
+    // Their newest file in a slot on Cloudinary, read in as a data URI through the first of the transforms
+    // that answers; null when there is none.
+    private function image(Employee $employee, string $field, string ...$transforms): ?string
     {
         $url = DB::connection('portal')->table('attachments')
             ->where('table_name', 'employees')
@@ -111,18 +153,37 @@ final class PortalEmployeeIdCards
             return null;
         }
 
+        foreach ($transforms as $transform) {
+            $picture = $this->fetched($employee, $field, $transform, $this->cloudinary->transformed($url, $transform));
+            if ($picture !== null) {
+                return $picture;
+            }
+        }
+
+        return null;
+    }
+
+    private function fetched(Employee $employee, string $field, string $transform, string $url): ?string
+    {
+        $context = ['employeeId' => (int) $employee->getKey(), 'field' => $field, 'transform' => $transform];
         try {
             $response = Http::timeout(self::IMAGE_TIMEOUT_SECONDS)
                 ->withOptions(['verify' => CaBundle::getSystemCaRootBundlePath()])
-                ->get($this->cloudinary->transformed($url, $transform));
+                ->retry(
+                    self::PROCESSING_TRIES,
+                    self::PROCESSING_WAIT_MILLISECONDS,
+                    static fn (Throwable $error): bool => $error instanceof RequestException && $error->response->status() === 423,
+                    throw: false,
+                )
+                ->get($url);
         } catch (Throwable $error) {
-            Log::warning('portal.id_card.picture_unavailable', ['employeeId' => (int) $employee->getKey(), 'field' => $field, 'reason' => $error->getMessage()]);
+            Log::warning('portal.id_card.picture_unavailable', $context + ['reason' => $error->getMessage()]);
 
             return null;
         }
         $mime = strtolower(trim(explode(';', (string) $response->header('Content-Type'))[0]));
         if (! $response->successful() || ! str_starts_with($mime, 'image/')) {
-            Log::warning('portal.id_card.picture_unavailable', ['employeeId' => (int) $employee->getKey(), 'field' => $field, 'reason' => 'HTTP '.$response->status().' '.$mime]);
+            Log::warning('portal.id_card.picture_unavailable', $context + ['reason' => 'HTTP '.$response->status().' '.$mime]);
 
             return null;
         }
