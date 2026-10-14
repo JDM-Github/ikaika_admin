@@ -18,7 +18,7 @@ final class PortalTeamMap
     public const RULE = 'manage.map';
 
     /**
-     * @return array{section: string, resource: string, data: array{people: list<array<string, mixed>>, unlocated: int}}
+     * @return array{section: string, resource: string, data: array{people: list<array<string, mixed>>, unplaced: list<array<string, mixed>>}}
      */
     public function list(Employee $actor, Request $request): array
     {
@@ -26,7 +26,7 @@ final class PortalTeamMap
         $inReach = PortalRules::people($actor, $request, self::RULE);
         $ids = array_map(static fn (Employee $person): int => (int) $person->getKey(), $inReach);
         if ($ids === []) {
-            return ['section' => 'manage', 'resource' => 'map', 'data' => ['people' => [], 'unlocated' => 0]];
+            return ['section' => 'manage', 'resource' => 'map', 'data' => ['people' => [], 'unplaced' => []]];
         }
 
         $connection = $this->connection();
@@ -50,8 +50,27 @@ final class PortalTeamMap
                 'latitude' => (float) $row->latitude,
                 'longitude' => (float) $row->longitude,
                 'place' => self::place($row),
-                // address when the address itself was placed; region when only the region could be.
+                // gps/map when they set their own home; address/region when it comes from their record.
                 'source' => (string) $row->source,
+            ];
+        }
+
+        // Everyone in reach without a placed point, named so the page can say who is missing.
+        $placed = array_map(static fn (array $person): int => (int) $person['id'], $people);
+        $missing = $connection->table('employees')
+            ->whereIn('employees.id', $ids)
+            ->whereNotIn('employees.id', $placed)
+            ->orderBy('employees.last_name')->orderBy('employees.first_name')
+            ->get(['employees.id', 'employees.first_name', 'employees.last_name', 'employees.department']);
+        $missingPhotos = PortalEmployeePresenter::photoUrls($missing->pluck('id')->all());
+
+        $unplaced = [];
+        foreach ($missing as $row) {
+            $unplaced[] = [
+                'id' => (string) (int) $row->id,
+                'name' => trim((string) $row->first_name.' '.(string) $row->last_name),
+                'department' => trim((string) $row->department) ?: null,
+                'photoUrl' => $missingPhotos[(int) $row->id] ?? null,
             ];
         }
 
@@ -60,8 +79,7 @@ final class PortalTeamMap
             'resource' => 'map',
             'data' => [
                 'people' => $people,
-                // The reach's people with neither an address nor a region that could be placed.
-                'unlocated' => max(0, count($ids) - count($people)),
+                'unplaced' => $unplaced,
             ],
         ];
     }

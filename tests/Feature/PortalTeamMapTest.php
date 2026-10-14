@@ -81,7 +81,7 @@ class PortalTeamMapTest extends TestCase
         $response = $this->withToken($this->token($this->employee('admin')))->getJson(self::BASE)->assertOk();
         $person = collect($response->json('data.people'))->firstWhere('id', (string) $member->getKey());
         $this->assertSame(['Angeles City, Pampanga', 'address', 15.145, 120.5887], [$person['place'], $person['source'], $person['latitude'], $person['longitude']]);
-        $this->assertGreaterThan(0, $response->json('data.unlocated'));
+        $this->assertGreaterThan(0, count($response->json('data.unplaced')));
 
         // Nothing for the address at all: the region places them.
         $member->forceFill(['address' => 'Somewhere Unknown, Nowhere'])->save();
@@ -113,13 +113,13 @@ class PortalTeamMapTest extends TestCase
         $ids = collect($response->json('data.people'))->pluck('id')->all();
 
         $this->assertNotContains((string) $executive->getKey(), $ids);
-        // Placed and unlocated together are the non-executive active people: an executive is neither a pin nor a gap.
+        // Placed and unplaced together are the non-executive active people: an executive is neither a pin nor a gap.
         $actives = Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
             ->whereRaw("LOWER(COALESCE(role, '')) != 'executive'")
             ->count();
-        $this->assertSame($actives, count($ids) + $response->json('data.unlocated'));
+        $this->assertSame($actives, count($ids) + count($response->json('data.unplaced')));
     }
 
     // The reported ask: a member sets their own home after signing in; the address never moves it again.
