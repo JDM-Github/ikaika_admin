@@ -338,6 +338,28 @@ class PortalSharedPagesTest extends TestCase
         $this->assertStringContainsString('<svg', $svg);
     }
 
+    // The reported ask (2026-10-14, user): the kept password is its creator's alone.
+    public function test_the_password_is_visible_only_to_the_person_who_made_the_share(): void
+    {
+        $token = $this->developerToken();
+        $created = $this->createShare($token);
+        $id = (string) $created->json('data.share.id');
+        $password = (string) $created->json('data.password');
+        $this->assertNotSame('', $password);
+        $this->assertSame($password, $created->json('data.share.password'));
+
+        // The creator reads it back from the list, with the name the page can show.
+        $mine = collect($this->withToken($token)->getJson(self::BASE)->json('data.shares'))->firstWhere('id', $id);
+        $this->assertSame($password, $mine['password']);
+        $this->assertNotEmpty($mine['createdByName']);
+
+        // Another administrator sees the row, but never the password.
+        $other = $this->employee("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'");
+        $theirs = collect($this->withToken($this->token($other))->getJson(self::BASE)->assertOk()->json('data.shares'))->firstWhere('id', $id);
+        $this->assertNull($theirs['password']);
+        $this->assertSame($mine['createdByName'], $theirs['createdByName']);
+    }
+
     // The reported ask (2026-10-14, user): a granted page carries a reach, never wider than the
     // actor holds, and a page the actor does not hold cannot be handed out at all.
     public function test_a_granted_page_carries_a_reach_never_wider_than_the_actor_holds(): void

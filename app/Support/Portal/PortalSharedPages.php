@@ -60,11 +60,14 @@ final class PortalSharedPages
     {
         $rows = $this->connection()->table('shared_pages')->orderByDesc('id')->get();
         $rulesByShare = $this->connection()->table('shared_page_rules')->get()->groupBy('share_id');
+        // One lookup for every creator, so each share can name who holds its password.
+        $creatorNames = $this->creatorNames($rows->pluck('created_by')->all());
+        $viewerId = $actor === null ? null : (int) $actor->getKey();
 
         $shares = [];
         foreach ($rows as $row) {
             $shareRules = $rulesByShare->get($row->id, collect());
-            $shares[] = $this->present($row, $shareRules->pluck('rule_key')->all(), self::reachesFrom($shareRules));
+            $shares[] = $this->present($row, $shareRules->pluck('rule_key')->all(), self::reachesFrom($shareRules), $viewerId, $creatorNames[(int) $row->created_by] ?? null);
         }
 
         return ['shares' => $shares, 'pages' => $this->pages($actor, $request)];
@@ -99,7 +102,7 @@ final class PortalSharedPages
             $this->mailPassword($code, $data['email'], $data['label'], $data['guestName'] ?? $data['label'], $password, $data['expiresAt'], false);
         }
 
-        return ['share' => $this->present($this->row($id), $data['rules'], $data['reaches']), 'password' => $password];
+        return ['share' => $this->present($this->row($id), $data['rules'], $data['reaches'], (int) $actor->getKey(), $this->creatorNameOf($id)), 'password' => $password];
     }
 
     /**
@@ -127,7 +130,7 @@ final class PortalSharedPages
         $this->writeRules($id, $data['rules'], $data['reaches']);
         $this->audit->record($actor, PortalLogAction::PATCH, 'manage.shares', '{UserName|You} changed the shared page '.$data['label'], (string) $id, $request);
 
-        return ['share' => $this->present($this->row($id), $data['rules'], $data['reaches'])];
+        return ['share' => $this->present($this->row($id), $data['rules'], $data['reaches'], (int) $actor->getKey(), $this->creatorNameOf($id))];
     }
 
     /**
@@ -141,7 +144,7 @@ final class PortalSharedPages
         $this->connection()->table('shared_page_otps')->where('share_id', $id)->delete();
         $this->audit->record($actor, PortalLogAction::DELETE, 'manage.shares', '{UserName|You} revoked the shared page '.trim((string) $row->label), (string) $id, $request);
 
-        return ['share' => $this->present($this->row($id), $this->rulesFor($id), $this->reachesFor($id))];
+        return ['share' => $this->present($this->row($id), $this->rulesFor($id), $this->reachesFor($id), (int) $actor->getKey(), $this->creatorNameOf($id))];
     }
 
     /**
@@ -466,7 +469,7 @@ final class PortalSharedPages
      * @param  array<string, string>  $reaches
      * @return array<string, mixed>
      */
-    private function present(object $row, array $rules, array $reaches = []): array
+    private function present(object $row, array $rules, array $reaches = [], ?int $viewerId = null, ?string $creatorName = null): array
     {
         return [
             'id' => (string) (int) $row->id,
@@ -474,9 +477,11 @@ final class PortalSharedPages
             'guestName' => $row->guest_name === null ? null : (string) $row->guest_name,
             'code' => (string) $row->code,
             'link' => $this->link((string) $row->code),
-            // The readable password, so the developer can send it again. Null for a share made before
+            // The kept password is its creator's alone: anyone else who may open the page reads
+            // null and the name of who holds it (2026-10-14, user). Null for a share made before
             // the value was kept, until its password is regenerated.
-            'password' => $row->password_value === null ? null : (string) $row->password_value,
+            'password' => $row->password_value === null || (int) $row->created_by !== $viewerId ? null : (string) $row->password_value,
+            'createdByName' => $creatorName,
             'email' => $row->email === null ? null : (string) $row->email,
             'requireOtp' => (bool) $row->require_otp,
             'expiresAt' => $row->expires_at === null ? null : (string) $row->expires_at,
@@ -487,6 +492,34 @@ final class PortalSharedPages
             // Only the pages that carry a reach; the rest read as they always did.
             'reaches' => (object) $reaches,
         ];
+    }
+
+    /**
+     * The name of each creator id, in one query.
+     *
+     * @param  list<int>  $ids
+     * @return array<int, string>
+     */
+    private function creatorNames(array $ids): array
+    {
+        $wanted = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if ($wanted === []) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($this->connection()->table('employees')->whereIn('id', $wanted)->get(['id', 'first_name', 'last_name']) as $row) {
+            $names[(int) $row->id] = trim((string) $row->first_name.' '.(string) $row->last_name);
+        }
+
+        return $names;
+    }
+
+    private function creatorNameOf(int $shareId): ?string
+    {
+        $row = $this->connection()->table('shared_pages')->where('id', $shareId)->first(['created_by']);
+
+        return $row === null ? null : ($this->creatorNames([(int) $row->created_by])[(int) $row->created_by] ?? null);
     }
 
     private function row(int $id): object
