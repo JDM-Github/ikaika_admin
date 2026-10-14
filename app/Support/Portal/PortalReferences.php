@@ -254,7 +254,7 @@ final class PortalReferences
             abort(422, 'Give the scope a name.');
         }
         $department = $this->knownDepartment($data['department']);
-        $this->scopeTree->add($department, $code, $name);
+        $this->treeLedgered($actor, $code, fn () => $this->scopeTree->add($department, $code, $name), 'add', ['wbs_code' => $code, 'name' => $name]);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.wbs', '{UserName|You} added the scope '.$code.' '.$name, $code, $request);
 
@@ -271,7 +271,7 @@ final class PortalReferences
         if ($name === '') {
             abort(422, 'Give the scope a name.');
         }
-        $this->scopeTree->rename($code, $name);
+        $this->treeLedgered($actor, $code, fn () => $this->scopeTree->rename($code, $name), 'edit', [str_ends_with(PortalScopeTree::tableFor($code)[0], 't4_tasks') ? 'task_name' : 'name' => $name]);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.wbs', '{UserName|You} renamed the scope '.$code.' to '.$name, $code, $request);
 
@@ -283,7 +283,7 @@ final class PortalReferences
      */
     public function removeTreeScope(Employee $actor, Request $request, string $code): array
     {
-        $this->scopeTree->remove($code);
+        $this->treeLedgered($actor, $code, fn () => $this->scopeTree->remove($code), 'delete', []);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.wbs', '{UserName|You} removed the scope '.$code, $code, $request);
 
@@ -350,15 +350,22 @@ final class PortalReferences
         }
 
         $oldName = trim((string) $row->name);
-        $this->connection()->table('job_types')->where('id', $id)->update(['department' => $department, 'name' => $name]);
-        // The report builder keys a type's allowed activities by name, so a rename carries them over: this
-        // department's own row, and the shared row while no other department still uses the old name.
-        if ($oldName !== $name) {
-            $this->connection()->table('job_type_allowed_activities')->where('job_type', $oldName)->where('department', trim((string) $row->department))->update(['job_type' => $name]);
-            if (! $this->connection()->table('job_types')->where('name', $oldName)->exists()) {
-                $this->connection()->table('job_type_allowed_activities')->where('job_type', $oldName)->whereNull('department')->update(['job_type' => $name]);
+        $this->ledger->within($this->connection(), function () use ($id, $department, $name, $oldName, $row, $actor): void {
+            $this->connection()->table('job_types')->where('id', $id)->update(['department' => $department, 'name' => $name]);
+            // The report builder keys a type's allowed activities by name, so a rename carries them over: this
+            // department's own row, and the shared row while no other department still uses the old name.
+            if ($oldName === $name) {
+                return;
             }
-        }
+            $renamed = $this->connection()->table('job_type_allowed_activities')->where('job_type', $oldName)->where('department', trim((string) $row->department))->pluck('id')->all();
+            if (! $this->connection()->table('job_types')->where('name', $oldName)->exists()) {
+                $renamed = [...$renamed, ...$this->connection()->table('job_type_allowed_activities')->where('job_type', $oldName)->whereNull('department')->pluck('id')->all()];
+            }
+            $this->connection()->table('job_type_allowed_activities')->whereIn('id', $renamed)->update(['job_type' => $name]);
+            foreach ($renamed as $allowedId) {
+                $this->ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, CoreLedger::PRODUCT_PORTAL.'.job_type_allowed_activities', ['id' => (string) $allowedId, 'fields' => ['job_type' => $name]], 'references.allowed_activities', (string) $allowedId, null, (int) $actor->getKey(), is_string($actor->id_no) ? $actor->id_no : null);
+            }
+        });
         $this->bump();
         $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.type', '{UserName|You} changed the project type '.$name, (string) $id, $request);
 
@@ -586,6 +593,36 @@ final class PortalReferences
                 : $this->ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, CoreLedger::PRODUCT_PORTAL.'.'.$table, $parameters, $resource, (string) $id, null, (int) $actor->getKey(), is_string($actor->id_no) ? $actor->id_no : null);
 
             return $result;
+        });
+    }
+
+    /**
+     * A scope-tree change and its ledger entry as one write, on the tier the code belongs to.
+     *
+     * @param  array<string, string>  $fields
+     */
+    private function treeLedgered(Employee $actor, string $code, Closure $write, string $kind, array $fields): void
+    {
+        [$table, $tier] = PortalScopeTree::tableFor($code);
+        $resource = 'references.scopes.t'.$tier;
+        $target = CoreLedger::PRODUCT_PORTAL.'.'.$table;
+        $this->ledger->within($this->connection(), function () use ($actor, $code, $write, $kind, $fields, $table, $resource, $target): void {
+            $before = $this->connection()->table($table)->whereRaw('TRIM(wbs_code) = ?', [$code])->get(['id', 'airtable_record_id'])->all();
+            $write();
+            $actorId = (int) $actor->getKey();
+            $actorIdNo = is_string($actor->id_no) ? $actor->id_no : null;
+            if ($kind === 'add') {
+                foreach ($this->connection()->table($table)->whereRaw('TRIM(wbs_code) = ?', [$code])->pluck('id') as $id) {
+                    $this->ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, $table.':'.$id, $target, ['id' => (string) $id, 'fields' => $fields], $resource, (string) $id, $actorId, $actorIdNo);
+                }
+
+                return;
+            }
+            foreach ($before as $row) {
+                $kind === 'edit'
+                    ? $this->ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, $target, ['id' => (string) $row->id, 'fields' => $fields], $resource, (string) $row->id, null, $actorId, $actorIdNo)
+                    : $this->ledger->recordDelete(CoreLedger::PRODUCT_PORTAL, $target, ['id' => (string) $row->id, 'airtableRecordId' => is_string($row->airtable_record_id) && $row->airtable_record_id !== '' ? $row->airtable_record_id : null], $resource, (string) $row->id, $actorId, $actorIdNo);
+            }
         });
     }
 

@@ -470,7 +470,7 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertNotNull($employee);
         $ledger = app(CoreLedger::class);
         $role = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['fields' => ['role' => 'Admin']], 'employees', (string) $employee->id);
-        $unmapped = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['fields' => ['phone_number' => '0917']], 'employees', (string) $employee->id);
+        $unmapped = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['fields' => ['is_developer' => 1]], 'employees', (string) $employee->id);
 
         $items = collect(app(PortalAirtableSync::class)->run(true)['items']);
 
@@ -592,20 +592,66 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertArrayNotHasKey('Reimbursement Receipt', $item['fields']);
     }
 
-    // Flag decisions are portal-only by design; they settle instead of reappearing every run.
-    public function test_a_flag_decision_is_not_synced_by_design_and_settles(): void
+    // The reported ask (2026-10-14, user): the daily-report review drives Approval, on every line it decided, and nothing else.
+    public function test_a_flag_decision_sends_approval_on_the_lines_it_decided(): void
     {
         $this->fakeAirtable();
+        $lineId = $this->reportLine('recLINE0000000051');
+        DB::connection('portal')->table('user_reports')->where('id', $lineId)->update(['approval' => 'Rejected']);
         $flag = app(CoreLedger::class)->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.user_reports',
-            ['id' => '4812', 'flagStatus' => 'Approved'], 'reports.flagged', '4812');
+            ['id' => (string) $lineId, 'flagStatus' => 'Rejected', 'userReportIds' => [$lineId], 'fields' => ['approval' => 'Rejected']], 'reports.flagged', (string) $lineId);
 
         $item = collect(app(PortalAirtableSync::class)->run(true)['items'])->firstWhere('actionId', $flag);
 
         $this->assertIsArray($item);
-        $this->assertSame('nothing', $item['outcome']);
-        $this->assertStringContainsString('portal-only', $item['problems'][0]);
+        $this->assertSame('synced', $item['outcome']);
+        $this->assertSame(['Approval' => 'Rejected'], $item['fields']);
         $this->assertNotNull(Action::query()->findOrFail($flag)->synced_at);
-        Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET');
+    }
+
+    // Allowed activities go one row per Job Type; a department's own list is named with it in brackets.
+    public function test_a_departments_allowed_activities_go_as_its_bracketed_job_type(): void
+    {
+        $schema = $this->schema();
+        $schema['tables'][] = ['name' => 'Job Type Allowed Activities', 'fields' => [
+            ['name' => 'Job Type', 'type' => 'singleLineText'],
+            ['name' => 'Activity Code ID Initials', 'type' => 'multilineText'],
+        ]];
+        $this->fakeAirtable($schema);
+        $portal = DB::connection('portal');
+        $shared = (int) $portal->table('job_type_allowed_activities')->insertGetId(['job_type' => 'Sync Type', 'department' => null, 'activity_code_id_initials' => '80']);
+        $own = (int) $portal->table('job_type_allowed_activities')->insertGetId(['job_type' => 'Sync Type', 'department' => 'MIS', 'activity_code_id_initials' => '50,51']);
+        $ledger = app(CoreLedger::class);
+        $first = $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, 'job_type_allowed_activities:'.$shared, 'portal.job_type_allowed_activities', ['id' => (string) $shared], 'references.allowed_activities', (string) $shared, 1, null);
+        $second = $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, 'job_type_allowed_activities:'.$own, 'portal.job_type_allowed_activities', ['id' => (string) $own], 'references.allowed_activities', (string) $own, 1, null);
+
+        $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
+
+        $this->assertSame(['Job Type' => 'Sync Type', 'Activity Code ID Initials' => '80'], $items->firstWhere('actionId', $first)['fields']);
+        $this->assertSame(['Job Type' => 'Sync Type (MIS)', 'Activity Code ID Initials' => '50,51'], $items->firstWhere('actionId', $second)['fields']);
+    }
+
+    // A document slot the portal changed goes, emptied when the portal removed its file; other slots stay alone.
+    public function test_a_changed_document_slot_is_sent_and_a_removed_one_goes_empty(): void
+    {
+        $schema = $this->schema();
+        $schema['tables'][2]['fields'][] = ['name' => 'Photo', 'type' => 'multipleAttachments'];
+        $schema['tables'][2]['fields'][] = ['name' => 'Tax Identification', 'type' => 'multipleAttachments'];
+        $this->fakeAirtable($schema);
+        $portal = DB::connection('portal');
+        $employeeId = (int) $portal->table('employees')->insertGetId(['airtable_record_id' => 'recEMPL0000000061', 'id_no' => '900000-0061', 'first_name' => 'Doc', 'last_name' => 'Holder']);
+        $portal->table('attachments')->insert(['table_name' => 'employees', 'record_id' => $employeeId, 'field_name' => 'photo', 'file_url' => 'https://res.cloudinary.com/demo/me.jpg', 'file_name' => 'me.jpg']);
+        $ledger = app(CoreLedger::class);
+        $uploaded = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['id' => (string) $employeeId, 'columns' => [], 'doc_photo' => true], 'employees', (string) $employeeId, null, 1, null);
+        $removed = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['id' => (string) $employeeId, 'columns' => [], 'doc_tax_identification' => true], 'employees', (string) $employeeId, null, 1, null);
+
+        $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
+
+        // Changed-only actions are not collapsed: each carries its own slot, judged with every pending one.
+        $fields = $items->firstWhere('actionId', $uploaded)['fields'];
+        $this->assertSame([['url' => 'https://res.cloudinary.com/demo/me.jpg', 'filename' => 'me.jpg']], $fields['Photo']);
+        $this->assertSame([], $fields['Tax Identification']);
+        $this->assertSame([], $items->firstWhere('actionId', $removed)['fields']['Tax Identification']);
     }
 
     public function test_an_unmapped_resource_is_left_for_later_and_a_failure_is_recorded(): void

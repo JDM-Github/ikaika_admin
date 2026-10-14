@@ -713,7 +713,8 @@ final class PortalSubmittedReports
                         $entry,
                         $group['remarks'],
                         $lateSubmission,
-                        self::NEW_APPROVAL,
+                        // The review drives Approval (2026-10-14, user): only a report that waits is Pending.
+                        $isFlagged ? self::NEW_APPROVAL : 'Approved',
                         $lateApproval,
                         null,
                         $createdAt,

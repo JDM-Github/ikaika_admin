@@ -697,6 +697,11 @@ class PortalProjectEditorTest extends TestCase
             ->assertOk()->assertJsonPath('data.department', 'MIS');
         $this->assertSame([$misCode], $activities->allowedFor('MIS', 'Management'));
         $this->assertSame([$engineeringCode], $activities->allowedFor('Engineering', 'Management'));
+        // Saved in place, so the row keeps its Airtable record, and each save is ledgered (2026-10-14).
+        $misRow = (int) $portal->table('job_type_allowed_activities')->where('job_type', 'Management')->where('department', 'MIS')->value('id');
+        $this->withToken($token)->putJson(self::BASE.'/allowed-activities', ['jobType' => 'Management', 'department' => 'MIS', 'activityCodes' => [$misCode, $sharedCode]])->assertOk();
+        $this->assertSame($misRow, (int) $portal->table('job_type_allowed_activities')->where('job_type', 'Management')->where('department', 'MIS')->value('id'));
+        $this->assertSame(['add', 'edit'], DB::connection('core')->table('actions')->where('resource', 'references.allowed_activities')->where('record_id', (string) $misRow)->orderBy('id')->pluck('action_type')->all());
         $this->withToken($token)->putJson(self::BASE.'/allowed-activities', ['jobType' => 'Management', 'department' => 'Nowhere', 'activityCodes' => []])->assertStatus(422);
     }
 

@@ -108,6 +108,18 @@ final class PortalScopeTree
         return $codes;
     }
 
+    /**
+     * The table a code's tier lives in, and its tier number, for whoever ledgers a change to it.
+     *
+     * @return array{0: string, 1: int}
+     */
+    public static function tableFor(string $code): array
+    {
+        $depth = substr_count($code, '-') + 1;
+
+        return [self::TIERS[$depth][0] ?? self::TIERS[4][0], min(4, $depth)];
+    }
+
     public function add(string $department, string $code, string $name): void
     {
         if (preg_match(self::CODE_SHAPE, $code) !== 1) {

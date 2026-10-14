@@ -519,7 +519,21 @@ final class PortalManageUsers
         }
 
         if ($changed !== []) {
-            $target->save();
+            // Named as a plain list: the ledger strips government and bank keys, and the sync reads SQL.
+            $columns = array_values(array_map(static fn (string $key): string => self::INFORMATION_COLUMNS[$key], $changed));
+            $this->ledger->within($target->getConnection(), function () use ($target, $actor, $columns): void {
+                $target->save();
+                $this->ledger->recordEdit(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreLedger::PRODUCT_PORTAL.'.employees',
+                    ['table' => 'employees', 'key' => 'id', 'id' => (string) $target->getKey(), 'columns' => $columns],
+                    'employees',
+                    (string) $target->getKey(),
+                    null,
+                    (int) $actor->getKey(),
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            });
             $this->bumpCache();
             PortalCache::bump();
             $this->audit->record(
@@ -547,6 +561,7 @@ final class PortalManageUsers
         $target = $this->privateTarget($actor, $id, $request);
         $field = trim((string) $request->input('field', ''));
         $this->employeeDocuments->upload($target, $field, $request->file('file'));
+        $this->ledgerDocument($actor, $target, $field);
         $this->documentsChanged($actor, $target, $request, PortalLogAction::POST, $field);
 
         return $this->profileResponse($actor, $target, $request);
@@ -559,6 +574,7 @@ final class PortalManageUsers
     {
         $target = $this->privateTarget($actor, $id, $request);
         $field = $this->employeeDocuments->remove($target, $documentId);
+        $this->ledgerDocument($actor, $target, $field);
         $this->documentsChanged($actor, $target, $request, PortalLogAction::DELETE, $field);
 
         return $this->profileResponse($actor, $target, $request);
@@ -642,6 +658,21 @@ final class PortalManageUsers
             'resource' => 'users',
             'data' => $this->profileData($viewer, $target, $request, $withPrivate),
         ];
+    }
+
+    // A document slot changed: the sync sends that slot's files to the Airtable field it maps to.
+    private function ledgerDocument(Employee $actor, Employee $target, string $field): void
+    {
+        $this->ledger->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            CoreLedger::PRODUCT_PORTAL.'.employees',
+            ['table' => 'employees', 'key' => 'id', 'id' => (string) $target->getKey(), 'columns' => [], 'doc_'.$field => true],
+            'employees',
+            (string) $target->getKey(),
+            null,
+            (int) $actor->getKey(),
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
     }
 
     /**

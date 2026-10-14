@@ -729,6 +729,11 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame('123-456-789', $saved['taxIdentificationNo']);
         $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
             ->where('message', 'like', '%changed the employee information of%')->exists());
+        // Ledgered by column name only (2026-10-14), and only what changed: the swift code already read that.
+        $ledgered = DB::connection('core')->table('actions')->where('resource', 'employees')->where('record_id', (string) $employeeId)
+            ->where('action_type', 'edit')->orderByDesc('id')->value('parameters');
+        $this->assertSame(['address', 'personal_email', 'emergency_contact_person_name'], json_decode((string) $ledgered, true)['parameters']['columns']);
+        $this->assertStringNotContainsString('Manila', (string) $ledgered);
 
         $this->withToken($head)->patchJson($users.'/information', ['sssNo' => '1111111111'])
             ->assertStatus(422)->assertJsonPath('message', 'SSS No. cannot be one digit repeated. Check it.');

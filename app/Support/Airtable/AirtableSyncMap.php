@@ -250,7 +250,7 @@ final class AirtableSyncMap
             'airtable_table' => 'Employees',
             'changed_only' => ['columns', 'fields', 'changes'],
             'create_full' => true,
-            'lenient' => ['Job Title'],
+            'lenient' => ['Job Title', 'Blood Type', 'Bank Name'],
             'fields' => [
                 'id_no' => 'ID No.',
                 'first_name' => 'First Name',
@@ -265,6 +265,59 @@ final class AirtableSyncMap
                 'role_level' => 'Role Level',
                 'department' => 'Department',
                 'location' => 'Location',
+                // Employee information (2026-10-14, user): the private details Manage / Users edits.
+                'start_date' => 'Start Date',
+                'date_of_birth' => 'Date of Birth',
+                'blood_type' => 'Blood Type',
+                'address' => 'Address',
+                'personal_email' => 'Personal E-Mail',
+                'phone_number' => 'Phone Number',
+                'tax_identification_no' => 'Tax Identification No.',
+                'sss_no' => 'SSS No.',
+                'philhealth_no' => 'PhilHealth No.',
+                'hdmf_no' => 'HDMF No.',
+                'bank_name' => 'Bank Name',
+                'bank_account_number' => 'Bank Account Number',
+                'bank_swift_code' => 'Bank SWIFT Code',
+                'emergency_contact_person_name' => 'Emergency Contact Person Name',
+                'emergency_contact_number' => 'Emergency Contact Number',
+                'emergency_contact_address' => 'Emergency Contact Address',
+            ],
+            // Their documents, sent when a person is created or the action changed that slot.
+            'attachments' => [
+                'Photo' => ['table_name' => 'employees', 'field_name' => 'photo', 'changed_key' => 'doc_photo'],
+                'Tax Identification' => ['table_name' => 'employees', 'field_name' => 'tax_identification', 'changed_key' => 'doc_tax_identification'],
+                'SS ID' => ['table_name' => 'employees', 'field_name' => 'ss_id', 'changed_key' => 'doc_ss_id'],
+                'PhilHealth ID' => ['table_name' => 'employees', 'field_name' => 'philhealth_id', 'changed_key' => 'doc_philhealth_id'],
+                'HDMF ID' => ['table_name' => 'employees', 'field_name' => 'hdmf_id', 'changed_key' => 'doc_hdmf_id'],
+                'Bank Certificate' => ['table_name' => 'employees', 'field_name' => 'bank_certificate', 'changed_key' => 'doc_bank_certificate'],
+            ],
+        ],
+        // The daily-report review drives Approval (2026-10-14, user): a report waiting for review is
+        // Pending, and the reviewer's decision sends Approved or Rejected on every line it decided.
+        'reports.flagged' => [
+            'sql_table' => 'user_reports',
+            'airtable_table' => 'User Reports',
+            'rows' => ['lines' => 'userReportIds', 'removed' => 'removedAirtableIds', 'deleted' => 'lines'],
+            'changed_only' => ['fields', 'changes'],
+            'fields' => [
+                'approval' => 'Approval',
+            ],
+        ],
+        // Flagging a member is a warning in Airtable too (2026-10-14, user); unflagging marks it Inactive.
+        'warnings' => [
+            'sql_table' => 'warnings',
+            'airtable_table' => 'Warnings',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'fields' => [
+                'warning_date' => 'Date',
+                'description' => 'Description',
+                'status' => 'Status',
+                'violation_type' => 'Violation Type',
+            ],
+            'links' => [
+                'Employee' => ['junction' => 'employees_warnings', 'local' => 'warning_id', 'foreign' => 'employee_id', 'table' => 'employees', 'column' => 'employeeIds'],
             ],
         ],
         // Manage / References (2026-10-14, user): a client or an activity code the portal adds is
@@ -295,6 +348,51 @@ final class AirtableSyncMap
                 'department' => 'Department',
             ],
         ],
+        // The scope tree, one Airtable table per tier (2026-10-14, user); the portal writes only the
+        // code, the name and (above tasks) the department.
+        'references.scopes.t1' => [
+            'sql_table' => 'project_scope_t1_processes',
+            'airtable_table' => 'Project Scope Source - T1 Processes',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => ['wbs_code' => 'WBS Code', 'name' => 'Name', 'department' => 'Department'],
+        ],
+        'references.scopes.t2' => [
+            'sql_table' => 'project_scope_t2_procedures',
+            'airtable_table' => 'Project Scope Source - T2 Procedures',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => ['wbs_code' => 'WBS Code', 'name' => 'Name', 'department' => 'Department'],
+        ],
+        'references.scopes.t3' => [
+            'sql_table' => 'project_scope_t3_activities',
+            'airtable_table' => 'Project Scope Source - T3 Activities',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => ['wbs_code' => 'WBS Code', 'name' => 'Name', 'department' => 'Department'],
+        ],
+        'references.scopes.t4' => [
+            'sql_table' => 'project_scope_t4_tasks',
+            'airtable_table' => 'Project Scope Source - T4 Tasks',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => ['wbs_code' => 'WBS Code', 'task_name' => 'Task Name'],
+        ],
+        // A project type's allowed activities. Airtable keeps one row per Job Type and has no
+        // Department, so a department's own list goes as "Management (MIS)" (2026-10-14, user).
+        'references.allowed_activities' => [
+            'sql_table' => 'job_type_allowed_activities',
+            'airtable_table' => 'Job Type Allowed Activities',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'bracketed' => ['job_type' => 'department'],
+            'fields' => ['job_type' => 'Job Type', 'activity_code_id_initials' => 'Activity Code ID Initials'],
+        ],
     ];
 
     /**
@@ -303,9 +401,7 @@ final class AirtableSyncMap
      *
      * @var array<string, string>
      */
-    private const PORTAL_ONLY = [
-        'reports.flagged' => 'Flag decisions are portal-only (separate.sql); Airtable has no field for them.',
-    ];
+    private const PORTAL_ONLY = [];
 
     public static function portalOnly(?string $resource): ?string
     {

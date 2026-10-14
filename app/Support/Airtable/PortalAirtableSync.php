@@ -510,7 +510,7 @@ final class PortalAirtableSync
     }
 
     /**
-     * @param  array{sql_table: string, airtable_table: string, fields: array<string, string>}  $map
+     * @param  array{sql_table: string, airtable_table: string, fields: array<string, string>, bracketed?: array<string, string>}  $map
      * @return array<string, mixed>
      */
     private function fields(array $map, object $row, bool $creating): array
@@ -518,6 +518,11 @@ final class PortalAirtableSync
         $fields = [];
         foreach ($map['fields'] as $column => $field) {
             $value = $row->{$column} ?? null;
+            // A column sent with another in brackets: "Management (MIS)" for a department's own row.
+            $suffix = isset($map['bracketed'][$column]) ? trim((string) ($row->{$map['bracketed'][$column]} ?? '')) : '';
+            if ($suffix !== '' && is_string($value)) {
+                $value .= ' ('.$suffix.')';
+            }
             // A create leaves an empty column out; an update sends null so a cleared value clears.
             if ($value === null && $creating) {
                 continue;
@@ -611,7 +616,8 @@ final class PortalAirtableSync
         $pending = $creating || ($map['attachments'] ?? []) === [] ? [] : $this->pendingKeys($action, (int) $row->id);
         foreach ($map['attachments'] ?? [] as $field => $source) {
             $key = $source['changed_key'] ?? $source['payload_key'] ?? null;
-            if (! $creating && ($key === null || ! isset($pending[$key]))) {
+            $changedHere = ! $creating && $key !== null && isset($pending[$key]);
+            if (! $creating && ! $changedHere) {
                 continue;
             }
             $files = DB::connection('portal')
@@ -630,9 +636,13 @@ final class PortalAirtableSync
                 }
                 $list[] = ['url' => $file->file_url, 'filename' => (string) ($file->file_name ?? 'file')];
             }
-            // Sent empty only when the portal itself removed the file. SQL did not import every
-            // receipt Airtable holds, so an empty list alone is no evidence of a removal.
-            if ($list !== [] || (isset($source['payload_key']) && $this->portalRemoved($action, (int) $row->id, $source['payload_key']))) {
+            // Sent empty only when the portal itself removed the file: a slot the action changed, or a
+            // receipt the ledger shows it held. SQL did not import every file Airtable holds, so an
+            // empty list alone is no evidence of a removal.
+            $removed = isset($source['payload_key'])
+                ? $this->portalRemoved($action, (int) $row->id, $source['payload_key'])
+                : $changedHere;
+            if ($list !== [] || $removed) {
                 $fields[$field] = $list;
             }
         }

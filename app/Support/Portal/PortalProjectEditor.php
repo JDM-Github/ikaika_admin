@@ -1487,15 +1487,38 @@ final class PortalProjectEditor
             }
         }
 
-        $row = $this->connection()->table('job_type_allowed_activities')->where('job_type', $jobType);
-        $rowDepartment === null ? $row->whereNull('department')->delete() : $row->where('department', $rowDepartment)->delete();
-        if ($codes !== []) {
-            $this->connection()->table('job_type_allowed_activities')->insert([
-                'job_type' => $jobType,
-                'department' => $rowDepartment,
-                'activity_code_id_initials' => implode(',', $codes),
-            ]);
-        }
+        // Saved in place, so the row keeps the Airtable record it already has, and ledgered for the sync (2026-10-14).
+        $this->ledger->within($this->connection(), function () use ($jobType, $rowDepartment, $codes, $actor): void {
+            $table = $this->connection()->table('job_type_allowed_activities');
+            $existing = (clone $table)->where('job_type', $jobType)
+                ->when($rowDepartment === null, fn ($query) => $query->whereNull('department'), fn ($query) => $query->where('department', $rowDepartment))
+                ->orderBy('id')->get(['id', 'airtable_record_id', 'activity_code_id_initials'])->all();
+            $keep = $existing[0] ?? null;
+            $initials = implode(',', $codes);
+            $actorId = (int) $actor->getKey();
+            $actorIdNo = is_string($actor->id_no) ? $actor->id_no : null;
+            $target = CoreLedger::PRODUCT_PORTAL.'.job_type_allowed_activities';
+            foreach ($existing as $row) {
+                if ($codes !== [] && $row === $keep) {
+                    continue;
+                }
+                (clone $table)->where('id', $row->id)->delete();
+                $this->ledger->recordDelete(CoreLedger::PRODUCT_PORTAL, $target, ['id' => (string) $row->id, 'airtableRecordId' => is_string($row->airtable_record_id) && $row->airtable_record_id !== '' ? $row->airtable_record_id : null], 'references.allowed_activities', (string) $row->id, $actorId, $actorIdNo);
+            }
+            if ($codes === []) {
+                return;
+            }
+            if ($keep !== null) {
+                if ((string) $keep->activity_code_id_initials !== $initials) {
+                    (clone $table)->where('id', $keep->id)->update(['activity_code_id_initials' => $initials]);
+                    $this->ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, $target, ['id' => (string) $keep->id, 'fields' => ['activity_code_id_initials' => $initials]], 'references.allowed_activities', (string) $keep->id, null, $actorId, $actorIdNo);
+                }
+
+                return;
+            }
+            $id = (int) (clone $table)->insertGetId(['job_type' => $jobType, 'department' => $rowDepartment, 'activity_code_id_initials' => $initials]);
+            $this->ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, 'job_type_allowed_activities:'.$id, $target, ['id' => (string) $id], 'references.allowed_activities', (string) $id, $actorId, $actorIdNo);
+        });
         // The report builder reads this table through its own cache; bump it so the form sees the change.
         (new PortalReportProjects)->bumpCache();
 
