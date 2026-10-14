@@ -278,10 +278,23 @@ final class PortalSharedPages
         $guestName = isset($data['guestName']) && trim((string) $data['guestName']) !== '' ? trim((string) $data['guestName']) : null;
         $slug = PortalCredentials::slug($data['slug'] ?? null);
 
-        // Only pages that have been verified guest-safe can be granted.
+        // Only pages that have been verified guest-safe can be granted; a page's option rides only with its page.
         $ready = $this->readyRules();
         $rules = array_values(array_unique(array_map(static fn (mixed $key): string => (string) $key, $data['rules'])));
+        $options = [];
         foreach ($rules as $key) {
+            $page = self::optionPage($key);
+            if ($page !== null) {
+                if (! in_array($page, $rules, true)) {
+                    abort(422, 'Turn on the page an option belongs to first.');
+                }
+                if (! PortalRules::holds($actor, $request, $key)) {
+                    abort(422, 'You cannot share a power you do not hold.');
+                }
+                $options[$key] = $page;
+
+                continue;
+            }
             if (! in_array($key, $ready, true)) {
                 abort(422, 'That page is not ready to share yet.');
             }
@@ -297,7 +310,7 @@ final class PortalSharedPages
         $reaches = [];
         $needsDepartment = false;
         foreach ($rules as $key) {
-            if (! (bool) ($catalog[$key]->supports_reach ?? false)) {
+            if (isset($options[$key]) || ! (bool) ($catalog[$key]->supports_reach ?? false)) {
                 continue;
             }
             $held = PortalRules::reach($actor, $request, $key);
@@ -316,6 +329,12 @@ final class PortalSharedPages
             $reaches[$key] = $reach;
             if ($reach === 'department') {
                 $needsDepartment = true;
+            }
+        }
+        // An option reaches no further than its page, nor than the actor holds it.
+        foreach ($options as $key => $page) {
+            if ((bool) ($catalog[$key]->supports_reach ?? false)) {
+                $reaches[$key] = PortalRules::narrower(PortalRules::reach($actor, $request, $key), $reaches[$page] ?? 'all') ?? 'department';
             }
         }
 
@@ -355,7 +374,7 @@ final class PortalSharedPages
     }
 
     /**
-     * @return list<array{key: string, label: string, group: ?string, isReady: bool, supportsReach: bool, reach: ?string}>
+     * @return list<array{key: string, label: string, group: ?string, isReady: bool, supportsReach: bool, reach: ?string, options: list<array{key: string, label: string}>}>
      */
     private function pages(?Employee $actor = null, ?Request $request = null): array
     {
@@ -375,14 +394,42 @@ final class PortalSharedPages
                 'supportsReach' => $supportsReach,
                 'reach' => $supportsReach && $actor !== null && $request !== null ? PortalRules::reach($actor, $request, $key) : null,
                 'sortOrder' => (int) ($placement['order'] ?? $entry?->sort_order ?? 0),
+                // Its options, each only when the actor may hand it out.
+                'options' => array_values(array_map(
+                    static fn (string $option): array => ['key' => $option, 'label' => $catalog[$option]->label ?? $option],
+                    array_filter(
+                        self::OPTIONS[$key] ?? [],
+                        static fn (string $option): bool => isset($catalog[$option]) && $actor !== null && $request !== null && PortalRules::holds($actor, $request, $option),
+                    ),
+                )),
             ];
         }
         usort($pages, static fn (array $left, array $right): int => $left['sortOrder'] <=> $right['sortOrder']);
 
         return array_map(
-            static fn (array $page): array => ['key' => $page['key'], 'label' => $page['label'], 'group' => $page['group'], 'isReady' => $page['isReady'], 'supportsReach' => $page['supportsReach'], 'reach' => $page['reach']],
+            static fn (array $page): array => ['key' => $page['key'], 'label' => $page['label'], 'group' => $page['group'], 'isReady' => $page['isReady'], 'supportsReach' => $page['supportsReach'], 'reach' => $page['reach'], 'options' => $page['options']],
             $pages,
         );
+    }
+
+    /*
+     * Powers a page may lend a guest beside the page itself (2026-10-14, user): Users may also show employee
+     * information, so a boss's share can open private details. Stored as rules of the share like pages.
+     */
+    private const OPTIONS = [
+        'manage.users' => ['manage.users.information'],
+    ];
+
+    // The page an option belongs to, or null for a key that is not an option.
+    private static function optionPage(string $key): ?string
+    {
+        foreach (self::OPTIONS as $page => $keys) {
+            if (in_array($key, $keys, true)) {
+                return $page;
+            }
+        }
+
+        return null;
     }
 
     // The sidebar's own filing, where the catalog differs: References sits under Manage there, after Users.

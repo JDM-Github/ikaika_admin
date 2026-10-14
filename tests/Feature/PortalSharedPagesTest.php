@@ -396,4 +396,33 @@ class PortalSharedPagesTest extends TestCase
         DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $developer->getKey(), 'permission_key' => 'projects.view']);
         $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view']]))->assertStatus(422);
     }
+
+    // The reported ask (2026-10-14, user): Users can lend Show employee information, so a boss's share opens private details.
+    public function test_users_can_lend_employee_information_to_a_guest(): void
+    {
+        $token = $this->developerToken();
+        $users = collect($this->withToken($token)->getJson(self::BASE)->json('data.pages'))->firstWhere('key', 'manage.users');
+        $this->assertSame([['key' => 'manage.users.information', 'label' => 'Show employee information']], $users['options']);
+
+        // An option rides only with its page.
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view', 'manage.users.information']]))
+            ->assertStatus(422)->assertJsonPath('message', 'Turn on the page an option belongs to first.');
+
+        $target = $this->employee("LOWER(COALESCE(role_level, '')) != 'executive'");
+        $plain = $this->createShare($token, ['rules' => ['manage.users']])->json('data');
+        $lent = $this->createShare($token, ['label' => 'Boss view', 'rules' => ['manage.users', 'manage.users.information']])->json('data');
+        $this->assertSame('all', DB::connection('portal')->table('shared_page_rules')->where('share_id', $lent['share']['id'])->where('rule_key', 'manage.users.information')->value('reach'));
+
+        $guest = fn (array $share): string => (string) $this->postJson('/api/development/portal/share/'.$share['share']['code'].'/access', ['password' => $share['password']])->assertOk()->json('data.token');
+        $profile = '/api/development/portal/manage/users/'.$target->getKey();
+        $this->withToken($guest($plain))->getJson($profile)->assertOk()->assertJsonPath('data.information', null);
+        $this->withToken($guest($plain))->getJson($profile.'/id-card')->assertForbidden();
+
+        // With the option the guest sees the private details, and the look is logged under the share's maker.
+        $this->assertIsArray($this->withToken($guest($lent))->getJson($profile)->assertOk()->json('data.information'));
+        $log = DB::connection('portal')->table('logs')->where('resource', 'manage.users.information')->where('record_id', (string) $target->getKey())->orderByDesc('id')->first();
+        $this->assertNotNull($log);
+        $this->assertSame((int) DB::connection('portal')->table('shared_pages')->where('id', $lent['share']['id'])->value('created_by'), (int) $log->employee_id);
+        $this->assertStringContainsString('The shared page "Boss view"', (string) $log->message);
+    }
 }

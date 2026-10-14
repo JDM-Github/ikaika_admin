@@ -7,6 +7,7 @@ use App\Support\Core\CoreLedger;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -573,15 +574,7 @@ final class PortalManageUsers
     public function idCard(Employee $actor, int $id, Request $request): array
     {
         $target = $this->privateTarget($actor, $id, $request);
-        $this->audit->record(
-            $actor,
-            PortalLogAction::VIEW,
-            self::INFORMATION_RULE,
-            '{UserName|You} made the ID card of '.PortalAccessGraph::name($target),
-            (string) $target->getKey(),
-            $request,
-            ['employeeId' => (int) $target->getKey()],
-        );
+        $this->recordPrivateView($actor, $request, 'made the ID card of', $target);
 
         return ['section' => 'manage', 'resource' => 'users', 'data' => $this->idCards->card($target)];
     }
@@ -642,15 +635,7 @@ final class PortalManageUsers
         $target = $this->inReach($viewer, $id, $request);
         $withPrivate = $this->seesPrivate($viewer, $target, $request);
         if ($withPrivate && ! $target->is($viewer)) {
-            $this->audit->record(
-                $viewer,
-                PortalLogAction::VIEW,
-                self::INFORMATION_RULE,
-                '{UserName|You} viewed the employee information of '.PortalAccessGraph::name($target),
-                (string) $target->getKey(),
-                $request,
-                ['employeeId' => (int) $target->getKey()],
-            );
+            $this->recordPrivateView($viewer, $request, 'viewed the employee information of', $target);
         }
 
         return [
@@ -705,6 +690,35 @@ final class PortalManageUsers
         }
 
         return $target;
+    }
+
+    /*
+     * Each look at private details is logged. A shared page's guest has no employee of their own, so the
+     * look is filed under whoever made the share, naming the share (2026-10-14, user).
+     */
+    private function recordPrivateView(Employee $viewer, Request $request, string $verb, Employee $target): void
+    {
+        $owner = $viewer;
+        $who = '{UserName|You}';
+        $guest = $request->attributes->get('portalShare');
+        if ($guest instanceof PortalGuest) {
+            $share = DB::connection('portal')->table('shared_pages')->where('id', $guest->shareId)->first(['label', 'created_by']);
+            $creator = $share === null ? null : Employee::query()->find((int) $share->created_by);
+            if ($creator === null) {
+                return;
+            }
+            $owner = $creator;
+            $who = 'The shared page "'.$share->label.'" of {UserName|You}';
+        }
+        $this->audit->record(
+            $owner,
+            PortalLogAction::VIEW,
+            self::INFORMATION_RULE,
+            $who.' '.$verb.' '.PortalAccessGraph::name($target),
+            (string) $target->getKey(),
+            $request,
+            ['employeeId' => (int) $target->getKey(), ...($guest instanceof PortalGuest ? ['shareId' => $guest->shareId] : [])],
+        );
     }
 
     // Someone in the Users reach whose private details the viewer sees; anyone else is refused.
