@@ -295,7 +295,7 @@ final class PortalSharedPages
                 if (! in_array($page, $rules, true)) {
                     abort(422, 'Turn on the page an option belongs to first.');
                 }
-                if (! PortalRules::holds($actor, $request, $key)) {
+                if (! self::mayShare($actor, $request, $key)) {
                     abort(422, 'You cannot share a power you do not hold.');
                 }
                 $options[$key] = $page;
@@ -304,6 +304,10 @@ final class PortalSharedPages
             }
             if (! in_array($key, $ready, true)) {
                 abort(422, 'That page is not ready to share yet.');
+            }
+            // A page without a reach was never checked against the maker before (2026-10-14).
+            if (! self::mayShare($actor, $request, $key)) {
+                abort(422, 'You cannot share a page you do not hold.');
             }
         }
         if ($rules === []) {
@@ -324,7 +328,7 @@ final class PortalSharedPages
             if (isset($options[$key]) || ! (bool) ($catalog[$key]->supports_reach ?? false)) {
                 continue;
             }
-            $held = PortalRules::reach($actor, $request, $key);
+            $held = self::shareableReach($actor, $request, $key);
             if ($held === null) {
                 abort(422, 'You cannot share a page you do not hold.');
             }
@@ -352,7 +356,7 @@ final class PortalSharedPages
         // An option reaches no further than its page, nor than the actor holds it.
         foreach ($options as $key => $page) {
             if ((bool) ($catalog[$key]->supports_reach ?? false)) {
-                $reaches[$key] = PortalRules::narrower(PortalRules::reach($actor, $request, $key), $reaches[$page] ?? 'all') ?? 'department';
+                $reaches[$key] = PortalRules::narrower(self::shareableReach($actor, $request, $key), $reaches[$page] ?? 'all') ?? 'department';
             }
         }
 
@@ -410,14 +414,14 @@ final class PortalSharedPages
                 'isReady' => (bool) $row->is_ready,
                 // The reach the actor holds, so the form offers no more than they may hand out.
                 'supportsReach' => $supportsReach,
-                'reach' => $supportsReach && $actor !== null && $request !== null ? PortalRules::reach($actor, $request, $key) : null,
+                'reach' => $supportsReach && $actor !== null && $request !== null ? self::shareableReach($actor, $request, $key) : null,
                 'sortOrder' => (int) ($placement['order'] ?? $entry?->sort_order ?? 0),
                 // Its options, each only when the actor may hand it out.
                 'options' => array_values(array_map(
                     static fn (string $option): array => ['key' => $option, 'label' => $catalog[$option]->label ?? $option],
                     array_filter(
                         self::OPTIONS[$key] ?? [],
-                        static fn (string $option): bool => isset($catalog[$option]) && $actor !== null && $request !== null && PortalRules::holds($actor, $request, $option),
+                        static fn (string $option): bool => isset($catalog[$option]) && $actor !== null && $request !== null && self::mayShare($actor, $request, $option),
                     ),
                 )),
             ];
@@ -451,14 +455,31 @@ final class PortalSharedPages
     }
 
     /**
-     * The departments Manage / References keeps, by name.
+     * The departments people work in, by name; Admin and General are project buckets, not departments.
      *
      * @return list<string>
      */
     private function departmentNames(): array
     {
-        return $this->connection()->table('departments')->orderBy('name')->pluck('name')
-            ->map(static fn (mixed $name): string => trim((string) $name))->filter()->unique()->values()->all();
+        return PortalDepartments::names();
+    }
+
+    /*
+     * Share any page (2026-10-14, user): its holder hands out any ready page at any reach, even one they
+     * switched off or never held. The MIS head holds everything in truth and only narrows himself.
+     */
+    public const SHARE_ANY = 'manage.shares.any';
+
+    // Whether the actor may put this page or power on a share.
+    private static function mayShare(Employee $actor, Request $request, string $key): bool
+    {
+        return PortalRules::holds($actor, $request, self::SHARE_ANY) || PortalRules::holds($actor, $request, $key);
+    }
+
+    // The widest reach the actor may hand this page out at, or null when they may not share it.
+    private static function shareableReach(Employee $actor, Request $request, string $key): ?string
+    {
+        return PortalRules::holds($actor, $request, self::SHARE_ANY) ? 'all' : PortalRules::reach($actor, $request, $key);
     }
 
     // The sidebar's own filing, where the catalog differs: References sits under Manage there, after Users.

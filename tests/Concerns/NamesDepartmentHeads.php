@@ -9,8 +9,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 
 /**
- * Report-page submissions email only the head of the filer's department, its Management-level admin
- * (2026-10-13, user). These name one head and one plain admin in a department, so a test can show
+ * Report-page submissions email only the head of the filer's department, as company_departments names
+ * them (2026-10-14, user). These name one head and one plain admin in a department, so a test can show
  * which of the two the email reaches.
  */
 trait NamesDepartmentHeads
@@ -27,18 +27,14 @@ trait NamesDepartmentHeads
     }
 
     /**
-     * One admin becomes the head of the member's department and another a plain admin in it; any
-     * other Management admin there steps down, so the head is the one the test names.
+     * One admin becomes the head of the member's department and another a plain admin in it, so the
+     * head is the one the test names.
      *
      * @return array{0: Employee, 1: Employee} the head, then the plain admin
      */
     protected function nameDepartmentHead(Employee $member): array
     {
         $department = trim((string) $member->department);
-        Employee::query()
-            ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ?", [strtolower($department)])
-            ->whereRaw("LOWER(TRIM(COALESCE(role_level, ''))) = 'management'")
-            ->update(['role_level' => null]);
 
         $admins = Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
@@ -52,10 +48,25 @@ trait NamesDepartmentHeads
             ->values();
         $this->assertCount(2, $admins);
         [$head, $admin] = [$admins[0], $admins[1]];
-        $head->forceFill(['department' => $department, 'role_level' => 'Management', 'is_developer' => false])->save();
-        $admin->forceFill(['department' => $department, 'role_level' => null, 'is_developer' => false])->save();
+        $head->forceFill(['department' => $department, 'is_developer' => false])->save();
+        $admin->forceFill(['department' => $department, 'is_developer' => false])->save();
+        DB::connection('portal')->table('company_departments')->whereIn('head_employee_id', [$head->getKey(), $admin->getKey()])->update(['head_employee_id' => null]);
+        $this->seatDepartmentHead($department, $head);
 
         return [$head, $admin];
+    }
+
+    // Makes the person the head of the department, adding the department when it is not one yet; null unseats its head.
+    protected function seatDepartmentHead(string $department, ?Employee $head): void
+    {
+        $rows = DB::connection('portal')->table('company_departments');
+        $existing = (clone $rows)->whereRaw('LOWER(TRIM(name)) = ?', [strtolower(trim($department))])->value('id');
+        if ($existing === null) {
+            $rows->insert(['name' => trim($department), 'head_employee_id' => $head?->getKey()]);
+
+            return;
+        }
+        $rows->where('id', $existing)->update(['head_employee_id' => $head?->getKey()]);
     }
 
     protected function assertEmailedOnlyTheHead(Employee $head, Employee $admin, string $subject): void

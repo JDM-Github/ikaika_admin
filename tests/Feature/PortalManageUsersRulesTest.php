@@ -234,28 +234,11 @@ class PortalManageUsersRulesTest extends TestCase
         $this->assertNull($this->ownPower('default', $this->misAdmin, 'manage.users.information'));
     }
 
-    // The seeded defaults: Nathaniel manages other admins, sees developers' activity and syncs to Airtable,
-    // and he and Steven see and edit employee information everywhere, alone auto-approve their projects and
-    // alone promote candidates (2026-10-12); Fin and Audie approve the projects they lead, under the Manage
-    // group they hold for it.
-    public function test_the_seeded_personal_defaults_name_nathaniel_and_steven(): void
+    // The seeded defaults: Fin and Audie approve the projects they lead, under the Manage group they hold
+    // for it. What Nathaniel and Steven held here is the department-head presets now (2026-10-14, user).
+    public function test_the_seeded_personal_defaults_name_fin_and_audie(): void
     {
         $this->assertSame([
-            '220202-0002:administration.actions.sync:-',
-            '220202-0002:administration.logs.developers:-',
-            '220202-0002:manage.onboarding.promote:-',
-            '220202-0002:manage.users.access.peers:-',
-            '220202-0002:manage.users.information:all',
-            '220202-0002:manage.users.information.edit:-',
-            '220202-0002:projects.create.direct:-',
-            '220202-0002:projects.edit.closed:department',
-            '220202-0002:projects.lead:all',
-            '220302-0003:manage.onboarding.promote:-',
-            '220302-0003:manage.users.information:all',
-            '220302-0003:manage.users.information.edit:-',
-            '220302-0003:projects.create.direct:-',
-            '220302-0003:projects.edit.closed:department',
-            '220302-0003:projects.lead:all',
             '220825-0004:manage:-',
             '220825-0004:projects.manager:lead',
             '230103-0005:manage:-',

@@ -370,6 +370,8 @@ class PortalSharedPagesTest extends TestCase
             ->whereNotNull('id_no')->where('id_no', '!=', '')
             ->orderBy('id')->firstOrFail();
         $token = $this->developerModeOn($this->token($developer));
+        // Share any page set aside, so what the developer holds is what they may hand out.
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $developer->getKey(), 'permission_key' => 'manage.shares.any']);
 
         // Narrowed to their department themselves: an asked-for Every department lands as department.
         DB::connection('portal')->table('access_self_reach')->updateOrInsert(
@@ -390,7 +392,7 @@ class PortalSharedPagesTest extends TestCase
         $this->assertNull($pages['finance.envelopes']['reach']);
 
         // Held for their own department only: naming another one is refused, their own is fine (2026-10-14, user).
-        $other = trim((string) DB::connection('portal')->table('departments')->whereRaw('LOWER(name) != ?', [strtolower(trim((string) $developer->department))])->value('name'));
+        $other = trim((string) DB::connection('portal')->table('company_departments')->whereRaw('LOWER(name) != ?', [strtolower(trim((string) $developer->department))])->value('name'));
         $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'department'], 'reachDepartment' => $other]))
             ->assertStatus(422)->assertJsonPath('message', 'You can only share your own department on a page you hold for your department.');
         $this->assertSame(trim((string) $developer->department), $this->createShare($token, ['rules' => ['projects.view'], 'reachDepartment' => trim((string) $developer->department)])->json('data.share.reachDepartment'));
@@ -414,6 +416,39 @@ class PortalSharedPagesTest extends TestCase
         // Switched off for themselves: the page cannot be handed out at all.
         DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $developer->getKey(), 'permission_key' => 'projects.view']);
         $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view']]))->assertStatus(422);
+    }
+
+    // The reported ask (2026-10-14, user): the MIS head shares any page at any reach, even one he switched off,
+    // and the reach picker names only the departments people work in.
+    public function test_the_mis_head_shares_any_page_and_the_picker_names_real_departments(): void
+    {
+        $nathaniel = Employee::query()->where('id_no', '220202-0002')->firstOrFail();
+        $nathaniel->forceFill(['is_developer' => false])->save();
+        $token = $this->token($nathaniel);
+        $portal = DB::connection('portal');
+        foreach (['projects.view', 'finance.envelopes', 'manage.users.information'] as $key) {
+            $portal->table('access_toggles')->insert(['employee_id' => $nathaniel->getKey(), 'permission_key' => $key]);
+        }
+        Cache::flush();
+
+        $list = $this->withToken($token)->getJson(self::BASE)->assertOk()->json('data');
+        $this->assertSame(['Engineering', 'MIS'], $list['departments']);
+        $pages = collect($list['pages'])->keyBy('key');
+        $this->assertSame('all', $pages['projects.view']['reach']);
+        $this->assertSame('manage.users.information', $pages['manage.users']['options'][0]['key'] ?? null);
+
+        $share = $this->createShare($token, [
+            'rules' => ['projects.view', 'finance.envelopes', 'manage.users', 'manage.users.information'],
+            'reaches' => ['projects.view' => 'department'],
+            'reachDepartment' => 'Engineering',
+        ])->json('data.share');
+        $this->assertSame(['department', 'Engineering'], [$share['reaches']['projects.view'], $share['reachDepartment']]);
+
+        // Without the power, a page with no reach is checked against the maker like any other.
+        $portal->table('access_toggles')->insert(['employee_id' => $nathaniel->getKey(), 'permission_key' => 'manage.shares.any']);
+        Cache::flush();
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['finance.envelopes']]))
+            ->assertStatus(422)->assertJsonPath('message', 'You cannot share a page you do not hold.');
     }
 
     // The reported ask (2026-10-14, user): Users can lend Show employee information, so a boss's share opens private details.

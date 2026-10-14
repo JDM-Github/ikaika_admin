@@ -7,7 +7,7 @@ use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Portal\PortalNotificationType;
 use App\Support\Portal\PortalProjectApproval;
 use App\Support\Portal\PortalReportReview;
-use App\Support\Portal\PortalRole;
+use App\Support\Portal\PortalDepartments;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -73,8 +73,7 @@ class PortalReportReviewTest extends TestCase
         $head = Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->whereRaw("LOWER(COALESCE(role, '')) = 'admin'")
-            ->whereRaw("LOWER(COALESCE(role_level, '')) = 'management'")
-            ->whereRaw('LOWER(TRIM(department)) = ?', ['engineering'])
+            ->whereIn('id', DB::connection('portal')->table('company_departments')->where('name', 'Engineering')->select('head_employee_id'))
             ->whereExists(fn ($query) => $query->from('employees_projects')
                 ->join('projects', 'projects.id', '=', 'employees_projects.project_id')
                 ->whereColumn('employees_projects.employee_id', 'employees.id')
@@ -88,9 +87,9 @@ class PortalReportReviewTest extends TestCase
 
         $this->assertSame(0, $this->flagOf($head, $day)[0]);
         $this->assertSame(PortalReportReview::APPROVED, $this->reviewStatusOf($head, $day.'-daily'));
-        $this->assertTrue(PortalRole::isDepartmentHead('Admin', ' Management '));
-        $this->assertFalse(PortalRole::isDepartmentHead('User', 'Management'));
-        $this->assertFalse(PortalRole::isDepartmentHead('Admin', 'Staff'));
+        // A head is whoever company_departments names (2026-10-14, user), never a role level.
+        $this->assertSame('Engineering', PortalDepartments::headedBy($head));
+        $this->assertNull(PortalDepartments::headedBy(Employee::query()->whereKeyNot($head->getKey())->whereNotIn('id', DB::connection('portal')->table('company_departments')->whereNotNull('head_employee_id')->select('head_employee_id'))->firstOrFail()));
     }
 
     // The reported ask (2026-10-13): an MIS member on a warning waits like anyone flagged.

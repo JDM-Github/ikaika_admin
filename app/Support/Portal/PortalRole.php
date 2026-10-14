@@ -49,12 +49,6 @@ final class PortalRole
         return self::normalize($role) === 'admin';
     }
 
-    // A department's head: an admin at the management level, as Steven is Engineering's (2026-10-13).
-    public static function isDepartmentHead(?string $role, ?string $roleLevel): bool
-    {
-        return self::normalize($roleLevel) === 'management' && self::isAdmin($role, $roleLevel);
-    }
-
     public static function canManageUsers(?string $role, ?string $roleLevel): bool
     {
         return self::isAdmin($role, $roleLevel);

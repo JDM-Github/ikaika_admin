@@ -57,6 +57,8 @@ class PortalAccessControlTest extends TestCase
         foreach (['access_grants', 'access_limits', 'access_personal', 'access_toggles', 'access_self_reach', 'access_lists'] as $table) {
             DB::connection('portal')->table($table)->delete();
         }
+        // No department heads either: their presets would set two admins apart.
+        DB::connection('portal')->table('company_departments')->update(['head_employee_id' => null]);
     }
 
     public function test_catalog_lists_access_rules_under_manage(): void

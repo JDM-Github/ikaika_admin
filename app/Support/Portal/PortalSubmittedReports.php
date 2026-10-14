@@ -683,7 +683,7 @@ final class PortalSubmittedReports
             $kind,
             $actor->department,
             $this->hasActiveWarning($employeeId),
-            PortalRole::isDepartmentHead($actor->role, $actor->role_level),
+            PortalDepartments::headedBy($actor) !== null,
         );
 
         // Each day's report as the review queue names it: its first line's id, by day.

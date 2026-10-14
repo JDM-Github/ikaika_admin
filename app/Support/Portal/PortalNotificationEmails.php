@@ -45,9 +45,6 @@ final class PortalNotificationEmails
     // Shared with the shared-page emails, which go out as the same letter from the same sender.
     public const FROM_NAME = 'IKAIKA Portal';
 
-    // A department's head: its admin at the Management role level (Nathaniel for MIS, Steven for Engineering).
-    private const HEAD_ROLE_LEVEL = 'management';
-
     public function send(Employee|int $employeeId, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
     {
         if (! PortalAdvancedSettings::notificationEmails()) {
@@ -64,9 +61,9 @@ final class PortalNotificationEmails
     }
 
     /**
-     * A report-page submission's email, to the head of the submitter's department alone: its
-     * Management-level admin. A department without one sends none; the submitter never mails
-     * themselves.
+     * A report-page submission's email, to the head of the submitter's department alone, as
+     * company_departments names them. A department without one sends none; the submitter never
+     * mails themselves.
      */
     public function sendToDepartmentHeads(Employee $actor, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void
     {
@@ -79,27 +76,16 @@ final class PortalNotificationEmails
     }
 
     /**
-     * The active Management-level admins of the actor's department, the actor aside.
+     * The active head of the actor's department, the actor aside (2026-10-14, user: heads are named in
+     * company_departments, not read from a role level).
      *
      * @return list<Employee>
      */
     public static function departmentHeads(Employee $actor): array
     {
-        $department = strtolower(trim((string) ($actor->department ?? '')));
-        if ($department === '') {
-            return [];
-        }
+        $head = PortalDepartments::headOf($actor->department ?? null);
 
-        return Employee::query()
-            ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = ?", [$department])
-            ->whereRaw("LOWER(TRIM(COALESCE(role_level, ''))) = ?", [self::HEAD_ROLE_LEVEL])
-            ->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'active'")
-            ->whereKeyNot($actor->getKey())
-            ->orderBy('id')
-            ->get()
-            ->filter(static fn (Employee $employee): bool => PortalRole::isDepartmentHead($employee->role, $employee->role_level))
-            ->values()
-            ->all();
+        return $head === null || $head->is($actor) ? [] : [$head];
     }
 
     private function deliver(Employee $employee, string $type, string $title, string $message, ?string $linkPath, ?string $linkLabel): void

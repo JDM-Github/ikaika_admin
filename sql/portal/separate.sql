@@ -924,43 +924,9 @@ SELECT 'developer', permission_key,
        permission_key = 'administration.logs'
 FROM access_permissions;
 
--- Personal defaults (access_personal), matched on id_no like is_developer.
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'manage.users.access.peers', NULL FROM employees WHERE id_no = '220202-0002'; -- Nathaniel Tanglao
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'administration.logs.developers', NULL FROM employees WHERE id_no = '220202-0002'; -- Nathaniel Tanglao
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'administration.actions.sync', NULL FROM employees WHERE id_no = '220202-0002'; -- Nathaniel Tanglao
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'manage.users.information', 'all' FROM employees WHERE id_no IN (
-    '220202-0002', -- Nathaniel Tanglao
-    '220302-0003'  -- Steven Gaurano
-);
-
--- Admins lead only their own department by preset. Nathaniel (MIS) and Steven (Engineering) manage
--- their departments, so they alone lead at every department; anyone else is a department-only lead
--- until a power-holder gives them more on Manage / Users.
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'projects.lead', 'all' FROM employees WHERE id_no IN (
-    '220202-0002', -- Nathaniel Tanglao
-    '220302-0003'  -- Steven Gaurano
-);
-
--- Only Nathaniel and Steven auto-approve the projects they add (2026-10-07, supervisor); every other
--- admin's new project waits for a Project Approver like anyone's.
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'projects.create.direct', NULL FROM employees WHERE id_no IN (
-    '220202-0002', -- Nathaniel Tanglao
-    '220302-0003'  -- Steven Gaurano
-);
-
--- The department heads, Nathaniel (MIS) and Steven (Engineering), alone change a Completed or Closed
--- project, each in their own department (2026-10-12, supervisor).
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'projects.edit.closed', 'department' FROM employees WHERE id_no IN (
-    '220202-0002', -- Nathaniel Tanglao
-    '220302-0003'  -- Steven Gaurano
-);
+-- Personal defaults (access_personal), matched on id_no like is_developer. What the department heads
+-- hold beyond an admin (Nathaniel for MIS, Steven for Engineering) is no longer here: it is the head
+-- presets, seeded with company_departments at the end of this file (2026-10-14, user).
 
 -- Project Approver: every admin by preset, and Fin Donasco and Audie Gantuangko over the projects they
 -- lead (2026-10-07, supervisor). Their own defaults rather than Steven's gift, so it does not hang on his.
@@ -1350,11 +1316,6 @@ VALUES
      0, 1, 'admin', 873);
 INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
     ('developer', 'manage.onboarding.promote', NULL, 0);
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'manage.onboarding.promote', NULL FROM employees WHERE id_no IN (
-    '220202-0002', -- Nathaniel Tanglao
-    '220302-0003'  -- Steven Gaurano
-);
 
 -- Activate and deactivate (2026-10-12): an admin turns someone in their Users reach Active or Inactive,
 -- never themselves or an executive, a fellow admin only with Manage other admins. Admins, executives and
@@ -1382,11 +1343,6 @@ VALUES
 INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
     ('executive', 'manage.users.information.edit', NULL, 0),
     ('developer', 'manage.users.information.edit', NULL, 0);
-INSERT INTO access_personal (employee_id, permission_key, reach)
-SELECT id, 'manage.users.information.edit', NULL FROM employees WHERE id_no IN (
-    '220202-0002', -- Nathaniel Tanglao
-    '220302-0003'  -- Steven Gaurano
-);
 
 -- Bug reports (2026-10-13): anyone reports a bug with up to three screenshots; MIS reads and tracks
 -- them. Anonymous by design: no employee column and no time finer than the day.
@@ -1472,3 +1428,53 @@ CREATE TABLE IF NOT EXISTS psgc_barangays (
     city_code CHAR(9)      NOT NULL,
     INDEX psgc_barangays_city_code_index (city_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- COMPANY DEPARTMENTS AND THEIR HEADS (2026-10-14, user)
+-- The departments people work in, one head each. Only MIS and Engineering are departments: Admin and
+-- General are project buckets and stay in the departments table above, which the project form,
+-- References, scopes and types read. People's department lists (Shared Pages reach, Manage / Users)
+-- read this one. A head is found here, not from role_level (PortalDepartments).
+-- Existing databases: add_portal_company_departments_and_head_presets.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS company_departments (
+    id               INT AUTO_INCREMENT PRIMARY KEY,
+    name             VARCHAR(100) NOT NULL,
+    head_employee_id INT          NULL,
+    created_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY company_departments_name (name),
+    FOREIGN KEY (head_employee_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO company_departments (name, head_employee_id)
+SELECT 'MIS', id FROM employees WHERE id_no = '220202-0002'; -- Nathaniel Tanglao
+INSERT IGNORE INTO company_departments (name, head_employee_id)
+SELECT 'Engineering', id FROM employees WHERE id_no = '220302-0003'; -- Steven Gaurano
+
+-- Share any page: put any ready page on a guest link at any reach, even one the maker switched off or
+-- never held. The MIS head holds everything in truth and only narrows himself day to day.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.shares.any', 'manage.shares', 'Share any page',
+     'Put any ready page on a shared link, at any department or all, even one {UserName|You} switched off or never held.',
+     0, 1, 'admin', 863);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('developer', 'manage.shares.any', NULL, 0);
+
+-- The head presets, laid over a head's admin preset (PortalAccessGraph::startingRules): 'head' for every
+-- department head, 'head:<department>' for one department's head. Heads lead and see employee
+-- information at every department, auto-approve what they add, alone change a Completed or Closed
+-- project of their department, promote candidates and edit employee information. The MIS head also
+-- manages other admins, sees developers' activity, runs the Airtable sync and shares any page.
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('head', 'manage.users.information', 'all', 0),
+    ('head', 'manage.users.information.edit', NULL, 0),
+    ('head', 'manage.onboarding.promote', NULL, 0),
+    ('head', 'projects.lead', 'all', 0),
+    ('head', 'projects.create.direct', NULL, 0),
+    ('head', 'projects.edit.closed', 'department', 0),
+    ('head:mis', 'manage.users.access.peers', NULL, 0),
+    ('head:mis', 'administration.logs.developers', NULL, 0),
+    ('head:mis', 'administration.actions.sync', NULL, 0),
+    ('head:mis', 'manage.shares.any', NULL, 0);

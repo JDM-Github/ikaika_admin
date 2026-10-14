@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
+use App\Support\Portal\PortalAccessGraph;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -171,20 +172,47 @@ class PortalAccessTest extends TestCase
     }
 
     // A preset that held a child without its parent would leave that child with nowhere to hang.
+    // A head's presets lie over their admin preset (2026-10-14, user), so a head rule's parent may sit in either.
     public function test_every_preset_holds_the_parent_of_each_rule_it_holds(): void
     {
-        $orphans = DB::connection('portal')->table('access_presets as presets')
-            ->join('access_permissions as permissions', 'permissions.permission_key', '=', 'presets.permission_key')
-            ->leftJoin('access_presets as parents', function ($join): void {
-                $join->on('parents.permission_key', '=', 'permissions.parent_key')
-                    ->on('parents.role', '=', 'presets.role');
-            })
-            ->whereNotNull('permissions.parent_key')
-            ->whereNull('parents.role')
-            ->pluck('presets.permission_key')
-            ->all();
+        $held = [];
+        foreach (DB::connection('portal')->table('access_presets')->get(['role', 'permission_key']) as $row) {
+            $held[(string) $row->role][(string) $row->permission_key] = true;
+        }
+        $parents = DB::connection('portal')->table('access_permissions')->pluck('parent_key', 'permission_key')->all();
+
+        $orphans = [];
+        foreach ($held as $role => $keys) {
+            $layers = str_starts_with($role, 'head') ? [$role, 'head', 'admin'] : [$role];
+            foreach (array_keys($keys) as $key) {
+                $parent = $parents[$key] ?? null;
+                if ($parent !== null && ! collect($layers)->contains(static fn (string $layer): bool => isset($held[$layer][$parent]))) {
+                    $orphans[] = $role.':'.$key;
+                }
+            }
+        }
 
         $this->assertSame([], $orphans);
+    }
+
+    // The reported ask (2026-10-14, user): heads hold the head preset, the MIS head the MIS one too, and a head
+    // is whoever company_departments names, so unseating one takes the presets away.
+    public function test_department_heads_hold_their_presets_from_company_departments(): void
+    {
+        $nathaniel = Employee::query()->where('id_no', '220202-0002')->firstOrFail();
+        $steven = Employee::query()->where('id_no', '220302-0003')->firstOrFail();
+        $reach = static fn (array $rules, string $key): ?string => array_key_exists($key, $rules) ? ($rules[$key]['reach'] ?? '-') : null;
+
+        $graph = PortalAccessGraph::load();
+        $mis = $graph->effective((int) $nathaniel->getKey());
+        $engineering = $graph->effective((int) $steven->getKey());
+        $this->assertSame(['all', 'department', '-', '-'], [$reach($mis, 'projects.lead'), $reach($mis, 'projects.edit.closed'), $reach($mis, 'manage.users.access.peers'), $reach($mis, 'manage.shares.any')]);
+        $this->assertSame(['all', 'department', null, null], [$reach($engineering, 'projects.lead'), $reach($engineering, 'projects.edit.closed'), $reach($engineering, 'manage.users.access.peers'), $reach($engineering, 'manage.shares.any')]);
+        $this->assertTrue($mis['manage.shares.any']['fromRole']);
+
+        DB::connection('portal')->table('company_departments')->where('head_employee_id', $steven->getKey())->update(['head_employee_id' => null]);
+        $unseated = PortalAccessGraph::load()->effective((int) $steven->getKey());
+        $this->assertSame([null, null], [$reach($unseated, 'projects.edit.closed'), $reach($unseated, 'projects.create.direct')]);
     }
 
     // Their own choice about powers they already hold, so it is never logged.

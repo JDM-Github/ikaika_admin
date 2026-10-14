@@ -796,8 +796,7 @@ final class PortalManageUsers
     }
 
     /**
-     * Every department the portal knows -- the Project Settings list, and any a person or project is
-     * in -- cut to the actor's own at department reach.
+     * The departments people work in (company_departments), cut to the actor's own at department reach.
      *
      * @return list<string>
      */
@@ -806,14 +805,9 @@ final class PortalManageUsers
         if ($reach !== 'all' && $reach !== 'department') {
             return [];
         }
-        $portal = Employee::query()->getConnection();
-        $values = [
-            ...($portal->getSchemaBuilder()->hasTable('departments') ? $portal->table('departments')->pluck('name')->all() : []),
-            ...Employee::query()->whereNotNull('department')->distinct()->pluck('department')->all(),
-            ...$portal->table('projects')->whereNotNull('department')->distinct()->pluck('department')->all(),
-        ];
+        // Only the departments people work in (2026-10-14, user): Admin and General are project buckets.
         $names = [];
-        foreach ($values as $value) {
+        foreach (PortalDepartments::names() as $value) {
             $name = self::text(is_string($value) ? $value : null);
             if ($name !== null) {
                 $names[PortalPreview::department($name)] ??= $name;

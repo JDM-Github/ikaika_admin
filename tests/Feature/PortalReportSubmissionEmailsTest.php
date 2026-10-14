@@ -72,8 +72,8 @@ class PortalReportSubmissionEmailsTest extends TestCase
 
     public function test_no_email_leaves_without_a_head_or_with_notification_emails_off(): void
     {
-        // A department with no Management admin emails nobody.
-        $this->head->forceFill(['role_level' => null])->save();
+        // A department with no head emails nobody.
+        $this->seatDepartmentHead((string) $this->member->department, null);
         $this->withToken($this->token($this->member))
             ->postJson(self::SUBMITTED, $this->dailyReportBody($this->member, $this->freeReportDate($this->member)))
             ->assertCreated();
@@ -82,7 +82,7 @@ class PortalReportSubmissionEmailsTest extends TestCase
 
         // Nor does someone with no department, and the head never mails themselves.
         $this->assertSame([], PortalNotificationEmails::departmentHeads($this->member->replicate()->forceFill(['department' => ''])));
-        $this->head->forceFill(['role_level' => 'Management'])->save();
+        $this->seatDepartmentHead((string) $this->member->department, $this->head);
         $this->assertSame([], PortalNotificationEmails::departmentHeads($this->head));
 
         config(['products.catalog.portal.notification_emails' => false]);
