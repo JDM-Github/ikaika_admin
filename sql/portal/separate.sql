@@ -171,13 +171,15 @@ CREATE TABLE email_messages (
     failed_count    INT          NOT NULL DEFAULT 0,
     failures        JSON         NULL,
     status          VARCHAR(16)  NOT NULL DEFAULT 'sent',
-    sent_by         INT          NOT NULL,
+    -- Null for a guest's send: the Email page is shareable, and a guest is no employee.
+    -- Existing databases: allow_guest_email_sends.
+    sent_by         INT          NULL,
     date_sent       DATETIME     NULL,
     date_created    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_email_messages_created (date_created),
     INDEX idx_email_messages_sent_by (sent_by),
     FOREIGN KEY (footer_id) REFERENCES email_blocks(id) ON DELETE SET NULL,
-    FOREIGN KEY (sent_by)   REFERENCES employees(id)    ON DELETE CASCADE
+    FOREIGN KEY (sent_by)   REFERENCES employees(id)    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE email_attachments (
@@ -1166,8 +1168,9 @@ INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('administration.actions', 1),
     ('administration.missing', 1),
     ('administration.emails', 1),
-    -- Held back: the composer is a form, and its own-scope image controls follow the same rule.
-    ('email', 0);
+    -- A guest may open the composer read-only and send: the send is the one write they make,
+    -- and it lands in All Emails like anyone's.
+    ('email', 1);
 
 -- Manage / Shared Pages: a fine-grained, administrator-tier power. The page opens and reads with
 -- manage.shares (which shows the link, its QR and the kept password); creating, editing and revoking

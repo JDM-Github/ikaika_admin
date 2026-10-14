@@ -289,7 +289,8 @@ final class PortalRules
 
     /**
      * A guest's rules: every granted page at the reach the share handed it out at, all for a page
-     * that carries none, since a guest has no department or person of their own.
+     * that carries none, since a guest has no department or person of their own. Granting Email
+     * lends Sending with it: the composer's one write is the send, and it lands in All Emails.
      *
      * @return array<string, ?string>
      */
@@ -298,6 +299,9 @@ final class PortalRules
         $rules = [];
         foreach ($guest->rules as $key => $reach) {
             $rules[$key] = $reach ?? 'all';
+            if ($key === 'email') {
+                $rules['email.send'] = 'all';
+            }
         }
 
         return $rules;

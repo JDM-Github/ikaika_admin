@@ -343,7 +343,9 @@ final class PortalEmailMessages
             abort(422, 'That audience reaches nobody.');
         }
 
-        $employeeId = (int) $actor->getKey();
+        // A guest is no employee: the row records no sender, and nothing is logged against a person.
+        $employeeId = $actor->getKey() === null ? null : (int) $actor->getKey();
+        $actorName = $employeeId === null ? 'A guest' : PortalActivityCopy::actorName($actor, $request, true);
         // The row and its files commit together: a file another send claimed first refuses this one whole.
         $messageId = (int) $this->connection()->transaction(fn (): int => $this->openWithAttachments(
             $attachments,
@@ -365,7 +367,7 @@ final class PortalEmailMessages
         ));
         $copies = $this->copies($messageId, $audience, $recipients, $cc, $bcc, [
             'title' => 'New email',
-            'message' => PortalActivityCopy::notifyEmailArrived($subject, PortalActivityCopy::actorName($actor, $request, true)),
+            'message' => PortalActivityCopy::notifyEmailArrived($subject, $actorName),
             'linkPath' => $linkPath,
             'linkLabel' => $linkPath === null ? null : 'Open',
             'payload' => ['emailId' => (string) $messageId, 'category' => $category],
@@ -382,30 +384,32 @@ final class PortalEmailMessages
             abort(503, 'The email could not be queued. Try again in a moment.');
         }
 
-        $this->audit->record(
-            $actor,
-            PortalLogAction::POST,
-            PortalEmail::CORE_RESOURCE,
-            PortalActivityCopy::sentEmail($subject, count($recipients)),
-            (string) $messageId,
-            $request,
-            [
-                'category' => $category,
-                'subject' => $subject,
-                'audience' => $audience,
-                // Typed addresses stay in the outbox row; the ledger that syncs out only counts them.
-                'audienceFilter' => [...$filter, 'emails' => count($filter['emails'])],
-                'cc' => count($cc),
-                'bcc' => count($bcc),
-                'asSender' => $fromName !== null,
-                'recipientCount' => count($recipients),
-                // Queued, not yet delivered: how each copy fared is written onto the outbox row as it lands.
-                'copies' => count($copies),
-                // How many files and how large, never their names: the ledger syncs out.
-                'attachments' => count($attachments),
-                'attachmentBytes' => PortalEmailAttachments::totalBytes($attachments),
-            ],
-        );
+        if ($employeeId !== null) {
+            $this->audit->record(
+                $actor,
+                PortalLogAction::POST,
+                PortalEmail::CORE_RESOURCE,
+                PortalActivityCopy::sentEmail($subject, count($recipients)),
+                (string) $messageId,
+                $request,
+                [
+                    'category' => $category,
+                    'subject' => $subject,
+                    'audience' => $audience,
+                    // Typed addresses stay in the outbox row; the ledger that syncs out only counts them.
+                    'audienceFilter' => [...$filter, 'emails' => count($filter['emails'])],
+                    'cc' => count($cc),
+                    'bcc' => count($bcc),
+                    'asSender' => $fromName !== null,
+                    'recipientCount' => count($recipients),
+                    // Queued, not yet delivered: how each copy fared is written onto the outbox row as it lands.
+                    'copies' => count($copies),
+                    // How many files and how large, never their names: the ledger syncs out.
+                    'attachments' => count($attachments),
+                    'attachmentBytes' => PortalEmailAttachments::totalBytes($attachments),
+                ],
+            );
+        }
         $this->bumpCache();
 
         return [
@@ -413,7 +417,7 @@ final class PortalEmailMessages
             'resource' => 'emails',
             'data' => PortalEmailPresenter::detail(
                 $this->rowOrFail($messageId),
-                $this->senders([$employeeId]),
+                $this->senders(array_filter([$employeeId])),
                 $this->attachments->forMessage($messageId),
             ),
         ];
@@ -629,7 +633,7 @@ final class PortalEmailMessages
         ?string $fromName,
         ?string $replyTo,
         array $recipients,
-        int $employeeId,
+        ?int $employeeId,
     ): int {
         $messageId = $this->openRow(
             $category,
@@ -676,7 +680,7 @@ final class PortalEmailMessages
         ?string $fromName,
         ?string $replyTo,
         array $recipients,
-        int $employeeId,
+        ?int $employeeId,
     ): int {
         return (int) $this->connection()->table('email_messages')->insertGetId([
             'category' => $category,

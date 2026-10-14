@@ -68,7 +68,7 @@ class AuthenticatePortalJwt
      */
     private function authenticateGuest(Request $request, array $payload): void
     {
-        if (! $request->isMethod('GET')) {
+        if (! $request->isMethod('GET') && ! $this->isGuestSend($request)) {
             abort(403, 'Guest access is read-only.');
         }
 
@@ -110,5 +110,17 @@ class AuthenticatePortalJwt
         if ($share->last_used_at === null || strtotime((string) $share->last_used_at) < now()->getTimestamp() - 60) {
             DB::connection('portal')->table('shared_pages')->where('id', $share->id)->update(['last_used_at' => now()]);
         }
+    }
+
+    /*
+     * The two writes a guest may make: sending email from the composer, and asking the server to
+     * build a preview (a POST only because the draft is too long for a query string). The send lands
+     * in All Emails like anyone's, and the routes' own rules (email.send, lent by the share's email
+     * grant) still gate them, so a share without the page cannot reach these paths.
+     */
+    private function isGuestSend(Request $request): bool
+    {
+        return $request->isMethod('POST')
+            && ($request->is('*/administration/emails') || $request->is('*/administration/emails/preview'));
     }
 }

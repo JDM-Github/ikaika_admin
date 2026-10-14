@@ -45,6 +45,8 @@ class PortalShareReadinessTest extends TestCase
         'administration.actions' => ['/api/development/portal/administration/all-actions'],
         'administration.missing' => ['/api/development/portal/administration/missing-reports'],
         'administration.emails' => ['/api/development/portal/administration/emails'],
+        // The composer's first read; its send is the one guest write, checked in PortalGuestEmailTest.
+        'email' => ['/api/development/portal/administration/emails/audiences'],
     ];
 
     protected function setUp(): void
