@@ -109,14 +109,25 @@ final class PortalScopeWork
         if ($projectIds === []) {
             return [];
         }
-        $rows = $this->connection()->table('projects_scope_progress')
-            ->whereIn('project_id', $projectIds)
-            ->orderByRaw('report_date IS NULL, report_date DESC')
-            ->orderByDesc('id')
-            ->get(['project_id', 'wbs_code', 'percent']);
+        // Only an approved report's progress counts (2026-10-14, user); among those the newest wins, whoever filed it.
+        $rows = $this->connection()->table('projects_scope_progress as progress')
+            ->join('user_reports', 'user_reports.id', '=', 'progress.user_report_id')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'progress.user_report_id')
+            ->whereIn('progress.project_id', $projectIds)
+            ->orderByRaw('progress.report_date IS NULL, progress.report_date DESC')
+            ->orderByDesc('progress.id')
+            ->get(['progress.project_id', 'progress.wbs_code', 'progress.percent', 'user_reports.late_submission', 'user_reports.late_submission_approval', 'employees_user_reports.is_flag', 'employees_user_reports.flag_status']);
         $progress = [];
         foreach ($rows as $row) {
-            $progress[(int) $row->project_id][(string) $row->wbs_code] ??= (int) $row->percent;
+            $status = PortalReportReview::status(
+                PortalSubmittedReportPresenter::kind($row->late_submission ?? null),
+                $row->is_flag ?? false,
+                $row->flag_status ?? null,
+                $row->late_submission_approval ?? null,
+            );
+            if ($status === PortalReportReview::APPROVED) {
+                $progress[(int) $row->project_id][(string) $row->wbs_code] ??= (int) $row->percent;
+            }
         }
 
         return $progress;

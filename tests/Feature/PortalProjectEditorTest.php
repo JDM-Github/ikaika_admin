@@ -1050,7 +1050,11 @@ class PortalProjectEditorTest extends TestCase
         $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$scope], 'scopeAssignees' => [$scope => [$member->getKey()], '999' => [$member->getKey()]]])->assertOk();
         $this->assertSame([$scope], $portal->table('projects_scope_assignees')->where('project_id', $id)->pluck('wbs_code')->all());
 
-        $portal->table('projects_scope_progress')->insert(['project_id' => $id, 'wbs_code' => $scope, 'employee_id' => $member->getKey(), 'percent' => 60]);
+        // Progress counts only from an approved report, so it rides on one that never waited.
+        $approvedLine = (int) $portal->table('employees_user_reports')->join('user_reports', 'user_reports.id', '=', 'employees_user_reports.user_report_id')
+            ->where('employees_user_reports.is_flag', 0)->where(fn ($daily) => $daily->whereNull('user_reports.late_submission')->orWhere('user_reports.late_submission', 0))
+            ->value('user_reports.id');
+        $portal->table('projects_scope_progress')->insert(['project_id' => $id, 'wbs_code' => $scope, 'employee_id' => $member->getKey(), 'user_report_id' => $approvedLine, 'percent' => 60]);
         $this->withToken($token)->getJson(self::BASE.'/'.$id)->assertOk()
             ->assertJsonPath('data.scopeAssignees.'.$scope, [(string) $member->getKey()])
             ->assertJsonPath('data.scopeProgress.'.$scope, 60);

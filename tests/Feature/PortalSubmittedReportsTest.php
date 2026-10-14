@@ -602,8 +602,24 @@ class PortalSubmittedReportsTest extends TestCase
         Cache::flush();
         $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
         $this->assertSame(['percent' => 40, 'asOf' => $today], ['percent' => $picker['scopes'][0]['percent'], 'asOf' => $picker['scopes'][0]['asOf']]);
+        // An Engineering daily report waits for review; the board counts its progress once approved.
+        $todayLine = (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('report_date', $today)->value('user_report_id');
+        $portal->table('employees_user_reports')->where('user_report_id', $todayLine)->update(['flag_status' => 'Approved']);
         $this->assertSame([(int) $project->id => ['100' => 40]], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
         $this->assertEqualsCanonicalizing([$today, $older], $portal->table('projects_scope_progress')->where('project_id', $project->id)->pluck('report_date')->map(fn ($day): string => substr((string) $day, 0, 10))->all());
+
+        // The reported ask (2026-10-14, user): a co-assignee's newer figure wins even when it is lower.
+        $other = (int) $portal->table('employees')->where('id', '!=', $actor->getKey())->orderBy('id')->value('id');
+        $portal->table('projects_scope_progress')->insert(['project_id' => $project->id, 'wbs_code' => '100', 'employee_id' => $other, 'user_report_id' => $todayLine, 'report_date' => $today, 'percent' => 20]);
+        $this->assertSame([(int) $project->id => ['100' => 20]], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
+
+        // Only approved reports count: a pending one is skipped, and the late one counts once both its decisions land.
+        $portal->table('employees_user_reports')->where('user_report_id', $todayLine)->update(['is_flag' => 1, 'flag_status' => 'Pending']);
+        $this->assertSame([], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
+        $lateLine = (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('report_date', $older)->value('user_report_id');
+        $portal->table('user_reports')->where('id', $lateLine)->update(['late_submission_approval' => 'Approved']);
+        $portal->table('employees_user_reports')->where('user_report_id', $lateLine)->update(['flag_status' => 'Approved']);
+        $this->assertSame([(int) $project->id => ['100' => 10]], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
     }
 
     public function test_a_daily_report_is_flagged_when_the_filer_has_an_active_warning(): void
