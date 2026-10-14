@@ -6,8 +6,8 @@ use App\Modules\Core\Models\Action;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Core\CoreLedger;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
-use Illuminate\Http\Client\Request;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -658,11 +658,9 @@ class PortalAirtableSyncTest extends TestCase
     public function test_a_changed_only_row_airtable_has_never_seen_is_blocked(): void
     {
         $this->fakeAirtable();
-        $employeeId = (int) DB::connection('portal')->table('employees')->insertGetId([
-            'id_no' => '900000-0001', 'first_name' => 'Never', 'last_name' => 'Synced', 'role' => 'User',
-        ]);
+        $requestId = $this->leaveRow('Pending', 'Vacation Leave');
         $actionId = app(CoreLedger::class)->recordEdit(
-            CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['fields' => ['role' => 'Admin']], 'employees', (string) $employeeId,
+            CoreLedger::PRODUCT_PORTAL, 'portal.requests', ['fields' => ['status' => 'Approved']], 'requests', (string) $requestId,
         );
 
         $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
@@ -671,6 +669,62 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertSame('blocked', $item['outcome']);
         $this->assertStringContainsString('Only changes to records Airtable already has', implode(' ', $item['problems']));
         Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET');
+    }
+
+    // The reported gap (2026-10-14): a person the portal adds is created in Airtable whole, so what
+    // links them can follow; a Job Title Airtable does not offer is left out rather than holding them back.
+    public function test_a_person_the_portal_adds_is_created_whole(): void
+    {
+        $this->fakeAirtable();
+        $employeeId = (int) DB::connection('portal')->table('employees')->insertGetId([
+            'id_no' => '900000-0002', 'first_name' => 'New', 'last_name' => 'Hire', 'email' => 'new.hire@example.com',
+            'role' => 'User', 'status' => 'Active', 'department' => 'MIS', 'job_title' => 'Chief Vibes Officer',
+        ]);
+        $actionId = app(CoreLedger::class)->recordAdd(CoreLedger::PRODUCT_PORTAL, 'employees:'.$employeeId, 'portal.employees', ['id' => (string) $employeeId], 'employees', (string) $employeeId, 1, null);
+
+        $item = collect(app(PortalAirtableSync::class)->run(true)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('synced', $item['outcome']);
+        $this->assertSame('New', $item['fields']['First Name']);
+        $this->assertArrayNotHasKey('Job Title', $item['fields']);
+        $this->assertStringContainsString('"Job Title" left out', implode(' ', $item['problems']));
+        $this->assertSame('recNEW0000000001', DB::connection('portal')->table('employees')->where('id', $employeeId)->value('airtable_record_id'));
+    }
+
+    // A private column is named in a plain list: its key would be stripped from the ledger, its value is read from SQL.
+    public function test_a_column_list_names_private_columns_without_carrying_their_values(): void
+    {
+        $this->fakeAirtable();
+        $employeeId = (int) DB::connection('portal')->table('employees')->insertGetId([
+            'airtable_record_id' => 'recEMPL0000000031', 'id_no' => '900000-0003', 'first_name' => 'Kept', 'last_name' => 'Private', 'email' => 'kept@example.com',
+        ]);
+        $actionId = app(CoreLedger::class)->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['columns' => ['email']], 'employees', (string) $employeeId, null, 1, null);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertSame(['Email' => 'kept@example.com'], $item['fields']);
+    }
+
+    // Manage / References (2026-10-14): a client added, changed and removed in the portal follows in Airtable.
+    public function test_a_client_is_created_patched_and_deleted(): void
+    {
+        $this->fakeAirtable();
+        $ledger = app(CoreLedger::class);
+        $portal = DB::connection('portal');
+        $clientId = (int) $portal->table('clients')->insertGetId(['name' => 'Sync Client', 'client_id' => 'C-900']);
+        $added = $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, 'clients:'.$clientId, 'portal.clients', ['id' => (string) $clientId, 'fields' => ['name' => 'Sync Client']], 'references.clients', (string) $clientId, 1, null);
+        $kept = (int) $portal->table('clients')->insertGetId(['airtable_record_id' => 'recCLNT0000000041', 'name' => 'Old Name', 'client_id' => 'C-901']);
+        $renamed = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.clients', ['id' => (string) $kept, 'fields' => ['name' => 'New Name']], 'references.clients', (string) $kept, null, 1, null);
+        $portal->table('clients')->where('id', $kept)->update(['name' => 'New Name']);
+        $removed = $ledger->recordDelete(CoreLedger::PRODUCT_PORTAL, 'portal.clients', ['id' => '900902', 'airtableRecordId' => 'recCLNT0000000042'], 'references.clients', '900902', 1, null);
+
+        $items = collect(app(PortalAirtableSync::class)->run(false, 0)['items']);
+
+        $this->assertSame('create', $items->firstWhere('actionId', $added)['outcome']);
+        $this->assertSame(['Name' => 'Sync Client', 'ClientID' => 'C-900'], $items->firstWhere('actionId', $added)['fields']);
+        $this->assertSame(['Name' => 'New Name'], $items->firstWhere('actionId', $renamed)['fields']);
+        $this->assertSame(['delete', 'recCLNT0000000042'], [$items->firstWhere('actionId', $removed)['outcome'], $items->firstWhere('actionId', $removed)['airtableId']]);
     }
 
     // The grid ledgers an edit as a diff under `changes` as well as a flat `fields` map; either way
@@ -1126,6 +1180,20 @@ class PortalAirtableSyncTest extends TestCase
                 ['name' => 'Role', 'type' => 'singleSelect', 'options' => $select(['Admin', 'User', 'ProjectAdmin'])],
                 ['name' => 'Email', 'type' => 'singleLineText'],
                 ['name' => 'Nickname', 'type' => 'multilineText'],
+                ['name' => 'ID No.', 'type' => 'singleLineText'],
+                ['name' => 'First Name', 'type' => 'singleLineText'],
+                ['name' => 'Last Name', 'type' => 'singleLineText'],
+                ['name' => 'Job Title', 'type' => 'singleSelect', 'options' => $select(['BIM Modeler'])],
+                ['name' => 'Status', 'type' => 'singleSelect', 'options' => $select(['Active', 'Inactive'])],
+                ['name' => 'Department', 'type' => 'singleSelect', 'options' => $select(['MIS', 'Engineering'])],
+            ],
+        ], [
+            'name' => 'Clients',
+            'fields' => [
+                ['name' => 'Name', 'type' => 'singleLineText'],
+                ['name' => 'ClientID', 'type' => 'singleLineText'],
+                ['name' => 'Notes', 'type' => 'multilineText'],
+                ['name' => 'Status', 'type' => 'singleSelect', 'options' => $select(['Active'])],
             ],
         ], [
             'name' => 'User Reports',

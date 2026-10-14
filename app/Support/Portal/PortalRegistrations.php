@@ -317,8 +317,7 @@ final class PortalRegistrations
         }
 
         $details = $this->detailsOf($row);
-        $employee = new Employee;
-        $employee->forceFill([
+        $employee = $this->users->createEmployee($actor, [
             'id_no' => $idNo,
             'first_name' => $this->text($details['firstName'] ?? null) ?? 'New',
             'middle_name' => $this->text($details['middleName'] ?? null),
@@ -345,7 +344,7 @@ final class PortalRegistrations
             'bank_name' => $this->text($details['bankName'] ?? null),
             'bank_account_number' => $this->text($details['bankAccountNumber'] ?? null),
             'bank_swift_code' => $this->text($details['bankSwiftCode'] ?? null),
-        ])->save();
+        ]);
         $employeeId = (int) $employee->getKey();
 
         $this->connection()->table('registrations')->where('id', $id)->update([

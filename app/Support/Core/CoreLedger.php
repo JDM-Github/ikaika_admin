@@ -71,6 +71,34 @@ final class CoreLedger
     }
 
     /**
+     * A permanent delete with no Recycle Bin entry (a References list row): logged so the Airtable
+     * sync can remove the record Airtable holds, but nothing to restore.
+     *
+     * @param  array<string, mixed>  $parameters
+     */
+    public function recordDelete(
+        string $product,
+        string $databaseTarget,
+        array $parameters,
+        ?string $resource = null,
+        ?string $recordId = null,
+        ?int $actorId = null,
+        ?string $actorIdNo = null,
+    ): int {
+        return DB::connection('core')->transaction(fn (): int => $this->insertAction(
+            $product,
+            $databaseTarget,
+            CoreActionType::DELETE,
+            $parameters,
+            $resource,
+            $recordId,
+            null,
+            $actorId,
+            $actorIdNo,
+        ));
+    }
+
+    /**
      * Snapshot into recycle and log a delete action. Same product + key replaces the previous trash.
      *
      * @param  array<string, mixed>  $payload

@@ -476,7 +476,7 @@ final class PortalProjectEditor
         $this->refuseRemovingAssignees($actor, $request, $projectId, [...$memberIds, ...$supportMemberIds]);
         $name = $this->text(self::split($row)[1]) ?? 'Project';
 
-        $this->ledger->within($this->connection(), function () use ($projectId, $memberIds, $supportMemberIds, $changes, $name, $actor, $request, $row): void {
+        $this->ledger->within($this->connection(), function () use ($projectId, $memberIds, $supportMemberIds, $changes, $name, $actor, $request): void {
             $changed = $this->changedFields([], $projectId, $memberIds, $supportMemberIds, null);
             $this->connection()->table('projects')->where('id', $projectId)->update(['date_modified' => now()]);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $memberIds);

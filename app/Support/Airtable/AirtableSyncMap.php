@@ -241,13 +241,16 @@ final class AirtableSyncMap
                 'duration' => 'Duration',
             ],
         ],
-        // Only the columns the portal itself changes (the role screen and the admin grid's plain
-        // profile fields); government ids, bank details and scans stay Airtable's to maintain.
-        // HR still edits this table in Airtable, so an update sends only what the action changed.
+        // HR still edits this table in Airtable, so an update sends only what the action changed. A
+        // person the portal adds (Add user, onboarding Promote) is created whole (2026-10-14, user):
+        // everything linking them would otherwise wait forever for an Airtable id. Job Title is a
+        // select there; a title it does not offer is left out rather than holding the person back.
         'employees' => [
             'sql_table' => 'employees',
             'airtable_table' => 'Employees',
-            'changed_only' => ['fields', 'changes'],
+            'changed_only' => ['columns', 'fields', 'changes'],
+            'create_full' => true,
+            'lenient' => ['Job Title'],
             'fields' => [
                 'id_no' => 'ID No.',
                 'first_name' => 'First Name',
@@ -262,6 +265,34 @@ final class AirtableSyncMap
                 'role_level' => 'Role Level',
                 'department' => 'Department',
                 'location' => 'Location',
+            ],
+        ],
+        // Manage / References (2026-10-14, user): a client or an activity code the portal adds is
+        // created whole, an edit sends what it changed, and a removal deletes Airtable's record.
+        'references.clients' => [
+            'sql_table' => 'clients',
+            'airtable_table' => 'Clients',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'lenient' => ['Status'],
+            'fields' => [
+                'name' => 'Name',
+                'client_id' => 'ClientID',
+                'notes' => 'Notes',
+                'status' => 'Status',
+            ],
+        ],
+        'references.activity_codes' => [
+            'sql_table' => 'activity_codes',
+            'airtable_table' => 'Activity Code/s',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => [
+                'name' => 'Name',
+                'id_no' => 'IdNo',
+                'department' => 'Department',
             ],
         ],
     ];

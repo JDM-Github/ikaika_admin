@@ -3,6 +3,8 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
+use Closure;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -24,6 +26,7 @@ final class PortalReferences
     public function __construct(
         private readonly PortalAudit $audit,
         private readonly PortalScopeTree $scopeTree,
+        private readonly CoreLedger $ledger,
     ) {}
 
     /**
@@ -113,7 +116,7 @@ final class PortalReferences
     {
         [$name, $code] = $this->validatedClient($request, null);
 
-        $id = (int) $this->connection()->table('clients')->insertGetId(['name' => $name, 'client_id' => $code]);
+        $id = $this->ledgered($actor, 'references.clients', 'clients', null, fn (): int => (int) $this->connection()->table('clients')->insertGetId(['name' => $name, 'client_id' => $code]), ['name' => $name, 'client_id' => $code]);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.client', '{UserName|You} added the client '.$name.' ('.$code.')', (string) $id, $request);
 
@@ -134,7 +137,7 @@ final class PortalReferences
             abort(422, 'This client\'s code is already in its project numbers, so it cannot change.');
         }
 
-        $this->connection()->table('clients')->where('id', $id)->update(['name' => $name, 'client_id' => $code]);
+        $this->ledgered($actor, 'references.clients', 'clients', $row, fn (): int => $this->connection()->table('clients')->where('id', $id)->update(['name' => $name, 'client_id' => $code]), ['name' => $name, 'client_id' => $code]);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.client', '{UserName|You} changed the client '.$name.' ('.$code.')', (string) $id, $request);
 
@@ -154,7 +157,7 @@ final class PortalReferences
             abort(422, 'This client has projects, so it stays on the list.');
         }
 
-        $this->connection()->table('clients')->where('id', $id)->delete();
+        $this->ledgeredDelete($actor, 'references.clients', 'clients', $row);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.client', '{UserName|You} removed the client '.trim((string) $row->name), (string) $id, $request);
 
@@ -179,11 +182,8 @@ final class PortalReferences
             abort(422, 'That scope code is already on the list.');
         }
 
-        $id = (int) $this->connection()->table('activity_codes')->insertGetId([
-            'id_no' => $code,
-            'name' => trim($data['name']),
-            'department' => trim($data['department']),
-        ]);
+        $columns = ['id_no' => $code, 'name' => trim($data['name']), 'department' => trim($data['department'])];
+        $id = $this->ledgered($actor, 'references.activity_codes', 'activity_codes', null, fn (): int => (int) $this->connection()->table('activity_codes')->insertGetId($columns), $columns);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.scope', '{UserName|You} added the scope '.$code, (string) $id, $request);
 
@@ -212,11 +212,8 @@ final class PortalReferences
             abort(422, 'That scope code is already on the list.');
         }
 
-        $this->connection()->table('activity_codes')->where('id', $id)->update([
-            'id_no' => $code,
-            'name' => trim($data['name']),
-            'department' => trim($data['department']),
-        ]);
+        $columns = ['id_no' => $code, 'name' => trim($data['name']), 'department' => trim($data['department'])];
+        $this->ledgered($actor, 'references.activity_codes', 'activity_codes', $row, fn (): int => $this->connection()->table('activity_codes')->where('id', $id)->update($columns), $columns);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.scope', '{UserName|You} changed the scope '.$code, (string) $id, $request);
 
@@ -233,7 +230,7 @@ final class PortalReferences
             abort(404, 'That scope was not found.');
         }
 
-        $this->connection()->table('activity_codes')->where('id', $id)->delete();
+        $this->ledgeredDelete($actor, 'references.activity_codes', 'activity_codes', $row);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.scope', '{UserName|You} removed the scope '.trim((string) $row->id_no), (string) $id, $request);
 
@@ -568,5 +565,44 @@ final class PortalReferences
     private function connection(): Connection
     {
         return Model::getConnectionResolver()->connection('portal');
+    }
+
+    /**
+     * A References row written with its ledger entry, so the Airtable sync creates or patches the
+     * record there (2026-10-14, user). An add returns the new id; an edit ledgers only what changed.
+     *
+     * @param  Closure(): int  $write
+     * @param  array<string, mixed>  $columns
+     */
+    private function ledgered(Employee $actor, string $resource, string $table, ?object $before, Closure $write, array $columns): int
+    {
+        return $this->ledger->within($this->connection(), function () use ($actor, $resource, $table, $before, $write, $columns): int {
+            $result = $write();
+            $id = $before === null ? $result : (int) $before->id;
+            $changed = array_filter($columns, static fn (mixed $value, string $column): bool => $before === null || (string) ($before->{$column} ?? '') !== (string) ($value ?? ''), ARRAY_FILTER_USE_BOTH);
+            $parameters = ['id' => (string) $id, 'fields' => $changed];
+            $before === null
+                ? $this->ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, $table.':'.$id, CoreLedger::PRODUCT_PORTAL.'.'.$table, $parameters, $resource, (string) $id, (int) $actor->getKey(), is_string($actor->id_no) ? $actor->id_no : null)
+                : $this->ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, CoreLedger::PRODUCT_PORTAL.'.'.$table, $parameters, $resource, (string) $id, null, (int) $actor->getKey(), is_string($actor->id_no) ? $actor->id_no : null);
+
+            return $result;
+        });
+    }
+
+    // A References row removed for good, ledgered with the Airtable id the sync deletes there.
+    private function ledgeredDelete(Employee $actor, string $resource, string $table, object $row): void
+    {
+        $this->ledger->within($this->connection(), function () use ($actor, $resource, $table, $row): void {
+            $this->connection()->table($table)->where('id', $row->id)->delete();
+            $this->ledger->recordDelete(
+                CoreLedger::PRODUCT_PORTAL,
+                CoreLedger::PRODUCT_PORTAL.'.'.$table,
+                ['id' => (string) $row->id, 'airtableRecordId' => is_string($row->airtable_record_id ?? null) && $row->airtable_record_id !== '' ? $row->airtable_record_id : null],
+                $resource,
+                (string) $row->id,
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
     }
 }

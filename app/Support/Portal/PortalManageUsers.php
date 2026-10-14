@@ -284,8 +284,8 @@ final class PortalManageUsers
 
     /**
      * Someone new, in the portal before Airtable has them: active, as a User (the role can change
-     * after, under its own power and checks), in a department the actor's Users reach covers.
-     * Airtable is HR's list, so the sync does not create them there; HR adds them in Airtable.
+     * after, under its own power and checks), in a department the actor's Users reach covers. The
+     * sync creates them in Airtable (2026-10-14, user), so what links them can follow.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
@@ -323,8 +323,7 @@ final class PortalManageUsers
             abort(422, 'Someone already has that email address.');
         }
 
-        $employee = new Employee;
-        $employee->forceFill([
+        $employee = $this->createEmployee($actor, [
             'id_no' => $idNo,
             'first_name' => $firstName,
             'middle_name' => self::text($data['middleName'] ?? null),
@@ -334,7 +333,7 @@ final class PortalManageUsers
             'department' => $department,
             'status' => 'Active',
             'role' => 'User',
-        ])->save();
+        ]);
         $this->bumpCache();
         PortalCache::bump();
         $this->audit->record(
@@ -643,6 +642,33 @@ final class PortalManageUsers
             'resource' => 'users',
             'data' => $this->profileData($viewer, $target, $request, $withPrivate),
         ];
+    }
+
+    /**
+     * A new employee and their ledger entry as one write, so the Airtable sync creates them there and
+     * every report, request or project linking them can follow (2026-10-14, user).
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function createEmployee(Employee $actor, array $attributes): Employee
+    {
+        $employee = new Employee;
+
+        return $this->ledger->within($employee->getConnection(), function () use ($employee, $attributes, $actor): Employee {
+            $employee->forceFill($attributes)->save();
+            $this->ledger->recordAdd(
+                CoreLedger::PRODUCT_PORTAL,
+                'employees:'.$employee->getKey(),
+                CoreLedger::PRODUCT_PORTAL.'.employees',
+                ['table' => 'employees', 'key' => 'id', 'id' => (string) $employee->getKey(), 'idNo' => $employee->id_no],
+                'employees',
+                (string) $employee->getKey(),
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+
+            return $employee;
+        });
     }
 
     /**

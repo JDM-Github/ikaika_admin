@@ -313,10 +313,19 @@ final class PortalAirtableSync
             $schema,
             $map['aliases'] ?? [],
         );
+        // A lenient choice Airtable does not offer is left out rather than blocking the whole row.
+        $notes = [];
+        foreach ($map['lenient'] ?? [] as $field) {
+            $choices = $schema[$map['airtable_table']][$field]['choices'] ?? null;
+            if ($choices !== null && is_string($fields[$field] ?? null) && ! in_array($fields[$field], $choices, true)) {
+                $notes[] = '"'.$field.'" left out: Airtable has no option "'.$fields[$field].'".';
+                unset($fields[$field]);
+            }
+        }
         $problems = [...$linkProblems, ...$this->problems($map['airtable_table'], $fields, $schema)];
 
         return [
-            ...$this->unit($action, $map['airtable_table'], $key, $problems !== [] ? 'blocked' : ($creating ? 'create' : 'update'), $problems, $airtableId),
+            ...$this->unit($action, $map['airtable_table'], $key, $problems !== [] ? 'blocked' : ($creating ? 'create' : 'update'), [...$problems, ...$notes], $airtableId),
             'fields' => $fields,
         ];
     }
@@ -461,7 +470,9 @@ final class PortalAirtableSync
     }
 
     /**
-     * The columns an action changed: a flat `fields` map, else the keys of its `changes` diff.
+     * The columns an action changed: a flat `fields` map, the keys of its `changes` diff, or a plain
+     * list of column names. The list is how a private column is named: the ledger strips government
+     * and bank keys from every payload, so their values never reach it, and the sync reads SQL anyway.
      *
      * @param  list<string>  $keys
      * @return list<string>
@@ -470,8 +481,9 @@ final class PortalAirtableSync
     {
         $payload = $this->payload($action);
         foreach ($keys as $key) {
-            if (is_array($payload[$key] ?? null)) {
-                return array_map('strval', array_keys($payload[$key]));
+            $value = $payload[$key] ?? null;
+            if (is_array($value)) {
+                return array_map('strval', array_is_list($value) ? $value : array_keys($value));
             }
         }
 
