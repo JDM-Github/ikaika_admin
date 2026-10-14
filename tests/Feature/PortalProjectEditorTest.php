@@ -227,13 +227,15 @@ class PortalProjectEditorTest extends TestCase
 
         $name = trim($admin->first_name.' '.$admin->last_name);
         $this->assertSame([
-            ['action_name' => 'Project Creation', 'created_by' => $name, 'remarks' => null],
+            ['action_name' => 'Project Creation', 'created_by' => $name, 'remarks' => 'Waiting for approval'],
             ['action_name' => 'Project Edited', 'created_by' => $name, 'remarks' => 'Name: '.$payload['name'].' to Trail Renamed 2020; Status: Ongoing to Completed; Area: 1,250 to 1,300 sq ft'],
             ['action_name' => 'Scopes Changed', 'created_by' => $name, 'remarks' => '1 scope'],
         ], $this->trail($id));
 
         $board = collect($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame('Scopes Changed: 1 scope', $board['trail'][0]['summary']);
+        // The board reads each stored name as Trail history words, with the kind its chip shows (2026-10-14, user).
+        $this->assertSame(['Scopes changed: 1 scope', 'scopes'], [$board['trail'][0]['summary'], $board['trail'][0]['kind']]);
+        $this->assertSame(['Project created: Waiting for approval', 'created'], [$board['trail'][2]['summary'], $board['trail'][2]['kind']]);
     }
 
     // Given Add projects anywhere, a member's project still waits where no Project Manager covers its department.
@@ -569,12 +571,20 @@ class PortalProjectEditorTest extends TestCase
             (int) $row->is_renamed_with_acc_number, (int) $row->is_ledger_moved_to_for_submission, (int) $row->is_ledger_details_updated,
             $row->project_creation_status, $row->project_creation_approver,
         ]);
-        $this->assertContains('Project Closed', array_column($this->trail($id), 'action_name'));
+        $this->assertContains('Project Closing Submission', array_column($this->trail($id), 'action_name'));
         $this->assertTrue(DB::connection('portal')->table('notifications')
             ->where('employee_id', $head->getKey())->where('title', 'Project closed')->where('link_path', '/manage/manage-projects')->exists());
 
         // Saving it again while Closed asks for nothing more.
         $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'closed'])->assertOk();
+
+        // The head's decision on a Closed project is its closing, and the trail says so.
+        DB::connection('portal')->table('access_personal')->updateOrInsert(['employee_id' => $head->getKey(), 'permission_key' => 'projects.manager'], ['reach' => 'all']);
+        Cache::flush();
+        $this->withToken($this->token($head))->patchJson('/api/development/portal/manage/projects/'.$id, ['decision' => 'approve'])->assertOk();
+        $this->assertSame('Project Closing Approved', DB::connection('portal')->table('projects_action_history')
+            ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
+            ->where('projects_action_history.project_id', $id)->orderByDesc('project_action_history.id')->value('project_action_history.action_name'));
 
         // Another department confirms once.
         $mis = $this->payload(['name' => 'Closing Tool '.Str::random(6), 'department' => 'MIS', 'leadId' => $admin->id, 'scopeCodes' => []]);

@@ -326,7 +326,7 @@ final class PortalProjectEditor
                 $employeeId,
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
-            $this->trail->record($projectId, PortalProjectTrail::CREATED, $actor, $request);
+            $this->trail->record($projectId, PortalProjectTrail::CREATED, $actor, $request, $isApproved ? 'Approved at once' : 'Waiting for approval');
 
             return $projectId;
         });
@@ -390,7 +390,7 @@ final class PortalProjectEditor
         $isResubmitted = $closing === null && $this->sendsBackForApproval($actor, $request, $row, array_diff($parts, self::PEOPLE_CHANGES) !== []);
         $columns = [...$fields['columns'], ...($isResubmitted ? self::PENDING_AGAIN : []), ...($closing ?? [])];
 
-        $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted, $closing, $removedActivities): void {
+        $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted, $closing, $removedActivities, $row): void {
             $this->assertNameFree($fields['name'], $fields['columns']['department'], $projectId);
             $this->connection()->table('projects')->where('id', $projectId)->update($columns);
             if ($removedActivities !== null) {
@@ -417,10 +417,10 @@ final class PortalProjectEditor
                 $this->trail->record($projectId, PortalProjectTrail::EDITED, $actor, $request, $changes);
             }
             if ($isResubmitted) {
-                $this->trail->record($projectId, PortalProjectTrail::RESUBMITTED, $actor, $request);
+                $this->recordResubmission($projectId, $row, $actor, $request);
             }
             if ($closing !== null) {
-                $this->trail->record($projectId, PortalProjectTrail::CLOSED, $actor, $request);
+                $this->trail->record($projectId, PortalProjectTrail::CLOSING_SUBMITTED, $actor, $request, 'Completion checklist ticked, waiting for the department head');
             }
         });
         if ($isResubmitted) {
@@ -530,6 +530,20 @@ final class PortalProjectEditor
         }
     }
 
+    // Why an edit put the project back to waiting, on the closing trail when it is a closing that waits again.
+    private function recordResubmission(int $projectId, object $row, Employee $actor, Request $request): void
+    {
+        $isClosing = ($row->status ?? null) === self::STATUSES['closed'];
+        $wasRejected = ($row->project_creation_status ?? null) === PortalProjectApproval::REJECTED;
+        $this->trail->record(
+            $projectId,
+            $isClosing ? PortalProjectTrail::CLOSING_RESUBMITTED : PortalProjectTrail::RESUBMITTED,
+            $actor,
+            $request,
+            ($wasRejected ? 'Edited after it was rejected' : 'Edited after it was approved').', waiting for approval again',
+        );
+    }
+
     // The activity log row, and the approvers' "updated" notice unless they already heard it was sent again.
     /**
      * The activities an edit takes out: what the form sent, or -- when it sent nothing and the type
@@ -588,7 +602,7 @@ final class PortalProjectEditor
         // Scopes are an edit too, so the creator cannot change an approved project around its approval.
         $isResubmitted = $this->sendsBackForApproval($actor, $request, $row, true);
 
-        $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request, $isResubmitted): void {
+        $this->ledger->within($this->connection(), function () use ($scopeCodes, $projectId, $name, $actor, $request, $isResubmitted, $row): void {
             $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->delete();
             $this->writeScopes($projectId, $scopeCodes);
             // Assignees ride with the scopes; a scope taken off takes its assignees along.
@@ -600,7 +614,7 @@ final class PortalProjectEditor
             }
             if ($isResubmitted) {
                 $this->connection()->table('projects')->where('id', $projectId)->update(self::PENDING_AGAIN);
-                $this->trail->record($projectId, PortalProjectTrail::RESUBMITTED, $actor, $request);
+                $this->recordResubmission($projectId, $row, $actor, $request);
             }
 
             $this->ledger->recordEdit(

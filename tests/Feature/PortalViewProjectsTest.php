@@ -288,7 +288,8 @@ class PortalViewProjectsTest extends TestCase
                 'id' => (string) $historyId,
                 'changedOn' => '2026-09-01T08:00:00+00:00',
                 'actorName' => 'Metrics Tester',
-                'summary' => 'Project Edited: Updated scope totals',
+                'summary' => 'Project edited: Updated scope totals',
+                'kind' => 'edited',
                 'actorPhotoUrl' => null,
             ],
         ], $row['trail']);

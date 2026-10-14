@@ -719,12 +719,9 @@ final class PortalViewProjects
         $trails = [];
         foreach ($rows as $row) {
             $projectId = (int) $row->project_id;
-            $action = trim((string) ($row->action_name ?? ''));
+            $described = PortalProjectTrail::describe((string) ($row->action_name ?? ''));
             $remarks = trim((string) ($row->remarks ?? ''));
-            $summary = $action !== '' ? $action : 'Project updated';
-            if ($remarks !== '') {
-                $summary .= ': '.$remarks;
-            }
+            $summary = $remarks === '' ? $described['title'] : $described['title'].': '.$remarks;
 
             $trails[$projectId] ??= [];
             $trails[$projectId][] = [
@@ -732,6 +729,7 @@ final class PortalViewProjects
                 'changedOn' => PortalViewProjectPresenter::instant($row->created_at),
                 'actorName' => trim((string) ($row->created_by ?? '')) ?: 'System',
                 'summary' => $summary,
+                'kind' => $described['kind'],
             ];
         }
 

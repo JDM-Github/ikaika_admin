@@ -40,6 +40,13 @@ final class PortalManageProjects
         PortalProjectApproval::PENDING => PortalProjectTrail::REOPENED,
     ];
 
+    // A Closed project's approval is its closing, so its trail says so rather than "creation".
+    private const CLOSING_TRAILS = [
+        PortalProjectApproval::APPROVED => PortalProjectTrail::CLOSING_APPROVED,
+        PortalProjectApproval::REJECTED => PortalProjectTrail::CLOSING_REJECTED,
+        PortalProjectApproval::PENDING => PortalProjectTrail::CLOSING_REOPENED,
+    ];
+
     /** The tab => the word projects.project_creation_status holds. */
     private const STATUSES = [
         'pending' => PortalProjectApproval::PENDING,
@@ -153,7 +160,9 @@ final class PortalManageProjects
         $name = $this->text($row->project_name ?? null) ?? 'Project';
         $decision = $isReopened ? 'pending' : ($isApproved ? 'approved' : 'rejected');
 
-        $this->ledger->within($this->connection(), function () use ($actor, $request, $projectId, $status, $isReopened, $decision, $remarks, $name): void {
+        $trail = (($row->status ?? null) === 'Closed' ? self::CLOSING_TRAILS : self::TRAILS)[$status];
+
+        $this->ledger->within($this->connection(), function () use ($actor, $request, $projectId, $status, $isReopened, $decision, $remarks, $name, $trail): void {
             // Back to waiting clears who decided, as a project that was never decided has no approver.
             $written = [
                 'project_creation_status' => $status,
@@ -174,7 +183,7 @@ final class PortalManageProjects
                 (int) $actor->getKey(),
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
-            $this->trail->record($projectId, self::TRAILS[$status], $actor, $request, $remarks);
+            $this->trail->record($projectId, $trail, $actor, $request, $remarks);
         });
 
         $this->audit->record(
