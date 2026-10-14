@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Modules\Core\Models\Action;
+use App\Support\Airtable\AirtableSyncMap;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Core\CoreLedger;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -458,8 +459,10 @@ class PortalAirtableSyncTest extends TestCase
 
         $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
 
+        // Ambiguous means neither sibling: the value is left out with a note, never guessed at.
         $this->assertSame('2 Vacation Leave', $items->firstWhere('actionId', $exact)['fields']['Category'] ?? null);
-        $this->assertSame('blocked', $items->firstWhere('actionId', $ambiguous)['outcome'] ?? null);
+        $this->assertSame('create', $items->firstWhere('actionId', $ambiguous)['outcome'] ?? null);
+        $this->assertArrayNotHasKey('Category', $items->firstWhere('actionId', $ambiguous)['fields']);
     }
 
     // HR edits Employees in Airtable, so an update sends only the columns this action changed.
@@ -773,6 +776,86 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertSame(['delete', 'recCLNT0000000042'], [$items->firstWhere('actionId', $removed)['outcome'], $items->firstWhere('actionId', $removed)['airtableId']]);
     }
 
+    // Every Trail history row the portal writes is added to Airtable, linked to its project (2026-10-14, user).
+    public function test_a_trail_row_is_created_linked_to_its_project(): void
+    {
+        $schema = $this->schema();
+        $schema['tables'][] = ['name' => 'Project Action History', 'fields' => [
+            ['name' => 'ActionName', 'type' => 'singleLineText'],
+            ['name' => 'CreatedBy', 'type' => 'singleLineText'],
+            ['name' => 'Remarks', 'type' => 'singleLineText'],
+            ['name' => 'Project', 'type' => 'multipleRecordLinks'],
+        ]];
+        $this->fakeAirtable($schema);
+        $portal = DB::connection('portal');
+        $projectId = $this->projectRow(['airtable_record_id' => 'recPROJ0000000071']);
+        $trailId = (int) $portal->table('project_action_history')->insertGetId(['action_name' => 'Project Edited', 'created_by' => 'Sync Tester', 'remarks' => 'Status: Ongoing to Done', 'created_at' => now()]);
+        $portal->table('projects_action_history')->insert(['project_id' => $projectId, 'project_action_id' => $trailId]);
+        $actionId = app(CoreLedger::class)->recordAdd(CoreLedger::PRODUCT_PORTAL, 'project_action_history:'.$trailId, 'portal.project_action_history', ['id' => (string) $trailId], 'projects.trail', (string) $trailId, 1, null);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertSame('create', $item['outcome']);
+        $this->assertSame(['ActionName' => 'Project Edited', 'CreatedBy' => 'Sync Tester', 'Remarks' => 'Status: Ongoing to Done', 'Project' => ['recPROJ0000000071']], $item['fields']);
+    }
+
+    // A submitted registration is created in Airtable whole, and promotion sends the row again with its
+    // ID No. and approval (2026-10-14, user).
+    public function test_a_registration_is_created_and_promotion_updates_it(): void
+    {
+        $schema = $this->schema();
+        $schema['tables'][] = ['name' => 'New Employee Data', 'fields' => array_map(
+            static fn (string $name): array => ['name' => $name, 'type' => 'singleLineText'],
+            array_values(AirtableSyncMap::for('onboarding.employee_data')['fields']),
+        )];
+        $this->fakeAirtable($schema);
+        $portal = DB::connection('portal');
+        $dataId = (int) $portal->table('new_employee_data')->insertGetId([
+            'first_name' => 'Liza', 'last_name' => 'Reyes', 'personal_email' => 'liza.personal@example.test',
+            'status' => 'Active', 'data_approval' => 'Pending',
+        ]);
+        $addId = app(CoreLedger::class)->recordAdd(CoreLedger::PRODUCT_PORTAL, 'new_employee_data:'.$dataId, 'portal.new_employee_data', ['id' => (string) $dataId], 'onboarding.employee_data', (string) $dataId, 1, null);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $addId);
+        $this->assertSame('create', $item['outcome']);
+        $this->assertSame(['First Name' => 'Liza', 'Last Name' => 'Reyes', 'Status' => 'Active', 'Personal E-Mail' => 'liza.personal@example.test', 'Data Approval' => 'Pending'], $item['fields']);
+
+        app(PortalAirtableSync::class)->run(true);
+
+        // Promoting them writes their ID No. and approval; the portal owns the row, so it goes whole.
+        $portal->table('new_employee_data')->where('id', $dataId)->update(['id_no' => '260701-0099', 'data_approval' => 'Approved']);
+        $editId = app(CoreLedger::class)->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.new_employee_data', ['id' => (string) $dataId], 'onboarding.employee_data', (string) $dataId, null, 1, null);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $editId);
+        $this->assertSame('update', $item['outcome']);
+        $this->assertSame('260701-0099', $item['fields']['ID No.']);
+        $this->assertSame('Approved', $item['fields']['Data Approval']);
+        $this->assertSame('Liza', $item['fields']['First Name']);
+    }
+
+    // The admin grid's bare table names reach every mirrored table it edits, column by column (2026-10-14, user).
+    public function test_a_grid_edit_of_a_mirrored_table_sends_only_that_column(): void
+    {
+        $this->fakeAirtable();
+        $clientId = (int) DB::connection('portal')->table('clients')->insertGetId(['airtable_record_id' => 'recCLNT0000000081', 'name' => 'Grid Client', 'client_id' => 'C-981', 'notes' => 'Edited in the grid']);
+        $actionId = app(CoreLedger::class)->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.clients', ['table' => 'clients', 'key' => 'id', 'fields' => ['notes' => 'Edited in the grid']], 'clients', (string) $clientId);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertSame(['Notes' => 'Edited in the grid'], $item['fields']);
+    }
+
+    // PHP keeps only the last of two equal array keys, silently: one resource must never shadow another.
+    public function test_no_resource_is_mapped_twice(): void
+    {
+        $source = (string) file_get_contents(app_path('Support/Airtable/AirtableSyncMap.php'));
+        $block = substr($source, (int) strpos($source, 'private const RESOURCES = ['), (int) strpos($source, 'private const PORTAL_ONLY') - (int) strpos($source, 'private const RESOURCES = ['));
+        preg_match_all("/^        '([a-z_.0-9]+)' => /m", $block, $keys);
+
+        $this->assertSame(count($keys[1]), count(array_unique($keys[1])));
+        $this->assertCount(count($keys[1]), AirtableSyncMap::resources());
+    }
+
     // The grid ledgers an edit as a diff under `changes` as well as a flat `fields` map; either way
     // it names the columns, and only those reach Airtable.
     public function test_a_changes_diff_names_the_columns_to_send(): void
@@ -1066,7 +1149,7 @@ class PortalAirtableSyncTest extends TestCase
     public function test_a_blocked_action_keeps_its_reason_without_an_attempt(): void
     {
         $this->fakeAirtable();
-        $requestId = $this->leaveRow('Pending', 'Unknown Leave');
+        $requestId = $this->leaveRow('Rescheduled', 'Vacation Leave');
         $actionId = $this->ledgerAdd($requestId);
 
         app(PortalAirtableSync::class)->run(true);
@@ -1074,7 +1157,7 @@ class PortalAirtableSyncTest extends TestCase
         $action = Action::query()->findOrFail($actionId);
         $this->assertNull($action->synced_at);
         $this->assertSame(0, (int) $action->attempts);
-        $this->assertStringContainsString('has no option "Unknown Leave"', (string) $action->last_error);
+        $this->assertStringContainsString('has no option "Rescheduled"', (string) $action->last_error);
     }
 
     // A create whose answer was lost may be in Airtable: it is held, and sent again only when asked.
@@ -1116,7 +1199,9 @@ class PortalAirtableSyncTest extends TestCase
 
         $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
 
-        $this->assertSame('blocked', $items->firstWhere('actionId', $two)['outcome']);
+        // It fits no option, so it is left out with a note; it must never land on "1 Day".
+        $this->assertSame('create', $items->firstWhere('actionId', $two)['outcome']);
+        $this->assertArrayNotHasKey('Category', $items->firstWhere('actionId', $two)['fields']);
         $this->assertSame('Vacation Leave', $items->firstWhere('actionId', $indexed)['fields']['Category']);
     }
 

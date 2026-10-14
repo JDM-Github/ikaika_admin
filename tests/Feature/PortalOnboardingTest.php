@@ -592,6 +592,10 @@ class PortalOnboardingTest extends TestCase
         // Ledgered as an add, so the Airtable sync creates them there (2026-10-14, user).
         $this->assertTrue(DB::connection('core')->table('actions')->where('resource', 'employees')->where('action_type', 'add')
             ->where('record_id', (string) $row->getKey())->exists());
+        // Their New Employee Data row too: added when they submitted, edited when promotion named their ID No.
+        $dataId = (string) DB::connection('portal')->table('registrations')->where('id', $id)->value('employee_data_id');
+        $this->assertSame(['add', 'edit'], DB::connection('core')->table('actions')->where('resource', 'onboarding.employee_data')
+            ->where('record_id', $dataId)->orderBy('id')->pluck('action_type')->all());
         $this->assertSame('Liza', $row->first_name);
         $this->assertSame('Reyes', $row->last_name);
         // The work email signs them in; the address the link was bound to is kept as their personal one.

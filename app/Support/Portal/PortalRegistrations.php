@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
@@ -111,6 +112,7 @@ final class PortalRegistrations
         private readonly PortalManageUsers $users,
         private readonly PortalEmployeeDocuments $employeeDocuments,
         private readonly PortalPlaces $places,
+        private readonly CoreLedger $ledger,
     ) {}
 
     /**
@@ -352,7 +354,10 @@ final class PortalRegistrations
             'promoted_employee_id' => $employeeId,
         ]);
         if ($row->employee_data_id !== null) {
-            $this->connection()->table('new_employee_data')->where('id', (int) $row->employee_data_id)->update(['id_no' => $idNo, 'data_approval' => 'Approved']);
+            $this->ledger->within($this->connection(), function () use ($row, $idNo, $actor): void {
+                $this->connection()->table('new_employee_data')->where('id', (int) $row->employee_data_id)->update(['id_no' => $idNo, 'data_approval' => 'Approved']);
+                $this->ledgerEmployeeData((int) $row->employee_data_id, true, $actor);
+            });
         }
         // Their files go to Cloudinary as their documents, the photo becoming their profile photo (2026-10-12, user).
         $this->employeeDocuments->copyFromRegistration($employee, $id);
@@ -580,17 +585,23 @@ final class PortalRegistrations
             'bank_swift_code' => $this->text($details['bankSwiftCode'] ?? null),
             'data_approval' => 'Pending',
         ];
-        $table = $this->connection()->table('new_employee_data');
-        $employeeDataId = $row->employee_data_id === null ? null : (int) $row->employee_data_id;
-        if ($employeeDataId !== null && $table->clone()->where('id', $employeeDataId)->exists()) {
-            $table->clone()->where('id', $employeeDataId)->update($record);
-        } else {
-            $employeeDataId = (int) $table->clone()->insertGetId(['id_no' => null] + $record);
-        }
-        $this->connection()->table('registrations')->where('id', (int) $row->id)->update([
-            'submitted_at' => now(),
-            'employee_data_id' => $employeeDataId,
-        ]);
+        // Ledgered with the row, so Airtable's New Employee Data gets it too (2026-10-14, user). The
+        // candidate has no employee of their own, so the entry names no actor.
+        $this->ledger->within($this->connection(), function () use ($row, $record): void {
+            $table = $this->connection()->table('new_employee_data');
+            $employeeDataId = $row->employee_data_id === null ? null : (int) $row->employee_data_id;
+            $exists = $employeeDataId !== null && $table->clone()->where('id', $employeeDataId)->exists();
+            if ($exists) {
+                $table->clone()->where('id', $employeeDataId)->update($record);
+            } else {
+                $employeeDataId = (int) $table->clone()->insertGetId(['id_no' => null] + $record);
+            }
+            $this->connection()->table('registrations')->where('id', (int) $row->id)->update([
+                'submitted_at' => now(),
+                'employee_data_id' => $employeeDataId,
+            ]);
+            $this->ledgerEmployeeData($employeeDataId, $exists, null);
+        });
 
         return ['submitted' => true];
     }
@@ -603,6 +614,18 @@ final class PortalRegistrations
     }
 
     // ---------------------------------------------------------------- internals
+
+    // A registration's New Employee Data row, for the Airtable sync: sent whole, since the portal owns it.
+    private function ledgerEmployeeData(int $employeeDataId, bool $existed, ?Employee $actor): void
+    {
+        $target = CoreLedger::PRODUCT_PORTAL.'.new_employee_data';
+        $parameters = ['id' => (string) $employeeDataId];
+        $actorId = $actor === null ? null : (int) $actor->getKey();
+        $actorIdNo = $actor !== null && is_string($actor->id_no) ? $actor->id_no : null;
+        $existed
+            ? $this->ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, $target, $parameters, 'onboarding.employee_data', (string) $employeeDataId, null, $actorId, $actorIdNo)
+            : $this->ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, 'new_employee_data:'.$employeeDataId, $target, $parameters, 'onboarding.employee_data', (string) $employeeDataId, $actorId, $actorIdNo);
+    }
 
     /**
      * @return array{candidateName: string, email: string, slug: ?string, expiresAt: ?string}

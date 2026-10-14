@@ -5,14 +5,29 @@ namespace Tests;
 use App\Support\Portal\PortalJwt;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\ChecksAirtableLive;
 
 abstract class TestCase extends BaseTestCase
 {
+    use ChecksAirtableLive;
+
     // Every portal write must carry a location (RequirePortalLocation); a test of that refusal flushes it.
     protected function setUp(): void
     {
         parent::setUp();
         $this->withHeader('X-Portal-Location', 'Calamba City, Laguna, Philippines');
+        $this->markAirtableLedger();
+    }
+
+    // With AIRTABLE_LIVE_SCENARIOS=1 the test's ledger is dry-run against the live base first; the
+    // rollback always follows, even when that check fails.
+    protected function tearDown(): void
+    {
+        try {
+            $this->checkAirtableLive();
+        } finally {
+            parent::tearDown();
+        }
     }
 
     /**
