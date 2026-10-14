@@ -103,7 +103,7 @@ if ($Gui -or $windowed) {
     . (Get-UiAsset 'build-backend.ps1')
     . (Join-Path $configsDir 'lib\api-target.ps1')
     $current = "$(Get-Content -LiteralPath (Join-Path $repoRoot 'VERSION') -ErrorAction SilentlyContinue | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1)".Trim()
-    $picked = Show-BuildReleaseDialog -ProjectName 'IKAIKA Portal API' -Version $current -RepoRoot $repoRoot -BuildRelease $PSCommandPath
+    $picked = Show-BuildReleaseDialog -ProjectName "$(Get-ProjectValue 'app.displayName' 'IkaIka Portal Backend')" -Version $current -RepoRoot $repoRoot -BuildRelease $PSCommandPath
     if ($null -eq $picked) {
         Write-Host ''
         Write-Host '  Nothing was built - the dialog closed without Build running.' -ForegroundColor DarkGray

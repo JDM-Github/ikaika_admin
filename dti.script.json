@@ -1,7 +1,7 @@
 {
   "version": "0.0.0+1",
-  "name": "Ikaika Portal",
-  "title": "Ikaika Portal",
+  "name": "IkaIka Portal Backend",
+  "title": "IkaIka Portal Backend",
   "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.39.3",
   "rules": {
     "global": [

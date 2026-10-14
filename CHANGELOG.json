@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-14T16:48:31+08:00",
+  "generated": "2026-10-14T21:55:46+08:00",
   "current": "",
   "releases": [],
   "upcoming": [
@@ -13,7 +13,8 @@
       "other": [
         "Release builds carry their version, as the estimator's do: dist/ikaika-portal-backend-<version>[-debug].zip with its .sha256.",
         "build-release tags and uploads when asked, as the estimator's does - -Tag, -Deploy, -DryRun - and -Clean, the Build release form's clean, removes the server's older backups and a failed deploy's leftovers.",
-        "build-release -Gui opens the project estimator's Build release dialog."
+        "build-release -Gui opens the project estimator's Build release dialog.",
+        "Releases and the build dialog name the backend IkaIka Portal Backend - as the estimator names its own"
       ]
     }
   ]
