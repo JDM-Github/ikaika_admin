@@ -78,6 +78,7 @@ function Show-BuildReleaseDialog {
         Timer     = $null
         RepoRoot  = $RepoRoot
         ExitCode  = 0
+        Script    = $BuildRelease
     }
 
     $el.SubtitleText.Text = "$ProjectName $Version"
@@ -274,7 +275,7 @@ function Show-BuildReleaseDialog {
         $q = '"'
         $state.Steps = @(
             @{ Label = 'build-release'; Exe = $exe
-               Args  = "-NoProfile -ExecutionPolicy Bypass -File $q$BuildRelease$q -Keep $($opts.Keep)" +
+               Args  = "-NoProfile -ExecutionPolicy Bypass -File $q$($state.Script)$q -Keep $($opts.Keep)" +
                        $(if ($opts.Debug) { ' -Debug' } else { '' }) +
                        $(if ($opts.BumpNeeded) { " -Bump $($opts.Version)" + $(if ($opts.Tag) { ' -Tag' } else { '' }) } else { '' }) +
                        $(if ($opts.Deploy) { ' -Deploy' + $(if ($opts.DryRun) { ' -DryRun' } else { '' }) + $(if ($opts.Clean) { ' -Clean' } else { '' }) } else { '' }) }
