@@ -306,6 +306,10 @@ final class PortalSharedPages
                 abort(422, 'That reach is not one a shared page may carry.');
             }
             $reach = PortalRules::narrower($held, $chosen) ?? $held;
+            // A guest has no records of their own, so a share reaches a department or every department.
+            if ($reach !== 'department' && $reach !== 'all') {
+                abort(422, 'A shared page reaches a department or every department; it cannot be only the person.');
+            }
             $reaches[$key] = $reach;
             if ($reach === 'department') {
                 $needsDepartment = true;

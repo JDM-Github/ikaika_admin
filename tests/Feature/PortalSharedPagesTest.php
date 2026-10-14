@@ -367,6 +367,9 @@ class PortalSharedPagesTest extends TestCase
         $this->assertTrue($pages['projects.view']['supportsReach']);
         $this->assertNull($pages['finance.envelopes']['reach']);
 
+        // A guest has no records of their own: only the person is refused, whatever was asked.
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'own']]))->assertStatus(422);
+
         // Switched off for themselves: the page cannot be handed out at all.
         DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $developer->getKey(), 'permission_key' => 'projects.view']);
         $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view']]))->assertStatus(422);
