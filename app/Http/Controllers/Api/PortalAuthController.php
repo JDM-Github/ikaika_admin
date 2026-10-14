@@ -29,13 +29,23 @@ class PortalAuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         // A deployed portal accepts ID sign-in only while the Advanced settings switch offers it.
-        if (! app()->environment(['local', 'testing']) && ! PortalAdvancedSettings::idLogin()) {
+        $deployed = ! app()->environment(['local', 'testing']);
+        if ($deployed && ! PortalAdvancedSettings::idLogin()) {
             abort(404);
         }
 
         $validated = $request->validate([
             'id_no' => ['required', 'string', 'max:64'],
+            'password' => ['nullable', 'string', 'max:255'],
         ]);
+
+        // Deployed, it also needs the password only MIS holds; with none configured nobody gets in.
+        if ($deployed) {
+            $expected = (string) config('services.portal_id_login.password', '');
+            if ($expected === '' || ! hash_equals($expected, (string) ($validated['password'] ?? ''))) {
+                abort(401, 'Unknown ID number.');
+            }
+        }
 
         $idNo = trim($validated['id_no']);
         if ($idNo === '') {

@@ -148,7 +148,15 @@ class PortalAdvancedSettingsTest extends TestCase
             'setting_key' => PortalAdvancedSettings::ID_LOGIN,
             'setting_value' => '1',
         ]);
-        $this->postJson($url, ['id_no' => $this->member->id_no])->assertOk()->assertJsonStructure(['token']);
+
+        // The switch alone is not enough (2026-10-14, user): the MIS-held password must match, and none configured refuses all.
+        config(['services.portal_id_login.password' => '']);
+        $this->postJson($url, ['id_no' => $this->member->id_no, 'password' => ''])->assertUnauthorized();
+
+        config(['services.portal_id_login.password' => 'mis-only']);
+        $this->postJson($url, ['id_no' => $this->member->id_no])->assertUnauthorized();
+        $this->postJson($url, ['id_no' => $this->member->id_no, 'password' => 'wrong'])->assertUnauthorized();
+        $this->postJson($url, ['id_no' => $this->member->id_no, 'password' => 'mis-only'])->assertOk()->assertJsonStructure(['token']);
     }
 
     private function developerToken(): string

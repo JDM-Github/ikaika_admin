@@ -49,6 +49,11 @@ return [
         'base_url' => 'https://api.bitbucket.org/2.0',
     ],
 
+    // ID-number sign-in on a deployed portal: only MIS knows it; unset, ID sign-in stays refused there.
+    'portal_id_login' => [
+        'password' => env('PORTAL_ID_LOGIN_PASSWORD'),
+    ],
+
     'cloudinary' => [
         'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
         'api_key' => env('CLOUDINARY_API_KEY'),
