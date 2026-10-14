@@ -54,7 +54,7 @@ final class PortalSharedPages
      * The panel: every share, newest first, and the pages a share may grant. The actor and request
      * are read only to say, per page, the reach the actor holds for it -- the form offers no more.
      *
-     * @return array{shares: list<array<string, mixed>>, pages: list<array{key: string, label: string, group: ?string, isReady: bool, supportsReach: bool, reach: ?string}>}
+     * @return array{shares: list<array<string, mixed>>, pages: list<array<string, mixed>>, departments: list<string>, ownDepartment: ?string}
      */
     public function index(?Employee $actor = null, ?Request $request = null): array
     {
@@ -70,7 +70,13 @@ final class PortalSharedPages
             $shares[] = $this->present($row, $shareRules->pluck('rule_key')->all(), self::reachesFrom($shareRules), $viewerId, $creatorNames[(int) $row->created_by] ?? null);
         }
 
-        return ['shares' => $shares, 'pages' => $this->pages($actor, $request)];
+        return [
+            'shares' => $shares,
+            'pages' => $this->pages($actor, $request),
+            // The reach picker names departments (2026-10-14, user): every one, and which is the actor's own.
+            'departments' => $this->departmentNames(),
+            'ownDepartment' => $actor === null ? null : (trim((string) $actor->department) ?: null),
+        ];
     }
 
     /**
@@ -268,6 +274,7 @@ final class PortalSharedPages
             'rules.*' => ['string', 'max:100'],
             'reaches' => ['nullable', 'array'],
             'reaches.*' => ['nullable', 'string', 'max:16'],
+            'reachDepartment' => ['nullable', 'string', 'max:100'],
         ]);
 
         $label = trim($data['label']);
@@ -309,6 +316,10 @@ final class PortalSharedPages
         $provided = is_array($data['reaches'] ?? null) ? $data['reaches'] : [];
         $reaches = [];
         $needsDepartment = false;
+        // The one department every department-reach page of the share uses; the actor's own unless named.
+        $own = trim((string) $actor->department);
+        $named = isset($data['reachDepartment']) ? trim((string) $data['reachDepartment']) : '';
+        $department = $named !== '' ? $named : $own;
         foreach ($rules as $key) {
             if (isset($options[$key]) || ! (bool) ($catalog[$key]->supports_reach ?? false)) {
                 continue;
@@ -329,7 +340,14 @@ final class PortalSharedPages
             $reaches[$key] = $reach;
             if ($reach === 'department') {
                 $needsDepartment = true;
+                // Held for one's own department only: that is the only department it may name.
+                if ($held !== 'all' && strcasecmp($department, $own) !== 0) {
+                    abort(422, 'You can only share your own department on a page you hold for your department.');
+                }
             }
+        }
+        if ($needsDepartment && ($department === '' || ! in_array(strtolower($department), array_map('strtolower', [...$this->departmentNames(), $own]), true))) {
+            abort(422, 'Choose a department for the pages set to one department.');
         }
         // An option reaches no further than its page, nor than the actor holds it.
         foreach ($options as $key => $page) {
@@ -348,7 +366,7 @@ final class PortalSharedPages
             'expiresAt' => $this->expiresAt($data),
             'ratePerMinute' => (int) ($data['ratePerMinute'] ?? self::DEFAULT_RATE_PER_MINUTE),
             // The department a department-reach share is scoped to, snapshotted so the guest stands in with it.
-            'reachDepartment' => $needsDepartment ? (trim((string) $actor->department) ?: null) : null,
+            'reachDepartment' => $needsDepartment ? $department : null,
             'rules' => $rules,
             'reaches' => $reaches,
         ];
@@ -430,6 +448,17 @@ final class PortalSharedPages
         }
 
         return null;
+    }
+
+    /**
+     * The departments Manage / References keeps, by name.
+     *
+     * @return list<string>
+     */
+    private function departmentNames(): array
+    {
+        return $this->connection()->table('departments')->orderBy('name')->pluck('name')
+            ->map(static fn (mixed $name): string => trim((string) $name))->filter()->unique()->values()->all();
     }
 
     // The sidebar's own filing, where the catalog differs: References sits under Manage there, after Users.
@@ -538,6 +567,8 @@ final class PortalSharedPages
             'rules' => array_values($rules),
             // Only the pages that carry a reach; the rest read as they always did.
             'reaches' => (object) $reaches,
+            // The department those set to one department are scoped to.
+            'reachDepartment' => $row->reach_department === null ? null : (string) $row->reach_department,
         ];
     }
 

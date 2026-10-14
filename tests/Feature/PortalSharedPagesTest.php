@@ -389,6 +389,25 @@ class PortalSharedPagesTest extends TestCase
         $this->assertTrue($pages['projects.view']['supportsReach']);
         $this->assertNull($pages['finance.envelopes']['reach']);
 
+        // Held for their own department only: naming another one is refused, their own is fine (2026-10-14, user).
+        $other = trim((string) DB::connection('portal')->table('departments')->whereRaw('LOWER(name) != ?', [strtolower(trim((string) $developer->department))])->value('name'));
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'department'], 'reachDepartment' => $other]))
+            ->assertStatus(422)->assertJsonPath('message', 'You can only share your own department on a page you hold for your department.');
+        $this->assertSame(trim((string) $developer->department), $this->createShare($token, ['rules' => ['projects.view'], 'reachDepartment' => trim((string) $developer->department)])->json('data.share.reachDepartment'));
+
+        // The list names every department for the picker, and the actor's own.
+        $list = $this->withToken($token)->getJson(self::BASE)->json('data');
+        $this->assertContains($other, $list['departments']);
+        $this->assertSame(trim((string) $developer->department), $list['ownDepartment']);
+
+        // Held for every department: any department may be named, and it is what the guest stands in with.
+        DB::connection('portal')->table('access_self_reach')->where('employee_id', $developer->getKey())->delete();
+        $named = $this->createShare($token, ['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'department'], 'reachDepartment' => $other])->json('data.share');
+        $this->assertSame([$other, 'department'], [$named['reachDepartment'], $named['reaches']['projects.view']]);
+        $this->assertSame($other, DB::connection('portal')->table('shared_pages')->where('id', $named['id'])->value('reach_department'));
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'department'], 'reachDepartment' => 'Nowhere']))
+            ->assertStatus(422)->assertJsonPath('message', 'Choose a department for the pages set to one department.');
+
         // A guest has no records of their own: only the person is refused, whatever was asked.
         $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'own']]))->assertStatus(422);
 
