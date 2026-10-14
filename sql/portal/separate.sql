@@ -92,6 +92,29 @@ CREATE TABLE calendar_event_members (
 
 
 -- ============================================================================
+-- REPORT TEMPLATES -- the report forms' Use a Template panel
+-- report_templates: one person's saved recipe for a report day, per user: the
+-- builder's rows as labels (a project, its activities with hours) plus the
+-- remarks, so it refills the picker as text. body is JSON:
+-- {projects: [{projectLabel, activities: [{activityLabel, hours}]}]}.
+-- Only its owner reads, changes or removes a row.
+-- Existing databases: create_portal_report_templates.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS report_templates (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id  INT          NOT NULL,
+    name         VARCHAR(100) NOT NULL,
+    notes        TEXT         NULL,
+    body         JSON         NOT NULL,
+    date_created DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    date_updated DATETIME     NULL,
+    INDEX idx_report_templates_employee (employee_id, name),
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ============================================================================
 -- ADMIN EMAIL — the Send Email page
 -- email_blocks: what the composer reuses. kind 'template' carries a category and
 -- subject; kind 'footer' is a signature or disclaimer appended under the body.

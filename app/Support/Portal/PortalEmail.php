@@ -79,9 +79,12 @@ final class PortalEmail
         $search = trim((string) $request->query('q', ''));
         $sort = trim((string) $request->query('sort', ''));
         $dir = strtolower(trim((string) $request->query('dir', 'desc'))) === 'asc' ? 'asc' : 'desc';
+        // The composer's Use a Template asks for its own blocks alone; the library page reads them all.
+        $actor = $request->attributes->get('portalEmployee');
+        $ownerId = $request->boolean('mine') && $actor instanceof Employee ? (int) $actor->getKey() : null;
 
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
-        $key = 'portal:administration:email:blocks:'.$version.':'.($kind ?? 'all').':'.$page.':'.$perPage.':'.md5($search).':'.$sort.':'.$dir;
+        $key = 'portal:administration:email:blocks:'.$version.':'.($kind ?? 'all').':'.$page.':'.$perPage.':'.md5($search).':'.$sort.':'.$dir.':'.($ownerId === null ? 'all' : 'u'.$ownerId);
 
         return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use (
             $kind,
@@ -90,8 +93,9 @@ final class PortalEmail
             $search,
             $sort,
             $dir,
+            $ownerId,
         ): array {
-            return $this->build($kind, $perPage, $page, $search, $sort, $dir);
+            return $this->build($kind, $perPage, $page, $search, $sort, $dir, $ownerId);
         });
     }
 
@@ -262,11 +266,14 @@ final class PortalEmail
      *     meta: array{current_page: int, per_page: int, total: int, last_page: int}
      * }
      */
-    private function build(?string $kind, int $perPage, int $page, string $search, string $sort, string $dir): array
+    private function build(?string $kind, int $perPage, int $page, string $search, string $sort, string $dir, ?int $ownerId = null): array
     {
         $query = EmailBlock::query()->select(PortalEmailPresenter::blockColumns());
         if ($kind !== null) {
             $query->where('kind', $kind);
+        }
+        if ($ownerId !== null) {
+            $query->where('created_by', $ownerId);
         }
         if ($search !== '') {
             $needle = '%'.str_replace(['%', '_'], ['\%', '\_'], $search).'%';

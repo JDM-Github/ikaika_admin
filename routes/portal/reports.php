@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Portal\Reports\ProjectsController;
+use App\Http\Controllers\Api\Portal\Reports\ReportTemplatesController;
 use App\Http\Controllers\Api\Portal\Reports\SubmittedController;
 use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
@@ -12,6 +13,16 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // An MIS project's commits on the report's day, from its linked Bitbucket repositories.
     Route::middleware(['throttle:portal-reports-projects', 'portal.rule:reports.daily|reports.late|reports.submitted.edit'])
         ->get('reports/code-activity', [ProjectsController::class, 'codeActivity']);
+
+    // The Use a Template panel: each person's own saved recipes, read and written only by them.
+    Route::middleware(['throttle:portal-reports-submitted', 'portal.rule:reports.daily|reports.late|requests.overtime|requests.offset'])
+        ->get('reports/templates', [ReportTemplatesController::class, 'index']);
+    Route::middleware(['throttle:portal-reports-submitted-write', 'portal.rule:reports.daily|reports.late|requests.overtime|requests.offset'])
+        ->group(function (): void {
+            Route::post('reports/templates', [ReportTemplatesController::class, 'store']);
+            Route::patch('reports/templates/{id}', [ReportTemplatesController::class, 'update'])->where('id', '[0-9]+');
+            Route::delete('reports/templates/{id}', [ReportTemplatesController::class, 'destroy'])->where('id', '[0-9]+');
+        });
 
     Route::middleware('throttle:portal-reports-submitted')->group(function (): void {
         // Before the list route, so /days is not read as a submitted-report id. The filing forms read
