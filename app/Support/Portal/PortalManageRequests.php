@@ -23,9 +23,12 @@ final class PortalManageRequests
 {
     public const CACHE_TTL_SECONDS = 30;
 
-    private const MAX_RANGE_MONTHS = 24;
+    /**
+     * MySQL's DATE bounds, standing in for an end of the range left open.
+     */
+    private const EARLIEST_DAY = '1000-01-01';
 
-    private const MAX_AHEAD_MONTHS = 12;
+    private const LATEST_DAY = '9999-12-31';
 
     private const CACHE_VERSION_KEY = PortalCache::DATA_VERSION_KEY;
 
@@ -63,12 +66,14 @@ final class PortalManageRequests
      *     reimbursements: list<array<string, mixed>>,
      *     flaggedReports: list<array<string, mixed>>,
      *     lateReports: list<array<string, mixed>>,
-     *     range: array{from: string, to: string}
+     *     range: array{from: ?string, to: ?string}
      * }
      */
     public function list(Request $request): array
     {
         [$from, $to] = $this->dateRange($request);
+        $first = $from ?? self::EARLIEST_DAY;
+        $last = $to ?? self::LATEST_DAY;
         $actor = $request->attributes->get('portalEmployee');
         if (! $actor instanceof Employee) {
             abort(401, 'Authentication is required.');
@@ -77,10 +82,10 @@ final class PortalManageRequests
         $version = (int) Cache::get(self::CACHE_VERSION_KEY, 1);
         // Everything the reach depends on is in the key, so one person's queue is never served to another.
         $scope = md5((string) json_encode([$reaches, PortalPreview::department($actor->department), (int) $actor->getKey()]));
-        $key = 'portal:manage:requests:'.$version.':'.$this->reports->cacheVersion().':'.$from.':'.$to.':'.$scope;
+        $key = 'portal:manage:requests:'.$version.':'.$this->reports->cacheVersion().':'.$first.':'.$last.':'.$scope;
 
-        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($from, $to, $actor, $reaches): array {
-            [$data, $leave, $overtime, $offset] = $this->requestLists($from, $to);
+        return Cache::remember($key, self::CACHE_TTL_SECONDS, function () use ($from, $to, $first, $last, $actor, $reaches): array {
+            [$data, $leave, $overtime, $offset] = $this->requestLists($first, $last);
             $employees = $this->employeesByName();
             $of = static fn (string $kind): callable => static fn (): ?string => $reaches[$kind];
 
@@ -91,9 +96,9 @@ final class PortalManageRequests
                 'leave' => $this->scoped($leave, $actor, $employees, $of('leave')),
                 'overtime' => $this->scoped($overtime, $actor, $employees, $of('overtime')),
                 'offset' => $this->scoped($offset, $actor, $employees, $of('offset')),
-                'reimbursements' => $this->scoped($this->claims($from, $to), $actor, $employees, $of('reimbursement')),
-                'flaggedReports' => $this->scoped($this->reports->flaggedReports($from, $to), $actor, $employees, $of('flag')),
-                'lateReports' => $this->scoped($this->reports->lateQueue($from, $to), $actor, $employees, $of('late')),
+                'reimbursements' => $this->scoped($this->claims($first, $last), $actor, $employees, $of('reimbursement')),
+                'flaggedReports' => $this->scoped($this->reports->flaggedReports($first, $last), $actor, $employees, $of('flag')),
+                'lateReports' => $this->scoped($this->reports->lateQueue($first, $last), $actor, $employees, $of('late')),
                 'range' => ['from' => $from, 'to' => $to],
             ];
         });
@@ -1290,27 +1295,23 @@ final class PortalManageRequests
     }
 
     /**
-     * @return array{0: string, 1: string}
+     * The range asked for, either end left open when it was not given. With neither, the queue is
+     * every year on file rather than a window, so nothing filed is ever out of an approver's reach.
+     *
+     * @return array{0: ?string, 1: ?string}
      */
     private function dateRange(Request $request): array
     {
         $fromRaw = trim((string) $request->query('from', ''));
         $toRaw = trim((string) $request->query('to', ''));
+        $from = $fromRaw === '' ? null : $this->parseDate($fromRaw);
+        $to = $toRaw === '' ? null : $this->parseDate($toRaw);
 
-        $to = $toRaw === ''
-            ? $this->timezone->today()->addMonths(self::MAX_AHEAD_MONTHS)
-            : $this->parseDate($toRaw);
-        $floor = $to->copy()->subMonths(self::MAX_RANGE_MONTHS + self::MAX_AHEAD_MONTHS)->startOfMonth();
-        $from = $fromRaw === '' ? $floor->copy() : $this->parseDate($fromRaw);
-
-        if ($from->gt($to)) {
+        if ($from !== null && $to !== null && $from->gt($to)) {
             abort(422, 'The from date must be on or before the to date.');
         }
-        if ($from->lt($floor)) {
-            $from = $floor;
-        }
 
-        return [$from->toDateString(), $to->toDateString()];
+        return [$from?->toDateString(), $to?->toDateString()];
     }
 
     private function parseDate(string $value): Carbon

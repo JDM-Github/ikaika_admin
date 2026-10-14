@@ -87,6 +87,59 @@ class PortalManageRequestsTest extends TestCase
         $this->assertSame($this->memberName($member), $leave['memberName']);
     }
 
+    // The reported ask (2026-10-14): asked for no range, the queue is every year on file, not the last 24 months.
+    public function test_with_no_range_the_queue_reaches_every_year_on_file(): void
+    {
+        $member = $this->activeMember();
+        $now = Carbon::now($this->app['config']->get('app.timezone'));
+        $old = $now->copy()->subMonths(40)->toDateString();
+        $ahead = $now->copy()->addMonths(18)->toDateString();
+        $oldLeave = $this->insertLeave($this->memberName($member), $old);
+        $aheadLeave = $this->insertLeave($this->memberName($member), $ahead);
+        $oldClaim = $this->insertApprovedClaim($member, $old);
+        $this->insertLateLine($member, $old);
+
+        $response = $this->withToken($this->tokenForAdmin())
+            ->getJson('/api/development/portal/manage/requests')
+            ->assertOk()
+            ->assertJsonPath('range.from', null)
+            ->assertJsonPath('range.to', null);
+
+        $this->assertContains((string) $oldLeave, $response->json('data.*.id'));
+        $this->assertContains((string) $aheadLeave, $response->json('leave.*.id'));
+        $this->assertContains((string) $oldClaim, $response->json('reimbursements.*.items.*.id'));
+        $this->assertContains($member->id.':'.$old, $response->json('lateReports.*.id'));
+    }
+
+    // A range reaches as far back as it names, either end may be left open, and it leaves out what it does not name.
+    public function test_a_range_reaches_any_year_it_names(): void
+    {
+        $member = $this->activeMember();
+        $old = Carbon::now($this->app['config']->get('app.timezone'))->subMonths(40)->toDateString();
+        $dayAfter = Carbon::parse($old)->addDay()->toDateString();
+        $id = (string) $this->insertLeave($this->memberName($member), $old);
+        $this->withToken($this->tokenForAdmin());
+        $leaveIds = fn (string $query): mixed => $this->getJson('/api/development/portal/manage/requests?'.$query)
+            ->assertOk()
+            ->json('leave.*.id');
+
+        $response = $this->getJson('/api/development/portal/manage/requests?from='.$old.'&to='.$this->today())
+            ->assertOk()
+            ->assertJsonPath('range.from', $old)
+            ->assertJsonPath('range.to', $this->today());
+        $this->assertContains($id, $response->json('leave.*.id'));
+        $this->assertContains($id, $leaveIds('to='.$old));
+        $this->assertNotContains($id, $leaveIds('from='.$dayAfter));
+    }
+
+    public function test_a_range_ending_before_it_starts_is_refused(): void
+    {
+        $this->withToken($this->tokenForAdmin())
+            ->getJson('/api/development/portal/manage/requests?from=2026-02-01&to=2026-01-31')
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'The from date must be on or before the to date.');
+    }
+
     public function test_an_admin_saves_queue_status_and_approver_remarks(): void
     {
         $member = $this->activeMember();

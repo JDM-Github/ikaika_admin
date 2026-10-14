@@ -235,9 +235,9 @@ class PortalManageUsersRulesTest extends TestCase
     }
 
     // The seeded defaults: Nathaniel manages other admins, sees developers' activity and syncs to Airtable,
-    // and he and Steven see and edit employee information everywhere, alone auto-approve their projects and
-    // alone promote candidates (2026-10-12); Fin and Audie approve the projects they lead, under the Manage
-    // group they hold for it.
+    // and he and Steven see and edit employee information everywhere, alone auto-approve their projects,
+    // alone promote candidates (2026-10-12) and alone approve profile changes (2026-10-14); Fin and Audie
+    // approve the projects they lead, under the Manage group they hold for it.
     public function test_the_seeded_personal_defaults_name_nathaniel_and_steven(): void
     {
         $this->assertSame([
@@ -246,11 +246,13 @@ class PortalManageUsersRulesTest extends TestCase
             '220202-0002:manage.onboarding.promote:-',
             '220202-0002:manage.users.access.peers:-',
             '220202-0002:manage.users.information:all',
+            '220202-0002:manage.users.information.approve:-',
             '220202-0002:manage.users.information.edit:-',
             '220202-0002:projects.create.direct:-',
             '220202-0002:projects.lead:all',
             '220302-0003:manage.onboarding.promote:-',
             '220302-0003:manage.users.information:all',
+            '220302-0003:manage.users.information.approve:-',
             '220302-0003:manage.users.information.edit:-',
             '220302-0003:projects.create.direct:-',
             '220302-0003:projects.lead:all',

@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\Portal\Manage\BudgetAccountsController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
 use App\Http\Controllers\Api\Portal\Manage\FlaggedMembersController;
 use App\Http\Controllers\Api\Portal\Manage\OnboardingController;
+use App\Http\Controllers\Api\Portal\Manage\ProfileChangesController;
 use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
 use App\Http\Controllers\Api\Portal\Manage\ReferencesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
@@ -120,6 +121,12 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->post('manage/users', [UsersController::class, 'store']);
     Route::middleware(['portal.rule:manage.users.department', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/department', [UsersController::class, 'updateDepartment'])
+        ->whereNumber('id');
+    // Approve profile changes: what people change about themselves on Settings, before it reaches their record (2026-10-14).
+    Route::middleware(['portal.rule:manage.users.information.approve', 'throttle:portal-manage-users'])
+        ->get('manage/users/changes', [ProfileChangesController::class, 'index']);
+    Route::middleware(['portal.rule:manage.users.information.approve', 'throttle:portal-manage-users-write'])
+        ->patch('manage/users/changes/{id}', [ProfileChangesController::class, 'decide'])
         ->whereNumber('id');
     // Edit employee information: the private details of the people whose information someone sees (2026-10-12).
     Route::middleware(['portal.rule:manage.users.information.edit', 'throttle:portal-manage-users-write'])

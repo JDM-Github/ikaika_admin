@@ -1302,3 +1302,35 @@ CREATE TABLE IF NOT EXISTS psgc_barangays (
     city_code CHAR(9)      NOT NULL,
     INDEX psgc_barangays_city_code_index (city_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Profile changes (2026-10-14): anyone changes their own employee information and documents on
+-- Settings, and the change waits here until a head admin approves it. Approve profile changes sits
+-- under Show employee information: developers by preset, the head admins by their own defaults.
+-- Existing databases: create_portal_profile_changes.
+CREATE TABLE IF NOT EXISTS employee_change_requests (
+    id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    employee_id  INT UNSIGNED NOT NULL,
+    status       VARCHAR(20)  NOT NULL DEFAULT 'Pending',
+    fields       JSON         NULL,
+    documents    JSON         NULL,
+    submitted_at DATETIME     NOT NULL,
+    decided_at   DATETIME     NULL,
+    decided_by   INT UNSIGNED NULL,
+    remarks      VARCHAR(500) NULL,
+    INDEX employee_change_requests_employee_id_status_index (employee_id, status),
+    INDEX employee_change_requests_status_submitted_at_index (status, submitted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.users.information.approve', 'manage.users.information', 'Approve profile changes',
+     'Approve or reject the employee information and documents people change about themselves on Settings, before it reaches their record.',
+     0, 1, 'admin', 849);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('developer', 'manage.users.information.approve', NULL, 0);
+INSERT INTO access_personal (employee_id, permission_key, reach)
+SELECT id, 'manage.users.information.approve', NULL FROM employees WHERE id_no IN (
+    '220202-0002', -- Nathaniel Tanglao
+    '220302-0003'  -- Steven Gaurano
+);
