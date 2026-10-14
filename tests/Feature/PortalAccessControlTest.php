@@ -26,6 +26,8 @@ class PortalAccessControlTest extends TestCase
 
     private Employee $fellow;
 
+    private Employee $third;
+
     private Employee $member;
 
     private Employee $outsider;
@@ -43,13 +45,16 @@ class PortalAccessControlTest extends TestCase
         Cache::flush();
         Mail::fake();
 
-        [$this->developer, $this->admin, $this->fellow] = $this->active("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'", 3);
-        [$this->member, $this->outsider] = $this->active("LOWER(COALESCE(role, '')) = 'user' AND LOWER(COALESCE(role_level, '')) != 'executive'", 2);
-        $this->executive = $this->active("LOWER(COALESCE(role_level, '')) = 'executive'", 1)[0];
+        // Shaped from the first active employees, so no roster change can starve the fixtures.
+        [$admins, $members] = $this->shapedPeople(4, 2);
+        [$this->developer, $this->admin, $this->fellow, $this->third] = $admins;
+        [$this->member, $this->outsider] = $members;
+        $this->executive = $this->rosterExecutive();
 
         $this->developer->forceFill(['is_developer' => true, 'department' => 'MIS'])->save();
         $this->admin->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
         $this->fellow->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+        $this->third->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
         $this->member->forceFill(['is_developer' => false, 'department' => ' mis '])->save();
         $this->outsider->forceFill(['is_developer' => false, 'department' => 'Engineering'])->save();
         $this->executive->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
@@ -461,8 +466,7 @@ class PortalAccessControlTest extends TestCase
     // Manage other admins from a fellow admin manages every other admin, never the giver, and cannot be passed on.
     public function test_manage_other_admins_from_a_fellow_admin_skips_the_giver_and_never_passes_on(): void
     {
-        $third = $this->active("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'", 4)[3];
-        $third->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+        $third = $this->third;
         $this->change($this->developer, $this->admin, ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
         $this->change($this->admin, $this->fellow, ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
 
@@ -487,8 +491,7 @@ class PortalAccessControlTest extends TestCase
     {
         [$john, $nathaniel] = [$this->developer, $this->fellow];
         $nathaniel->forceFill(['is_developer' => true])->save();
-        $third = $this->active("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'", 4)[3];
-        $third->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
+        $third = $this->third;
 
         // John in Developer mode gives Nathaniel Manage other admins; Nathaniel in Default gives it back.
         $this->change($john, $nathaniel, ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
@@ -629,24 +632,5 @@ class PortalAccessControlTest extends TestCase
         }
 
         return $this->withToken($this->tokens[$employee->id]);
-    }
-
-    /**
-     * @return list<Employee>
-     */
-    private function active(string $where, int $count): array
-    {
-        $employees = Employee::query()
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->whereRaw($where)
-            ->whereNotNull('id_no')
-            ->where('id_no', '!=', '')
-            ->orderBy('id')
-            ->limit($count)
-            ->get()
-            ->all();
-        $this->assertCount($count, $employees);
-
-        return $employees;
     }
 }

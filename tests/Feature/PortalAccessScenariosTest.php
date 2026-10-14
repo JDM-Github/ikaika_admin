@@ -11,9 +11,10 @@ use Tests\Concerns\ManagesPortalAccess;
 use Tests\TestCase;
 
 /**
- * Longer Access Rule stories across gifts, loans, limits, lists, moves and modes. John and Nathaniel
- * are developer admins, Third and Fourth plain admins, all in MIS with two MIS members and one
- * Engineering member; the executive is the roster's only one.
+ * Longer Access Rule stories across gifts, loans, limits, lists, moves and modes. The fixtures are
+ * the roster's first active employees, shaped inside the transaction (2026-10-14, user): John and
+ * Nathaniel are developer admins, Third and Fourth plain admins, all in MIS with two MIS members and
+ * one Engineering member; the executive is the roster's own.
  */
 class PortalAccessScenariosTest extends TestCase
 {
@@ -52,9 +53,11 @@ class PortalAccessScenariosTest extends TestCase
         Mail::fake();
         $this->clearAccessTables();
 
-        [$this->john, $this->nathaniel, $this->third, $this->fourth] = $this->activeWhere("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'", 4);
-        [$this->member, $this->member2, $this->outsider] = $this->activeWhere("LOWER(COALESCE(role, '')) = 'user' AND LOWER(COALESCE(role_level, '')) != 'executive'", 3);
-        $this->executive = $this->activeWhere("LOWER(COALESCE(role_level, '')) = 'executive'", 1)[0];
+        // Shaped from the first active employees, so no roster change can starve the fixtures.
+        [$admins, $members] = $this->shapedPeople(4, 3);
+        [$this->john, $this->nathaniel, $this->third, $this->fourth] = $admins;
+        [$this->member, $this->member2, $this->outsider] = $members;
+        $this->executive = $this->rosterExecutive();
         foreach ([$this->john, $this->nathaniel] as $developer) {
             $developer->forceFill(['is_developer' => true, 'department' => 'MIS'])->save();
         }

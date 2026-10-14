@@ -2,6 +2,7 @@
 
 namespace Tests;
 
+use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalJwt;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
@@ -64,5 +65,61 @@ abstract class TestCase extends BaseTestCase
         );
 
         return $token;
+    }
+
+    /**
+     * @return list<Employee>
+     */
+    protected function activeWhere(string $where, int $count): array
+    {
+        $employees = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw($where)
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->orderBy('id')
+            ->limit($count)
+            ->get()
+            ->all();
+        $this->assertCount($count, $employees);
+
+        return $employees;
+    }
+
+    // The roster's own executive, never a shaped one; a scenario names the only one it needs.
+    protected function rosterExecutive(): Employee
+    {
+        return $this->activeWhere("LOWER(COALESCE(role_level, '')) = 'executive'", 1)[0];
+    }
+
+    /**
+     * People for a test's own world, shaped inside the transaction (2026-10-14, user): the first
+     * active employees, never the executive, become admins and members whatever roles the roster
+     * holds, so changing a role in the app never breaks a fixture.
+     *
+     * @return array{0: list<Employee>, 1: list<Employee>}
+     */
+    protected function shapedPeople(int $admins, int $members): array
+    {
+        $people = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->whereNotNull('id_no')
+            ->where('id_no', '!=', '')
+            ->orderBy('id')
+            ->limit($admins + $members)
+            ->get()
+            ->all();
+        $this->assertCount($admins + $members, $people);
+        $adminPeople = array_slice($people, 0, $admins);
+        $memberPeople = array_slice($people, $admins, $members);
+        foreach ($adminPeople as $person) {
+            $person->forceFill(['role' => 'admin', 'role_level' => null])->save();
+        }
+        foreach ($memberPeople as $person) {
+            $person->forceFill(['role' => 'user', 'role_level' => null])->save();
+        }
+
+        return [$adminPeople, $memberPeople];
     }
 }
