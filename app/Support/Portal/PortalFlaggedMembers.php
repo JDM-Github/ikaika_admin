@@ -4,6 +4,7 @@ namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\UserReport;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -35,7 +36,10 @@ final class PortalFlaggedMembers
     // What Airtable's own warnings carry: a flag is a review hold, not a recorded violation.
     private const VIOLATION_TYPE = 'N/A';
 
-    public function __construct(private readonly PortalAudit $audit) {}
+    public function __construct(
+        private readonly PortalAudit $audit,
+        private readonly CoreLedger $ledger,
+    ) {}
 
     /**
      * Everyone in reach who is flagged, newest flag first, and everyone in reach who could be.
@@ -102,7 +106,7 @@ final class PortalFlaggedMembers
             abort(422, $this->nameOf($member).' is already flagged.');
         }
 
-        $this->connection()->transaction(function () use ($member, $reason): void {
+        $this->ledger->within($this->connection(), function () use ($member, $reason, $actor): void {
             $warningId = (int) $this->connection()->table('warnings')->insertGetId([
                 'warning_date' => Carbon::now(config('app.timezone'))->toDateString(),
                 'description' => $reason,
@@ -114,6 +118,8 @@ final class PortalFlaggedMembers
                 'employee_id' => (int) $member->getKey(),
                 'warning_id' => $warningId,
             ]);
+            // Airtable keeps its warnings too, so flagging is ledgered for the sync (2026-10-14, user).
+            $this->ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, 'warnings:'.$warningId, CoreLedger::PRODUCT_PORTAL.'.warnings', ['id' => (string) $warningId], 'warnings', (string) $warningId, (int) $actor->getKey(), is_string($actor->id_no) ? $actor->id_no : null);
         });
 
         // The approver's own log only: the flagged person must never learn they are flagged.
@@ -141,7 +147,12 @@ final class PortalFlaggedMembers
             abort(404, $this->nameOf($member).' is not flagged.');
         }
 
-        $this->connection()->table('warnings')->whereIn('id', $warningIds)->update(['status' => self::INACTIVE]);
+        $this->ledger->within($this->connection(), function () use ($warningIds, $actor): void {
+            $this->connection()->table('warnings')->whereIn('id', $warningIds)->update(['status' => self::INACTIVE]);
+            foreach ($warningIds as $warningId) {
+                $this->ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, CoreLedger::PRODUCT_PORTAL.'.warnings', ['id' => (string) $warningId, 'fields' => ['status' => self::INACTIVE]], 'warnings', (string) $warningId, null, (int) $actor->getKey(), is_string($actor->id_no) ? $actor->id_no : null);
+            }
+        });
 
         $this->audit->record(
             $actor,

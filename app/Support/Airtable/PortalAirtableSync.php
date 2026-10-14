@@ -5,6 +5,7 @@ namespace App\Support\Airtable;
 use App\Modules\Core\Models\Action;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreLedger;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -25,6 +26,20 @@ final class PortalAirtableSync
     /** Outcomes that mean the unit is done: nothing more to send for it. */
     private const LANDED = ['synced', 'discarded', 'deleted', 'superseded', 'covered', 'nothing'];
 
+    // Marks a create whose answer never came back: Airtable may hold it, so it is not sent again blind.
+    public const UNCERTAIN_CREATE = 'Create may already be in Airtable (its answer was lost); check there, then run with --retry-creates.';
+
+    // A row still missing this long after its action was written is gone, not a write still committing.
+    private const GONE_AFTER_MINUTES = 10;
+
+    // Field types Airtable fills itself; a write to one is refused.
+    private const COMPUTED = ['formula', 'rollup', 'multipleLookupValues', 'count', 'autoNumber', 'createdTime', 'lastModifiedTime', 'createdBy', 'lastModifiedBy', 'button', 'aiText'];
+
+    // attempts is a SMALLINT UNSIGNED; an action failing forever must never overflow it and stop every run.
+    private const MAX_ATTEMPTS = 65000;
+
+    private bool $retryCreates = false;
+
     public function __construct(private readonly AirtableClient $airtable) {}
 
     /**
@@ -34,8 +49,9 @@ final class PortalAirtableSync
      *     items: list<array{actionId: int, resource: ?string, actionType: string, recordId: ?string, outcome: string, table: ?string, airtableId: ?string, fields: array<string, mixed>, problems: list<string>}>
      * }
      */
-    public function run(bool $send): array
+    public function run(bool $send, int $settleSeconds = 0, bool $retryCreates = false): array
     {
+        $this->retryCreates = $retryCreates;
         $schema = $this->airtable->tables();
         $counts = array_fill_keys(['create', 'update', 'delete', 'discard', 'synced', 'covered', 'superseded', 'nothing', 'blocked', 'failed', 'skipped'], 0);
         $items = [];
@@ -45,6 +61,8 @@ final class PortalAirtableSync
         $actions = Action::query()
             ->where('product', CoreLedger::PRODUCT_PORTAL)
             ->whereNull('synced_at')
+            // The ledger commits a moment before the portal row does; a fresh action waits a run.
+            ->when($settleSeconds > 0, fn ($query) => $query->where('created_at', '<=', Carbon::now()->subSeconds($settleSeconds)))
             ->orderBy('id')
             ->get();
 
@@ -235,19 +253,29 @@ final class PortalAirtableSync
             // Gone by design only when a later action on the same report, or the same record,
             // explains it (an edit replaced the line, a delete removed it). Anything else is retried:
             // it may be a line whose report has not finished committing yet.
-            $explained = $action->getKey() !== null && Action::query()
+            $scope = $multiRow ? $action->recycle_key : (string) $rowId;
+            $explained = $action->getKey() !== null && $scope !== null && Action::query()
                 ->where('product', CoreLedger::PRODUCT_PORTAL)
                 ->where('resource', $action->resource)
                 ->where('id', '>', $action->getKey())
-                ->where($multiRow ? 'recycle_key' : 'record_id', $multiRow ? $action->recycle_key : (string) $rowId)
+                ->where($multiRow ? 'recycle_key' : 'record_id', $scope)
                 ->exists();
+            // Long missing is gone: a later edit or delete under another resource replaced it.
+            $stale = $action->created_at !== null && Carbon::parse($action->created_at)->lt(Carbon::now()->subMinutes(self::GONE_AFTER_MINUTES));
 
-            return $explained
+            return $explained || $stale
                 ? $this->unit($action, $map['airtable_table'], $key, 'superseded', ['Replaced or deleted later; the newer action carries this row.'])
                 : $this->unit($action, $map['airtable_table'], $key, 'failed', ['The SQL row '.$key.' is not there, and no later action explains why.']);
         }
 
         $airtableId = is_string($row->airtable_record_id ?? null) && $row->airtable_record_id !== '' ? $row->airtable_record_id : null;
+
+        // In the Recycle Bin: a record Airtable has stays Airtable's, and one it never had is not sent.
+        if (($row->deleted_at ?? null) !== null && ! $probe) {
+            return $this->unit($action, $map['airtable_table'], $key, 'nothing', [$airtableId === null
+                ? 'Moved to the Recycle Bin before it reached Airtable; it will not be sent.'
+                : 'In the Recycle Bin; Airtable keeps its own record.'], $airtableId);
+        }
 
         // Withdrawn by the member: it was never really filed, so Airtable should not hold it at all.
         $discard = $map['discard_when'] ?? null;
@@ -263,28 +291,41 @@ final class PortalAirtableSync
         // it too: a row Airtable has never seen has no earlier state to protect, so it goes whole.
         $createsWhole = $creating && ($map['create_full'] ?? false) === true;
         $columns = $map['fields'];
+        // Null means everything: a full-row resource, a whole create, or a check.
+        $changed = null;
         if (isset($map['changed_only']) && ! $probe && ! $createsWhole) {
             // Airtable-maintained records: only what this action changed, so HR's edits there survive.
             if ($creating) {
                 return $this->unit($action, $map['airtable_table'], $key, 'blocked', ['Only changes to records Airtable already has are synced for this table.']);
             }
-            $columns = array_intersect_key($columns, array_flip($this->changedColumns($action, $map['changed_only'])));
-            if ($columns === []) {
-                return $this->unit($action, $map['airtable_table'], $key, 'nothing', ['None of the changed columns are synced to Airtable.'], $airtableId);
-            }
+            $changed = $this->changedColumns($action, $map['changed_only']);
+            $columns = array_intersect_key($columns, array_flip($changed));
         }
 
-        [$links, $linkProblems] = $this->links($map, $row);
-        $fields = $this->coerce($map['airtable_table'], $this->fitChoices(
+        [$links, $linkProblems] = $this->links($map, $row, $changed);
+        $files = $this->attachments($map, $row, $action, $creating);
+        if ($changed !== null && $columns === [] && $links === [] && $linkProblems === [] && $files === []) {
+            return $this->unit($action, $map['airtable_table'], $key, 'nothing', ['None of the changed columns are synced to Airtable.'], $airtableId);
+        }
+        $fields = $this->fitChoices(
             $map['airtable_table'],
-            $this->fields([...$map, 'fields' => $columns], $row, $creating) + $links + $this->attachments($map, $row, $action),
+            $this->coerce($map['airtable_table'], $this->fields([...$map, 'fields' => $columns], $row, $creating) + $links + $files, $schema),
             $schema,
             $map['aliases'] ?? [],
-        ), $schema);
+        );
+        // A lenient choice Airtable does not offer is left out rather than blocking the whole row.
+        $notes = [];
+        foreach ($map['lenient'] ?? [] as $field) {
+            $choices = $schema[$map['airtable_table']][$field]['choices'] ?? null;
+            if ($choices !== null && is_string($fields[$field] ?? null) && ! in_array($fields[$field], $choices, true)) {
+                $notes[] = '"'.$field.'" left out: Airtable has no option "'.$fields[$field].'".';
+                unset($fields[$field]);
+            }
+        }
         $problems = [...$linkProblems, ...$this->problems($map['airtable_table'], $fields, $schema)];
 
         return [
-            ...$this->unit($action, $map['airtable_table'], $key, $problems !== [] ? 'blocked' : ($creating ? 'create' : 'update'), $problems, $airtableId),
+            ...$this->unit($action, $map['airtable_table'], $key, $problems !== [] ? 'blocked' : ($creating ? 'create' : 'update'), [...$problems, ...$notes], $airtableId),
             'fields' => $fields,
         ];
     }
@@ -352,7 +393,14 @@ final class PortalAirtableSync
                 }
             }
 
-            $created = $this->airtable->create($unit['table'], $unit['fields']);
+            if (! $this->retryCreates && str_contains((string) $action->last_error, self::UNCERTAIN_CREATE)) {
+                return [...$unit, 'outcome' => 'failed', 'problems' => [...$unit['problems'], self::UNCERTAIN_CREATE]];
+            }
+            try {
+                $created = $this->airtable->create($unit['table'], $unit['fields']);
+            } catch (ConnectionException) {
+                return [...$unit, 'outcome' => 'failed', 'problems' => [...$unit['problems'], self::UNCERTAIN_CREATE]];
+            }
             // Written back only onto a row still without one: a row that changed mid-run (an edit, a
             // delete, another run) must not end up pointing at a second record.
             $written = 0;
@@ -379,7 +427,8 @@ final class PortalAirtableSync
 
     /**
      * Stamps the action once every unit landed; records the failures when any unit failed. A
-     * blocked or skipped unit leaves it quietly unsynced, since retrying cannot help until fixed.
+     * blocked or skipped unit leaves it unsynced with its reason kept, so a lasting blocker shows
+     * outside a dry run too, but counts no attempt: retrying cannot help until it is fixed.
      *
      * @param  list<array{actionId: int, resource: ?string, actionType: string, recordId: ?string, outcome: string, table: ?string, airtableId: ?string, fields: array<string, mixed>, problems: list<string>}>  $units
      */
@@ -389,7 +438,7 @@ final class PortalAirtableSync
         if ($failed !== []) {
             $messages = array_merge(...array_map(static fn (array $unit): array => $unit['problems'], $failed));
             Action::query()->whereKey($action->getKey())->update([
-                'attempts' => DB::raw('attempts + 1'),
+                'attempts' => DB::raw('LEAST(attempts + 1, '.self::MAX_ATTEMPTS.')'),
                 'last_error' => mb_substr(implode(' | ', $messages), 0, 1000),
             ]);
 
@@ -399,6 +448,13 @@ final class PortalAirtableSync
         $done = array_filter($units, static fn (array $unit): bool => in_array($unit['outcome'], self::LANDED, true));
         if ($units !== [] && count($done) === count($units)) {
             Action::query()->whereKey($action->getKey())->update(['synced_at' => Carbon::now(), 'last_error' => null]);
+
+            return;
+        }
+        $waiting = array_filter($units, static fn (array $unit): bool => ! in_array($unit['outcome'], self::LANDED, true));
+        $reasons = array_merge(...array_map(static fn (array $unit): array => $unit['problems'], array_values($waiting)));
+        if ($reasons !== []) {
+            Action::query()->whereKey($action->getKey())->update(['last_error' => mb_substr(implode(' | ', $reasons), 0, 1000)]);
         }
     }
 
@@ -414,7 +470,9 @@ final class PortalAirtableSync
     }
 
     /**
-     * The columns an action changed: a flat `fields` map, else the keys of its `changes` diff.
+     * The columns an action changed: a flat `fields` map, the keys of its `changes` diff, or a plain
+     * list of column names. The list is how a private column is named: the ledger strips government
+     * and bank keys from every payload, so their values never reach it, and the sync reads SQL anyway.
      *
      * @param  list<string>  $keys
      * @return list<string>
@@ -423,8 +481,9 @@ final class PortalAirtableSync
     {
         $payload = $this->payload($action);
         foreach ($keys as $key) {
-            if (is_array($payload[$key] ?? null)) {
-                return array_map('strval', array_keys($payload[$key]));
+            $value = $payload[$key] ?? null;
+            if (is_array($value)) {
+                return array_map('strval', array_is_list($value) ? $value : array_keys($value));
             }
         }
 
@@ -451,7 +510,7 @@ final class PortalAirtableSync
     }
 
     /**
-     * @param  array{sql_table: string, airtable_table: string, fields: array<string, string>}  $map
+     * @param  array{sql_table: string, airtable_table: string, fields: array<string, string>, bracketed?: array<string, string>}  $map
      * @return array<string, mixed>
      */
     private function fields(array $map, object $row, bool $creating): array
@@ -459,6 +518,11 @@ final class PortalAirtableSync
         $fields = [];
         foreach ($map['fields'] as $column => $field) {
             $value = $row->{$column} ?? null;
+            // A column sent with another in brackets: "Management (MIS)" for a department's own row.
+            $suffix = isset($map['bracketed'][$column]) ? trim((string) ($row->{$map['bracketed'][$column]} ?? '')) : '';
+            if ($suffix !== '' && is_string($value)) {
+                $value .= ' ('.$suffix.')';
+            }
             // A create leaves an empty column out; an update sends null so a cleared value clears.
             if ($value === null && $creating) {
                 continue;
@@ -477,19 +541,32 @@ final class PortalAirtableSync
      * column on it, such as a member role) or, when the link names `from`, one row the row itself
      * names -- a project's lead is an email on the project, with no junction to walk.
      *
-     * @param  array{links?: array<string, array{junction?: string, local?: string, foreign?: string, table: string, where?: array<string, string>, matches?: string, from?: string}>}  $map
+     * On a changed-only update ($changed names what the action changed) only a link the action
+     * changed is sent, and then even empty, since the portal itself removed it. Otherwise every link
+     * goes, and never empty: SQL's junctions may not hold every link Airtable has.
+     *
+     * @param  array{links?: array<string, array{junction?: string, local?: string, foreign?: string, table: string, where?: array<string, string>, matches?: string, from?: string, column?: string}>}  $map
+     * @param  list<string>|null  $changed
      * @return array{0: array<string, list<string>>, 1: list<string>}
      */
-    private function links(array $map, object $row): array
+    private function links(array $map, object $row, ?array $changed = null): array
     {
         $fields = [];
         $problems = [];
         foreach ($map['links'] ?? [] as $field => $link) {
+            $column = $link['column'] ?? $link['from'] ?? null;
+            if ($changed !== null && ($column === null || ! in_array($column, $changed, true))) {
+                continue;
+            }
             $from = $link['from'] ?? null;
             if ($from !== null) {
                 $source = $row->{$from} ?? null;
                 // Nothing named, nothing to link; an empty value must never match a blank column.
                 if (! is_string($source) || trim($source) === '') {
+                    if ($changed !== null) {
+                        $fields[$field] = [];
+                    }
+
                     continue;
                 }
                 $linked = DB::connection('portal')
@@ -515,9 +592,7 @@ final class PortalAirtableSync
                 }
                 $ids[] = $target->airtable_record_id;
             }
-            // Never sent empty: SQL's junctions may not hold every link Airtable has, so an empty
-            // list is no evidence the link should go.
-            if ($ids !== []) {
+            if ($ids !== [] || $changed !== null) {
                 $fields[$field] = $ids;
             }
         }
@@ -528,13 +603,23 @@ final class PortalAirtableSync
     /**
      * Airtable fetches each file from its URL, so a receipt must be a public link -- Cloudinary's.
      *
-     * @param  array{attachments?: array<string, array{table_name: string, field_name: string, payload_key?: string}>}  $map
+     * Sent on a create, or when an unsent action on the row carried the file's key: re-sending on every
+     * update would make Airtable fetch each file again, and replace a good copy if the link went stale.
+     * Every pending action counts, since the first one pushes the row and covers the later ones.
+     *
+     * @param  array{attachments?: array<string, array{table_name: string, field_name: string, payload_key?: string, changed_key?: string}>}  $map
      * @return array<string, list<array{url: string, filename: string}>>
      */
-    private function attachments(array $map, object $row, Action $action): array
+    private function attachments(array $map, object $row, Action $action, bool $creating = true): array
     {
         $fields = [];
+        $pending = $creating || ($map['attachments'] ?? []) === [] ? [] : $this->pendingKeys($action, (int) $row->id);
         foreach ($map['attachments'] ?? [] as $field => $source) {
+            $key = $source['changed_key'] ?? $source['payload_key'] ?? null;
+            $changedHere = ! $creating && $key !== null && isset($pending[$key]);
+            if (! $creating && ! $changedHere) {
+                continue;
+            }
             $files = DB::connection('portal')
                 ->table('attachments')
                 ->where('table_name', $source['table_name'])
@@ -551,14 +636,39 @@ final class PortalAirtableSync
                 }
                 $list[] = ['url' => $file->file_url, 'filename' => (string) ($file->file_name ?? 'file')];
             }
-            // Sent empty only when the portal itself removed the file. SQL did not import every
-            // receipt Airtable holds, so an empty list alone is no evidence of a removal.
-            if ($list !== [] || (isset($source['payload_key']) && $this->portalRemoved($action, (int) $row->id, $source['payload_key']))) {
+            // Sent empty only when the portal itself removed the file: a slot the action changed, or a
+            // receipt the ledger shows it held. SQL did not import every file Airtable holds, so an
+            // empty list alone is no evidence of a removal.
+            $removed = isset($source['payload_key'])
+                ? $this->portalRemoved($action, (int) $row->id, $source['payload_key'])
+                : $changedHere;
+            if ($list !== [] || $removed) {
                 $fields[$field] = $list;
             }
         }
 
         return $fields;
+    }
+
+    /**
+     * Every payload key the row's unsent actions carry, this one included.
+     *
+     * @return array<string, true>
+     */
+    private function pendingKeys(Action $action, int $rowId): array
+    {
+        $keys = array_fill_keys(array_keys($this->payload($action)), true);
+        $pending = Action::query()
+            ->where('product', CoreLedger::PRODUCT_PORTAL)
+            ->where('resource', $action->resource)
+            ->where('record_id', (string) $rowId)
+            ->whereNull('synced_at')
+            ->get(['parameters']);
+        foreach ($pending as $entry) {
+            $keys += array_fill_keys(array_keys($this->payload($entry)), true);
+        }
+
+        return $keys;
     }
 
     /**
@@ -601,10 +711,17 @@ final class PortalAirtableSync
     {
         foreach ($fields as $name => $value) {
             $type = $schema[$table][$name]['type'] ?? null;
-            if (in_array($type, ['number', 'currency', 'percent'], true) && is_numeric($value)) {
+            // A blank is no value: Airtable refuses '' for a number, date or choice, and clears on null.
+            if ($value === '' && in_array($type, ['number', 'currency', 'percent', 'date', 'singleSelect', 'multipleSelects', 'phoneNumber', 'email', 'url'], true)) {
+                $fields[$name] = null;
+            } elseif (in_array($type, ['number', 'currency', 'percent'], true) && is_numeric($value)) {
                 $fields[$name] = $value + 0;
             } elseif ($type === 'date' && is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}/', $value) === 1) {
                 $fields[$name] = substr($value, 0, 10);
+            } elseif ($type === 'checkbox') {
+                $fields[$name] = in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'y'], true);
+            } elseif ($type === 'multipleSelects' && is_string($value)) {
+                $fields[$name] = array_values(array_filter(array_map('trim', explode(',', $value)), static fn (string $part): bool => $part !== ''));
             }
         }
 
@@ -626,33 +743,43 @@ final class PortalAirtableSync
     {
         foreach ($fields as $name => $value) {
             $choices = $schema[$table][$name]['choices'] ?? null;
-            if ($choices === null || ! is_string($value)) {
+            if ($choices === null) {
                 continue;
             }
-            foreach ($aliases[$name] ?? [] as $from => $to) {
-                if ($this->comparable($from) === $this->comparable($value)) {
-                    $value = $to;
-                    break;
-                }
-            }
-            $exact = array_values(array_filter($choices, fn (string $choice): bool => $this->comparable($choice, false) === $this->comparable($value, false)));
-            $loose = array_values(array_filter($choices, fn (string $choice): bool => $this->comparable($choice) === $this->comparable($value)));
-            // "2 Day" must not land on "1 Day" just because both read "day" without their numbers.
-            if (count($exact) === 1) {
-                $fields[$name] = $exact[0];
-            } elseif (count($loose) === 1) {
-                $fields[$name] = $loose[0];
+            if (is_string($value)) {
+                $fields[$name] = $this->fitChoice($value, $choices, $aliases[$name] ?? []);
+            } elseif (is_array($value)) {
+                $fields[$name] = array_map(fn (mixed $part): mixed => is_string($part) ? $this->fitChoice($part, $choices, $aliases[$name] ?? []) : $part, $value);
             }
         }
 
         return $fields;
     }
 
-    // Case, spacing and (loosely) a leading "01 " / "3." numbering are presentation, not meaning.
+    /**
+     * @param  list<string>  $choices
+     * @param  array<string, string>  $aliases
+     */
+    private function fitChoice(string $value, array $choices, array $aliases): string
+    {
+        foreach ($aliases as $from => $to) {
+            if ($this->comparable($from) === $this->comparable($value)) {
+                $value = $to;
+                break;
+            }
+        }
+        $exact = array_values(array_filter($choices, fn (string $choice): bool => $this->comparable($choice, false) === $this->comparable($value, false)));
+        $loose = array_values(array_filter($choices, fn (string $choice): bool => $this->comparable($choice) === $this->comparable($value)));
+
+        return count($exact) === 1 ? $exact[0] : (count($loose) === 1 ? $loose[0] : $value);
+    }
+
+    // Case, spacing and (loosely) a leading index -- "01 ", "3.", "2)" -- are presentation, not meaning.
+    // A plain number is part of the label: "2 Day" is not "1 Day", nor "3D Scan" "2D Scan".
     private function comparable(string $label, bool $dropNumbering = true): string
     {
         if ($dropNumbering) {
-            $label = (string) preg_replace('/^\s*\d+\s*[.)\-]?\s*/', '', $label);
+            $label = (string) preg_replace('/^\s*(?:\d+\s*[.)\-]\s*|0\d+\s+)/', '', $label);
         }
 
         return strtolower((string) preg_replace('/\s+/', ' ', trim($label)));
@@ -679,8 +806,18 @@ final class PortalAirtableSync
 
                 continue;
             }
-            if ($field['choices'] !== null && $value !== null && ! in_array((string) $value, $field['choices'], true)) {
-                $problems[] = '"'.$name.'" has no option "'.$value.'" (Airtable offers: '.implode(', ', $field['choices']).').';
+            if (in_array($field['type'], self::COMPUTED, true)) {
+                $problems[] = '"'.$name.'" is computed in Airtable ('.$field['type'].') and cannot be written.';
+
+                continue;
+            }
+            if ($field['choices'] === null || $value === null) {
+                continue;
+            }
+            foreach (is_array($value) ? $value : [$value] as $part) {
+                if (! in_array((string) $part, $field['choices'], true)) {
+                    $problems[] = '"'.$name.'" has no option "'.$part.'" (Airtable offers: '.implode(', ', $field['choices']).').';
+                }
             }
         }
 

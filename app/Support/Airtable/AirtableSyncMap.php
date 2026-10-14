@@ -95,7 +95,7 @@ final class AirtableSyncMap
             'attachments' => [
                 // `receipt` is the payload key that says whether the member kept or removed it.
                 'Receipts (If Applicable)' => ['table_name' => 'reimbursements', 'field_name' => 'receipts', 'payload_key' => 'receipt'],
-                'Reimbursement Receipt' => ['table_name' => 'reimbursements', 'field_name' => 'payout_receipt'],
+                'Reimbursement Receipt' => ['table_name' => 'reimbursements', 'field_name' => 'payout_receipt', 'changed_key' => 'payoutReceipt'],
             ],
         ],
         // One filing is one user_reports row per line. The ledger names the lines rather than the
@@ -105,15 +105,17 @@ final class AirtableSyncMap
             'sql_table' => 'user_reports',
             'airtable_table' => 'User Reports',
             'rows' => ['lines' => 'lineIds', 'removed' => 'removedAirtableIds', 'deleted' => 'lines'],
-            // Only what the report form writes. Late-submission approval, IsSupport, Actual Work
-            // Date, End date, Duration and Approver Remarks are Airtable's to keep: the form never
-            // sets them, so sending the empty SQL value would erase them from a record an edit reuses.
+            // Only what the report form writes. IsSupport, Actual Work Date, End date, Duration and
+            // Approver Remarks are Airtable's to keep: the form never sets them, so sending the empty
+            // SQL value would erase them from a record an edit reuses. Late-submission approval is the
+            // form's (Pending when filed, back to Pending on an edit), so it goes (2026-10-14).
             'fields' => [
                 'report_date' => 'Date',
                 'hours_rendered' => 'Hours Rendered',
                 'change_in_elements' => 'Change in Elements (+/-)',
                 'remarks' => 'Remarks',
                 'late_submission' => 'LateSubmission',
+                'late_submission_approval' => 'LateSubmission Approval',
                 'approval' => 'Approval',
             ],
             'links' => [
@@ -169,15 +171,21 @@ final class AirtableSyncMap
                 'project_creation_approver' => 'ProjectCreationApprover',
                 'project_approver_email' => 'Project Approver Email',
                 'project_creation_approver_remarks' => 'ProjectCreationApproverRemarks',
+                // The completion checklist closing a project asks for (2026-10-13).
+                'is_renamed_with_acc_number' => 'Is the ACC project renamed with ACC latest project number?',
+                'is_ledger_moved_to_for_submission' => 'Is the project ledger (MS Teams Planner) moved and updated to For Submission (completed status)?',
+                'is_ledger_details_updated' => 'Are the details in the project ledger (MS Teams Planner) updated?',
             ],
+            // `column` names the key an edit's `fields` map carries when it changed that link, so an
+            // update sends a link only when the action changed it (an approval never re-sends people).
             'links' => [
                 // A project names its lead by email, and SQL keeps no lead row to walk: the match is
                 // that email against the employee's own.
                 'PM ID' => ['table' => 'employees', 'matches' => 'email', 'from' => 'project_lead_email'],
-                'Client' => ['junction' => 'projects_clients', 'local' => 'project_id', 'foreign' => 'client_id', 'table' => 'clients'],
+                'Client' => ['junction' => 'projects_clients', 'local' => 'project_id', 'foreign' => 'client_id', 'table' => 'clients', 'column' => 'clientId'],
                 // One junction, three fields: the role on it is what tells members from support.
-                'Project Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'member']],
-                'Support Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'support']],
+                'Project Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'member'], 'column' => 'memberIds'],
+                'Support Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'support'], 'column' => 'supportMemberIds'],
             ],
         ],
         // The admin grid ledgers an edit under the bare table name. Only the columns it changed are
@@ -233,13 +241,16 @@ final class AirtableSyncMap
                 'duration' => 'Duration',
             ],
         ],
-        // Only the columns the portal itself changes (the role screen and the admin grid's plain
-        // profile fields); government ids, bank details and scans stay Airtable's to maintain.
-        // HR still edits this table in Airtable, so an update sends only what the action changed.
+        // HR still edits this table in Airtable, so an update sends only what the action changed. A
+        // person the portal adds (Add user, onboarding Promote) is created whole (2026-10-14, user):
+        // everything linking them would otherwise wait forever for an Airtable id. Job Title is a
+        // select there; a title it does not offer is left out rather than holding the person back.
         'employees' => [
             'sql_table' => 'employees',
             'airtable_table' => 'Employees',
-            'changed_only' => ['fields', 'changes'],
+            'changed_only' => ['columns', 'fields', 'changes'],
+            'create_full' => true,
+            'lenient' => ['Job Title', 'Blood Type', 'Bank Name'],
             'fields' => [
                 'id_no' => 'ID No.',
                 'first_name' => 'First Name',
@@ -254,7 +265,133 @@ final class AirtableSyncMap
                 'role_level' => 'Role Level',
                 'department' => 'Department',
                 'location' => 'Location',
+                // Employee information (2026-10-14, user): the private details Manage / Users edits.
+                'start_date' => 'Start Date',
+                'date_of_birth' => 'Date of Birth',
+                'blood_type' => 'Blood Type',
+                'address' => 'Address',
+                'personal_email' => 'Personal E-Mail',
+                'phone_number' => 'Phone Number',
+                'tax_identification_no' => 'Tax Identification No.',
+                'sss_no' => 'SSS No.',
+                'philhealth_no' => 'PhilHealth No.',
+                'hdmf_no' => 'HDMF No.',
+                'bank_name' => 'Bank Name',
+                'bank_account_number' => 'Bank Account Number',
+                'bank_swift_code' => 'Bank SWIFT Code',
+                'emergency_contact_person_name' => 'Emergency Contact Person Name',
+                'emergency_contact_number' => 'Emergency Contact Number',
+                'emergency_contact_address' => 'Emergency Contact Address',
             ],
+            // Their documents, sent when a person is created or the action changed that slot.
+            'attachments' => [
+                'Photo' => ['table_name' => 'employees', 'field_name' => 'photo', 'changed_key' => 'doc_photo'],
+                'Tax Identification' => ['table_name' => 'employees', 'field_name' => 'tax_identification', 'changed_key' => 'doc_tax_identification'],
+                'SS ID' => ['table_name' => 'employees', 'field_name' => 'ss_id', 'changed_key' => 'doc_ss_id'],
+                'PhilHealth ID' => ['table_name' => 'employees', 'field_name' => 'philhealth_id', 'changed_key' => 'doc_philhealth_id'],
+                'HDMF ID' => ['table_name' => 'employees', 'field_name' => 'hdmf_id', 'changed_key' => 'doc_hdmf_id'],
+                'Bank Certificate' => ['table_name' => 'employees', 'field_name' => 'bank_certificate', 'changed_key' => 'doc_bank_certificate'],
+            ],
+        ],
+        // The daily-report review drives Approval (2026-10-14, user): a report waiting for review is
+        // Pending, and the reviewer's decision sends Approved or Rejected on every line it decided.
+        'reports.flagged' => [
+            'sql_table' => 'user_reports',
+            'airtable_table' => 'User Reports',
+            'rows' => ['lines' => 'userReportIds', 'removed' => 'removedAirtableIds', 'deleted' => 'lines'],
+            'changed_only' => ['fields', 'changes'],
+            'fields' => [
+                'approval' => 'Approval',
+            ],
+        ],
+        // Flagging a member is a warning in Airtable too (2026-10-14, user); unflagging marks it Inactive.
+        'warnings' => [
+            'sql_table' => 'warnings',
+            'airtable_table' => 'Warnings',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'fields' => [
+                'warning_date' => 'Date',
+                'description' => 'Description',
+                'status' => 'Status',
+                'violation_type' => 'Violation Type',
+            ],
+            'links' => [
+                'Employee' => ['junction' => 'employees_warnings', 'local' => 'warning_id', 'foreign' => 'employee_id', 'table' => 'employees', 'column' => 'employeeIds'],
+            ],
+        ],
+        // Manage / References (2026-10-14, user): a client or an activity code the portal adds is
+        // created whole, an edit sends what it changed, and a removal deletes Airtable's record.
+        'references.clients' => [
+            'sql_table' => 'clients',
+            'airtable_table' => 'Clients',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'lenient' => ['Status'],
+            'fields' => [
+                'name' => 'Name',
+                'client_id' => 'ClientID',
+                'notes' => 'Notes',
+                'status' => 'Status',
+            ],
+        ],
+        'references.activity_codes' => [
+            'sql_table' => 'activity_codes',
+            'airtable_table' => 'Activity Code/s',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => [
+                'name' => 'Name',
+                'id_no' => 'IdNo',
+                'department' => 'Department',
+            ],
+        ],
+        // The scope tree, one Airtable table per tier (2026-10-14, user); the portal writes only the
+        // code, the name and (above tasks) the department.
+        'references.scopes.t1' => [
+            'sql_table' => 'project_scope_t1_processes',
+            'airtable_table' => 'Project Scope Source - T1 Processes',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => ['wbs_code' => 'WBS Code', 'name' => 'Name', 'department' => 'Department'],
+        ],
+        'references.scopes.t2' => [
+            'sql_table' => 'project_scope_t2_procedures',
+            'airtable_table' => 'Project Scope Source - T2 Procedures',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => ['wbs_code' => 'WBS Code', 'name' => 'Name', 'department' => 'Department'],
+        ],
+        'references.scopes.t3' => [
+            'sql_table' => 'project_scope_t3_activities',
+            'airtable_table' => 'Project Scope Source - T3 Activities',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => ['wbs_code' => 'WBS Code', 'name' => 'Name', 'department' => 'Department'],
+        ],
+        'references.scopes.t4' => [
+            'sql_table' => 'project_scope_t4_tasks',
+            'airtable_table' => 'Project Scope Source - T4 Tasks',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => ['wbs_code' => 'WBS Code', 'task_name' => 'Task Name'],
+        ],
+        // A project type's allowed activities. Airtable keeps one row per Job Type and has no
+        // Department, so a department's own list goes as "Management (MIS)" (2026-10-14, user).
+        'references.allowed_activities' => [
+            'sql_table' => 'job_type_allowed_activities',
+            'airtable_table' => 'Job Type Allowed Activities',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'bracketed' => ['job_type' => 'department'],
+            'fields' => ['job_type' => 'Job Type', 'activity_code_id_initials' => 'Activity Code ID Initials'],
         ],
     ];
 
@@ -264,9 +401,7 @@ final class AirtableSyncMap
      *
      * @var array<string, string>
      */
-    private const PORTAL_ONLY = [
-        'reports.flagged' => 'Flag decisions are portal-only (separate.sql); Airtable has no field for them.',
-    ];
+    private const PORTAL_ONLY = [];
 
     public static function portalOnly(?string $resource): ?string
     {

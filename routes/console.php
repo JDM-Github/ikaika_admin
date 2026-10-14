@@ -14,6 +14,7 @@ use App\Support\Portal\PortalManageRequests;
 use App\Support\Portal\PortalPlaces;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schedule;
 
@@ -24,9 +25,17 @@ Artisan::command('inspire', function () {
 // Dry run unless --send is given: the default must never write to Airtable by accident.
 Artisan::command('portal:airtable-sync
     {--send : Write to Airtable; without it nothing is written anywhere}
-    {--check : Test every mapping against one real row each; writes nothing}', function (PortalAirtableSync $sync) {
+    {--check : Test every mapping against one real row each; writes nothing}
+    {--retry-creates : Send again the creates whose answer was lost, once you have checked Airtable holds none of them}', function (PortalAirtableSync $sync) {
     $send = (bool) $this->option('send');
     $check = (bool) $this->option('check');
+    // Two sends at once could land an older state over a newer one, so a send runs alone (2026-10-14).
+    $lock = $send ? Cache::lock('portal:airtable-sync', 3600) : null;
+    if ($lock !== null && ! $lock->get()) {
+        $this->error('Another Airtable send is already running; nothing was sent.');
+
+        return 1;
+    }
     $this->info(match (true) {
         $check => 'CHECK -- every mapping against the live base; nothing will be written.',
         $send => 'Sending unsynced portal actions to Airtable.',
@@ -34,14 +43,17 @@ Artisan::command('portal:airtable-sync
     });
 
     try {
+        // An action younger than ten seconds waits a run: its portal row may still be committing.
         $report = $check
             ? ['items' => $sync->check(), 'counts' => null]
-            : $sync->run($send);
+            : $sync->run($send, 10, (bool) $this->option('retry-creates'));
     } catch (Throwable $error) {
         // Unreachable or misconfigured Airtable: a readable reason, never a stack trace or the token.
         $this->error('Airtable sync stopped: '.$error->getMessage().' Anything already sent is recorded; run it again to continue.');
 
         return 1;
+    } finally {
+        $lock?->release();
     }
 
     foreach ($report['items'] as $item) {

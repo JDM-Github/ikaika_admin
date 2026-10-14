@@ -589,6 +589,9 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame('991231-9001', $employee['idNo']);
         $row = Employee::query()->where('id_no', '991231-9001')->first();
         $this->assertNotNull($row);
+        // Ledgered as an add, so the Airtable sync creates them there (2026-10-14, user).
+        $this->assertTrue(DB::connection('core')->table('actions')->where('resource', 'employees')->where('action_type', 'add')
+            ->where('record_id', (string) $row->getKey())->exists());
         $this->assertSame('Liza', $row->first_name);
         $this->assertSame('Reyes', $row->last_name);
         // The work email signs them in; the address the link was bound to is kept as their personal one.
@@ -726,6 +729,11 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame('123-456-789', $saved['taxIdentificationNo']);
         $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
             ->where('message', 'like', '%changed the employee information of%')->exists());
+        // Ledgered by column name only (2026-10-14), and only what changed: the swift code already read that.
+        $ledgered = DB::connection('core')->table('actions')->where('resource', 'employees')->where('record_id', (string) $employeeId)
+            ->where('action_type', 'edit')->orderByDesc('id')->value('parameters');
+        $this->assertSame(['address', 'personal_email', 'emergency_contact_person_name'], json_decode((string) $ledgered, true)['parameters']['columns']);
+        $this->assertStringNotContainsString('Manila', (string) $ledgered);
 
         $this->withToken($head)->patchJson($users.'/information', ['sssNo' => '1111111111'])
             ->assertStatus(422)->assertJsonPath('message', 'SSS No. cannot be one digit repeated. Check it.');

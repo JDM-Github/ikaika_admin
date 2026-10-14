@@ -189,6 +189,8 @@ class PortalManageRequestsTest extends TestCase
             $this->assertSame(1, (int) $row->is_flag);
             $this->assertSame('Approved', $row->flag_status);
             $this->assertSame('Reviewed, looks fine.', $row->flag_remarks);
+            // The review is what Airtable's Approval means (2026-10-14, user).
+            $this->assertSame('Approved', DB::connection('portal')->table('user_reports')->where('id', $id)->value('approval'));
         }
 
         $action = Action::query()
@@ -199,6 +201,7 @@ class PortalManageRequestsTest extends TestCase
         $this->assertSame('portal.user_reports', $action->database_target);
         $parameters = $action->parameters['parameters'];
         $this->assertSame('Approved', $parameters['flagStatus']);
+        $this->assertSame(['approval' => 'Approved'], $parameters['fields']);
         $this->assertContains($firstId, $parameters['userReportIds']);
         $this->assertContains($secondId, $parameters['userReportIds']);
 
@@ -685,6 +688,8 @@ class PortalManageRequestsTest extends TestCase
             ->first();
         $this->assertNotNull($warning);
         $this->assertSame('N/A', $warning->violation_type);
+        // Ledgered for the sync, so Airtable's Warnings gets it too (2026-10-14, user).
+        $this->assertTrue(Action::query()->where('resource', 'warnings')->where('action_type', 'add')->where('record_id', (string) $warning->warning_id)->exists());
 
         $this->assertFalse(PortalNotification::query()->where('employee_id', $member->getKey())->where('created_at', '>=', now()->subMinute())->exists());
         $this->assertFalse(PortalLog::query()->where('employee_id', $member->getKey())->where('resource', 'manage.flagged-members')->exists());
@@ -719,6 +724,9 @@ class PortalManageRequestsTest extends TestCase
             ->pluck('warnings.status')
             ->all();
         $this->assertSame(['Inactive'], $statuses);
+        $warningId = DB::connection('portal')->table('employees_warnings')->join('warnings', 'warnings.id', '=', 'employees_warnings.warning_id')
+            ->where('employees_warnings.employee_id', $member->getKey())->where('warnings.description', 'Review for a week.')->value('warnings.id');
+        $this->assertTrue(Action::query()->where('resource', 'warnings')->where('action_type', 'edit')->where('record_id', (string) $warningId)->exists());
 
         $this->withToken($token)
             ->deleteJson('/api/development/portal/manage/flagged-members/'.$member->getKey())

@@ -125,6 +125,12 @@ class PortalReferencesTest extends TestCase
         $this->withToken($token)->deleteJson(self::BASE.'/scopes/'.$row['id'])
             ->assertOk()
             ->assertJsonPath('data.scopes', fn (array $scopes): bool => collect($scopes)->doesntContain(fn (array $scope): bool => $scope['id'] === $row['id']));
+
+        // Each write is ledgered for the Airtable sync: the add whole, the edit by what it changed (2026-10-14).
+        $actions = DB::connection('core')->table('actions')->where('resource', 'references.activity_codes')->where('record_id', (string) $row['id'])
+            ->orderBy('id')->get(['action_type', 'parameters'])
+            ->map(fn (object $action): array => [$action->action_type, collect(array_keys((array) (json_decode((string) $action->parameters, true)['parameters']['fields'] ?? [])))->sort()->values()->all()])->all();
+        $this->assertSame([['add', ['department', 'id_no', 'name']], ['edit', ['name']], ['delete', []]], $actions);
     }
 
     public function test_a_duplicate_code_is_refused(): void
@@ -139,6 +145,7 @@ class PortalReferencesTest extends TestCase
     public function test_a_departments_scope_tree_is_added_renamed_and_removed(): void
     {
         $token = $this->adminToken();
+        $before = (int) DB::connection('core')->table('actions')->max('id');
         $tree = fn (TestResponse $response): array => $response->json('data.scopeTree');
         $add = fn (array $body): TestResponse => $this->withToken($token)->postJson(self::BASE.'/tree-scopes', $body);
 
@@ -170,6 +177,14 @@ class PortalReferencesTest extends TestCase
         $this->withToken($token)->deleteJson(self::BASE.'/tree-scopes/910-01-01')->assertOk();
         $this->withToken($token)->deleteJson(self::BASE.'/tree-scopes/910-01')->assertOk();
         $this->assertSame([], collect($tree($this->withToken($token)->deleteJson(self::BASE.'/tree-scopes/910')->assertOk()))->where('code', '910')->all());
+
+        // Each tier's change is ledgered under its own tier, so the sync reaches the right Airtable table (2026-10-14).
+        $ledgered = DB::connection('core')->table('actions')->where('resource', 'like', 'references.scopes.%')->where('id', '>', $before)
+            ->orderBy('id')->get(['resource', 'action_type'])->map(fn (object $action): string => $action->resource.':'.$action->action_type)->all();
+        $this->assertSame([
+            'references.scopes.t1:add', 'references.scopes.t2:add', 'references.scopes.t3:add', 'references.scopes.t2:edit',
+            'references.scopes.t3:delete', 'references.scopes.t2:delete', 'references.scopes.t1:delete',
+        ], $ledgered);
     }
 
     public function test_a_missing_scope_cannot_be_changed(): void
@@ -250,6 +265,8 @@ class PortalReferencesTest extends TestCase
         $added = collect($this->withToken($token)->postJson(self::BASE.'/clients', ['name' => '  Kona   Builders ', 'code' => $next])
             ->assertOk()->json('data.clients'))->firstWhere('code', $next);
         $this->assertSame(['name' => 'Kona Builders', 'code' => $next, 'projects' => 0], collect($added)->only(['name', 'code', 'projects'])->all());
+        $this->assertTrue(DB::connection('core')->table('actions')->where('resource', 'references.clients')->where('action_type', 'add')
+            ->where('record_id', (string) $added['id'])->exists());
 
         // Add Project numbers the new client's first project with its code.
         $option = collect($this->withToken($token)->getJson('/api/development/portal/projects/options')->assertOk()->json('data.clients'))->firstWhere('id', $added['id']);

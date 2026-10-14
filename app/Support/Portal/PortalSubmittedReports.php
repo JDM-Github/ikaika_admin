@@ -514,6 +514,7 @@ final class PortalSubmittedReports
             // Each new line takes its old line's Airtable id and the columns the form never sets, so
             // Airtable keeps its record and an approved late submission stays approved.
             $oldLines = $this->lockedLines($removedIds);
+            $matched = $this->matchedLines($oldLines, array_values($resolved));
             $this->deleteLines($removedIds);
             $lineIds = [];
             foreach (array_values($resolved) as $index => $entry) {
@@ -529,13 +530,14 @@ final class PortalSubmittedReports
                     $created,
                     $isFlagged,
                     $flagStatus,
-                    $this->carriedColumns($oldLines, $index),
+                    $this->carriedColumns($matched[$index] ?? null, $oldLines[0] ?? null),
                 );
             }
-            // Old lines beyond the new count were dropped; their Airtable records are the sync's to delete.
+            // Old lines no new line took over were dropped; their Airtable records are the sync's to delete.
+            $taken = array_map(static fn (object $line): int => (int) $line->id, array_filter($matched));
             $droppedAirtableIds = [];
-            foreach (array_slice($oldLines, count($resolved)) as $dropped) {
-                if (is_string($dropped->airtable_record_id) && $dropped->airtable_record_id !== '') {
+            foreach ($oldLines as $dropped) {
+                if (! in_array((int) $dropped->id, $taken, true) && is_string($dropped->airtable_record_id) && $dropped->airtable_record_id !== '') {
                     $droppedAirtableIds[] = $dropped->airtable_record_id;
                 }
             }
@@ -711,7 +713,8 @@ final class PortalSubmittedReports
                         $entry,
                         $group['remarks'],
                         $lateSubmission,
-                        self::NEW_APPROVAL,
+                        // The review drives Approval (2026-10-14, user): only a report that waits is Pending.
+                        $isFlagged ? self::NEW_APPROVAL : 'Approved',
                         $lateApproval,
                         null,
                         $createdAt,
@@ -2351,24 +2354,58 @@ final class PortalSubmittedReports
      */
     private function lockedLines(array $lineIds): array
     {
+        $line = fn (string $junction, string $column) => $this->connection()->table($junction)
+            ->select($column)->whereColumn($junction.'.user_report_id', 'user_reports.id')->limit(1);
+
         return $this->connection()->table('user_reports')
             ->whereIn('id', $lineIds)
             ->orderBy('id')
             ->lockForUpdate()
-            ->get(['id', 'airtable_record_id', ...self::FORM_UNSET_COLUMNS, ...self::REPORT_LEVEL_COLUMNS])
+            ->select(['id', 'airtable_record_id', ...self::FORM_UNSET_COLUMNS, ...self::REPORT_LEVEL_COLUMNS])
+            ->selectSub($line('projects_user_reports', 'project_id'), 'project_key')
+            ->selectSub($line('user_reports_activity_codes', 'activity_code_id'), 'activity_key')
+            ->selectSub($line('user_reports_earn_codes', 'earn_code_id'), 'earn_key')
+            ->get()
             ->all();
     }
 
     /**
-     * What a re-inserted line keeps from the old line in its place. A line an edit added beyond the
-     * old count has no line of its own, but still inherits the report-level decision columns.
+     * Which old line each new line takes over: the one with the same project, activity and earn code,
+     * so an Airtable record, and the columns only Airtable keeps, stay with the work they describe.
+     * Removing the first of three entries no longer shifts every record onto the wrong project.
      *
      * @param  list<object>  $oldLines
+     * @param  list<array<string, mixed>>  $entries
+     * @return array<int, object|null>
+     */
+    private function matchedLines(array $oldLines, array $entries): array
+    {
+        $free = $oldLines;
+        $matched = [];
+        foreach ($entries as $index => $entry) {
+            $matched[$index] = null;
+            foreach ($free as $at => $old) {
+                if ((int) $old->project_key === (int) ($entry['projectId'] ?? 0)
+                    && (int) $old->activity_key === (int) ($entry['activityCodeId'] ?? 0)
+                    && (int) $old->earn_key === (int) ($entry['earnCodeId'] ?? 0)) {
+                    $matched[$index] = $old;
+                    unset($free[$at]);
+                    break;
+                }
+            }
+        }
+
+        return $matched;
+    }
+
+    /**
+     * What a re-inserted line keeps from the old line it took over. A line with no old line of its own
+     * still inherits the report-level decision columns, from the report's first old line.
+     *
      * @return array<string, mixed>
      */
-    private function carriedColumns(array $oldLines, int $index): array
+    private function carriedColumns(?object $own, ?object $first): array
     {
-        $own = $oldLines[$index] ?? null;
         if ($own !== null) {
             $carried = ['airtable_record_id' => $own->airtable_record_id];
             foreach ([...self::FORM_UNSET_COLUMNS, ...self::REPORT_LEVEL_COLUMNS] as $column) {
@@ -2378,7 +2415,6 @@ final class PortalSubmittedReports
             return $carried;
         }
 
-        $first = $oldLines[0] ?? null;
         if ($first === null) {
             return [];
         }

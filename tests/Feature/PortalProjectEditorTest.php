@@ -238,6 +238,30 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame(['Project created: Waiting for approval', 'created'], [$board['trail'][2]['summary'], $board['trail'][2]['kind']]);
     }
 
+    // The reported bug (2026-10-14): an edit ledgers what it changed, so the Airtable sync can send it.
+    public function test_an_edit_ledgers_the_columns_and_links_it_changed(): void
+    {
+        $admin = $this->employee('admin');
+        $this->headOfEveryDepartment($admin);
+        $token = $this->token($admin);
+        $payload = $this->payload(['status' => 'ongoing']);
+        $id = (int) $this->create($token, $payload)->assertCreated()->json('data.id');
+        unset($payload['scopeCodes']);
+        $lastFields = fn (): array => (array) (DB::connection('core')->table('actions')->where('database_target', 'portal.projects')
+            ->where('record_id', (string) $id)->where('action_type', CoreActionType::EDIT)->orderByDesc('id')
+            ->value('parameters') ? json_decode((string) DB::connection('core')->table('actions')->where('database_target', 'portal.projects')
+            ->where('record_id', (string) $id)->where('action_type', CoreActionType::EDIT)->orderByDesc('id')->value('parameters'), true)['parameters']['fields'] ?? [] : []);
+
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'completed', 'area' => 1300, 'supportMemberIds' => []])->assertOk();
+        $fields = $lastFields();
+        $this->assertSame(['area_sqft', 'status', 'supportMemberIds'], collect(array_keys($fields))->sort()->values()->all());
+        $this->assertSame([], $fields['supportMemberIds']);
+
+        // Saved again unchanged: nothing for Airtable.
+        $this->withToken($token)->patchJson(self::BASE.'/'.$id, [...$payload, 'status' => 'completed', 'area' => 1300, 'supportMemberIds' => []])->assertOk();
+        $this->assertSame([], $lastFields());
+    }
+
     // Given Add projects anywhere, a member's project still waits where no Project Manager covers its department.
     public function test_a_members_project_waits_for_a_project_manager(): void
     {
@@ -673,6 +697,11 @@ class PortalProjectEditorTest extends TestCase
             ->assertOk()->assertJsonPath('data.department', 'MIS');
         $this->assertSame([$misCode], $activities->allowedFor('MIS', 'Management'));
         $this->assertSame([$engineeringCode], $activities->allowedFor('Engineering', 'Management'));
+        // Saved in place, so the row keeps its Airtable record, and each save is ledgered (2026-10-14).
+        $misRow = (int) $portal->table('job_type_allowed_activities')->where('job_type', 'Management')->where('department', 'MIS')->value('id');
+        $this->withToken($token)->putJson(self::BASE.'/allowed-activities', ['jobType' => 'Management', 'department' => 'MIS', 'activityCodes' => [$misCode, $sharedCode]])->assertOk();
+        $this->assertSame($misRow, (int) $portal->table('job_type_allowed_activities')->where('job_type', 'Management')->where('department', 'MIS')->value('id'));
+        $this->assertSame(['add', 'edit'], DB::connection('core')->table('actions')->where('resource', 'references.allowed_activities')->where('record_id', (string) $misRow)->orderBy('id')->pluck('action_type')->all());
         $this->withToken($token)->putJson(self::BASE.'/allowed-activities', ['jobType' => 'Management', 'department' => 'Nowhere', 'activityCodes' => []])->assertStatus(422);
     }
 

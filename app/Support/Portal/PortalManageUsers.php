@@ -284,8 +284,8 @@ final class PortalManageUsers
 
     /**
      * Someone new, in the portal before Airtable has them: active, as a User (the role can change
-     * after, under its own power and checks), in a department the actor's Users reach covers.
-     * Airtable is HR's list, so the sync does not create them there; HR adds them in Airtable.
+     * after, under its own power and checks), in a department the actor's Users reach covers. The
+     * sync creates them in Airtable (2026-10-14, user), so what links them can follow.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
@@ -323,8 +323,7 @@ final class PortalManageUsers
             abort(422, 'Someone already has that email address.');
         }
 
-        $employee = new Employee;
-        $employee->forceFill([
+        $employee = $this->createEmployee($actor, [
             'id_no' => $idNo,
             'first_name' => $firstName,
             'middle_name' => self::text($data['middleName'] ?? null),
@@ -334,7 +333,7 @@ final class PortalManageUsers
             'department' => $department,
             'status' => 'Active',
             'role' => 'User',
-        ])->save();
+        ]);
         $this->bumpCache();
         PortalCache::bump();
         $this->audit->record(
@@ -520,7 +519,21 @@ final class PortalManageUsers
         }
 
         if ($changed !== []) {
-            $target->save();
+            // Named as a plain list: the ledger strips government and bank keys, and the sync reads SQL.
+            $columns = array_values(array_map(static fn (string $key): string => self::INFORMATION_COLUMNS[$key], $changed));
+            $this->ledger->within($target->getConnection(), function () use ($target, $actor, $columns): void {
+                $target->save();
+                $this->ledger->recordEdit(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreLedger::PRODUCT_PORTAL.'.employees',
+                    ['table' => 'employees', 'key' => 'id', 'id' => (string) $target->getKey(), 'columns' => $columns],
+                    'employees',
+                    (string) $target->getKey(),
+                    null,
+                    (int) $actor->getKey(),
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            });
             $this->bumpCache();
             PortalCache::bump();
             $this->audit->record(
@@ -548,6 +561,7 @@ final class PortalManageUsers
         $target = $this->privateTarget($actor, $id, $request);
         $field = trim((string) $request->input('field', ''));
         $this->employeeDocuments->upload($target, $field, $request->file('file'));
+        $this->ledgerDocument($actor, $target, $field);
         $this->documentsChanged($actor, $target, $request, PortalLogAction::POST, $field);
 
         return $this->profileResponse($actor, $target, $request);
@@ -560,6 +574,7 @@ final class PortalManageUsers
     {
         $target = $this->privateTarget($actor, $id, $request);
         $field = $this->employeeDocuments->remove($target, $documentId);
+        $this->ledgerDocument($actor, $target, $field);
         $this->documentsChanged($actor, $target, $request, PortalLogAction::DELETE, $field);
 
         return $this->profileResponse($actor, $target, $request);
@@ -643,6 +658,48 @@ final class PortalManageUsers
             'resource' => 'users',
             'data' => $this->profileData($viewer, $target, $request, $withPrivate),
         ];
+    }
+
+    // A document slot changed: the sync sends that slot's files to the Airtable field it maps to.
+    private function ledgerDocument(Employee $actor, Employee $target, string $field): void
+    {
+        $this->ledger->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            CoreLedger::PRODUCT_PORTAL.'.employees',
+            ['table' => 'employees', 'key' => 'id', 'id' => (string) $target->getKey(), 'columns' => [], 'doc_'.$field => true],
+            'employees',
+            (string) $target->getKey(),
+            null,
+            (int) $actor->getKey(),
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
+    }
+
+    /**
+     * A new employee and their ledger entry as one write, so the Airtable sync creates them there and
+     * every report, request or project linking them can follow (2026-10-14, user).
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function createEmployee(Employee $actor, array $attributes): Employee
+    {
+        $employee = new Employee;
+
+        return $this->ledger->within($employee->getConnection(), function () use ($employee, $attributes, $actor): Employee {
+            $employee->forceFill($attributes)->save();
+            $this->ledger->recordAdd(
+                CoreLedger::PRODUCT_PORTAL,
+                'employees:'.$employee->getKey(),
+                CoreLedger::PRODUCT_PORTAL.'.employees',
+                ['table' => 'employees', 'key' => 'id', 'id' => (string) $employee->getKey(), 'idNo' => $employee->id_no],
+                'employees',
+                (string) $employee->getKey(),
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+
+            return $employee;
+        });
     }
 
     /**

@@ -789,6 +789,9 @@ final class PortalManageRequests
                 'flag_status' => $status,
                 'flag_remarks' => $remarks,
             ]);
+        // The review is what Airtable's Approval means (2026-10-14, user).
+        $approval = in_array($status, ['Approved', 'Rejected'], true) ? $status : 'Pending';
+        $this->connection()->table('user_reports')->whereIn('id', $groupIds)->update(['approval' => $approval]);
 
         // One decision covers every line of the group, so the sync needs each line's id.
         $this->recordDecision($actor, 'flag', $id, [
@@ -798,6 +801,7 @@ final class PortalManageRequests
             'reportedOn' => $this->calendarDate($seed->report_date ?? null),
             'flagStatus' => $status,
             'flagRemarks' => $remarks,
+            'fields' => ['approval' => $approval],
         ]);
 
         return [

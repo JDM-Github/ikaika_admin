@@ -1288,6 +1288,8 @@ final class PortalReimbursementRequests
             ->select(['id', 'airtable_record_id', 'reimb_date', 'item', 'cost', 'qty', 'purpose', 'team', 'status'])
             ->whereIn('id', $ids)
             ->orderBy('id')
+            // Under a lock, as reports read theirs: an id a sync writes back mid-edit must be the one deleted.
+            ->lockForUpdate()
             ->get();
         $receipts = $this->attachmentsByRecordId($ids, self::RECEIPT_FIELD);
 

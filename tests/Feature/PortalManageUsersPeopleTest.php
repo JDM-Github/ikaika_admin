@@ -60,6 +60,9 @@ class PortalManageUsersPeopleTest extends TestCase
         $this->assertSame((string) $row->getKey(), (string) $profile['id']);
         $this->assertTrue(DB::connection('portal')->table('logs')->where('resource', 'manage.users')->where('record_id', (string) $row->getKey())
             ->where('message', '{UserName|You} added Lani Kealoha as a user')->exists());
+        // Ledgered as an add, so the Airtable sync creates them there (2026-10-14, user).
+        $this->assertTrue(DB::connection('core')->table('actions')->where('resource', 'employees')->where('action_type', 'add')
+            ->where('record_id', (string) $row->getKey())->exists());
 
         // They sign in with their ID No. and appear on the roster.
         $this->postJson('/api/development/portal/auth/login', ['id_no' => $options['nextIdNo']])->assertOk();

@@ -54,6 +54,9 @@ class PortalReportReviewTest extends TestCase
         $this->assertSame(0, $this->flagOf($analyst, $analystDay)[0]);
         $this->assertSame(PortalReportReview::PENDING, $this->reviewStatusOf($engineer, $engineerDay.'-daily'));
         $this->assertSame(PortalReportReview::APPROVED, $this->reviewStatusOf($analyst, $analystDay.'-daily'));
+        // The review drives Approval (2026-10-14, user): only the report that waits is Pending.
+        $this->assertSame(['Pending'], $this->lines($engineer, $engineerDay)->pluck('user_reports.approval')->unique()->values()->all());
+        $this->assertSame(['Approved'], $this->lines($analyst, $analystDay)->pluck('user_reports.approval')->unique()->values()->all());
 
         // The reported ask (2026-10-13): the one that waits rings its reviewers' bell, naming its row on Daily Reports.
         $notices = PortalNotification::query()->where('type', PortalNotificationType::REPORT_TO_REVIEW)->get();
