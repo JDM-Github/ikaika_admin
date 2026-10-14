@@ -126,9 +126,16 @@ function Show-BuildReleaseDialog {
     }
     # Naming the actual destination, because this is the one label here where picking
     # the wrong radio writes to production.
+    # What the picked target lacks, as build-release would refuse it; the run then fills in what check-targets can derive first.
+    $targetProblem = {
+        if (-not (Get-Command Resolve-ApiTarget -ErrorAction SilentlyContinue)) { return '' }
+        return "$((Resolve-ApiTarget $state.RepoRoot $(if ($el.StagingRadio.IsChecked) { 'debug' } else { 'release' })).Problem)"
+    }
     $syncTarget = {
         if ($el.StagingRadio.IsChecked) { $el.DeployHintText.Text = 'The Test Server, using debug.env: composer, the swap, migrations, then the health check.' }
         else { $el.DeployHintText.Text = 'PRODUCTION, using release.env: composer, the swap, migrations, then the health check.' }
+        $problem = & $targetProblem
+        $el.ErrorText.Text = if ($problem) { "$problem The run fills in what check-targets can derive from the deploy config and the server first." } else { '' }
     }
     [void]$el.DeployCheck.Add_Checked($syncDeploy)
     [void]$el.DeployCheck.Add_Unchecked($syncDeploy)
@@ -264,6 +271,7 @@ function Show-BuildReleaseDialog {
             Version    = $picked
             BumpNeeded = ($picked -ne 'same')
             Tag        = [bool]$el.TagCheck.IsChecked
+            FixTarget  = [bool](& $targetProblem)
         }
         $state.Result = $opts
 
@@ -277,6 +285,7 @@ function Show-BuildReleaseDialog {
             @{ Label = 'build-release'; Exe = $exe
                Args  = "-NoProfile -ExecutionPolicy Bypass -File $q$($state.Script)$q -Keep $($opts.Keep)" +
                        $(if ($opts.Debug) { ' -Debug' } else { '' }) +
+                       $(if ($opts.FixTarget) { ' -FixTarget' } else { '' }) +
                        $(if ($opts.BumpNeeded) { " -Bump $($opts.Version)" + $(if ($opts.Tag) { ' -Tag' } else { '' }) } else { '' }) +
                        $(if ($opts.Deploy) { ' -Deploy' + $(if ($opts.DryRun) { ' -DryRun' } else { '' }) + $(if ($opts.Clean) { ' -Clean' } else { '' }) } else { '' }) }
         )

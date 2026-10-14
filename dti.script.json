@@ -99,6 +99,14 @@
             ]
           },
           {
+            "flag": "FixTarget",
+            "label": "-FixTarget   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "When the target is not set up, fill in what check-targets can derive from its deploy config and the server, then build.",
+            "default": ""
+          },
+          {
             "flag": "Gui",
             "label": "-Gui   [SwitchParameter]",
             "type": "boolean",
@@ -108,7 +116,44 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Bump ${build-release.args.Bump} -Tag ${build-release.args.Tag} -Deploy ${build-release.args.Deploy} -DryRun ${build-release.args.DryRun} -Clean ${build-release.args.Clean} -Keep ${build-release.args.Keep} -Gui ${build-release.args.Gui}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Bump ${build-release.args.Bump} -Tag ${build-release.args.Tag} -Deploy ${build-release.args.Deploy} -DryRun ${build-release.args.DryRun} -Clean ${build-release.args.Clean} -Keep ${build-release.args.Keep} -FixTarget ${build-release.args.FixTarget} -Gui ${build-release.args.Gui}"
+        ]
+      },
+      "check-targets": {
+        "description": "Checks that staging and production can be built and deployed, and fills in what is missing from what is already known - the checker build-release consults before it refuses a target, and fixes with when asked (-FixTarget, or its prompt)",
+        "args": [
+          {
+            "flag": "Target",
+            "label": "-Target   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Which target to check: staging (debug.*), production (release.*), or both.",
+            "default": "all",
+            "allowed_values": [
+              "all",
+              "staging",
+              "production"
+            ]
+          },
+          {
+            "flag": "Fix",
+            "label": "-Fix   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Write every value that can be derived.",
+            "default": ""
+          },
+          {
+            "flag": "Offline",
+            "label": "-Offline   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Check the files against each other only; no SSH to the server and no request to the API.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/check-targets -Target ${check-targets.args.Target} -Fix ${check-targets.args.Fix} -Offline ${check-targets.args.Offline}"
         ]
       },
       "ci-check": {

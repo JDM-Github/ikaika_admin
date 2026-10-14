@@ -2,7 +2,9 @@
 # The archive is what server/deploy-release uploads and deployment/server/deploy-admin.sh installs. On its own this only builds, so a pipeline can show
 # building and uploading as two steps; -Tag, -Deploy and -Clean add the rest in the project estimator's order, as its build-release does: build, then
 # tag-version files the changelog, commits and tags, then server/deploy-release uploads - each only once the one before it is good.
-# The target's folder is <kind>.assetUrl in ikaika_scripts.env, and a target without one is refused rather than built for the wrong folder - production has none until it is set up.
+# The target's folder is <kind>.assetUrl in ikaika_scripts.env, and production's serverEnv lines name its site (lib/api-target.ps1); a target
+# missing either goes to check-targets, which derives them from the deploy config and the server - its report, then its fix with
+# -FixTarget or a yes at the prompt - and is refused if they are still missing, rather than built for the wrong folder or installed as staging.
 # -Bump bumps VERSION before the build, as the estimator's build-release bumps pubspec.yaml: uncommitted, and put back if the build fails, so
 # the archive carries the version it is built as; tag-version then files the changelog, commits and tags it once the build is good.
 # <archive>.deploy.json beside the archive names the target it was built for, so server/deploy-release refuses it for the other one, and -Clean
@@ -14,7 +16,7 @@
 #     .\script.ps1 build-release -Debug -Deploy -DryRun          and what the upload would send, nothing sent
 #     .\script.ps1 build-release -Debug -Bump patch -Tag -Deploy  bumped, tagged on Bitbucket, installed on staging
 #     .\script.ps1 build-release -Gui                            the dialog
-#     .\script.ps1 build-release                                 production's, once release.assetUrl is set
+#     .\script.ps1 build-release -FixTarget                      production's, with what check-targets can derive filled in first
 
 param(
     # Staging: debug.assetUrl rather than production's release.assetUrl.
@@ -34,6 +36,8 @@ param(
     # How many release copies dist/ keeps; older ones are pruned.
     [ArgumentCompletions('5', '10', '20', '50')]
     [int]$Keep = 10,
+    # When the target is not set up, fill in what check-targets can derive from its deploy config and the server, then build.
+    [switch]$FixTarget,
     # The estimator backend's Build release dialog, instead of running with these switches.
     [switch]$Gui,
     [switch]$Help
@@ -49,7 +53,7 @@ if ($Help) {
   build-release - build the API's release archive for staging or production, and tag and upload it when asked.
 
   Usage
-    .\script.ps1 build-release [-Debug] [-Bump keep|patch|minor|major|x.y.z [-Tag]] [-Deploy [-DryRun] [-Clean]] [-Keep <n>]
+    .\script.ps1 build-release [-Debug] [-Bump keep|patch|minor|major|x.y.z [-Tag]] [-Deploy [-DryRun] [-Clean]] [-Keep <n>] [-FixTarget]
     .\script.ps1 build-release -Gui
 
   Examples
@@ -72,9 +76,14 @@ if ($Help) {
     .\script.ps1 build-release -Gui
         The Build release dialog the project estimator's backend has.
 
-    .\script.ps1 build-release
-        The same for production, from release.assetUrl - refused while that is
-        blank, since production is not set up yet.
+    .\script.ps1 build-release -FixTarget
+        The same for production, from release.assetUrl, with what is missing
+        filled in first by check-targets.
+
+  A target that is not set up - no assetUrl, or for production no SITE_DIR,
+  SITE_URL or API_CHANNEL among its serverEnv lines - is handed to
+  check-targets, which derives them from the deploy config and the server.
+  Run here, it shows its report and offers the fix; -FixTarget applies it.
 
   Every build also writes dist/<artifact.prefix>-<version>[-debug].zip with
   its .sha256, for the GitHub release, keeping the newest -Keep.
@@ -92,6 +101,7 @@ $windowed = $PSBoundParameters.Count -eq 0 -and [Environment]::UserInteractive -
 if ($Gui -or $windowed) {
     foreach ($lib in 'ui-host.ps1', 'toolkit-version.ps1', 'app-version.ps1') { . (Join-Path $libDir $lib) }
     . (Get-UiAsset 'build-backend.ps1')
+    . (Join-Path $configsDir 'lib\api-target.ps1')
     $current = "$(Get-Content -LiteralPath (Join-Path $repoRoot 'VERSION') -ErrorAction SilentlyContinue | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1)".Trim()
     $picked = Show-BuildReleaseDialog -ProjectName 'IKAIKA Portal API' -Version $current -RepoRoot $repoRoot -BuildRelease $PSCommandPath
     if ($null -eq $picked) {
@@ -101,7 +111,7 @@ if ($Gui -or $windowed) {
         exit 0
     }
     if ($picked.AlreadyRan) { exit $picked.ExitCode }
-    $arguments = @{ Debug = $picked.Debug; Keep = $picked.Keep; Deploy = $picked.Deploy; DryRun = $picked.DryRun; Clean = $picked.Clean }
+    $arguments = @{ Debug = $picked.Debug; Keep = $picked.Keep; Deploy = $picked.Deploy; DryRun = $picked.DryRun; Clean = $picked.Clean; FixTarget = $picked.FixTarget }
     if ($picked.BumpNeeded) { $arguments.Bump = $picked.Version; $arguments.Tag = $picked.Tag }
     & $PSCommandPath @arguments
     exit $LASTEXITCODE
@@ -117,16 +127,35 @@ if ($Tag -and -not $bumping) { Write-Host '  -Tag has nothing to tag without a -
 if (($DryRun -or $Clean) -and -not $Deploy) { Write-Host '  -DryRun and -Clean apply to an upload, and there is no -Deploy.' -ForegroundColor DarkGray }
 
 $kind = if ($Debug) { 'debug' } else { 'release' }
-$config = @(Get-Content -LiteralPath (Join-Path $repoRoot 'ikaika_scripts.env'))
-$assetUrl = "$(($config | Where-Object { $_ -match "^$kind\.assetUrl=" } | Select-Object -First 1) -replace '^[^=]*=', '')".Trim()
-if (-not $assetUrl) {
+. (Join-Path $configsDir 'lib\api-target.ps1')
+$target = Resolve-ApiTarget $repoRoot $kind
+# Nobody at the keyboard means no, and the refusal says how.
+if ($target.Problem) {
+    $targetName = if ($Debug) { 'staging' } else { 'production' }
+    $checker = Join-Path $PSScriptRoot 'check-targets.ps1'
+    $pwsh = (Get-Process -Id $PID).Path
     Write-Host ''
-    Write-Host "  $kind.assetUrl is blank in ikaika_scripts.env, so there is no folder to build $(if ($Debug) { 'staging' } else { 'production' }) for." -ForegroundColor Red
-    Write-Host '  It is the public folder the target serves the API from, e.g. /website_a85fbf18/central-api.' -ForegroundColor DarkGray
-    if (-not $Debug) { Write-Host '  -Debug builds staging; -Gui opens the dialog.' -ForegroundColor DarkGray }
-    Write-Host ''
-    exit 1
+    Write-Host "  $($target.Problem)" -ForegroundColor Yellow
+    $fixing = [bool]$FixTarget
+    if (-not $fixing) {
+        & $pwsh -NoProfile -File $checker -Target $targetName
+        . (Join-Path $libDir 'interactive.ps1')
+        $rows = @(@{ id = 'fix'; label = 'Fill in what can be derived, then build' }, @{ id = 'stop'; label = 'Stop here' })
+        $fixing = (Request-Choice -Rows $rows -Title "$targetName is not set up") -eq 'fix'
+    }
+    if ($fixing) {
+        & $pwsh -NoProfile -File $checker -Target $targetName -Fix
+        $target = Resolve-ApiTarget $repoRoot $kind
+    }
+    if ($target.Problem) {
+        Write-Host ''
+        Write-Host "  $($target.Problem)" -ForegroundColor Red
+        Write-Host "  .\script.ps1 check-targets -Target $targetName -Fix fills in what can be derived, or build-release -FixTarget does it first$(if (-not $Debug) { '; -Debug builds staging' })." -ForegroundColor DarkGray
+        Write-Host ''
+        exit 1
+    }
 }
+$assetUrl = $target.AssetUrl
 if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'node_modules'))) {
     Write-Host '  There is no node_modules here for the Vite build; run npm ci first.' -ForegroundColor Red
     exit 1

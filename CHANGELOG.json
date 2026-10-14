@@ -1,11 +1,13 @@
 {
-  "generated": "2026-10-14T11:49:28+08:00",
+  "generated": "2026-10-14T16:48:31+08:00",
   "current": "",
   "releases": [],
   "upcoming": [
     {
       "version": "Unreleased",
-      "added": [],
+      "added": [
+        "Staging and production are checked before a build - check-targets says what either lacks and -Fix fills in what the deploy config and the server tell it; build-release offers that fix and -FixTarget applies it first"
+      ],
       "changed": [],
       "fixed": [],
       "other": [
