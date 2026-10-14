@@ -99,12 +99,13 @@ class PortalRulesTest extends TestCase
         $this->assertSame(['developer'], DB::connection('portal')->table('access_presets')->where('permission_key', 'administration.recycle.unlisted')->pluck('role')->all());
     }
 
-    // Grouping rows scope nothing themselves, so they offer no reach: each page or kind under them has its own.
+    // Grouping rows scope nothing themselves, so they offer no reach; Requests carries one now
+    // because a shared grant is scoped by it, while its kinds keep their own reaches.
     public function test_grouping_rows_carry_no_reach(): void
     {
-        $reach = DB::connection('portal')->table('access_permissions')->whereIn('permission_key', ['manage', 'manage.requests', 'administration'])->pluck('supports_reach', 'permission_key');
+        $reach = DB::connection('portal')->table('access_permissions')->whereIn('permission_key', ['manage', 'administration'])->pluck('supports_reach', 'permission_key');
 
-        $this->assertSame(['administration' => 0, 'manage' => 0, 'manage.requests' => 0], $reach->map(static fn ($value): int => (int) $value)->sortKeys()->all());
+        $this->assertSame(['administration' => 0, 'manage' => 0], $reach->map(static fn ($value): int => (int) $value)->sortKeys()->all());
     }
 
     // Manage / Requests switches over without changing an admin's queue: every kind and decision, for their department.

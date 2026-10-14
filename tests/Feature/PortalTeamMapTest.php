@@ -156,4 +156,34 @@ class PortalTeamMapTest extends TestCase
             $this->withToken($this->token($executive))->getJson($home)->assertOk()->assertJsonPath('data.required', false);
         }
     }
+
+    // The reported ask (2026-10-14, user): the map follows its reach, narrowed to a department here.
+    public function test_the_map_follows_a_reach_narrowed_to_a_department(): void
+    {
+        $admin = $this->employee('admin');
+        $stranger = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->whereRaw("LOWER(COALESCE(department, '')) != ?", [strtolower(trim((string) $admin->department))])
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->orderBy('id')
+            ->firstOrFail();
+        foreach ([$admin, $stranger] as $person) {
+            DB::connection('portal')->table('employee_home_locations')->insert([
+                'employee_id' => $person->getKey(), 'query' => 'Somewhere', 'source' => 'map', 'latitude' => 14.5, 'longitude' => 121.0,
+            ]);
+        }
+        $token = $this->token($admin);
+
+        $all = collect($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data.people'))->pluck('id');
+        $this->assertContains((string) $stranger->getKey(), $all);
+
+        DB::connection('portal')->table('access_self_reach')->updateOrInsert(
+            ['employee_id' => $admin->getKey(), 'permission_key' => 'manage.map'],
+            ['reach' => 'department'],
+        );
+        $scoped = collect($this->withToken($token)->getJson(self::BASE)->assertOk()->json('data.people'))->pluck('id');
+        $this->assertContains((string) $admin->getKey(), $scoped);
+        $this->assertNotContains((string) $stranger->getKey(), $scoped);
+    }
 }

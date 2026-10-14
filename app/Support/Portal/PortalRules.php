@@ -287,10 +287,21 @@ final class PortalRules
         return $guest instanceof PortalGuest ? $guest : null;
     }
 
+    // The Requests page's kinds, lent with the page at the same reach: the queue's lists follow the kind rules.
+    private const REQUEST_KINDS = [
+        'manage.requests.leave',
+        'manage.requests.overtime',
+        'manage.requests.offset',
+        'manage.requests.reimbursement',
+        'manage.requests.flagged',
+        'manage.requests.late',
+    ];
+
     /**
      * A guest's rules: every granted page at the reach the share handed it out at, all for a page
      * that carries none, since a guest has no department or person of their own. Granting Email
      * lends Sending with it: the composer's one write is the send, and it lands in All Emails.
+     * Granting Requests lends its kinds at the same reach, since the queue's lists follow them.
      *
      * @return array<string, ?string>
      */
@@ -301,6 +312,11 @@ final class PortalRules
             $rules[$key] = $reach ?? 'all';
             if ($key === 'email') {
                 $rules['email.send'] = 'all';
+            }
+            if ($key === 'manage.requests') {
+                foreach (self::REQUEST_KINDS as $kind) {
+                    $rules[$kind] = $reach ?? 'all';
+                }
             }
         }
 

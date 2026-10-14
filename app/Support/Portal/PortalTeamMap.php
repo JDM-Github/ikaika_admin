@@ -2,13 +2,16 @@
 
 namespace App\Support\Portal;
 
+use App\Modules\Portal\Models\Employee;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 
 /**
  * Manage / Map (2026-10-13, user): where each active person lives, as PortalHomeLocations keeps it: the
  * home they set themselves, else their address on record, else their region. Only administrators open
- * it (manage.map).
+ * it (manage.map), and the map follows that rule's reach like every page: a department reach shows the
+ * department, every department shows everyone.
  */
 final class PortalTeamMap
 {
@@ -17,15 +20,18 @@ final class PortalTeamMap
     /**
      * @return array{section: string, resource: string, data: array{people: list<array<string, mixed>>, unlocated: int}}
      */
-    public function list(): array
+    public function list(Employee $actor, Request $request): array
     {
+        // The people the rule lets this actor open: never an executive, and within their reach.
+        $inReach = PortalRules::people($actor, $request, self::RULE);
+        $ids = array_map(static fn (Employee $person): int => (int) $person->getKey(), $inReach);
+        if ($ids === []) {
+            return ['section' => 'manage', 'resource' => 'map', 'data' => ['people' => [], 'unlocated' => 0]];
+        }
+
         $connection = $this->connection();
-        // Never an executive: the page keeps no executive's records, as Manage / Requests does.
-        $active = $connection->table('employees')
-            ->whereRaw("LOWER(COALESCE(employees.status, '')) = 'active'")
-            ->whereRaw("LOWER(COALESCE(employees.role_level, '')) != 'executive'")
-            ->whereRaw("LOWER(COALESCE(employees.role, '')) != 'executive'");
-        $rows = (clone $active)
+        $rows = $connection->table('employees')
+            ->whereIn('employees.id', $ids)
             ->join('employee_home_locations as home', 'home.employee_id', '=', 'employees.id')
             ->orderBy('employees.last_name')->orderBy('employees.first_name')
             ->get([
@@ -54,8 +60,8 @@ final class PortalTeamMap
             'resource' => 'map',
             'data' => [
                 'people' => $people,
-                // Active people with neither an address nor a region that could be placed.
-                'unlocated' => max(0, (clone $active)->count() - count($people)),
+                // The reach's people with neither an address nor a region that could be placed.
+                'unlocated' => max(0, count($ids) - count($people)),
             ],
         ];
     }

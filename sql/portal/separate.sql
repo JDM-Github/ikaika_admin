@@ -729,7 +729,7 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('access', NULL, 'Access', 'See {UserName|Your} powers and switch them off and on. This page itself always stays on.', 0, 0, 700),
 
 ('manage', NULL, 'Manage', 'Work on other people''s records.', 0, 1, 800),
-('manage.requests', 'manage', 'Requests', 'Review other people''s requests. Each kind below reaches only as far as its own setting.', 0, 1, 810),
+('manage.requests', 'manage', 'Requests', 'Review other people''s requests. Each kind below reaches only as far as its own setting.', 1, 1, 810),
 ('manage.requests.leave', 'manage.requests', 'Leave Requests', 'See leave requests.', 1, 1, 811),
 ('manage.requests.leave.decide', 'manage.requests.leave', 'Approve or reject', 'Approve or reject leave requests, with remarks.', 0, 1, 812),
 ('manage.requests.overtime', 'manage.requests', 'Overtime Requests', 'See overtime requests.', 1, 1, 813),
@@ -1273,16 +1273,18 @@ SELECT 'admin', permission_key, NULL, 0 FROM access_permissions WHERE permission
 INSERT INTO access_presets (role, permission_key, reach, include_executives)
 SELECT 'developer', permission_key, NULL, 0 FROM access_permissions WHERE permission_key LIKE 'manage.onboarding%';
 
--- Manage / Map: where each person last saved something. An administrator's power.
--- Existing databases: add_portal_team_map_rule.
+-- Manage / Map: where each person last saved something. An administrator's power, at every
+-- department by preset so the map opens on everyone; a narrower reach narrows it.
+-- Existing databases: add_portal_team_map_rule, reach_for_requests_and_map.
 INSERT INTO access_permissions
     (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
 VALUES
     ('manage.map', 'manage', 'Map',
      'See on a world map where each person last saved something in the portal.',
-     0, 1, 'admin', 880);
-INSERT INTO access_presets (role, permission_key, reach, include_executives)
-SELECT role, 'manage.map', NULL, 0 FROM (SELECT 'admin' AS role UNION ALL SELECT 'developer') AS roles;
+     1, 1, 'admin', 880);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('admin', 'manage.map', 'all', 0),
+    ('developer', 'manage.map', 'all', 0);
 
 -- Allowed activities per department (2026-10-13): Management is a type in four departments, each with
 -- its own list; a row with a department wins over the shared row (no department, as Airtable's are).
