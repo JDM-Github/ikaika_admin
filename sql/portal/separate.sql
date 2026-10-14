@@ -1058,6 +1058,9 @@ CREATE TABLE IF NOT EXISTS shared_pages (
     require_otp     TINYINT(1)   NOT NULL DEFAULT 1,
     expires_at      TIMESTAMP    NULL,           -- NULL only when the developer clears it
     rate_per_minute SMALLINT     NOT NULL DEFAULT 60,
+    -- The department a department-reach share is scoped to, snapshotted at save.
+    -- Existing databases: add_reach_to_shared_page_rules.
+    reach_department VARCHAR(100) NULL,
     revoked_at      TIMESTAMP    NULL,
     created_by      INT          NOT NULL,       -- employees.id, the developer
     created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1076,6 +1079,9 @@ CREATE TABLE IF NOT EXISTS shared_pages (
 CREATE TABLE IF NOT EXISTS shared_page_rules (
     share_id INT          NOT NULL,
     rule_key VARCHAR(100) NOT NULL,
+    -- How far the granted page reaches for the guest; null for a rule that carries no reach.
+    -- Existing databases: add_reach_to_shared_page_rules.
+    reach    VARCHAR(16)  NULL,
     PRIMARY KEY (share_id, rule_key),
     FOREIGN KEY (share_id) REFERENCES shared_pages(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -288,15 +288,16 @@ final class PortalRules
     }
 
     /**
-     * A guest's rules: every granted page at reach all, since a guest has no department or person.
+     * A guest's rules: every granted page at the reach the share handed it out at, all for a page
+     * that carries none, since a guest has no department or person of their own.
      *
      * @return array<string, ?string>
      */
     private static function guestRules(PortalGuest $guest): array
     {
         $rules = [];
-        foreach ($guest->rules as $key) {
-            $rules[$key] = 'all';
+        foreach ($guest->rules as $key => $reach) {
+            $rules[$key] = $reach ?? 'all';
         }
 
         return $rules;

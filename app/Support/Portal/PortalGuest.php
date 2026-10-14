@@ -3,14 +3,15 @@
 namespace App\Support\Portal;
 
 /**
- * A guest resolved from a shared-page token: which share, and the page rules the developer granted.
- * It stands in for the employee on a guest request, so PortalRules answers from this list instead of
- * a role, and the request is read-only (AuthenticatePortalJwt refuses every non-GET).
+ * A guest resolved from a shared-page token: which share, and the page rules the developer granted,
+ * each with the reach it was handed out at (null for a rule that carries none). It stands in for the
+ * employee on a guest request, so PortalRules answers from this list instead of a role, and the
+ * request is read-only (AuthenticatePortalJwt refuses every non-GET).
  */
 final class PortalGuest
 {
     /**
-     * @param  list<string>  $rules
+     * @param  array<string, ?string>  $rules  granted rule key => reach
      */
     public function __construct(
         public readonly int $shareId,
@@ -19,6 +20,6 @@ final class PortalGuest
 
     public function holds(string $key): bool
     {
-        return in_array($key, $this->rules, true);
+        return array_key_exists($key, $this->rules);
     }
 }

@@ -336,4 +336,38 @@ class PortalSharedPagesTest extends TestCase
         $this->assertIsString($svg);
         $this->assertStringContainsString('<svg', $svg);
     }
+
+    // The reported ask (2026-10-14, user): a granted page carries a reach, never wider than the
+    // actor holds, and a page the actor does not hold cannot be handed out at all.
+    public function test_a_granted_page_carries_a_reach_never_wider_than_the_actor_holds(): void
+    {
+        $developer = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->where('is_developer', true)
+            ->whereNotNull('id_no')->where('id_no', '!=', '')
+            ->orderBy('id')->firstOrFail();
+        $token = $this->developerModeOn($this->token($developer));
+
+        // Narrowed to their department themselves: an asked-for Every department lands as department.
+        DB::connection('portal')->table('access_self_reach')->updateOrInsert(
+            ['employee_id' => $developer->getKey(), 'permission_key' => 'projects.view'],
+            ['reach' => 'department'],
+        );
+        $created = $this->createShare($token, ['rules' => ['projects.view'], 'reaches' => ['projects.view' => 'all']]);
+        $this->assertSame(['projects.view' => 'department'], (array) $created->json('data.share.reaches'));
+        $id = (int) $created->json('data.share.id');
+        $this->assertSame('department', DB::connection('portal')->table('shared_page_rules')->where('share_id', $id)->value('reach'));
+        // The department scope is snapshotted from the actor, for the guest's stand-in.
+        $this->assertSame(trim((string) $developer->department), trim((string) DB::connection('portal')->table('shared_pages')->where('id', $id)->value('reach_department')));
+
+        // The list tells the form the reach the actor holds for each page.
+        $pages = collect($this->withToken($token)->getJson(self::BASE)->json('data.pages'))->keyBy('key');
+        $this->assertSame('department', $pages['projects.view']['reach']);
+        $this->assertTrue($pages['projects.view']['supportsReach']);
+        $this->assertNull($pages['finance.envelopes']['reach']);
+
+        // Switched off for themselves: the page cannot be handed out at all.
+        DB::connection('portal')->table('access_toggles')->insert(['employee_id' => $developer->getKey(), 'permission_key' => 'projects.view']);
+        $this->withToken($token)->postJson(self::BASE, $this->payload(['rules' => ['projects.view']]))->assertStatus(422);
+    }
 }

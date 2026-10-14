@@ -93,12 +93,18 @@ class AuthenticatePortalJwt
             ->table('shared_page_rules')
             ->where('share_id', $share->id)
             ->orderBy('rule_key')
-            ->pluck('rule_key')
+            ->pluck('reach', 'rule_key')
             ->all();
 
-        $request->attributes->set('portalShare', new PortalGuest((int) $share->id, array_values($rules)));
-        // An empty employee stands in so services reading the actor get nulls instead of crashing.
-        $request->attributes->set('portalEmployee', new Employee);
+        $request->attributes->set('portalShare', new PortalGuest((int) $share->id, $rules));
+        // An empty employee stands in so services reading the actor get nulls instead of crashing;
+        // a department-reach share lends it the scope's department so the reach filters still work.
+        $standIn = new Employee;
+        $scopeDepartment = trim((string) ($share->reach_department ?? ''));
+        if ($scopeDepartment !== '') {
+            $standIn->forceFill(['department' => $scopeDepartment]);
+        }
+        $request->attributes->set('portalEmployee', $standIn);
         $request->attributes->set('portalSessionId', is_string($payload['sid'] ?? null) ? $payload['sid'] : null);
 
         if ($share->last_used_at === null || strtotime((string) $share->last_used_at) < now()->getTimestamp() - 60) {
