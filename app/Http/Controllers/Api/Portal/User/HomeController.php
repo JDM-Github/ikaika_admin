@@ -33,7 +33,7 @@ class HomeController extends Controller
             'method' => ['required', 'string', Rule::in(PortalHomeLocations::OWN_SOURCES)],
         ]);
         $this->homes->setOwn((int) $actor->getKey(), (float) $data['latitude'], (float) $data['longitude'], $data['method']);
-        $this->audit->record($actor, PortalLogAction::PATCH, 'user.home', '{UserName|You} set {UserName|your} home location', (string) $actor->getKey(), $request);
+        $this->audit->record($actor, PortalLogAction::PATCH, 'user.home', '{UserName|You} set {UserName|Your} home location', (string) $actor->getKey(), $request);
 
         return response()->json(['section' => 'user', 'resource' => 'home', 'data' => $this->homes->mine($actor)]);
     }
