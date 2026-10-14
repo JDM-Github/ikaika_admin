@@ -17,20 +17,36 @@ class AdvancedSettingsController extends Controller
     {
         $this->developer($request);
 
-        return response()->json(['data' => ['notificationEmails' => PortalAdvancedSettings::notificationEmails()]]);
+        return response()->json(['data' => [
+            'notificationEmails' => PortalAdvancedSettings::notificationEmails(),
+            'idLogin' => PortalAdvancedSettings::idLogin(),
+        ]]);
     }
 
     public function update(Request $request): JsonResponse
     {
         $actor = $this->developer($request);
         $validated = $request->validate([
-            'notificationEmails' => ['required', 'boolean'],
+            'notificationEmails' => ['nullable', 'boolean'],
+            'idLogin' => ['nullable', 'boolean'],
         ]);
+        $notificationEmails = $validated['notificationEmails'] ?? null;
+        $idLogin = $validated['idLogin'] ?? null;
+        if ($notificationEmails === null && $idLogin === null) {
+            abort(422, 'Give at least one switch.');
+        }
 
-        $on = (bool) $validated['notificationEmails'];
-        $this->advanced->setNotificationEmails($actor, $request, $on);
+        if ($notificationEmails !== null) {
+            $this->advanced->setNotificationEmails($actor, $request, (bool) $notificationEmails);
+        }
+        if ($idLogin !== null) {
+            $this->advanced->setIdLogin($actor, $request, (bool) $idLogin);
+        }
 
-        return response()->json(['data' => ['notificationEmails' => $on]]);
+        return response()->json(['data' => [
+            'notificationEmails' => PortalAdvancedSettings::notificationEmails(),
+            'idLogin' => PortalAdvancedSettings::idLogin(),
+        ]]);
     }
 
     private function developer(Request $request): Employee

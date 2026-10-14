@@ -42,7 +42,7 @@ class PortalAdvancedSettingsTest extends TestCase
         }
         DB::connection('core')->table('settings')
             ->where('product', 'portal')
-            ->where('setting_key', PortalAdvancedSettings::NOTIFICATION_EMAILS)
+            ->whereIn('setting_key', [PortalAdvancedSettings::NOTIFICATION_EMAILS, PortalAdvancedSettings::ID_LOGIN])
             ->delete();
 
         $this->developer = $this->active();
@@ -103,6 +103,36 @@ class PortalAdvancedSettingsTest extends TestCase
         $this->withToken($this->developerToken())
             ->patchJson(self::URL, [])
             ->assertStatus(422);
+    }
+
+    // The reported ask (2026-10-14, user): ID sign-in follows a stored switch, so a deployed
+    // portal offers the box only when a developer turns it on.
+    public function test_the_id_login_switch_is_off_until_a_developer_turns_it_on(): void
+    {
+        $public = '/api/development/portal/auth/id-login';
+        $this->getJson($public)->assertOk()->assertJsonPath('data.idLogin', false);
+
+        $token = $this->developerToken();
+        $this->withToken($token)->patchJson(self::URL, ['idLogin' => true])->assertOk()->assertJsonPath('data.idLogin', true);
+        $this->assertSame('1', DB::connection('core')->table('settings')
+            ->where('product', 'portal')
+            ->where('setting_key', PortalAdvancedSettings::ID_LOGIN)
+            ->value('setting_value'));
+
+        // The public read follows, so the login screen can offer the box with no session.
+        $this->getJson($public)->assertOk()->assertJsonPath('data.idLogin', true);
+        $this->read($token)->assertOk()->assertJsonPath('data.idLogin', true);
+
+        // The write is audible: a developer's act, on its own resource.
+        $log = PortalLog::query()
+            ->where('employee_id', $this->developer->getKey())
+            ->where('resource', 'settings.advanced')
+            ->orderByDesc('id')
+            ->firstOrFail();
+        $this->assertTrue((bool) ($log->payload['idLogin'] ?? false));
+
+        $this->withToken($token)->patchJson(self::URL, ['idLogin' => false])->assertOk()->assertJsonPath('data.idLogin', false);
+        $this->getJson($public)->assertOk()->assertJsonPath('data.idLogin', false);
     }
 
     private function developerToken(): string
