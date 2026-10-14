@@ -95,7 +95,7 @@ final class AirtableSyncMap
             'attachments' => [
                 // `receipt` is the payload key that says whether the member kept or removed it.
                 'Receipts (If Applicable)' => ['table_name' => 'reimbursements', 'field_name' => 'receipts', 'payload_key' => 'receipt'],
-                'Reimbursement Receipt' => ['table_name' => 'reimbursements', 'field_name' => 'payout_receipt'],
+                'Reimbursement Receipt' => ['table_name' => 'reimbursements', 'field_name' => 'payout_receipt', 'changed_key' => 'payoutReceipt'],
             ],
         ],
         // One filing is one user_reports row per line. The ledger names the lines rather than the
@@ -105,15 +105,17 @@ final class AirtableSyncMap
             'sql_table' => 'user_reports',
             'airtable_table' => 'User Reports',
             'rows' => ['lines' => 'lineIds', 'removed' => 'removedAirtableIds', 'deleted' => 'lines'],
-            // Only what the report form writes. Late-submission approval, IsSupport, Actual Work
-            // Date, End date, Duration and Approver Remarks are Airtable's to keep: the form never
-            // sets them, so sending the empty SQL value would erase them from a record an edit reuses.
+            // Only what the report form writes. IsSupport, Actual Work Date, End date, Duration and
+            // Approver Remarks are Airtable's to keep: the form never sets them, so sending the empty
+            // SQL value would erase them from a record an edit reuses. Late-submission approval is the
+            // form's (Pending when filed, back to Pending on an edit), so it goes (2026-10-14).
             'fields' => [
                 'report_date' => 'Date',
                 'hours_rendered' => 'Hours Rendered',
                 'change_in_elements' => 'Change in Elements (+/-)',
                 'remarks' => 'Remarks',
                 'late_submission' => 'LateSubmission',
+                'late_submission_approval' => 'LateSubmission Approval',
                 'approval' => 'Approval',
             ],
             'links' => [
@@ -169,15 +171,21 @@ final class AirtableSyncMap
                 'project_creation_approver' => 'ProjectCreationApprover',
                 'project_approver_email' => 'Project Approver Email',
                 'project_creation_approver_remarks' => 'ProjectCreationApproverRemarks',
+                // The completion checklist closing a project asks for (2026-10-13).
+                'is_renamed_with_acc_number' => 'Is the ACC project renamed with ACC latest project number?',
+                'is_ledger_moved_to_for_submission' => 'Is the project ledger (MS Teams Planner) moved and updated to For Submission (completed status)?',
+                'is_ledger_details_updated' => 'Are the details in the project ledger (MS Teams Planner) updated?',
             ],
+            // `column` names the key an edit's `fields` map carries when it changed that link, so an
+            // update sends a link only when the action changed it (an approval never re-sends people).
             'links' => [
                 // A project names its lead by email, and SQL keeps no lead row to walk: the match is
                 // that email against the employee's own.
                 'PM ID' => ['table' => 'employees', 'matches' => 'email', 'from' => 'project_lead_email'],
-                'Client' => ['junction' => 'projects_clients', 'local' => 'project_id', 'foreign' => 'client_id', 'table' => 'clients'],
+                'Client' => ['junction' => 'projects_clients', 'local' => 'project_id', 'foreign' => 'client_id', 'table' => 'clients', 'column' => 'clientId'],
                 // One junction, three fields: the role on it is what tells members from support.
-                'Project Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'member']],
-                'Support Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'support']],
+                'Project Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'member'], 'column' => 'memberIds'],
+                'Support Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'support'], 'column' => 'supportMemberIds'],
             ],
         ],
         // The admin grid ledgers an edit under the bare table name. Only the columns it changed are

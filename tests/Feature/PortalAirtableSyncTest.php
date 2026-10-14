@@ -7,6 +7,8 @@ use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Core\CoreLedger;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -330,9 +332,11 @@ class PortalAirtableSyncTest extends TestCase
 
         $this->assertIsArray($item);
         $this->assertSame('update', $item['outcome']);
-        foreach (['LateSubmission Approval', 'IsSupport', 'Actual Work Date', 'End date', 'Duration', 'Approver Remarks', 'Project', 'Activity', 'Earn Code'] as $kept) {
+        foreach (['IsSupport', 'Actual Work Date', 'End date', 'Duration', 'Approver Remarks', 'Project', 'Activity', 'Earn Code'] as $kept) {
             $this->assertArrayNotHasKey($kept, $item['fields']);
         }
+        // Late-submission approval is the form's own now: Pending on filing, back to Pending on an edit.
+        $this->assertArrayHasKey('LateSubmission Approval', $item['fields']);
     }
 
     // SQL never imported every receipt, so an update with none must not erase Airtable's.
@@ -371,14 +375,14 @@ class PortalAirtableSyncTest extends TestCase
     public function test_a_403_on_a_record_that_still_exists_is_a_real_failure(): void
     {
         $this->fakeGone(exists: true);
-        $requestId = $this->leaveRow('Pending', 'Vacation Leave', 'recHELD000000001');
+        $requestId = $this->leaveRow('Pending', 'Vacation Leave', 'recHELD0000000001');
         $actionId = $this->ledgerAdd($requestId, 'edit');
 
         $item = collect(app(PortalAirtableSync::class)->run(true)['items'])->firstWhere('actionId', $actionId);
 
         $this->assertIsArray($item);
         $this->assertSame('failed', $item['outcome']);
-        $this->assertSame('recHELD000000001', DB::connection('portal')->table('requests')->where('id', $requestId)->value('airtable_record_id'));
+        $this->assertSame('recHELD0000000001', DB::connection('portal')->table('requests')->where('id', $requestId)->value('airtable_record_id'));
         Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
     }
 
@@ -869,6 +873,209 @@ class PortalAirtableSyncTest extends TestCase
     /**
      * @param  array<string, mixed>|null  $schema
      */
+    // The reported bug (2026-10-14): the editor's own edit ledgers what it changed, and only that is sent.
+    public function test_a_project_edit_sends_its_changed_columns_and_only_the_links_it_changed(): void
+    {
+        $this->fakeAirtable();
+        $projectId = $this->projectRow(['airtable_record_id' => 'recPROJ0000000011', 'project_lead_email' => null]);
+        $member = $this->linkPerson($projectId, 'member', 0);
+        $this->linkPerson($projectId, 'support', 1);
+        $actionId = $this->ledgerProject($projectId, 'edit', ['projectName' => 'Sync Test', 'fields' => ['status' => 'Done', 'memberIds' => [1]]]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('update', $item['outcome']);
+        $this->assertSame(['Status', 'Project Members'], array_keys($item['fields']));
+        $this->assertSame([$member], $item['fields']['Project Members']);
+    }
+
+    // An approval re-sends no people: a member a PM added in Airtable must survive it.
+    public function test_a_project_decision_sends_no_links(): void
+    {
+        $this->fakeAirtable();
+        $lead = DB::connection('portal')->table('employees')->whereNotNull('airtable_record_id')->whereNotNull('email')->orderBy('id')->first();
+        $projectId = $this->projectRow(['airtable_record_id' => 'recPROJ0000000012', 'project_lead_email' => $lead->email]);
+        $this->linkPerson($projectId, 'member', 0);
+        $actionId = $this->ledgerProject($projectId, 'edit', ['decision' => 'approved', 'fields' => ['project_creation_status' => 'Approved', 'date_modified' => '2026-10-14']]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame(['ProjectCreationStatus'], array_keys($item['fields']));
+    }
+
+    // Removing the last member is the portal's own act, so the empty list goes.
+    public function test_a_link_the_portal_emptied_is_sent_empty(): void
+    {
+        $this->fakeAirtable();
+        $projectId = $this->projectRow(['airtable_record_id' => 'recPROJ0000000013']);
+        $actionId = $this->ledgerProject($projectId, 'edit', ['fields' => ['supportMemberIds' => []]]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame(['Support Members' => []], $item['fields']);
+    }
+
+    // Closing answers Airtable's three checklist questions as checkboxes.
+    public function test_closing_sends_the_checklist_as_checkboxes(): void
+    {
+        $this->fakeAirtable();
+        $projectId = $this->projectRow(['airtable_record_id' => 'recPROJ0000000014', 'status' => 'Closed', 'is_renamed_with_acc_number' => 1, 'is_ledger_moved_to_for_submission' => 1, 'is_ledger_details_updated' => 0]);
+        $actionId = $this->ledgerProject($projectId, 'edit', ['fields' => ['status' => 'Closed', 'is_renamed_with_acc_number' => true, 'is_ledger_moved_to_for_submission' => true, 'is_ledger_details_updated' => false]]);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('update', $item['outcome']);
+        $this->assertSame('Closed', $item['fields']['Status']);
+        $this->assertTrue($item['fields']['Is the ACC project renamed with ACC latest project number?']);
+        $this->assertFalse($item['fields']['Are the details in the project ledger (MS Teams Planner) updated?']);
+    }
+
+    // A project moved to the Recycle Bin before its first sync is never created there.
+    public function test_a_project_in_the_recycle_bin_is_never_created(): void
+    {
+        $this->fakeAirtable();
+        $projectId = $this->projectRow(['deleted_at' => now()]);
+        $actionId = $this->ledgerProject($projectId, 'add', ['projectName' => 'Sync Test']);
+
+        $item = collect(app(PortalAirtableSync::class)->run(true)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertIsArray($item);
+        $this->assertSame('nothing', $item['outcome']);
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
+        $this->assertNotNull(Action::query()->findOrFail($actionId)->synced_at);
+    }
+
+    // Long missing is gone: an old action whose row an edit under another resource replaced settles.
+    public function test_a_row_missing_long_after_its_action_settles_as_superseded(): void
+    {
+        $this->fakeAirtable();
+        $actionId = $this->reportAction(['lineIds' => [99999997]]);
+        Action::query()->whereKey($actionId)->update(['created_at' => now()->subMinutes(20)]);
+
+        $units = collect(app(PortalAirtableSync::class)->run(true)['items'])->where('actionId', $actionId);
+
+        $this->assertSame(['superseded'], $units->pluck('outcome')->all());
+        $this->assertNotNull(Action::query()->findOrFail($actionId)->synced_at);
+    }
+
+    // A blocker is kept on the action, so it shows outside a dry run, but counts no attempt.
+    public function test_a_blocked_action_keeps_its_reason_without_an_attempt(): void
+    {
+        $this->fakeAirtable();
+        $requestId = $this->leaveRow('Pending', 'Unknown Leave');
+        $actionId = $this->ledgerAdd($requestId);
+
+        app(PortalAirtableSync::class)->run(true);
+
+        $action = Action::query()->findOrFail($actionId);
+        $this->assertNull($action->synced_at);
+        $this->assertSame(0, (int) $action->attempts);
+        $this->assertStringContainsString('has no option "Unknown Leave"', (string) $action->last_error);
+    }
+
+    // A create whose answer was lost may be in Airtable: it is held, and sent again only when asked.
+    public function test_a_create_whose_answer_was_lost_is_held_until_retry_creates(): void
+    {
+        $posts = 0;
+        Http::fake(function (Request $request) use (&$posts) {
+            if ($request->method() !== 'POST') {
+                return Http::response($this->schema());
+            }
+            $posts++;
+            if ($posts === 1) {
+                throw new ConnectionException('cURL error 28: Operation timed out');
+            }
+
+            return Http::response(['id' => 'recNEW0000000077']);
+        });
+        $requestId = $this->leaveRow('Pending', 'Vacation Leave');
+        $actionId = $this->ledgerAdd($requestId);
+
+        $first = collect(app(PortalAirtableSync::class)->run(true)['items'])->firstWhere('actionId', $actionId);
+        $second = collect(app(PortalAirtableSync::class)->run(true)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertSame(['failed', 'failed'], [$first['outcome'], $second['outcome']]);
+        $this->assertSame(1, $posts);
+        $this->assertStringContainsString(PortalAirtableSync::UNCERTAIN_CREATE, (string) Action::query()->findOrFail($actionId)->last_error);
+
+        $retried = collect(app(PortalAirtableSync::class)->run(true, 0, true)['items'])->firstWhere('actionId', $actionId);
+        $this->assertSame('synced', $retried['outcome']);
+        $this->assertSame(2, $posts);
+    }
+
+    // "2 Day" is not "1 Day": a plain number is part of the label, while a leading index is not.
+    public function test_a_numbered_label_never_lands_on_another_number(): void
+    {
+        $this->fakeAirtable();
+        $two = $this->ledgerAdd($this->leaveRow('Pending', '2 Day'));
+        $indexed = $this->ledgerAdd($this->leaveRow('Pending', '01 Vacation Leave'));
+
+        $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
+
+        $this->assertSame('blocked', $items->firstWhere('actionId', $two)['outcome']);
+        $this->assertSame('Vacation Leave', $items->firstWhere('actionId', $indexed)['fields']['Category']);
+    }
+
+    // A fresh action waits a run (its row may still be committing), and failures never overflow attempts.
+    public function test_a_fresh_action_waits_and_attempts_stay_capped(): void
+    {
+        $this->fakeAirtable();
+        $fresh = $this->ledgerAdd($this->leaveRow('Pending', 'Vacation Leave'));
+        $this->assertNull(collect(app(PortalAirtableSync::class)->run(false, 10)['items'])->firstWhere('actionId', $fresh));
+
+        Http::fake(fn (Request $request) => $request->method() === 'POST'
+            ? Http::response(['error' => ['type' => 'INVALID_REQUEST', 'message' => 'Nope']], 422)
+            : Http::response($this->schema()));
+        Action::query()->whereKey($fresh)->update(['attempts' => 65000]);
+        app(PortalAirtableSync::class)->run(true);
+        $this->assertSame(65000, (int) Action::query()->findOrFail($fresh)->attempts);
+    }
+
+    // A decision re-sends no receipt; the payout carries only its own file.
+    public function test_receipts_go_on_a_create_or_when_the_action_changed_them(): void
+    {
+        $this->fakeAirtable();
+        $portal = DB::connection('portal');
+        $itemId = (int) $portal->table('reimbursements')->insertGetId(['airtable_record_id' => 'recITEM0000000021', 'reimb_date' => '2026-10-05', 'item' => 'Ink', 'cost' => 10, 'qty' => 1, 'status' => 'Approved']);
+        $portal->table('attachments')->insert([
+            ['table_name' => 'reimbursements', 'record_id' => $itemId, 'field_name' => 'receipts', 'file_url' => 'https://res.cloudinary.com/demo/a.jpg', 'file_name' => 'a.jpg'],
+            ['table_name' => 'reimbursements', 'record_id' => $itemId, 'field_name' => 'payout_receipt', 'file_url' => 'https://res.cloudinary.com/demo/p.jpg', 'file_name' => 'p.jpg'],
+        ]);
+        $ledger = app(CoreLedger::class);
+        $decision = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.requests', ['id' => (string) $itemId, 'status' => 'Approved'], 'requests.reimbursement', (string) $itemId, null, 1, null);
+        $payout = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.requests', ['id' => (string) $itemId, 'payoutReceipt' => ['name' => 'p.jpg']], 'requests.reimbursement', (string) $itemId, null, 1, null);
+
+        $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
+
+        // The first action pushes the row for both, so it carries the payout the later one changed.
+        $this->assertArrayNotHasKey('Receipts (If Applicable)', $items->firstWhere('actionId', $decision)['fields']);
+        $this->assertSame([['url' => 'https://res.cloudinary.com/demo/p.jpg', 'filename' => 'p.jpg']], $items->firstWhere('actionId', $decision)['fields']['Reimbursement Receipt']);
+        $this->assertSame('covered', $items->firstWhere('actionId', $payout)['outcome']);
+
+        // Alone, a decision sends no file at all.
+        Action::query()->whereKey($payout)->update(['synced_at' => now()]);
+        $alone = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $decision);
+        $this->assertArrayNotHasKey('Reimbursement Receipt', $alone['fields']);
+    }
+
+    public function test_a_second_send_waits_for_the_first(): void
+    {
+        $this->fakeAirtable();
+        $lock = Cache::lock('portal:airtable-sync', 60);
+        $this->assertTrue($lock->get());
+        try {
+            $this->artisan('portal:airtable-sync', ['--send' => true])
+                ->expectsOutputToContain('Another Airtable send is already running')
+                ->assertExitCode(1);
+        } finally {
+            $lock->release();
+        }
+    }
+
     private function fakeAirtable(?array $schema = null): void
     {
         Http::fake([
@@ -891,7 +1098,7 @@ class PortalAirtableSyncTest extends TestCase
                 ['name' => 'Name', 'type' => 'singleLineText'],
                 ['name' => 'Reason', 'type' => 'singleLineText'],
                 ['name' => 'Status', 'type' => 'singleSelect', 'options' => $select(['Approved', 'Pending', 'Rejected'])],
-                ['name' => 'Category', 'type' => 'singleSelect', 'options' => $select(['Sick Leave', 'Vacation Leave'])],
+                ['name' => 'Category', 'type' => 'singleSelect', 'options' => $select(['Sick Leave', 'Vacation Leave', '1 Day'])],
                 ['name' => 'Type', 'type' => 'singleLineText'],
                 ['name' => 'Approver Remarks', 'type' => 'multilineText'],
                 ['name' => 'No. of Hours', 'type' => 'number'],
@@ -970,6 +1177,10 @@ class PortalAirtableSyncTest extends TestCase
                 ['name' => 'Client', 'type' => 'multipleRecordLinks'],
                 ['name' => 'Project Members', 'type' => 'multipleRecordLinks'],
                 ['name' => 'Support Members', 'type' => 'multipleRecordLinks'],
+                ['name' => 'Is the ACC project renamed with ACC latest project number?', 'type' => 'checkbox'],
+                ['name' => 'Is the project ledger (MS Teams Planner) moved and updated to For Submission (completed status)?', 'type' => 'checkbox'],
+                ['name' => 'Are the details in the project ledger (MS Teams Planner) updated?', 'type' => 'checkbox'],
+                ['name' => 'Total NoE', 'type' => 'rollup'],
             ],
         ]]];
     }

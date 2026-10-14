@@ -758,6 +758,40 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertSame('recFIRST00000001', $deleted->parameters['parameters']['lines'][0]['airtable_record_id']);
     }
 
+    // The reported risk (2026-10-14): removing the first entry must not shift its Airtable record
+    // onto the next entry's work; a record follows the entry with the same project, activity and code.
+    public function test_an_edit_keeps_each_airtable_record_with_its_own_entry(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstProject();
+        $first = $this->firstActivity();
+        $second = DB::connection('portal')->table('activity_codes')->where('id', '!=', $first->id)
+            ->whereNotNull('name')->where('name', '!=', '')->whereNotNull('id_no')->where('id_no', '!=', '')->orderBy('id')->first();
+        $this->assertNotNull($second);
+        $earn = $this->firstEarnCode();
+        $today = Carbon::today()->toDateString();
+        $this->insertLine($actor, ['report_date' => $today, 'airtable_record_id' => 'recFIRST000000001'], $project, $first, $earn);
+        $this->insertLine($actor, ['report_date' => $today, 'airtable_record_id' => 'recSECOND00000001'], $project, $second, $earn);
+
+        $this->patchJson('/api/development/portal/reports/submitted/'.$today.'-daily', [
+            'entries' => [[
+                'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+                'activityLabel' => PortalSubmittedReportPresenter::activityLabel($second->name ?? null, $second->id_no ?? null),
+                'hoursRendered' => 8,
+                'elementChange' => 0,
+            ]],
+            'remarks' => 'Only the second kept',
+        ], ['Authorization' => 'Bearer '.$this->loginToken($actor)])->assertOk();
+
+        $edited = Action::query()
+            ->where('recycle_key', CoreRecycleKey::submittedReport((int) $actor->getKey(), $today, 'daily'))
+            ->where('action_type', CoreActionType::EDIT)
+            ->firstOrFail();
+        $lineIds = $edited->parameters['parameters']['lineIds'];
+        $this->assertSame('recSECOND00000001', DB::connection('portal')->table('user_reports')->where('id', $lineIds[0])->value('airtable_record_id'));
+        $this->assertSame(['recFIRST000000001'], $edited->parameters['parameters']['removedAirtableIds']);
+    }
+
     // The form never sets these, so an edit that re-inserts the lines must carry them over.
     public function test_an_edit_keeps_the_columns_the_form_never_sets(): void
     {

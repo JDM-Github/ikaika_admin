@@ -392,6 +392,7 @@ final class PortalProjectEditor
 
         $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted, $closing, $removedActivities, $row): void {
             $this->assertNameFree($fields['name'], $fields['columns']['department'], $projectId);
+            $changed = $this->changedFields($columns, $projectId, $fields['memberIds'], $fields['supportMemberIds'], $fields['clientId']);
             $this->connection()->table('projects')->where('id', $projectId)->update($columns);
             if ($removedActivities !== null) {
                 $this->activities->replace($projectId, $removedActivities);
@@ -406,7 +407,7 @@ final class PortalProjectEditor
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,
                 self::CORE_TARGET,
-                [...$fields['ledger'], 'id' => (string) $projectId],
+                [...$fields['ledger'], 'id' => (string) $projectId, 'fields' => $changed],
                 self::CORE_RESOURCE,
                 (string) $projectId,
                 CoreRecycleKey::project($projectId),
@@ -475,7 +476,8 @@ final class PortalProjectEditor
         $this->refuseRemovingAssignees($actor, $request, $projectId, [...$memberIds, ...$supportMemberIds]);
         $name = $this->text(self::split($row)[1]) ?? 'Project';
 
-        $this->ledger->within($this->connection(), function () use ($projectId, $memberIds, $supportMemberIds, $changes, $name, $actor, $request): void {
+        $this->ledger->within($this->connection(), function () use ($projectId, $memberIds, $supportMemberIds, $changes, $name, $actor, $request, $row): void {
+            $changed = $this->changedFields([], $projectId, $memberIds, $supportMemberIds, null);
             $this->connection()->table('projects')->where('id', $projectId)->update(['date_modified' => now()]);
             $this->replacePeople($projectId, self::MEMBER_ROLE, $memberIds);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $supportMemberIds);
@@ -489,6 +491,7 @@ final class PortalProjectEditor
                     'projectName' => $name,
                     'memberIds' => array_map('strval', $memberIds),
                     'supportMemberIds' => array_map('strval', $supportMemberIds),
+                    'fields' => $changed,
                 ],
                 self::CORE_RESOURCE,
                 (string) $projectId,
@@ -620,7 +623,7 @@ final class PortalProjectEditor
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,
                 self::CORE_TARGET,
-                ['id' => (string) $projectId, 'projectName' => $name, 'scopeCodes' => $scopeCodes],
+                ['id' => (string) $projectId, 'projectName' => $name, 'scopeCodes' => $scopeCodes, 'fields' => $isResubmitted ? self::PENDING_AGAIN : []],
                 self::CORE_RESOURCE,
                 (string) $projectId,
                 CoreRecycleKey::project($projectId),
@@ -853,6 +856,46 @@ final class PortalProjectEditor
      * @param  list<int>  $supportMemberIds
      * @return list<string>
      */
+    /**
+     * What an edit changes, for the Airtable sync, read before the write: each changed column with its
+     * new value, and a changed link under the key the sync map names it by. A null list is untouched.
+     *
+     * @param  array<string, mixed>  $columns
+     * @param  list<int>|null  $memberIds
+     * @param  list<int>|null  $supportMemberIds
+     * @return array<string, mixed>
+     */
+    private function changedFields(array $columns, int $projectId, ?array $memberIds, ?array $supportMemberIds, ?int $clientId): array
+    {
+        // The whole row, under a lock: liveProjectOrFail reads only a few columns.
+        $row = $columns === [] ? null : $this->connection()->table('projects')->where('id', $projectId)->lockForUpdate()->first();
+        $changed = [];
+        foreach ($columns as $column => $value) {
+            $before = $row->{$column} ?? null;
+            // A DECIMAL reads back as "1300.00": numbers are compared as numbers.
+            $same = is_numeric($before) && is_numeric($value) ? (float) $before === (float) $value : (string) ($before ?? '') === (string) ($value ?? '');
+            if ($column !== 'date_modified' && ! $same) {
+                $changed[$column] = $value;
+            }
+        }
+        foreach (['memberIds' => [self::MEMBER_ROLE, $memberIds], 'supportMemberIds' => [self::SUPPORT_ROLE, $supportMemberIds]] as $key => [$role, $new]) {
+            if ($new === null) {
+                continue;
+            }
+            $old = $this->connection()->table('employees_projects')->where('project_id', $projectId)->where('role_on_project', $role)->pluck('employee_id')->map(static fn (mixed $id): int => (int) $id)->sort()->values()->all();
+            $sorted = array_map('intval', $new);
+            sort($sorted);
+            if ($old !== $sorted) {
+                $changed[$key] = $sorted;
+            }
+        }
+        if ($clientId !== null && (int) $this->connection()->table('projects_clients')->where('project_id', $projectId)->value('client_id') !== $clientId) {
+            $changed['clientId'] = $clientId;
+        }
+
+        return $changed;
+    }
+
     private function peopleChanges(int $projectId, array $memberIds, array $supportMemberIds): array
     {
         $parts = [];
