@@ -34,6 +34,8 @@ class PortalShareReadinessTest extends TestCase
         'manage.requests' => ['/api/development/portal/manage/requests'],
         'manage.reports' => ['/api/development/portal/manage/reports'],
         'manage.users' => ['/api/development/portal/manage/users'],
+        'manage.onboarding' => ['/api/development/portal/manage/registrations'],
+        'manage.map' => ['/api/development/portal/manage/map'],
         'finance.overview' => ['/api/development/portal/manage/budget-codes', '/api/development/portal/manage/budget-transactions'],
         'finance.transactions' => ['/api/development/portal/manage/budget-transactions'],
         'finance.envelopes' => ['/api/development/portal/manage/budget-codes'],

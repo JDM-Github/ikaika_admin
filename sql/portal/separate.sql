@@ -1126,6 +1126,8 @@ INSERT IGNORE INTO shared_page_shareable (rule_key, is_ready) VALUES
     ('manage.requests', 1),
     ('manage.reports', 1),
     ('manage.users', 1),
+    ('manage.onboarding', 1),
+    ('manage.map', 1),
     ('finance.overview', 1),
     ('finance.transactions', 1),
     ('finance.envelopes', 1),
