@@ -106,6 +106,20 @@ final class PortalScopeWork
      */
     public function latestProgress(array $projectIds): array
     {
+        return array_map(
+            static fn (array $scopes): array => array_map(static fn (array $latest): int => $latest['percent'], $scopes),
+            $this->latestApproved($projectIds),
+        );
+    }
+
+    /**
+     * The same newest approved figure with the report day it came from, for the report picker's hint.
+     *
+     * @param  list<int>  $projectIds
+     * @return array<int, array<string, array{percent: int, asOf: ?string}>>
+     */
+    public function latestApproved(array $projectIds): array
+    {
         if ($projectIds === []) {
             return [];
         }
@@ -116,7 +130,7 @@ final class PortalScopeWork
             ->whereIn('progress.project_id', $projectIds)
             ->orderByRaw('progress.report_date IS NULL, progress.report_date DESC')
             ->orderByDesc('progress.id')
-            ->get(['progress.project_id', 'progress.wbs_code', 'progress.percent', 'user_reports.late_submission', 'user_reports.late_submission_approval', 'employees_user_reports.is_flag', 'employees_user_reports.flag_status']);
+            ->get(['progress.project_id', 'progress.wbs_code', 'progress.percent', 'progress.report_date', 'user_reports.late_submission', 'user_reports.late_submission_approval', 'employees_user_reports.is_flag', 'employees_user_reports.flag_status']);
         $progress = [];
         foreach ($rows as $row) {
             $status = PortalReportReview::status(
@@ -126,7 +140,10 @@ final class PortalScopeWork
                 $row->late_submission_approval ?? null,
             );
             if ($status === PortalReportReview::APPROVED) {
-                $progress[(int) $row->project_id][(string) $row->wbs_code] ??= (int) $row->percent;
+                $progress[(int) $row->project_id][(string) $row->wbs_code] ??= [
+                    'percent' => (int) $row->percent,
+                    'asOf' => $row->report_date === null ? null : substr((string) $row->report_date, 0, 10),
+                ];
             }
         }
 

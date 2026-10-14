@@ -144,9 +144,9 @@ final class PortalReportProjects
             // Nor against one that is not approved yet.
             ->tap(PortalProjectApproval::openForWork(...))
             ->select(['projects.id', 'projects.project_number', 'projects.project_name', 'projects.type_of_job', 'projects.department'])
-            // The scopes this member is assigned on it, "code=percent@day" from the newest report day, same query.
+            // The scopes this member is assigned on it, in the same query; their progress is read after.
             ->selectRaw(
-                "(SELECT GROUP_CONCAT(CONCAT(assigned.wbs_code, '=', COALESCE((SELECT CONCAT(progress.percent, '@', COALESCE(DATE_FORMAT(progress.report_date, '%Y-%m-%d'), '')) FROM projects_scope_progress progress WHERE progress.project_id = assigned.project_id AND progress.wbs_code = assigned.wbs_code ORDER BY progress.report_date IS NULL, progress.report_date DESC, progress.id DESC LIMIT 1), '')) ORDER BY assigned.wbs_code SEPARATOR ',') FROM projects_scope_assignees assigned WHERE assigned.project_id = projects.id AND assigned.employee_id = ?) as assigned_scopes",
+                '(SELECT GROUP_CONCAT(assigned.wbs_code ORDER BY assigned.wbs_code) FROM projects_scope_assignees assigned WHERE assigned.project_id = projects.id AND assigned.employee_id = ?) as assigned_scopes',
                 [$employeeId],
             )
             // What each project took out of its type's activities, read in the same query.
@@ -173,7 +173,7 @@ final class PortalReportProjects
                 'hasLines' => PortalProjectWork::isEngineering($row->department ?? null),
                 'removed' => $row->removed_codes === null ? [] : explode(',', (string) $row->removed_codes),
                 'department' => trim((string) ($row->department ?? '')),
-                'scopes' => self::assigned($row->assigned_scopes ?? null),
+                'scopes' => array_values(array_filter(explode(',', (string) ($row->assigned_scopes ?? '')))),
             ];
         }
 
@@ -181,9 +181,16 @@ final class PortalReportProjects
         $assigned = array_filter($projects, static fn (array $project): bool => $project['scopes'] !== []);
         if ($assigned !== []) {
             $names = (new PortalScopeTree)->names();
+            // The hint follows the board: the newest approved report's figure, and its day (2026-10-14, user).
+            $latest = (new PortalScopeWork)->latestApproved(array_keys($assigned));
             foreach ($assigned as $id => $project) {
                 $projects[$id]['scopes'] = array_map(
-                    static fn (array $scope): array => [...$scope, 'label' => $names[$scope['code']] ?? $scope['code']],
+                    static fn (string $code): array => [
+                        'code' => $code,
+                        'percent' => $latest[$id][$code]['percent'] ?? null,
+                        'asOf' => $latest[$id][$code]['asOf'] ?? null,
+                        'label' => $names[$code] ?? $code,
+                    ],
                     $project['scopes'],
                 );
             }
@@ -193,21 +200,6 @@ final class PortalReportProjects
         usort($ordered, static fn (array $first, array $second): int => strcmp($first['label'], $second['label']));
 
         return $ordered;
-    }
-
-    /**
-     * @return list<array{code: string, percent: ?int}>
-     */
-    private static function assigned(mixed $raw): array
-    {
-        $scopes = [];
-        foreach (array_filter(explode(',', (string) $raw)) as $pair) {
-            [$code, $latest] = array_pad(explode('=', $pair, 2), 2, '');
-            [$percent, $asOf] = array_pad(explode('@', $latest, 2), 2, '');
-            $scopes[] = ['code' => $code, 'percent' => $percent === '' ? null : (int) $percent, 'asOf' => $asOf === '' ? null : $asOf];
-        }
-
-        return $scopes;
     }
 
     /**

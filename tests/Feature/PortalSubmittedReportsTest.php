@@ -590,6 +590,12 @@ class PortalSubmittedReportsTest extends TestCase
             ->assertJsonPath('data.0.entries.0.scopeProgress', [['code' => '100', 'label' => 'Project Initiation', 'percent' => 40]]);
 
         $this->assertSame(40, (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('wbs_code', '100')->value('percent'));
+        // An Engineering daily report waits for review: the hint, like the board, shows nothing until it is approved.
+        Cache::flush();
+        $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
+        $this->assertSame(['percent' => null, 'asOf' => null], ['percent' => $picker['scopes'][0]['percent'], 'asOf' => $picker['scopes'][0]['asOf']]);
+        $todayLine = (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('report_date', $today)->value('user_report_id');
+        $portal->table('employees_user_reports')->where('user_report_id', $todayLine)->update(['flag_status' => 'Approved']);
         Cache::flush();
         $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
         $this->assertSame(40, $picker['scopes'][0]['percent']);
@@ -602,9 +608,6 @@ class PortalSubmittedReportsTest extends TestCase
         Cache::flush();
         $picker = collect($this->getJson('/api/development/portal/reports/projects', $headers)->json('data'))->firstWhere('id', (string) $project->id);
         $this->assertSame(['percent' => 40, 'asOf' => $today], ['percent' => $picker['scopes'][0]['percent'], 'asOf' => $picker['scopes'][0]['asOf']]);
-        // An Engineering daily report waits for review; the board counts its progress once approved.
-        $todayLine = (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('report_date', $today)->value('user_report_id');
-        $portal->table('employees_user_reports')->where('user_report_id', $todayLine)->update(['flag_status' => 'Approved']);
         $this->assertSame([(int) $project->id => ['100' => 40]], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
         $this->assertEqualsCanonicalizing([$today, $older], $portal->table('projects_scope_progress')->where('project_id', $project->id)->pluck('report_date')->map(fn ($day): string => substr((string) $day, 0, 10))->all());
 
