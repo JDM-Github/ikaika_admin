@@ -83,9 +83,14 @@ if ($Help) {
     exit 0
 }
 
-if ($Gui) {
-    $libDir = Join-Path $repoRoot 'decoupled-script\lib'
-    foreach ($lib in 'load-env.ps1', 'ui-host.ps1', 'toolkit-version.ps1', 'app-version.ps1') { . (Join-Path $libDir $lib) }
+# Run with nothing at all where a window can open - bare, or from the launcher - it is the dialog, as the estimator's
+# build-release is: the toolkit shows no form of its own for a command that owns a dialog. Anything named runs as named.
+$libDir = Join-Path $repoRoot 'decoupled-script\lib'
+. (Join-Path $libDir 'load-env.ps1')
+$windowed = $PSBoundParameters.Count -eq 0 -and [Environment]::UserInteractive -and
+    "$(Get-ProjectValue 'scripts.gui' 'auto')".Trim().ToLower() -ne 'off' -and "$(Get-ProjectEnvValue 'SCRIPTS_NO_GUI')" -ne '1'
+if ($Gui -or $windowed) {
+    foreach ($lib in 'ui-host.ps1', 'toolkit-version.ps1', 'app-version.ps1') { . (Join-Path $libDir $lib) }
     . (Get-UiAsset 'build-backend.ps1')
     $current = "$(Get-Content -LiteralPath (Join-Path $repoRoot 'VERSION') -ErrorAction SilentlyContinue | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1)".Trim()
     $picked = Show-BuildReleaseDialog -ProjectName 'IKAIKA Portal API' -Version $current -RepoRoot $repoRoot -BuildRelease $PSCommandPath
@@ -118,6 +123,7 @@ if (-not $assetUrl) {
     Write-Host ''
     Write-Host "  $kind.assetUrl is blank in ikaika_scripts.env, so there is no folder to build $(if ($Debug) { 'staging' } else { 'production' }) for." -ForegroundColor Red
     Write-Host '  It is the public folder the target serves the API from, e.g. /website_a85fbf18/central-api.' -ForegroundColor DarkGray
+    if (-not $Debug) { Write-Host '  -Debug builds staging; -Gui opens the dialog.' -ForegroundColor DarkGray }
     Write-Host ''
     exit 1
 }
