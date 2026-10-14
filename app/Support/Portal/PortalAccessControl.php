@@ -112,6 +112,8 @@ final class PortalAccessControl
                 // What the editor did here in Developer mode stays theirs to change only there.
                 'lockedToDeveloperMode' => ! $asDeveloper && $this->madeInDeveloperMode($graph, $editorId, $targetId, $key),
                 'canHold' => $graph->canHold($targetId, $key),
+                // Carried by another power they hold: on and locked until that one goes.
+                'impliedBy' => isset($their['impliedBy']) ? $graph->catalog()[$their['impliedBy']]->label : null,
                 'heldWithoutYou' => $without['holds'],
                 'reachWithoutYou' => $without['reach'],
                 'supportsList' => $list !== null,
@@ -166,6 +168,10 @@ final class PortalAccessControl
         }
         if ($change['action'] === self::OVERRIDE && $live === null) {
             abort(403, 'Only a developer in Developer mode can override.');
+        }
+        $carrier = $graph->effective($targetId)[$key]['impliedBy'] ?? null;
+        if ($carrier !== null && $change['action'] !== self::ON) {
+            abort(422, 'That power comes with '.$graph->catalog()[$carrier]->label.', so it stays on while they hold it. Switch that off first.');
         }
         // Held on only through someone else's gift: nobody but a developer's Override moves it.
         if (in_array($change['action'], [self::OFF, self::REACH], true) && $this->heldThroughOthers($graph, $editorId, $live !== null, $targetId, $key)) {

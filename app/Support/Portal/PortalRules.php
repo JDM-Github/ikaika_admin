@@ -96,7 +96,8 @@ final class PortalRules
         $narrowed = self::selfReach($employee);
         $rules = [];
         foreach ($graph->effective((int) $employee->getKey()) as $key => $rule) {
-            if (self::isSwitchedOn($catalog, $off, $key)) {
+            // A carried power follows its carrier's switch, never its own.
+            if (self::isSwitchedOn($catalog, $off, $rule['impliedBy'] ?? $key)) {
                 $rules[$key] = self::narrower($rule['reach'], $narrowed[$key] ?? null);
             }
         }

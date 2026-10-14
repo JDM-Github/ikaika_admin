@@ -7,6 +7,7 @@ use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalActivityScopes;
 use App\Support\Portal\PortalEmployeePresenter;
 use App\Support\Portal\PortalProjectActivities;
+use App\Support\Portal\PortalProjectPowers;
 use App\Support\Portal\PortalReportProjects;
 use App\Support\Portal\PortalViewProjectPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -455,6 +456,52 @@ class PortalProjectEditorTest extends TestCase
 
         // Scopes are not people: still Edit projects' and Manage scopes'.
         $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => [$this->scopeCodes()[0]]])->assertForbidden();
+    }
+
+    // The reported ask (2026-10-14, user): a plain member may not take someone assigned to a scope off the
+    // project; Remove scope assignees allows it, and Project Lead carries that power, on and locked.
+    public function test_removing_a_scope_assignee_needs_the_power_project_lead_carries(): void
+    {
+        $portal = DB::connection('portal');
+        $id = $this->liveProjectId();
+        $member = $this->employee('user', 3);
+        $assigned = $this->employee('user', 4);
+        $unassigned = $this->employee('user', 5);
+        $token = $this->token($member);
+        $portal->table('employees_projects')->where('project_id', $id)->delete();
+        foreach ([$member, $assigned, $unassigned] as $person) {
+            $portal->table('employees_projects')->insert(['employee_id' => $person->getKey(), 'project_id' => $id, 'role_on_project' => $person->is($member) ? 'member' : 'support']);
+        }
+        [$scope] = $this->scopeCodes();
+        $portal->table('projects_wbs_scopes')->insertOrIgnore(['project_id' => $id, 'wbs_code' => $scope]);
+        $portal->table('projects_scope_assignees')->insert(['project_id' => $id, 'wbs_code' => $scope, 'employee_id' => $assigned->getKey()]);
+        Cache::flush();
+        $url = self::BASE.'/'.$id;
+
+        // Someone with no scope goes freely; the assigned one is refused by name, and stays assigned.
+        $this->withToken($token)->patchJson($url, ['memberIds' => [$member->getKey()], 'supportMemberIds' => [$assigned->getKey()]])->assertOk();
+        $this->withToken($token)->patchJson($url, ['memberIds' => [$member->getKey()], 'supportMemberIds' => []])
+            ->assertForbidden()
+            ->assertJsonPath('message', 'You do not have the power to remove someone assigned to this project\'s scopes ('.trim($assigned->first_name.' '.$assigned->last_name).'). Ask a Project Lead.');
+        $this->assertSame(1, $portal->table('projects_scope_assignees')->where('project_id', $id)->count());
+
+        // Project Lead carries it: a limit on it and the member's own switch cannot take it away.
+        $this->grant($member, [PortalProjectPowers::LEAD => 'department']);
+        $admin = Employee::query()->whereRaw("LOWER(COALESCE(role_level, '')) = 'executive'")->whereRaw("LOWER(COALESCE(status, '')) = 'active'")->orderBy('id')->firstOrFail();
+        $portal->table('access_limits')->insert(['employee_id' => $member->getKey(), 'permission_key' => PortalProjectPowers::REMOVE_ASSIGNEES, 'limited_by' => $admin->getKey(), 'as_developer' => 0]);
+        $portal->table('access_toggles')->insert(['employee_id' => $member->getKey(), 'permission_key' => PortalProjectPowers::REMOVE_ASSIGNEES]);
+        Cache::flush();
+        $own = collect($this->withToken($token)->getJson('/api/development/portal/access')->assertOk()->json('data'))->firstWhere('key', PortalProjectPowers::REMOVE_ASSIGNEES);
+        $this->assertSame([false, true, 'Project Lead'], [$own['canToggle'], $own['isActive'], $own['impliedBy']]);
+        $this->withToken($token)->patchJson('/api/development/portal/access/switches', ['key' => PortalProjectPowers::REMOVE_ASSIGNEES, 'on' => false])->assertStatus(422);
+        $adminToken = $this->token($admin);
+        $sheet = collect($this->withToken($adminToken)->getJson('/api/development/portal/manage/access/'.$member->getKey())->assertOk()->json('data'))->firstWhere('key', PortalProjectPowers::REMOVE_ASSIGNEES);
+        $this->assertSame([true, 'Project Lead'], [$sheet['holds'], $sheet['impliedBy']]);
+        $this->withToken($adminToken)->patchJson('/api/development/portal/manage/access/'.$member->getKey(), ['key' => PortalProjectPowers::REMOVE_ASSIGNEES, 'action' => 'off'])
+            ->assertStatus(422)->assertJsonPath('message', 'That power comes with Project Lead, so it stays on while they hold it. Switch that off first.');
+
+        $this->withToken($token)->patchJson($url, ['memberIds' => [$member->getKey()], 'supportMemberIds' => []])->assertOk();
+        $this->assertSame(0, $portal->table('projects_scope_assignees')->where('project_id', $id)->count());
     }
 
     // The creator changing only the people of an approved project keeps it approved.

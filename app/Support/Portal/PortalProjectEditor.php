@@ -472,6 +472,7 @@ final class PortalProjectEditor
         $memberIds = $this->validatedPeople($data['memberIds'] ?? [], $projectId, self::MEMBER_ROLE);
         $supportMemberIds = $this->validatedPeople($data['supportMemberIds'] ?? [], $projectId, self::SUPPORT_ROLE);
         $changes = $this->peopleChanges($projectId, $memberIds, $supportMemberIds);
+        $this->refuseRemovingAssignees($actor, $request, $projectId, [...$memberIds, ...$supportMemberIds]);
         $name = $this->text(self::split($row)[1]) ?? 'Project';
 
         $this->ledger->within($this->connection(), function () use ($projectId, $memberIds, $supportMemberIds, $changes, $name, $actor, $request): void {
@@ -502,6 +503,31 @@ final class PortalProjectEditor
         $this->announceEdit($actor, $request, $projectId, $name, $this->text($row->department ?? null), true);
 
         return $this->response($projectId, true);
+    }
+
+    /**
+     * Off the project is off its scopes too, so taking off someone assigned to one needs Remove scope
+     * assignees (Project Lead carries it); the refusal names who is assigned (2026-10-14, user).
+     *
+     * @param  list<int>  $keptIds
+     */
+    private function refuseRemovingAssignees(Employee $actor, Request $request, int $projectId, array $keptIds): void
+    {
+        if (PortalRules::holds($actor, $request, PortalProjectPowers::REMOVE_ASSIGNEES)) {
+            return;
+        }
+        $names = $this->connection()->table('projects_scope_assignees as assigned')
+            ->join('employees', 'employees.id', '=', 'assigned.employee_id')
+            ->where('assigned.project_id', $projectId)
+            ->whereNotIn('assigned.employee_id', $keptIds === [] ? [0] : $keptIds)
+            ->orderBy('employees.first_name')
+            ->distinct()
+            ->get(['employees.first_name', 'employees.last_name'])
+            ->map(static fn (object $person): string => trim($person->first_name.' '.$person->last_name))
+            ->all();
+        if ($names !== []) {
+            abort(403, "You do not have the power to remove someone assigned to this project's scopes (".implode(', ', $names).'). Ask a Project Lead.');
+        }
     }
 
     // The activity log row, and the approvers' "updated" notice unless they already heard it was sent again.

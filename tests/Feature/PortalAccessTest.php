@@ -133,6 +133,8 @@ class PortalAccessTest extends TestCase
             'projects.delete' => 'all', 'projects.lead' => 'all', 'projects.create' => 'all', 'projects.create.direct' => null,
             'projects.created' => null, 'projects.created.export' => null,
             'projects.manager' => 'all', 'projects.track' => 'all', 'projects.track.export' => null,
+            // Remove scope assignees (2026-10-14, user): every role above member; Project Lead carries it too.
+            'projects.assignees.remove' => null,
         ];
         // References and Shared Pages are administrators' powers now (2026-10-09): admins hold them
         // by preset, with Edit references, Create and revoke and New passwords beside them.

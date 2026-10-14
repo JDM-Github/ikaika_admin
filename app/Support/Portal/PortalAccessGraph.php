@@ -51,6 +51,9 @@ final class PortalAccessGraph
     /**
      * @var array<string, int>
      */
+    // A power another one carries: on, and locked on, for as long as its holder holds that one.
+    public const IMPLIED = [PortalProjectPowers::REMOVE_ASSIGNEES => PortalProjectPowers::LEAD];
+
     private const TIER_RANK = [self::TIER_MEMBER => 1, self::TIER_ADMIN => 2, self::TIER_EXECUTIVE => 3, self::TIER_DEVELOPER => 4];
 
     /**
@@ -385,6 +388,12 @@ final class PortalAccessGraph
                 foreach ($this->subtree((string) $limit->permission_key) as $key) {
                     unset($rules[$key]);
                 }
+            }
+        }
+
+        foreach (self::IMPLIED as $key => $carrier) {
+            if (isset($rules[$carrier], $this->catalog[$key])) {
+                $rules[$key] = ['reach' => null, 'executives' => false, 'fromRole' => $rules[$carrier]['fromRole'], 'givenBy' => $rules[$carrier]['givenBy'], 'givenByDeveloper' => $rules[$carrier]['givenByDeveloper'], 'impliedBy' => $carrier];
             }
         }
 

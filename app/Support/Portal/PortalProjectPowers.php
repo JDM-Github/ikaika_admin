@@ -33,6 +33,9 @@ final class PortalProjectPowers
 
     public const VIEW = 'projects.view';
 
+    // Taking someone assigned to a scope off the project through the members-only edit; Project Lead carries it (2026-10-14, user).
+    public const REMOVE_ASSIGNEES = 'projects.assignees.remove';
+
     // Department heads only (2026-10-12, supervisor): Nathaniel and Steven by personal default.
     public const EDIT_CLOSED = 'projects.edit.closed';
 

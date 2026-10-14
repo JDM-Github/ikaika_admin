@@ -686,6 +686,8 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('projects.delete', 'projects.view', 'Delete projects', 'Move {UserName|Your} department''s projects or any project to the recycle bin. On Only your own, the projects {UserName|You} lead.', 1, 1, 213),
 ('projects.edit.closed', 'projects.edit', 'Edit closed projects', 'Change a Completed or Closed project, approved or not: {UserName|Your} department''s or every one. Nobody else can.', 1, 1, 215),
 ('projects.lead', 'projects.view', 'Project Lead', 'Be chosen as the lead of {UserName|Your} department''s projects or of any project.', 1, 1, 214),
+-- Project Lead carries it, on and locked (2026-10-14, user): PortalAccessGraph::IMPLIED. Existing databases: add_portal_remove_scope_assignees_rule.
+('projects.assignees.remove', 'projects.view', 'Remove scope assignees', 'Take someone assigned to a project''s scopes off its Members or Support members. Comes with Project Lead.', 0, 1, 216),
 ('projects.create', 'projects', 'Add projects', 'Start a new project from Add New Project, for {UserName|Your} department or every department.', 1, 1, 220),
 ('projects.create.direct', 'projects.create', 'Auto-approve projects', 'A project {UserName|You} add is approved at once, without waiting for a Project Approver.', 0, 1, 221),
 -- Created Projects is its own power (2026-10-09, user): a person may be barred from adding projects
