@@ -140,8 +140,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:manage.users.information.edit', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/information', [UsersController::class, 'updateInformation'])
         ->whereNumber('id');
-    // An ID card prints private details, so it is made for the people whose information someone sees (2026-10-14).
-    Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
+    // Generate ID is its own power (2026-10-14, user): the card of someone in the Users reach, with
+    // the private details it prints.
+    Route::middleware(['portal.rule:manage.users.id_card', 'throttle:portal-manage-users'])
         ->get('manage/users/{id}/id-card', [UsersController::class, 'idCard'])
         ->whereNumber('id');
     // Their documents follow the same power: a file into one of their slots, or one taken off (2026-10-13).

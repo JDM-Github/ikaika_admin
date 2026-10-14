@@ -1345,6 +1345,20 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
     ('executive', 'manage.users.information.edit', NULL, 0),
     ('developer', 'manage.users.information.edit', NULL, 0);
 
+-- Generate ID (2026-10-14, user): the person's ID card, front and back, with their blood type and
+-- emergency contact as it prints. Its own power, not Show employee information; admins and above hold
+-- it. Existing databases: add_portal_users_id_card_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.users.id_card', 'manage.users', 'Generate ID',
+     'Make the ID card of someone in {UserName|Your} reach, front and back, with their blood type and emergency contact as it prints. Download it as PDF, PNG or Photoshop files.',
+     0, 1, 'admin', 852);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('admin', 'manage.users.id_card', NULL, 0),
+    ('executive', 'manage.users.id_card', NULL, 0),
+    ('developer', 'manage.users.id_card', NULL, 0);
+
 -- Bug reports (2026-10-13): anyone reports a bug with up to three screenshots; MIS reads and tracks
 -- them. Anonymous by design: no employee column and no time finer than the day.
 -- Existing databases: create_portal_bug_reports.

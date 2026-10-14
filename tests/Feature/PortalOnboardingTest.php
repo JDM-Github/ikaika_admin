@@ -862,8 +862,11 @@ class PortalOnboardingTest extends TestCase
         $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
             ->where('message', 'like', '%made the ID card of%')->exists());
 
-        // It prints private details, so someone who cannot see them cannot make it.
-        $this->withToken($plain)->getJson($users.'/id-card')->assertForbidden();
+        // Its own power, not Show employee information: a plain admin holds Generate ID by preset and
+        // makes the card of someone in their reach; a member holds nothing that opens it.
+        $this->withToken($plain)->getJson($users.'/id-card')->assertOk()->assertJsonPath('data.idNo', '991231-9014');
+        $member = $this->token($this->employee("LOWER(COALESCE(role, '')) = 'user' AND LOWER(COALESCE(role_level, '')) != 'executive'"));
+        $this->withToken($member)->getJson($users.'/id-card')->assertForbidden();
         $this->assertSame('Jhon Noriel D. Malabanan', PortalEmployeeIdCards::cardName(' Jhon Noriel ', 'dimaculangan', 'Malabanan'));
         $this->assertSame('Jhon Malabanan', PortalEmployeeIdCards::cardName('Jhon', '  ', 'Malabanan'));
     }

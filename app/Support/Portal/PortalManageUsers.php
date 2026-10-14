@@ -646,14 +646,15 @@ final class PortalManageUsers
     }
 
     /**
-     * An employee's ID card (2026-10-14, user), for whoever sees their employee information, since it
-     * prints their blood type and emergency contact. Making one is logged as a look at those is.
+     * An employee's ID card (2026-10-14, user), for whoever holds Generate ID and can see them on the
+     * Users roster; it prints the private details the card carries. Making one is logged as a look
+     * at those.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function idCard(Employee $actor, int $id, Request $request): array
     {
-        $target = $this->privateTarget($actor, $id, $request);
+        $target = $this->inReach($actor, $id, $request);
         $this->recordPrivateView($actor, $request, 'made the ID card of', $target);
 
         return ['section' => 'manage', 'resource' => 'users', 'data' => $this->idCards->card($target)];
