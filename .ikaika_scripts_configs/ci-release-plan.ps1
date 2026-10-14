@@ -4,6 +4,8 @@
 # Build, version and upload are steps of their own, in the project estimator's order - build-release with -Bump, then tag-version once the build
 # is good, then server/deploy-release once the tag is - so a run shows which one it is in, and a build that fails spends no version.
 # A production upload needs its box ticked and a production to go to: release.assetUrl in ikaika_scripts.env is blank until there is one.
+# clean, as the estimator's: the upload clears the server's older backups too - build-release -Clean, which tells deploy-admin.sh through
+# the archive's deploy.json, since the server's variables travel with the archive.
 param(
     # Where build-release's arguments are written.
     [string]$PlanFile = (Join-Path $(if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }) 'build-release.json')
@@ -36,6 +38,7 @@ $version = Get-Answer 'version' 'same'
 $customVersion = Get-Answer 'custom_version' ''
 $upload = Test-Answer 'upload'
 $dryRun = Test-Answer 'dry_run'
+$clean = Test-Answer 'clean'
 $githubRelease = Test-Answer 'github_release' $true
 $refType = "$env:GITHUB_REF_TYPE"
 $refName = "$env:GITHUB_REF_NAME"
@@ -56,9 +59,9 @@ if ($tagging -and $refType -ne 'branch') { $problems += "A version bump is commi
 $kind = if ($target -eq 'staging') { 'debug' } else { 'release' }
 if (-not (Get-ConfigValue "$kind.assetUrl")) { $problems += "There is no $target to build for yet: $kind.assetUrl is blank in ikaika_scripts.env." }
 # As the project estimator's: a dry run sends nothing, so it needs no production box, and without an upload there is nothing to try.
-if (-not $upload -and $dryRun) {
-    Write-Output '::warning title=Upload options ignored::Dry run applies only with "Upload to the server" ticked.'
-    $dryRun = $false
+if (-not $upload -and ($dryRun -or $clean)) {
+    Write-Output '::warning title=Upload options ignored::Dry run and clean apply only with "Upload to the server" ticked.'
+    $dryRun = $false; $clean = $false
 }
 if ($upload -and -not $dryRun -and $target -eq 'production' -and -not (Test-Answer 'confirm_production')) { $problems += 'Tick "Yes, upload to PRODUCTION" to upload to production.' }
 
@@ -70,6 +73,7 @@ if ($problems.Count) {
 $arguments = [ordered]@{ Debug = $target -eq 'staging' }
 # build-release bumps the version as it builds, as the estimator's does; tag-version commits and tags it after.
 if ($tagging) { $arguments.Bump = "$bump" }
+if ($clean) { $arguments.Clean = $true }
 $arguments | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $PlanFile -Encoding utf8
 $deploy = $null
 if ($upload) {
@@ -99,7 +103,7 @@ if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "re
 $stages = @('| 1 - Check | These choices, then GitHub synced from Bitbucket and the toolkit fetched |')
 $stages += "| $($stages.Count + 1) - Build | $(if ($tagging) { "VERSION bumped $bump, uncommitted, then " })the $target archive, its fonts served from $(Get-ConfigValue "$kind.assetUrl") |"
 if ($tagging) { $stages += "| $($stages.Count + 1) - Tag | Once the build is good: the changelog filed under the new version, committed and tagged $(if ($target -eq 'staging') { 'as a staging build' } else { 'as a production release' }) by github-actions[bot] on Bitbucket |" }
-if ($upload) { $stages += "| $($stages.Count + 1) - Upload | $(if ($tagging) { 'Once the tag is on Bitbucket: ' })to $target with deploy-admin.sh, composer, the swap, migrations, then the health check |" }
+if ($upload) { $stages += "| $($stages.Count + 1) - Upload | $(if ($tagging) { 'Once the tag is on Bitbucket: ' })to $target with deploy-admin.sh, composer, the swap, migrations, then the health check$(if ($dryRun) { ', as a dry run that sends nothing' })$(if ($clean) { ', clearing older backups' }) |" }
 if ($tagging) { $stages += "| $($stages.Count + 1) - GitHub | The version commit and tag pushed to GitHub as well |" }
 if ($releasing) { $stages += "| $($stages.Count + 1) - GitHub release | $(if ($target -eq 'staging') { 'A prerelease' } else { 'The latest release' }) keeps the build and this version's changelog, so no artifact takes Actions storage |" }
 $summary = @('### Build release', '', '| Stage | What it does |', '| --- | --- |') + $stages + @('', '| Choice | Value |', '| --- | --- |')

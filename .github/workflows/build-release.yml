@@ -44,6 +44,10 @@ on:
         description: Dry run - name what would go up and run, upload nothing
         type: boolean
         default: false
+      clean:
+        description: Remove older backups and a failed deploy's leftovers on the server
+        type: boolean
+        default: false
 
 permissions:
   contents: read

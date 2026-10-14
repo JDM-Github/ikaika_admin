@@ -1,12 +1,20 @@
 # Builds the API's release archive, deployment/out/central-platform.zip, for staging or production: deployment/build.ps1 with the public folder the target serves it from, which Vite bakes into every font URL.
-# The archive is what server/deploy-release uploads and deployment/server/deploy-admin.sh installs; this only builds it, so a pipeline can show building and uploading as two steps.
+# The archive is what server/deploy-release uploads and deployment/server/deploy-admin.sh installs. On its own this only builds, so a pipeline can show
+# building and uploading as two steps; -Tag, -Deploy and -Clean add the rest in the project estimator's order, as its build-release does: build, then
+# tag-version files the changelog, commits and tags, then server/deploy-release uploads - each only once the one before it is good.
 # The target's folder is <kind>.assetUrl in ikaika_scripts.env, and a target without one is refused rather than built for the wrong folder - production has none until it is set up.
 # -Bump bumps VERSION before the build, as the estimator's build-release bumps pubspec.yaml: uncommitted, and put back if the build fails, so
 # the archive carries the version it is built as; tag-version then files the changelog, commits and tags it once the build is good.
+# <archive>.deploy.json beside the archive names the target it was built for, so server/deploy-release refuses it for the other one, and -Clean
+# there asks deploy-admin.sh to remove the older release backups and a failed deploy's leftovers once the new release is in.
 # A versioned copy, <artifact.prefix>-<version>[-debug].zip with its .sha256, goes in dist/ for the GitHub release, as the estimator's builds do.
+# -Gui opens the estimator backend's Build release dialog (.ikaika_scripts_configs/ui/build-backend.xaml) instead: a named command runs without asking.
 #
-#     .\script.ps1 build-release -Debug       the staging archive
-#     .\script.ps1 build-release              production's, once release.assetUrl is set
+#     .\script.ps1 build-release -Debug                          the staging archive
+#     .\script.ps1 build-release -Debug -Deploy -DryRun          and what the upload would send, nothing sent
+#     .\script.ps1 build-release -Debug -Bump patch -Tag -Deploy  bumped, tagged on Bitbucket, installed on staging
+#     .\script.ps1 build-release -Gui                            the dialog
+#     .\script.ps1 build-release                                 production's, once release.assetUrl is set
 
 param(
     # Staging: debug.assetUrl rather than production's release.assetUrl.
@@ -15,9 +23,19 @@ param(
     # VERSION uncommitted and put back if the build fails. Same, or left out, builds the version as it stands.
     [ArgumentCompletions('same', 'keep', 'patch', 'minor', 'major')]
     [string]$Bump = '',
+    # With a -Bump, file the changelog under the new version, commit and tag it on Bitbucket once the build is good - tag-version.
+    [switch]$Tag,
+    # Upload to the server once the build (and the tag) is good: server/deploy-release, which installs it with deploy-admin.sh.
+    [switch]$Deploy,
+    # With -Deploy, name what would go up and run, and send nothing.
+    [switch]$DryRun,
+    # With -Deploy, remove the server's older release backups and a failed deploy's leftovers once the new release is in.
+    [switch]$Clean,
     # How many release copies dist/ keeps; older ones are pruned.
     [ArgumentCompletions('5', '10', '20', '50')]
     [int]$Keep = 10,
+    # The estimator backend's Build release dialog, instead of running with these switches.
+    [switch]$Gui,
     [switch]$Help
 )
 
@@ -28,32 +46,60 @@ $repoRoot = Split-Path $configsDir -Parent
 if ($Help) {
     Write-Host @'
 
-  build-release - build the API's release archive for staging or production.
+  build-release - build the API's release archive for staging or production, and tag and upload it when asked.
 
   Usage
-    .\script.ps1 build-release [-Debug] [-Bump keep|patch|minor|major|x.y.z] [-Keep <n>]
+    .\script.ps1 build-release [-Debug] [-Bump keep|patch|minor|major|x.y.z [-Tag]] [-Deploy [-DryRun] [-Clean]] [-Keep <n>]
+    .\script.ps1 build-release -Gui
 
   Examples
     .\script.ps1 build-release -Debug
         deployment/out/central-platform.zip for the Test Server: the Vite build
         with debug.assetUrl baked into its font URLs, the app's code, VERSION.
 
+    .\script.ps1 build-release -Debug -Deploy -DryRun
+        The same, then what the upload would send and run. Nothing is sent.
+
+    .\script.ps1 build-release -Debug -Bump patch -Tag -Deploy
+        The next patch built for staging, the changelog filed under it,
+        committed and tagged on Bitbucket, then installed on the Test Server.
+        A failed build puts VERSION back as it was; a failed tag uploads nothing.
+
+    .\script.ps1 build-release -Debug -Deploy -Clean
+        Installed on staging, then the older release backups and a failed
+        deploy's leftovers removed from the server.
+
+    .\script.ps1 build-release -Gui
+        The Build release dialog the project estimator's backend has.
+
     .\script.ps1 build-release
         The same for production, from release.assetUrl - refused while that is
         blank, since production is not set up yet.
 
-    .\script.ps1 build-release -Debug -Bump patch
-        The next patch, in VERSION uncommitted, built for staging; tag-version
-        files the changelog, commits and tags it. A failed build puts VERSION
-        back as it was.
-
   Every build also writes dist/<artifact.prefix>-<version>[-debug].zip with
   its .sha256, for the GitHub release, keeping the newest -Keep.
 
-  Then .\script.ps1 server/deploy-release -Debug uploads and installs it.
-
 '@
     exit 0
+}
+
+if ($Gui) {
+    $libDir = Join-Path $repoRoot 'decoupled-script\lib'
+    foreach ($lib in 'load-env.ps1', 'ui-host.ps1', 'toolkit-version.ps1', 'app-version.ps1') { . (Join-Path $libDir $lib) }
+    . (Get-UiAsset 'build-backend.ps1')
+    $current = "$(Get-Content -LiteralPath (Join-Path $repoRoot 'VERSION') -ErrorAction SilentlyContinue | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1)".Trim()
+    $picked = Show-BuildReleaseDialog -ProjectName 'IKAIKA Portal API' -Version $current -RepoRoot $repoRoot -BuildRelease $PSCommandPath
+    if ($null -eq $picked) {
+        Write-Host ''
+        Write-Host '  Nothing was built - the dialog closed without Build running.' -ForegroundColor DarkGray
+        Write-Host ''
+        exit 0
+    }
+    if ($picked.AlreadyRan) { exit $picked.ExitCode }
+    $arguments = @{ Debug = $picked.Debug; Keep = $picked.Keep; Deploy = $picked.Deploy; DryRun = $picked.DryRun; Clean = $picked.Clean }
+    if ($picked.BumpNeeded) { $arguments.Bump = $picked.Version; $arguments.Tag = $picked.Tag }
+    & $PSCommandPath @arguments
+    exit $LASTEXITCODE
 }
 
 foreach ($lib in 'shared-fetch.ps1', 'changelog.ps1', 'app-version.ps1', 'toolkit-version.ps1') { . (Join-Path $repoRoot "decoupled-script\lib\$lib") }
@@ -62,6 +108,8 @@ if ($bumping -and $Bump -notmatch '^(keep|patch|minor|major|\d+\.\d+\.\d+)$') {
     Write-Host "  -Bump takes same, keep, patch, minor, major or x.y.z; it is '$Bump'." -ForegroundColor Red
     exit 1
 }
+if ($Tag -and -not $bumping) { Write-Host '  -Tag has nothing to tag without a -Bump that changes the version.' -ForegroundColor DarkGray }
+if (($DryRun -or $Clean) -and -not $Deploy) { Write-Host '  -DryRun and -Clean apply to an upload, and there is no -Deploy.' -ForegroundColor DarkGray }
 
 $kind = if ($Debug) { 'debug' } else { 'release' }
 $config = @(Get-Content -LiteralPath (Join-Path $repoRoot 'ikaika_scripts.env'))
@@ -116,6 +164,9 @@ if (-not (Test-Path -LiteralPath $archive)) {
     Write-Host "  The build finished without writing $archive." -ForegroundColor Red
     exit 1
 }
+$serverEnv = [ordered]@{}
+if ($Clean) { $serverEnv.CLEAN = '1' }
+[ordered]@{ target = $kind; serverEnv = $serverEnv } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath "$archive.deploy.json" -Encoding utf8
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLower()
 Write-Host ''
 Write-Host "  Built $archive - $([Math]::Round((Get-Item -LiteralPath $archive).Length / 1MB, 2)) MB, sha256 $($hash.Substring(0, 12))..." -ForegroundColor Green
@@ -132,5 +183,22 @@ if ($prefix -and $version) {
     Get-ChildItem -LiteralPath $dist -Filter "$prefix-*.zip" -File | Sort-Object LastWriteTime -Descending | Select-Object -Skip $Keep |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName, "$($_.FullName).sha256" -Force -ErrorAction SilentlyContinue }
     Write-Host "  Release copy: $named" -ForegroundColor Green
+}
+
+# The estimator's order from here: the version tagged once the build is good, the upload once the tag is on Bitbucket.
+$dispatcher = Join-Path $repoRoot 'script.ps1'
+if ($Tag -and $bumping) {
+    Write-Host ''
+    & $dispatcher tag-version $(if ($Debug) { '-Debug' })
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host '  The version was not tagged, so nothing was uploaded.' -ForegroundColor Red
+        exit 1
+    }
+}
+if ($Deploy) {
+    Write-Host ''
+    $upload = @{ Debug = [bool]$Debug; Force = $true; DryRun = [bool]$DryRun }
+    & $dispatcher server/deploy-release @upload
+    exit $LASTEXITCODE
 }
 exit 0

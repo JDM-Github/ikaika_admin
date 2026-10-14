@@ -1,6 +1,7 @@
 # Writes the run's result into its summary, as the project estimator's run does: the version, each step from build to upload, the tag on
 # Bitbucket and GitHub, the release, and every file with its artifact. The same file in both portal repos: the version file is
 # version.manifest, else VERSION, and an upload went to the target's web address, else to the health URL it was checked at.
+# A file is kept in the artifact of its platform - <artifact>-web, -windows, -android or -linux - and anything else in <artifact> itself.
 # It reads the checkout, dist and the outcomes of the steps before it, handed over as environment variables, so it reports a failed run as well as a finished one.
 param(
     # Where the built files are, relative to the repo or absolute.
@@ -31,6 +32,8 @@ $state = @{ success = 'done'; failure = 'failed'; skipped = 'skipped'; cancelled
 function Get-State([string]$Outcome) { if ($state.ContainsKey($Outcome)) { return $state[$Outcome] } return 'did not run' }
 
 $rows = @("| Version | $version$(if ($bump) { " (bump: $bump)" } else { ' (unchanged)' }) |")
+if ($env:WINDOWS_OUTCOME -and $env:WINDOWS_OUTCOME -ne 'skipped') { $rows += "| Windows, built first | $(Get-State $env:WINDOWS_OUTCOME) |" }
+if ($env:UBUNTU_OUTCOME -and $env:UBUNTU_OUTCOME -ne 'skipped') { $rows += "| Ubuntu's builds | $(Get-State $env:UBUNTU_OUTCOME) |" }
 $rows += "| Build | $(Get-State $env:BUILD_OUTCOME) |"
 if ($env:TAGGING -eq 'true') { $rows += "| Changelog filed, version tagged | $(Get-State $env:TAG_OUTCOME) |" }
 if ($deploys -eq 'true') {
@@ -52,9 +55,12 @@ if ($env:TAGGING -eq 'true') {
 }
 if ($env:RELEASE_URL) { $rows += "| GitHub release | $env:RELEASE_URL ($(if ($staging) { 'prerelease' } else { 'latest' })) |" }
 
+$artifactFor = [ordered]@{ '-web\.zip$' = 'web'; '-windows(-setup\.exe(\.blockmap)?|\.zip|-latest\.yml)$' = 'windows'; '\.(apk|aab)$' = 'android'; '-linux(\.AppImage|\.tar\.gz|-latest\.yml)$' = 'linux' }
 $files = @()
 foreach ($file in @(Get-ChildItem -LiteralPath $(if ([IO.Path]::IsPathRooted($DistDir)) { $DistDir } else { Join-Path $repoRoot $DistDir }) -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '\.sha256$' })) {
-    $files += "| $($file.Name) | $('{0:N1} MB' -f ($file.Length / 1MB)) | $(if ($artifactName) { $artifactName } else { '-' }) |"
+    $pattern = $artifactFor.Keys | Where-Object { $file.Name -match $_ } | Select-Object -First 1
+    $artifact = if (-not $artifactName) { '-' } elseif ($pattern) { "$artifactName-$($artifactFor[$pattern])" } else { $artifactName }
+    $files += "| $($file.Name) | $('{0:N1} MB' -f ($file.Length / 1MB)) | $artifact |"
 }
 
 $summary = @('### Result', '', '| | |', '| --- | --- |') + $rows

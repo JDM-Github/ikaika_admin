@@ -25,6 +25,8 @@
         @{ Name = 'a build that keeps its version has no tag to release under'; Answers = @{}; Exit = 0; Outputs = @{ RELEASING = 'false' }; Says = 'kept as an artifact instead' }
         # dry_run, as the project estimator's: names what would go up and run, sends nothing, and needs no production box.
         @{ Name = 'a dry-run upload sends nothing'; Answers = @{ upload = $true; dry_run = $true }; Exit = 0; Outputs = @{ UPLOADING = 'true'; DEPLOY_PLAN = '{"Debug":true,"Force":true,"DryRun":true}' } }
-        @{ Name = 'dry_run without an upload is ignored'; Answers = @{ dry_run = $true }; Exit = 0; Outputs = @{ UPLOADING = 'false'; DEPLOY_PLAN = '' }; Says = 'Dry run applies only with' }
+        @{ Name = 'dry run and clean without an upload are dropped'; Answers = @{ dry_run = $true; clean = $true }; Exit = 0; Outputs = @{ UPLOADING = 'false'; DEPLOY_PLAN = '' }; Says = 'Dry run and clean apply only with'; Absent = @('Clean') }
+        # clean, as the estimator's: the upload clears older backups, through the archive's deploy.json, so build-release carries it.
+        @{ Name = 'an upload that cleans the server'; Answers = @{ upload = $true; clean = $true }; Exit = 0; Plan = @{ Debug = $true; Clean = $true }; Outputs = @{ DEPLOY_PLAN = '{"Debug":true,"Force":true}' }; Says = ', clearing older backups' }
     )
 }

@@ -53,6 +53,38 @@
             ]
           },
           {
+            "flag": "Tag",
+            "label": "-Tag   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "With a -Bump, file the changelog under the new version, commit and tag it on Bitbucket once the build is good - tag-version.",
+            "default": ""
+          },
+          {
+            "flag": "Deploy",
+            "label": "-Deploy   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Upload to the server once the build (and the tag) is good: server/deploy-release, which installs it with deploy-admin.sh.",
+            "default": ""
+          },
+          {
+            "flag": "DryRun",
+            "label": "-DryRun   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "With -Deploy, name what would go up and run, and send nothing.",
+            "default": ""
+          },
+          {
+            "flag": "Clean",
+            "label": "-Clean   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "With -Deploy, remove the server's older release backups and a failed deploy's leftovers once the new release is in.",
+            "default": ""
+          },
+          {
             "flag": "Keep",
             "label": "-Keep   [Int32]",
             "type": "string",
@@ -65,10 +97,18 @@
               "20",
               "50"
             ]
+          },
+          {
+            "flag": "Gui",
+            "label": "-Gui   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "The estimator backend's Build release dialog, instead of running with these switches.",
+            "default": ""
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Bump ${build-release.args.Bump} -Keep ${build-release.args.Keep}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Bump ${build-release.args.Bump} -Tag ${build-release.args.Tag} -Deploy ${build-release.args.Deploy} -DryRun ${build-release.args.DryRun} -Clean ${build-release.args.Clean} -Keep ${build-release.args.Keep} -Gui ${build-release.args.Gui}"
         ]
       },
       "ci-check": {
