@@ -425,6 +425,7 @@ WHERE id_no IN (
     '260701-0020', -- John Dave Pega
     '260701-0019', -- Jhon Noriel Malabanan
     '260701-0018', -- Jolas Mendez
+    '250407-0009', -- Jolas Mendez
     '220101-0001', -- Don De Guzman, the president
     '220202-0002'  -- Nathaniel Tanglao, the MIS manager
 );
