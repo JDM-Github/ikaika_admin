@@ -1296,14 +1296,10 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
 
 -- Allowed activities per department (2026-10-13): Management is a type in four departments, each with
 -- its own list; a row with a department wins over the shared row (no department, as Airtable's are).
--- Existing databases: add_department_to_portal_allowed_activities.
-ALTER TABLE job_type_allowed_activities
-    ADD COLUMN department VARCHAR(100) NULL AFTER job_type;
-INSERT INTO job_type_allowed_activities (job_type, department, activity_code_id_initials) VALUES
-    ('Management', 'Engineering', '1004'),
-    ('Management', 'MIS',         '2002,2004'),
-    ('Management', 'General',     '2001,2003,9000,9001,9002'),
-    ('Management', 'Admin',       '2001,2003,9000,9001,9002');
+-- The column is in schema.sql (job_type_allowed_activities.department) and the four Management lists
+-- are seeded by migration add_department_to_portal_allowed_activities -- both deliberately kept out of
+-- this file: it is appended to data.sql for the Airtable import, where an ALTER on a column schema.sql
+-- already creates would fail, and a second INSERT into the table would break the exporter's cell check.
 
 -- Manage Scopes (2026-10-13): members assigned to a project's scopes, and the progress they report.
 -- Existing databases: create_portal_scope_assignees_and_progress.
