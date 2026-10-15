@@ -215,6 +215,58 @@ class PortalReferencesTest extends TestCase
             ->assertJsonPath('data.jobTypes', fn (array $types): bool => collect($types)->doesntContain(fn (array $type): bool => $type['id'] === $row['id']));
     }
 
+    // The leave form's vocabulary is edited here now, not hardcoded (2026-10-15, user).
+    public function test_a_leave_type_is_added_edited_and_removed(): void
+    {
+        $token = $this->adminToken();
+
+        $page = $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $this->assertNotEmpty($page->json('data.leaveTypes'));
+
+        $added = $this->withToken($token)->postJson(self::BASE.'/leave-types', ['name' => 'Test Leave 9901'])->assertOk();
+        $row = collect($added->json('data.leaveTypes'))->firstWhere('name', 'Test Leave 9901');
+        $this->assertNotNull($row);
+
+        $this->withToken($token)->postJson(self::BASE.'/leave-types', ['name' => 'test leave 9901'])->assertStatus(422);
+        $this->withToken($token)->postJson(self::BASE.'/leave-types', ['name' => '   '])->assertStatus(422);
+
+        $this->withToken($token)->patchJson(self::BASE.'/leave-types/'.$row['id'], ['name' => 'Test Leave 9902'])
+            ->assertOk()
+            ->assertJsonPath('data.leaveTypes', fn (array $types): bool => collect($types)->contains(fn (array $type): bool => $type['id'] === $row['id'] && $type['name'] === 'Test Leave 9902'));
+        $this->withToken($token)->patchJson(self::BASE.'/leave-types/99999999', ['name' => 'Gone'])->assertNotFound();
+
+        $this->withToken($token)->deleteJson(self::BASE.'/leave-types/'.$row['id'])
+            ->assertOk()
+            ->assertJsonPath('data.leaveTypes', fn (array $types): bool => collect($types)->doesntContain(fn (array $type): bool => $type['id'] === $row['id']));
+        $this->withToken($token)->deleteJson(self::BASE.'/leave-types/'.$row['id'])->assertNotFound();
+    }
+
+    // The reimbursement form's offices are edited here now, not hardcoded (2026-10-15, user).
+    public function test_a_team_is_added_edited_and_removed(): void
+    {
+        $token = $this->adminToken();
+
+        $page = $this->withToken($token)->getJson(self::BASE)->assertOk();
+        $this->assertNotEmpty($page->json('data.teams'));
+
+        $added = $this->withToken($token)->postJson(self::BASE.'/teams', ['name' => 'Test Office 9901'])->assertOk();
+        $row = collect($added->json('data.teams'))->firstWhere('name', 'Test Office 9901');
+        $this->assertNotNull($row);
+
+        $this->withToken($token)->postJson(self::BASE.'/teams', ['name' => 'test office 9901'])->assertStatus(422);
+        $this->withToken($token)->postJson(self::BASE.'/teams', ['name' => '   '])->assertStatus(422);
+
+        $this->withToken($token)->patchJson(self::BASE.'/teams/'.$row['id'], ['name' => 'Test Office 9902'])
+            ->assertOk()
+            ->assertJsonPath('data.teams', fn (array $teams): bool => collect($teams)->contains(fn (array $team): bool => $team['id'] === $row['id'] && $team['name'] === 'Test Office 9902'));
+        $this->withToken($token)->patchJson(self::BASE.'/teams/99999999', ['name' => 'Gone'])->assertNotFound();
+
+        $this->withToken($token)->deleteJson(self::BASE.'/teams/'.$row['id'])
+            ->assertOk()
+            ->assertJsonPath('data.teams', fn (array $teams): bool => collect($teams)->doesntContain(fn (array $team): bool => $team['id'] === $row['id']));
+        $this->withToken($token)->deleteJson(self::BASE.'/teams/'.$row['id'])->assertNotFound();
+    }
+
     public function test_a_department_is_added_described_and_removed(): void
     {
         $token = $this->adminToken();

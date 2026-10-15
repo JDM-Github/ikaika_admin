@@ -1008,6 +1008,45 @@ END
 WHERE description IS NULL OR TRIM(description) = '';
 
 -- ============================================================================
+-- LEAVE TYPES - Manage / References
+-- The company's leave vocabulary, editable on References' Leave types tab. The leave form offers
+-- exactly this list, so a value is a row here, not a constant in code.
+-- Existing databases: run the CREATE and its seed, or migration create_portal_leave_types.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS leave_types (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY leave_types_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO leave_types (name) VALUES
+    ('01 Vacation Leave'),
+    ('02 Sick Leave'),
+    ('03 Emergency Leave'),
+    ('04 Bereavement Leave'),
+    ('05 Maternity or Paternity Leave');
+
+-- ============================================================================
+-- TEAMS - Manage / References
+-- The offices a reimbursement line may belong to, editable on References' Teams tab.
+-- The reimbursement form offers exactly this list instead of a constant in code.
+-- Existing databases: run the CREATE and its seed, or migration create_portal_teams.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS teams (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY teams_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO teams (name) VALUES
+    ('Angeles Pampanga Office'),
+    ('Cebu Office');
+
+-- ============================================================================
 -- EMPLOYEE SIGNATURES - Manage / Users, the portal's own editable copy
 -- Airtable syncs into the portal one way and overwrites the mapped employees columns on every run,
 -- so the details an employee's signature shows are kept here instead: edited in the portal and read

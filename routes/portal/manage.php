@@ -50,6 +50,16 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
             ->whereNumber('id');
         Route::delete('manage/references/job-types/{id}', [ReferencesController::class, 'destroyJobType'])
             ->whereNumber('id');
+        Route::post('manage/references/leave-types', [ReferencesController::class, 'storeLeaveType']);
+        Route::patch('manage/references/leave-types/{id}', [ReferencesController::class, 'updateLeaveType'])
+            ->whereNumber('id');
+        Route::delete('manage/references/leave-types/{id}', [ReferencesController::class, 'destroyLeaveType'])
+            ->whereNumber('id');
+        Route::post('manage/references/teams', [ReferencesController::class, 'storeTeam']);
+        Route::patch('manage/references/teams/{id}', [ReferencesController::class, 'updateTeam'])
+            ->whereNumber('id');
+        Route::delete('manage/references/teams/{id}', [ReferencesController::class, 'destroyTeam'])
+            ->whereNumber('id');
         Route::post('manage/references/departments', [ReferencesController::class, 'storeDepartment']);
         Route::patch('manage/references/departments/{id}', [ReferencesController::class, 'updateDepartment'])
             ->whereNumber('id');
