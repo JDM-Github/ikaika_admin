@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\Portal\Manage\BudgetAccountsController;
 use App\Http\Controllers\Api\Portal\Manage\BudgetEnvelopesController;
 use App\Http\Controllers\Api\Portal\Manage\FlaggedMembersController;
 use App\Http\Controllers\Api\Portal\Manage\OnboardingController;
+use App\Http\Controllers\Api\Portal\Manage\ProfileChangesController;
 use App\Http\Controllers\Api\Portal\Manage\ProjectsController;
 use App\Http\Controllers\Api\Portal\Manage\ReferencesController;
 use App\Http\Controllers\Api\Portal\Manage\ReportsController;
@@ -48,6 +49,16 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::patch('manage/references/job-types/{id}', [ReferencesController::class, 'updateJobType'])
             ->whereNumber('id');
         Route::delete('manage/references/job-types/{id}', [ReferencesController::class, 'destroyJobType'])
+            ->whereNumber('id');
+        Route::post('manage/references/leave-types', [ReferencesController::class, 'storeLeaveType']);
+        Route::patch('manage/references/leave-types/{id}', [ReferencesController::class, 'updateLeaveType'])
+            ->whereNumber('id');
+        Route::delete('manage/references/leave-types/{id}', [ReferencesController::class, 'destroyLeaveType'])
+            ->whereNumber('id');
+        Route::post('manage/references/teams', [ReferencesController::class, 'storeTeam']);
+        Route::patch('manage/references/teams/{id}', [ReferencesController::class, 'updateTeam'])
+            ->whereNumber('id');
+        Route::delete('manage/references/teams/{id}', [ReferencesController::class, 'destroyTeam'])
             ->whereNumber('id');
         Route::post('manage/references/departments', [ReferencesController::class, 'storeDepartment']);
         Route::patch('manage/references/departments/{id}', [ReferencesController::class, 'updateDepartment'])
@@ -129,12 +140,19 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:manage.users.department', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/department', [UsersController::class, 'updateDepartment'])
         ->whereNumber('id');
+    // Approve profile changes: what people change about themselves on Settings, before it reaches their record (2026-10-14).
+    Route::middleware(['portal.rule:manage.users.information.approve', 'throttle:portal-manage-users'])
+        ->get('manage/users/changes', [ProfileChangesController::class, 'index']);
+    Route::middleware(['portal.rule:manage.users.information.approve', 'throttle:portal-manage-users-write'])
+        ->patch('manage/users/changes/{id}', [ProfileChangesController::class, 'decide'])
+        ->whereNumber('id');
     // Edit employee information: the private details of the people whose information someone sees (2026-10-12).
     Route::middleware(['portal.rule:manage.users.information.edit', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/information', [UsersController::class, 'updateInformation'])
         ->whereNumber('id');
-    // An ID card prints private details, so it is made for the people whose information someone sees (2026-10-14).
-    Route::middleware(['portal.rule:manage.users', 'throttle:portal-manage-users'])
+    // Generate ID is its own power (2026-10-14, user): the card of someone in the Users reach, with
+    // the private details it prints.
+    Route::middleware(['portal.rule:manage.users.id_card', 'throttle:portal-manage-users'])
         ->get('manage/users/{id}/id-card', [UsersController::class, 'idCard'])
         ->whereNumber('id');
     // Their documents follow the same power: a file into one of their slots, or one taken off (2026-10-13).

@@ -10,6 +10,7 @@ use App\Support\Portal\PortalAudit;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
 use Tests\TestCase;
@@ -124,6 +125,26 @@ class PortalAuditTest extends TestCase
             'Monday, September 7, 2026',
             PortalActivityCopy::date('2026-09-07'),
         );
+    }
+
+    // Every username token a message carries must be one the portal swaps; a lowercase "your" once
+    // rendered raw on the Logs page (2026-10-14, user).
+    public function test_every_username_token_is_one_the_portal_swaps(): void
+    {
+        $supported = ['{UserName|You}', '{UserName|Your}', "{UserName|You're}"];
+        $found = [];
+        foreach (File::allFiles(app_path()) as $file) {
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+            preg_match_all('/\{UserName\|[^}]*\}/', (string) file_get_contents($file->getPathname()), $matches);
+            foreach ($matches[0] as $token) {
+                $found[$token] = true;
+            }
+        }
+        $unsupported = array_values(array_diff(array_keys($found), $supported));
+
+        $this->assertSame([], $unsupported, 'Tokens the portal cannot swap: '.implode(', ', $unsupported));
     }
 
     public function test_writes_a_decision_into_both_the_requester_and_the_approver_streams(): void

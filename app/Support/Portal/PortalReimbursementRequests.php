@@ -76,17 +76,6 @@ final class PortalReimbursementRequests
 
     private const CORE_RESOURCE = 'requests.reimbursement';
 
-    /**
-     * The offices the old portal offered. Filing is allow-listed against this pair; a historical
-     * row may still carry an older `team` value, but the picker does not.
-     *
-     * @var list<string>
-     */
-    private const OFFICES = [
-        'Angeles Pampanga Office',
-        'Cebu Office',
-    ];
-
     public function __construct(
         private readonly CoreLedger $ledger,
         private readonly PortalTimezone $timezone,
@@ -762,11 +751,23 @@ final class PortalReimbursementRequests
     }
 
     /**
+     * The offices a reimbursement line may belong to, read from Manage / References' Teams list.
+     * Filing is allow-listed against this list; a historical row may still carry an older `team`
+     * value, but the picker does not.
+     *
      * @return list<string>
      */
     private function offices(): array
     {
-        return self::OFFICES;
+        $offices = [];
+        foreach ($this->connection()->table('teams')->orderBy('name')->pluck('name') as $name) {
+            $trimmed = trim((string) $name);
+            if ($trimmed !== '') {
+                $offices[] = $trimmed;
+            }
+        }
+
+        return $offices;
     }
 
     /**

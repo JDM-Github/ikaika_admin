@@ -490,34 +490,12 @@ final class PortalManageUsers
     public function updateInformation(Employee $actor, int $id, Request $request): array
     {
         $target = $this->privateTarget($actor, $id, $request);
-        $rules = array_fill_keys(array_keys(self::INFORMATION_COLUMNS), ['sometimes', 'nullable', 'string', 'max:255']);
-        $rules['personalEmail'][] = 'email';
-        /** @var array<string, string|null> $data */
-        $data = $request->validate($rules, [], ['personalEmail' => 'personal email']);
-        if ($data === []) {
+        $changes = $this->cleanedInformation($target, $request);
+        if ($changes === null) {
             abort(422, 'Change at least one detail.');
         }
 
-        $sent = [];
-        foreach ($data as $key => $value) {
-            $sent[self::REGISTRATION_KEYS[$key] ?? $key] = $value;
-        }
-        $clean = $this->input->cleaned($sent);
-
-        $changed = [];
-        foreach (array_keys($data) as $key) {
-            $column = self::INFORMATION_COLUMNS[$key];
-            $value = $clean[self::REGISTRATION_KEYS[$key] ?? $key] ?? null;
-            if ($key === 'personalEmail') {
-                $value = self::text($value) === null ? null : strtolower((string) self::text($value));
-            }
-            $current = $key === 'dateOfBirth' ? self::text(substr((string) $target->{$column}, 0, 10)) : self::text($target->{$column});
-            if ($current !== $value) {
-                $target->{$column} = $value;
-                $changed[] = $key;
-            }
-        }
-
+        $changed = $this->applyInformation($target, $changes);
         if ($changed !== []) {
             // Named as a plain list: the ledger strips government and bank keys, and the sync reads SQL.
             $columns = array_values(array_map(static fn (string $key): string => self::INFORMATION_COLUMNS[$key], $changed));
@@ -551,6 +529,93 @@ final class PortalManageUsers
     }
 
     /**
+     * Someone's private details as their profile sends them, by key.
+     *
+     * @return array<string, string|null>
+     */
+    public function informationOf(Employee $target): array
+    {
+        $values = [];
+        foreach (self::INFORMATION_COLUMNS as $key => $column) {
+            $values[$key] = $key === 'dateOfBirth' ? self::text(substr((string) $target->{$column}, 0, 10)) : self::text($target->{$column});
+        }
+
+        return $values;
+    }
+
+    /**
+     * The private details a request sends, cleaned the way a registration cleans them, that differ from
+     * what someone has now, by key; null when it sends none at all. Someone changing their own details
+     * asks with the same rules (2026-10-14, user).
+     *
+     * @return array<string, string|null>|null
+     */
+    public function cleanedInformation(Employee $target, Request $request): ?array
+    {
+        $rules = array_fill_keys(array_keys(self::INFORMATION_COLUMNS), ['sometimes', 'nullable', 'string', 'max:255']);
+        $rules['personalEmail'][] = 'email';
+        /** @var array<string, string|null> $data */
+        $data = $request->validate($rules, [], ['personalEmail' => 'personal email']);
+        if ($data === []) {
+            return null;
+        }
+
+        $sent = [];
+        foreach ($data as $key => $value) {
+            $sent[self::REGISTRATION_KEYS[$key] ?? $key] = $value;
+        }
+        $clean = $this->input->cleaned($sent);
+
+        $current = $this->informationOf($target);
+        $changes = [];
+        foreach (array_keys($data) as $key) {
+            $value = $clean[self::REGISTRATION_KEYS[$key] ?? $key] ?? null;
+            if ($key === 'personalEmail') {
+                $value = self::text($value) === null ? null : strtolower((string) self::text($value));
+            }
+            if ($current[$key] !== $value) {
+                $changes[$key] = $value;
+            }
+        }
+
+        return $changes;
+    }
+
+    /**
+     * Cleaned private details written to someone, and the keys that changed; an unknown key is ignored.
+     *
+     * @param  array<string, string|null>  $changes
+     * @return list<string>
+     */
+    public function applyInformation(Employee $target, array $changes): array
+    {
+        $current = $this->informationOf($target);
+        $changed = [];
+        foreach ($changes as $key => $value) {
+            $column = self::INFORMATION_COLUMNS[$key] ?? null;
+            if ($column !== null && $current[$key] !== $value) {
+                $target->{$column} = $value;
+                $changed[] = $key;
+            }
+        }
+        if ($changed !== []) {
+            $target->save();
+            $this->bumpCache();
+            PortalCache::bump();
+        }
+
+        return $changed;
+    }
+
+    // Whether someone may see this person's private details, as a profile shows them or not.
+    public function seesPrivate(Employee $viewer, Employee $target, Request $request): bool
+    {
+        $seesExecutives = PortalRole::isExecutive($viewer->role, $viewer->role_level) || PortalDeveloperMode::isOn($viewer, $request);
+
+        return PortalRules::covers(PortalRules::reach($viewer, $request, self::INFORMATION_RULE), $viewer, $target, $seesExecutives);
+    }
+
+    /**
      * Edit employee information's documents (2026-10-13, user): a file put in one of their slots, by
      * whoever may change their private details. The log names the slot, never the file.
      *
@@ -581,14 +646,15 @@ final class PortalManageUsers
     }
 
     /**
-     * An employee's ID card (2026-10-14, user), for whoever sees their employee information, since it
-     * prints their blood type and emergency contact. Making one is logged as a look at those is.
+     * An employee's ID card (2026-10-14, user), for whoever holds Generate ID and can see them on the
+     * Users roster; it prints the private details the card carries. Making one is logged as a look
+     * at those.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function idCard(Employee $actor, int $id, Request $request): array
     {
-        $target = $this->privateTarget($actor, $id, $request);
+        $target = $this->inReach($actor, $id, $request);
         $this->recordPrivateView($actor, $request, 'made the ID card of', $target);
 
         return ['section' => 'manage', 'resource' => 'users', 'data' => $this->idCards->card($target)];
@@ -799,13 +865,6 @@ final class PortalManageUsers
             'resource' => 'users',
             'data' => $this->profileData($viewer, $target, $request, true),
         ];
-    }
-
-    private function seesPrivate(Employee $viewer, Employee $target, Request $request): bool
-    {
-        $seesExecutives = PortalRole::isExecutive($viewer->role, $viewer->role_level) || PortalDeveloperMode::isOn($viewer, $request);
-
-        return PortalRules::covers(PortalRules::reach($viewer, $request, self::INFORMATION_RULE), $viewer, $target, $seesExecutives);
     }
 
     /**

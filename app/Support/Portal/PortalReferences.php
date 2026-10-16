@@ -53,6 +53,24 @@ final class PortalReferences
             ];
         }
 
+        // The company's leave vocabulary, the list the leave form offers.
+        $leaveTypes = [];
+        foreach ($this->connection()->table('leave_types')->orderBy('name')->get(['id', 'name']) as $row) {
+            $leaveTypes[] = [
+                'id' => (string) (int) $row->id,
+                'name' => trim((string) $row->name),
+            ];
+        }
+
+        // The offices a reimbursement line may belong to, the list it offers.
+        $teams = [];
+        foreach ($this->connection()->table('teams')->orderBy('name')->get(['id', 'name']) as $row) {
+            $teams[] = [
+                'id' => (string) (int) $row->id,
+                'name' => trim((string) $row->name),
+            ];
+        }
+
         // Who staffs each department, for the Members column and its filter: active employees only,
         // matched the way every other department filter matches (case-insensitive, trimmed).
         $membersByDepartment = [];
@@ -102,6 +120,8 @@ final class PortalReferences
                 'scopes' => $scopes,
                 'scopeTree' => $this->scopeTree->roots(),
                 'jobTypes' => $jobTypes,
+                'leaveTypes' => $leaveTypes,
+                'teams' => $teams,
                 'departments' => $departments,
                 'clients' => $clients,
                 'nextClientCode' => $this->nextClientCode(),
@@ -390,6 +410,121 @@ final class PortalReferences
     }
 
     /**
+     * The company's leave vocabulary: the list the leave form offers, so a change here is what the
+     * form offers next. A leave type carries no department, code or project count.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function addLeaveType(Employee $actor, Request $request): array
+    {
+        $name = $this->validatedLeaveType($request);
+        if ($this->leaveTypeTaken($name)) {
+            abort(422, 'That leave type is already on the list.');
+        }
+
+        $id = (int) $this->connection()->table('leave_types')->insertGetId(['name' => $name]);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.leave-type', '{UserName|You} added the leave type '.$name, (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function updateLeaveType(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('leave_types')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That leave type was not found.');
+        }
+        $name = $this->validatedLeaveType($request);
+        if ($this->leaveTypeTaken($name, $id)) {
+            abort(422, 'That leave type is already on the list.');
+        }
+
+        $this->connection()->table('leave_types')->where('id', $id)->update(['name' => $name]);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.leave-type', '{UserName|You} changed the leave type '.$name, (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function removeLeaveType(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('leave_types')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That leave type was not found.');
+        }
+
+        $this->connection()->table('leave_types')->where('id', $id)->delete();
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.leave-type', '{UserName|You} removed the leave type '.trim((string) $row->name), (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * The offices a reimbursement line may belong to. Like a leave type, a team is a bare name.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function addTeam(Employee $actor, Request $request): array
+    {
+        $name = $this->validatedTeam($request);
+        if ($this->teamTaken($name)) {
+            abort(422, 'That team is already on the list.');
+        }
+
+        $id = (int) $this->connection()->table('teams')->insertGetId(['name' => $name]);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.team', '{UserName|You} added the team '.$name, (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function updateTeam(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('teams')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That team was not found.');
+        }
+        $name = $this->validatedTeam($request);
+        if ($this->teamTaken($name, $id)) {
+            abort(422, 'That team is already on the list.');
+        }
+
+        $this->connection()->table('teams')->where('id', $id)->update(['name' => $name]);
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.team', '{UserName|You} changed the team '.$name, (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function removeTeam(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('teams')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That team was not found.');
+        }
+
+        $this->connection()->table('teams')->where('id', $id)->delete();
+        $this->bump();
+        $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.team', '{UserName|You} removed the team '.trim((string) $row->name), (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function addDepartment(Employee $actor, Request $request): array
@@ -520,6 +655,40 @@ final class PortalReferences
     private function codeTaken(string $code, ?int $exceptId = null): bool
     {
         return $this->taken('activity_codes', 'id_no', $code, $exceptId);
+    }
+
+    // A leave type's name, trimmed and non-empty, from the request the form sent.
+    private function validatedLeaveType(Request $request): string
+    {
+        $data = $request->validate(['name' => ['required', 'string', 'max:100']]);
+        $name = trim($data['name']);
+        if ($name === '') {
+            abort(422, 'Give the leave type a name.');
+        }
+
+        return $name;
+    }
+
+    private function leaveTypeTaken(string $name, ?int $exceptId = null): bool
+    {
+        return $this->taken('leave_types', 'name', $name, $exceptId);
+    }
+
+    // A team's name, trimmed and non-empty, from the request the form sent.
+    private function validatedTeam(Request $request): string
+    {
+        $data = $request->validate(['name' => ['required', 'string', 'max:100']]);
+        $name = trim($data['name']);
+        if ($name === '') {
+            abort(422, 'Give the team a name.');
+        }
+
+        return $name;
+    }
+
+    private function teamTaken(string $name, ?int $exceptId = null): bool
+    {
+        return $this->taken('teams', 'name', $name, $exceptId);
     }
 
     private function jobTypeTaken(string $department, string $name, ?int $exceptId = null): bool

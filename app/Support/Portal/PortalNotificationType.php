@@ -25,6 +25,14 @@ final class PortalNotificationType
     // A bug report came in, for whoever reads Bug Reports (2026-10-13). It names no sender.
     public const BUG_REPORTED = 'bug-reports.filed';
 
+    // Someone changed their own employee information, for the head admins to approve (2026-10-14).
+    public const PROFILE_CHANGES_TO_REVIEW = 'profile.changes.filed';
+
+    // Their profile changes approved or rejected, for the one who asked (2026-10-14).
+    public const PROFILE_CHANGES_APPROVED = 'profile.changes.approved';
+
+    public const PROFILE_CHANGES_REJECTED = 'profile.changes.rejected';
+
     public const REQUEST_CANCELLED_LEAVE = 'requests.leave.cancelled';
 
     public const REQUEST_CANCELLED_OVERTIME = 'requests.overtime.cancelled';

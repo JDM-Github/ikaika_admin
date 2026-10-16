@@ -350,6 +350,10 @@ CREATE TABLE job_type_allowed_activities (
     id                          INT AUTO_INCREMENT PRIMARY KEY,
     airtable_record_id          VARCHAR(20) UNIQUE,
     job_type                    VARCHAR(255),
+    -- Per-department override (2026-10-13): a row with a department wins over the shared row.
+    -- Nullable, so every Airtable row (which has none) loads as a shared row. The four
+    -- Management lists are seeded by migration add_department_to_portal_allowed_activities.
+    department                  VARCHAR(100) NULL,
     activity_code_id_initials   TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

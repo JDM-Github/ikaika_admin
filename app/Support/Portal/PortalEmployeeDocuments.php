@@ -65,9 +65,11 @@ final class PortalEmployeeDocuments
     ) {}
 
     /**
-     * Their files on Cloudinary, newest first within each field; only an https link is listed.
+     * Their files on Cloudinary, newest first within each field; only an https link is listed. A PDF
+     * comes with its first page as its thumbnail and its pages as pictures, so it previews like a
+     * picture does (2026-10-14, user).
      *
-     * @return list<array{id: string, field: string, name: string, mimeType: string, sizeBytes: int, url: string, thumbUrl: string|null}>
+     * @return list<array{id: string, field: string, name: string, mimeType: string, sizeBytes: int, url: string, thumbUrl: string|null, pagesUrl: string|null}>
      */
     public function listFor(Employee $employee): array
     {
@@ -78,17 +80,37 @@ final class PortalEmployeeDocuments
             ->orderByDesc('id')
             ->get(['id', 'field_name', 'file_url', 'file_name', 'file_size_bytes', 'mime_type'])
             ->filter(static fn (object $row): bool => is_string($row->file_url) && str_starts_with($row->file_url, 'https://'))
-            ->map(fn (object $row): array => [
-                'id' => (string) (int) $row->id,
-                'field' => (string) $row->field_name,
-                'name' => trim((string) $row->file_name) !== '' ? (string) $row->file_name : (string) $row->field_name,
-                'mimeType' => (string) ($row->mime_type ?? ''),
-                'sizeBytes' => (int) ($row->file_size_bytes ?? 0),
-                'url' => (string) $row->file_url,
-                'thumbUrl' => $this->cloudinary->thumbUrl((string) $row->file_url, (string) ($row->mime_type ?? '')),
-            ])
+            ->map(fn (object $row): array => $this->described(
+                (string) (int) $row->id,
+                (string) $row->field_name,
+                trim((string) $row->file_name) !== '' ? (string) $row->file_name : (string) $row->field_name,
+                (string) ($row->mime_type ?? ''),
+                (int) ($row->file_size_bytes ?? 0),
+                (string) $row->file_url,
+            ))
             ->values()
             ->all();
+    }
+
+    /**
+     * A file as a document list shows it, kept or only asked for.
+     *
+     * @return array{id: string, field: string, name: string, mimeType: string, sizeBytes: int, url: string, thumbUrl: string|null, pagesUrl: string|null}
+     */
+    public function described(string $id, string $field, string $name, string $mime, int $sizeBytes, string $url): array
+    {
+        $isPdf = $mime === 'application/pdf';
+
+        return [
+            'id' => $id,
+            'field' => $field,
+            'name' => $name,
+            'mimeType' => $mime,
+            'sizeBytes' => $sizeBytes,
+            'url' => $url,
+            'thumbUrl' => $isPdf ? $this->cloudinary->pdfThumbUrl($url) : $this->cloudinary->thumbUrl($url, $mime),
+            'pagesUrl' => $isPdf ? $this->cloudinary->pdfPagesUrl($url) : null,
+        ];
     }
 
     /**
@@ -164,6 +186,95 @@ final class PortalEmployeeDocuments
     // A file put in one of their slots: it replaces what the slot held, or joins the bank certificates.
     public function upload(Employee $employee, string $field, mixed $file): void
     {
+        $this->checked($field, $file);
+        $this->assertRoom($employee, [$field], []);
+        // Stored before the row changes, so a failed upload leaves the slot as it was.
+        $this->attach($employee, $this->stored($field, $file));
+    }
+
+    /**
+     * A file checked for one of their slots and put on Cloudinary, not yet one of theirs: an upload
+     * attaches it at once, a change someone asks for about themselves once it is approved (2026-10-14).
+     *
+     * @return array{field: string, fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}
+     */
+    public function stored(string $field, mixed $file): array
+    {
+        $mime = $this->checked($field, $file);
+        /** @var UploadedFile $file */
+        $stored = $this->cloudinary->uploadReceipt($file, self::FOLDER);
+
+        return ['field' => $field, 'fileUrl' => $stored['fileUrl'], 'fileName' => $file->getClientOriginalName(), 'sizeBytes' => $stored['sizeBytes'], 'mimeType' => $mime];
+    }
+
+    /**
+     * A slot that holds several keeps to its limit once these files join it and those leave.
+     *
+     * @param  list<string>  $addedFields
+     * @param  list<int>  $removedIds
+     */
+    public function assertRoom(Employee $employee, array $addedFields, array $removedIds): void
+    {
+        foreach (array_count_values($addedFields) as $field => $adding) {
+            if (! (self::EDITABLE[$field]['multiple'] ?? false)) {
+                continue;
+            }
+            $held = $this->rowsOf($employee)->where('field_name', $field)->whereNotIn('id', $removedIds)->count();
+            if ($held + $adding > PortalRegistrationDocuments::MAX_BANK_FILES) {
+                abort(422, 'Keep up to '.PortalRegistrationDocuments::MAX_BANK_FILES.' bank certificates. Remove one first.');
+            }
+        }
+    }
+
+    /**
+     * A stored file made one of theirs: it replaces what its slot held, or joins the bank certificates.
+     *
+     * @param  array{field: string, fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}  $stored
+     */
+    public function attach(Employee $employee, array $stored): void
+    {
+        $isMultiple = self::EDITABLE[$stored['field']]['multiple'] ?? false;
+        DB::connection('portal')->transaction(function () use ($employee, $stored, $isMultiple): void {
+            if (! $isMultiple) {
+                $this->rowsOf($employee)->where('field_name', $stored['field'])->delete();
+            }
+            DB::connection('portal')->table('attachments')->insert([
+                'table_name' => 'employees',
+                'record_id' => (int) $employee->getKey(),
+                'field_name' => $stored['field'],
+                'file_url' => $stored['fileUrl'],
+                'file_name' => $stored['fileName'],
+                'file_size_bytes' => $stored['sizeBytes'],
+                'mime_type' => $stored['mimeType'],
+            ]);
+        });
+        PortalCache::bump();
+    }
+
+    // One of their files taken off, and the slot it was in; another employee's is not found.
+    public function remove(Employee $employee, int $documentId): string
+    {
+        $field = $this->fieldOf($employee, $documentId);
+        if ($field === null) {
+            abort(404, 'That document was not found.');
+        }
+        $this->rowsOf($employee)->where('id', $documentId)->delete();
+        PortalCache::bump();
+
+        return $field;
+    }
+
+    // The slot one of their files is in; null when it is not one of theirs, or gone.
+    public function fieldOf(Employee $employee, int $documentId): ?string
+    {
+        $field = $this->rowsOf($employee)->where('id', $documentId)->value('field_name');
+
+        return is_string($field) ? $field : null;
+    }
+
+    // The file's type, once it suits the slot; a slot it does not suit, or no file, is refused.
+    private function checked(string $field, mixed $file): string
+    {
         $slot = self::EDITABLE[$field] ?? abort(422, 'Choose which document this is.');
         if (! $file instanceof UploadedFile || ! $file->isValid()) {
             abort(422, 'Choose a file to upload.');
@@ -175,41 +286,8 @@ final class PortalEmployeeDocuments
         if (! in_array($mime, $slot['mimes'], true)) {
             abort(422, $slot['label'].($slot['mimes'] === self::PICTURES ? ' has to be a JPG, PNG, WebP or GIF picture.' : ' has to be a picture or a PDF.'));
         }
-        $held = $this->rowsOf($employee)->where('field_name', $field)->pluck('id')->all();
-        if ($slot['multiple'] && count($held) >= PortalRegistrationDocuments::MAX_BANK_FILES) {
-            abort(422, 'Keep up to '.PortalRegistrationDocuments::MAX_BANK_FILES.' bank certificates. Remove one first.');
-        }
 
-        // Stored before the row changes, so a failed upload leaves the slot as it was.
-        $stored = $this->cloudinary->uploadReceipt($file, self::FOLDER);
-        DB::connection('portal')->transaction(function () use ($employee, $field, $file, $mime, $stored, $slot, $held): void {
-            if (! $slot['multiple'] && $held !== []) {
-                $this->rowsOf($employee)->whereIn('id', $held)->delete();
-            }
-            DB::connection('portal')->table('attachments')->insert([
-                'table_name' => 'employees',
-                'record_id' => (int) $employee->getKey(),
-                'field_name' => $field,
-                'file_url' => $stored['fileUrl'],
-                'file_name' => $file->getClientOriginalName(),
-                'file_size_bytes' => $stored['sizeBytes'],
-                'mime_type' => $mime,
-            ]);
-        });
-        PortalCache::bump();
-    }
-
-    // One of their files taken off, and the slot it was in; another employee's is not found.
-    public function remove(Employee $employee, int $documentId): string
-    {
-        $field = $this->rowsOf($employee)->where('id', $documentId)->value('field_name');
-        if (! is_string($field)) {
-            abort(404, 'That document was not found.');
-        }
-        $this->rowsOf($employee)->where('id', $documentId)->delete();
-        PortalCache::bump();
-
-        return $field;
+        return $mime;
     }
 
     private function rowsOf(Employee $employee): Builder

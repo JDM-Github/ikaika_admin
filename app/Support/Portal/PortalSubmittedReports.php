@@ -475,6 +475,14 @@ final class PortalSubmittedReports
         $entries = $this->validatedEntries($request);
         $remarks = $this->validatedRemarks($request);
         $resolved = $this->resolveEntries($entries, $existing);
+        // The day's scope figures ride with the edit (2026-10-14, user), on projects it has hours on.
+        $progress = $this->scopeWork->validated($employeeId, $request->input('scopeProgress', []));
+        $reported = array_map('intval', array_column($resolved, 'projectId'));
+        foreach ($progress as $entry) {
+            if (! in_array($entry['project_id'], $reported, true)) {
+                abort(422, 'Report scope progress on a project that day has hours on.');
+            }
+        }
 
         $first = $existing[0];
         $lateSubmission = $first->late_submission ?? null;
@@ -505,6 +513,7 @@ final class PortalSubmittedReports
             $isFlagged,
             $flagStatus,
             $entries,
+            $progress,
             $id,
             $kind,
             $actor,
@@ -517,8 +526,9 @@ final class PortalSubmittedReports
             $matched = $this->matchedLines($oldLines, array_values($resolved));
             $this->deleteLines($removedIds);
             $lineIds = [];
+            $lineByProject = [];
             foreach (array_values($resolved) as $index => $entry) {
-                $lineIds[] = $this->insertLine(
+                $lineId = $this->insertLine(
                     $employeeId,
                     $date,
                     $entry,
@@ -532,6 +542,14 @@ final class PortalSubmittedReports
                     $flagStatus,
                     $this->carriedColumns($matched[$index] ?? null, $oldLines[0] ?? null),
                 );
+                $lineIds[] = $lineId;
+                $lineByProject[(int) $entry['projectId']] ??= $lineId;
+            }
+            // The day's figures are replaced with what the edit carries; each keeps the day's first
+            // line on its project, as a filing does.
+            $this->scopeWork->clearDay($employeeId, $date);
+            foreach ($progress as $entry) {
+                $this->scopeWork->record($employeeId, $lineByProject[$entry['project_id']] ?? null, $date, [$entry]);
             }
             // Old lines no new line took over were dropped; their Airtable records are the sync's to delete.
             $taken = array_map(static fn (object $line): int => (int) $line->id, array_filter($matched));

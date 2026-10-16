@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Portal\User\HomeController;
+use App\Http\Controllers\Api\Portal\User\InformationController;
 use App\Http\Controllers\Api\Portal\User\LogsController;
 use App\Http\Controllers\Api\Portal\User\NotificationsController;
 use App\Http\Middleware\AuthenticatePortalJwt;
@@ -24,5 +25,12 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::post('user/notifications/read-all', [NotificationsController::class, 'markAllRead']);
         Route::delete('user/notifications/{id}', [NotificationsController::class, 'destroy'])
             ->whereNumber('id');
+    });
+    // Their own employee information, which changes only once a head admin approves (2026-10-14).
+    Route::middleware('throttle:portal-user-information')
+        ->get('user/information', [InformationController::class, 'show']);
+    Route::middleware('throttle:portal-user-information-write')->group(function (): void {
+        Route::post('user/information/changes', [InformationController::class, 'submit']);
+        Route::delete('user/information/changes', [InformationController::class, 'withdraw']);
     });
 });

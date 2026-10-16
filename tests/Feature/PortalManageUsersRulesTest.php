@@ -234,11 +234,14 @@ class PortalManageUsersRulesTest extends TestCase
         $this->assertNull($this->ownPower('default', $this->misAdmin, 'manage.users.information'));
     }
 
-    // The seeded defaults: Fin and Audie approve the projects they lead, under the Manage group they hold
-    // for it. What Nathaniel and Steven held here is the department-head presets now (2026-10-14, user).
-    public function test_the_seeded_personal_defaults_name_fin_and_audie(): void
+    // The seeded defaults: Fin and Audie approve the projects they lead, under the Manage group they
+    // hold for it; Nathaniel and Steven alone approve profile changes (2026-10-14). What they hold
+    // beyond an admin is the department-head presets now (2026-10-14, user).
+    public function test_the_seeded_personal_defaults_name_fin_audie_and_the_profile_change_approvers(): void
     {
         $this->assertSame([
+            '220202-0002:manage.users.information.approve:-',
+            '220302-0003:manage.users.information.approve:-',
             '220825-0004:manage:-',
             '220825-0004:projects.manager:lead',
             '230103-0005:manage:-',

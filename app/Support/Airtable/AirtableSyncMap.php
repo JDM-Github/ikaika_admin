@@ -22,6 +22,96 @@ final class AirtableSyncMap
 
     private const WITHDRAWN = ['column' => 'status', 'value' => 'Cancelled'];
 
+    // One list per mirrored table, shared by the portal's own resource and the admin grid's bare
+    // table name, so the two never drift apart (2026-10-14).
+    private const CLIENT_FIELDS = ['name' => 'Name', 'client_id' => 'ClientID', 'notes' => 'Notes', 'status' => 'Status'];
+
+    private const ACTIVITY_CODE_FIELDS = ['name' => 'Name', 'id_no' => 'IdNo', 'department' => 'Department'];
+
+    private const WARNING_FIELDS = ['warning_date' => 'Date', 'description' => 'Description', 'status' => 'Status', 'violation_type' => 'Violation Type'];
+
+    private const ALLOWED_FIELDS = ['job_type' => 'Job Type', 'activity_code_id_initials' => 'Activity Code ID Initials'];
+
+    private const TRAIL_FIELDS = ['action_name' => 'ActionName', 'created_by' => 'CreatedBy', 'remarks' => 'Remarks'];
+
+    private const TRAIL_PROJECT = [
+        'Project' => ['junction' => 'projects_action_history', 'local' => 'project_action_id', 'foreign' => 'project_id', 'table' => 'projects'],
+    ];
+
+    // What a candidate submits on registration; Airtable's New Employee Data mirrors Employees' names.
+    private const NEW_EMPLOYEE_FIELDS = [
+        'id_no' => 'ID No.',
+        'first_name' => 'First Name',
+        'middle_name' => 'Middle Name',
+        'last_name' => 'Last Name',
+        'nickname' => 'Nickname',
+        'email' => 'Email',
+        'job_title' => 'Job Title',
+        'start_date' => 'Start Date',
+        'status' => 'Status',
+        'date_of_birth' => 'Date of Birth',
+        'address' => 'Address',
+        'personal_email' => 'Personal E-Mail',
+        'phone_number' => 'Phone Number',
+        'tax_identification_no' => 'Tax Identification No.',
+        'philhealth_no' => 'PhilHealth No.',
+        'sss_no' => 'SSS No.',
+        'hdmf_no' => 'HDMF No.',
+        'role' => 'Role',
+        'department' => 'Department',
+        'emergency_contact_person_name' => 'Emergency Contact Person Name',
+        'emergency_contact_number' => 'Emergency Contact Number',
+        'emergency_contact_address' => 'Emergency Contact Address',
+        'bank_name' => 'Bank Name',
+        'bank_account_number' => 'Bank Account Number',
+        'bank_swift_code' => 'Bank SWIFT Code',
+        'data_approval' => 'Data Approval',
+    ];
+
+    private const T1_FIELDS = [
+        'wbs_code' => 'WBS Code', 'process_index' => 'Process Index', 'level' => 'Level', 'type' => 'Type', 'name' => 'Name',
+        'process_wbs' => 'Process WBS', 'sop_reference' => 'SOP Reference', 'time_trackable' => 'Time Trackable',
+        'department' => 'Department', 'status' => 'Status',
+    ];
+
+    private const T2_FIELDS = [
+        'wbs_code' => 'WBS Code', 'sequence_index' => 'Sequence Index', 'level' => 'Level', 'type' => 'Type', 'name' => 'Name',
+        'process' => 'Process', 'activity_wbs' => 'Activity WBS', 'sop_reference' => 'SOP Reference', 'time_trackable' => 'Time Trackable',
+        'department' => 'Department', 'status' => 'Status',
+    ];
+
+    private const T3_FIELDS = [
+        'wbs_code' => 'WBS Code', 'activity_index' => 'Activity Index', 'level' => 'Level', 'type' => 'Type', 'name' => 'Name',
+        'procedure_wbs' => 'Procedure WBS', 'procedure' => 'Procedure', 'process_wbs' => 'Process WBS', 'process' => 'Process',
+        'sop_reference' => 'SOP Reference', 'time_trackable' => 'Time Trackable', 'department' => 'Department', 'status' => 'Status',
+    ];
+
+    private const T4_FIELDS = [
+        'wbs_code' => 'WBS Code', 'task_index' => 'Task Index', 'task_name' => 'Task Name', 'task_notes' => 'Task Notes', 'task' => 'Task',
+        'activity_name' => 'Activity Name', 'activity' => 'Activity', 'procedure_name' => 'Procedure Name', 'procedure' => 'Procedure',
+        'description' => 'Description', 'start_date' => 'Start Date', 'due_date' => 'Due Date', 'time_spent_hrs' => 'Time Spent (hrs)',
+        'status' => 'Status', 'priority' => 'Priority',
+    ];
+
+    private const EARN_CODE_FIELDS = ['description' => 'Description', 'did_not_work' => 'Did Not Work', 'did_work' => 'Did Work'];
+
+    private const ACHIEVEMENT_FIELDS = ['achievement_date' => 'Date', 'project_name' => 'Project Name', 'description' => 'Description', 'links' => 'Links'];
+
+    private const BIM_FORM_FIELDS = [
+        'project_number' => 'Project Number', 'project_name' => 'Project Name', 'project_address' => 'Project Address',
+        'project_size_sqft' => 'Project Size (sq. ft)', 'status' => 'Status', 'no_of_floors' => 'No. of Floors',
+        'client_name' => 'Client Name', 'poc_name' => 'Point of Contact (POC)', 'poc_phone' => 'POC Phone #',
+        'purpose_of_scan_to_bim' => 'Purpose of Scan to BIM Model', 'arch_lod' => 'ARCH LOD', 'struct_lod' => 'STRUCT LOD',
+        'mech_lod' => 'MECH LOD', 'elect_lod' => 'ELECT LOD', 'plumb_lod' => 'PLUMB LOD', 'fp_lod' => 'FP LOD',
+        'client_provides_point_cloud' => 'Client will provide point cloud scan', 'point_cloud_scan_format' => 'Point Cloud Scan Format',
+        'client_has_existing_cad_rvt' => 'Client has existing CAD and RVT File', 'special_requests' => 'Special Requests',
+        'insertion_point_strategy' => 'Insertion Point Strategy', 'preferred_workset' => 'Preffered Workset',
+        'form_assigned_by' => 'Form Assigned By', 'filled_up_by' => 'Filled Up By',
+    ];
+
+    // The admin grid edits a row in place: only the columns it changed, only on a record Airtable has.
+    private const GRID = ['changed_only' => ['fields', 'changes']];
+
     // Airtable links a request to its projects; SQL keeps that in the projects_requests junction.
     private const REQUEST_PROJECTS = [
         'Project' => ['junction' => 'projects_requests', 'local' => 'request_id', 'foreign' => 'project_id', 'table' => 'projects'],
@@ -46,6 +136,9 @@ final class AirtableSyncMap
             'sample' => ['column' => 'type', 'value' => 'Leave'],
             'airtable_table' => 'Request',
             'discard_when' => self::WITHDRAWN,
+            // The base offers Sick and Vacation Leave only (2026-10-14): an Emergency, Bereavement or
+            // Maternity request goes without its Category rather than being held back forever.
+            'lenient' => ['Category'],
             'fields' => [...self::REQUEST_FIELDS, 'category' => 'Category'],
         ],
         'requests.overtime' => [
@@ -147,6 +240,9 @@ final class AirtableSyncMap
             'airtable_table' => 'Project/s',
             'changed_only' => ['columns', 'fields', 'changes'],
             'create_full' => true,
+            // The form offers LOD 100, which no LOD field in this base has (2026-10-14): left out with a
+            // note rather than holding the whole project, and everything filed against it, back.
+            'lenient' => ['LOD', 'AR LOD', 'ST LOD', 'MD LOD', 'EL LOD', 'PL LOD', 'FP LOD'],
             'fields' => [
                 'project_name' => 'Project Name',
                 'department' => 'Department',
@@ -305,17 +401,13 @@ final class AirtableSyncMap
             ],
         ],
         // Flagging a member is a warning in Airtable too (2026-10-14, user); unflagging marks it Inactive.
+        // The admin grid ledgers under this same bare name, so its in-place edits use this map too.
         'warnings' => [
             'sql_table' => 'warnings',
             'airtable_table' => 'Warnings',
             'changed_only' => ['fields', 'changes'],
             'create_full' => true,
-            'fields' => [
-                'warning_date' => 'Date',
-                'description' => 'Description',
-                'status' => 'Status',
-                'violation_type' => 'Violation Type',
-            ],
+            'fields' => self::WARNING_FIELDS,
             'links' => [
                 'Employee' => ['junction' => 'employees_warnings', 'local' => 'warning_id', 'foreign' => 'employee_id', 'table' => 'employees', 'column' => 'employeeIds'],
             ],
@@ -329,12 +421,7 @@ final class AirtableSyncMap
             'create_full' => true,
             'deleted_id' => 'airtableRecordId',
             'lenient' => ['Status'],
-            'fields' => [
-                'name' => 'Name',
-                'client_id' => 'ClientID',
-                'notes' => 'Notes',
-                'status' => 'Status',
-            ],
+            'fields' => self::CLIENT_FIELDS,
         ],
         'references.activity_codes' => [
             'sql_table' => 'activity_codes',
@@ -342,11 +429,7 @@ final class AirtableSyncMap
             'changed_only' => ['fields', 'changes'],
             'create_full' => true,
             'deleted_id' => 'airtableRecordId',
-            'fields' => [
-                'name' => 'Name',
-                'id_no' => 'IdNo',
-                'department' => 'Department',
-            ],
+            'fields' => self::ACTIVITY_CODE_FIELDS,
         ],
         // The scope tree, one Airtable table per tier (2026-10-14, user); the portal writes only the
         // code, the name and (above tasks) the department.
@@ -391,8 +474,36 @@ final class AirtableSyncMap
             'create_full' => true,
             'deleted_id' => 'airtableRecordId',
             'bracketed' => ['job_type' => 'department'],
-            'fields' => ['job_type' => 'Job Type', 'activity_code_id_initials' => 'Activity Code ID Initials'],
+            'fields' => self::ALLOWED_FIELDS,
         ],
+        // A candidate's registration (2026-10-14, user): the portal owns the row, so each action sends it
+        // whole, and promoting writes its ID No. and approval. Its documents reach Employees on promotion.
+        'onboarding.employee_data' => [
+            'sql_table' => 'new_employee_data',
+            'airtable_table' => 'New Employee Data',
+            'lenient' => ['Job Title', 'Department', 'Bank Name', 'Role', 'Status', 'Data Approval'],
+            'fields' => self::NEW_EMPLOYEE_FIELDS,
+        ],
+        // Every Trail history row the portal writes (2026-10-14, user), linked to its project. Only ever created.
+        'projects.trail' => [
+            'sql_table' => 'project_action_history',
+            'airtable_table' => 'Project Action History',
+            'fields' => self::TRAIL_FIELDS,
+            'links' => self::TRAIL_PROJECT,
+        ],
+        // The admin grid's bare table names for every other mirrored table it can edit (2026-10-14, user).
+        'clients' => [...self::GRID, 'sql_table' => 'clients', 'airtable_table' => 'Clients', 'fields' => self::CLIENT_FIELDS],
+        'activity_codes' => [...self::GRID, 'sql_table' => 'activity_codes', 'airtable_table' => 'Activity Code/s', 'fields' => self::ACTIVITY_CODE_FIELDS],
+        'job_type_allowed_activities' => [...self::GRID, 'sql_table' => 'job_type_allowed_activities', 'airtable_table' => 'Job Type Allowed Activities', 'bracketed' => ['job_type' => 'department'], 'fields' => self::ALLOWED_FIELDS],
+        'new_employee_data' => [...self::GRID, 'sql_table' => 'new_employee_data', 'airtable_table' => 'New Employee Data', 'fields' => self::NEW_EMPLOYEE_FIELDS],
+        'project_action_history' => [...self::GRID, 'sql_table' => 'project_action_history', 'airtable_table' => 'Project Action History', 'fields' => self::TRAIL_FIELDS],
+        'project_scope_t1_processes' => [...self::GRID, 'sql_table' => 'project_scope_t1_processes', 'airtable_table' => 'Project Scope Source - T1 Processes', 'fields' => self::T1_FIELDS],
+        'project_scope_t2_procedures' => [...self::GRID, 'sql_table' => 'project_scope_t2_procedures', 'airtable_table' => 'Project Scope Source - T2 Procedures', 'fields' => self::T2_FIELDS],
+        'project_scope_t3_activities' => [...self::GRID, 'sql_table' => 'project_scope_t3_activities', 'airtable_table' => 'Project Scope Source - T3 Activities', 'fields' => self::T3_FIELDS],
+        'project_scope_t4_tasks' => [...self::GRID, 'sql_table' => 'project_scope_t4_tasks', 'airtable_table' => 'Project Scope Source - T4 Tasks', 'fields' => self::T4_FIELDS],
+        'earn_codes' => [...self::GRID, 'sql_table' => 'earn_codes', 'airtable_table' => 'Earn Codes', 'fields' => self::EARN_CODE_FIELDS],
+        'achievements_milestones' => [...self::GRID, 'sql_table' => 'achievements_milestones', 'airtable_table' => 'Achievements and Milestones', 'fields' => self::ACHIEVEMENT_FIELDS],
+        'bim_form' => [...self::GRID, 'sql_table' => 'bim_form', 'airtable_table' => 'BIM Form', 'fields' => self::BIM_FORM_FIELDS],
     ];
 
     /**

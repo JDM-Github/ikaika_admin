@@ -625,6 +625,55 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertSame([(int) $project->id => ['100' => 10]], app(PortalScopeWork::class)->latestProgress([(int) $project->id]));
     }
 
+    // An edit carries the day's scope figures with it (2026-10-14, user): the edit replaces what that
+    // day reported, and a figure the edit leaves out is cleared for the day.
+    public function test_editing_a_report_replaces_that_days_scope_progress(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $today = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $portal = DB::connection('portal');
+        $portal->table('projects_wbs_scopes')->insertOrIgnore([['project_id' => $project->id, 'wbs_code' => '100']]);
+        $portal->table('projects_scope_assignees')->insert(['project_id' => $project->id, 'wbs_code' => '100', 'employee_id' => $actor->getKey()]);
+        Cache::flush();
+
+        $entry = [
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name ?? null, $activity->id_no ?? null),
+            'hoursRendered' => 4,
+            'elementChange' => 0,
+        ];
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [['reportDate' => $today, 'remarks' => 'Scope work', 'entries' => [$entry], 'scopeProgress' => [['projectId' => $project->id, 'code' => '100', 'percent' => 40]]]],
+        ], $headers)->assertCreated();
+        $before = (int) $portal->table('projects_scope_progress')->where('project_id', $project->id)->value('user_report_id');
+
+        $this->patchJson('/api/development/portal/reports/submitted/'.$today.'-daily', [
+            'entries' => [$entry],
+            'remarks' => 'Scope work',
+            'scopeProgress' => [['projectId' => $project->id, 'code' => '100', 'percent' => 55]],
+        ], $headers)->assertOk()
+            ->assertJsonPath('data.entries.0.scopeProgress', [['code' => '100', 'label' => 'Project Initiation', 'percent' => 55]]);
+
+        $rows = $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('report_date', $today)->get();
+        $this->assertCount(1, $rows);
+        $this->assertSame(55, (int) $rows[0]->percent);
+        // Its line is the one this edit made, not the deleted one the filing carried.
+        $after = (int) $rows[0]->user_report_id;
+        $this->assertNotSame($before, $after);
+        $this->assertTrue($portal->table('user_reports')->where('id', $after)->exists());
+
+        // A figure the edit leaves out is cleared for that day.
+        $this->patchJson('/api/development/portal/reports/submitted/'.$today.'-daily', [
+            'entries' => [$entry],
+            'remarks' => 'Scope work',
+        ], $headers)->assertOk();
+        $this->assertSame(0, $portal->table('projects_scope_progress')->where('project_id', $project->id)->where('report_date', $today)->count());
+    }
+
     public function test_a_daily_report_is_flagged_when_the_filer_has_an_active_warning(): void
     {
         $actor = $this->activeMember();

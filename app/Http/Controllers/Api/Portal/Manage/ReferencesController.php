@@ -62,6 +62,36 @@ class ReferencesController extends Controller
         return response()->json($this->settings->removeJobType($this->editor($request), $request, $id));
     }
 
+    public function storeLeaveType(Request $request): JsonResponse
+    {
+        return response()->json($this->settings->addLeaveType($this->editor($request), $request));
+    }
+
+    public function updateLeaveType(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->updateLeaveType($this->editor($request), $request, $id));
+    }
+
+    public function destroyLeaveType(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->removeLeaveType($this->editor($request), $request, $id));
+    }
+
+    public function storeTeam(Request $request): JsonResponse
+    {
+        return response()->json($this->settings->addTeam($this->editor($request), $request));
+    }
+
+    public function updateTeam(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->updateTeam($this->editor($request), $request, $id));
+    }
+
+    public function destroyTeam(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->removeTeam($this->editor($request), $request, $id));
+    }
+
     public function storeDepartment(Request $request): JsonResponse
     {
         return response()->json($this->settings->addDepartment($this->editor($request), $request));

@@ -49,7 +49,7 @@ final class PortalAirtableSync
      *     items: list<array{actionId: int, resource: ?string, actionType: string, recordId: ?string, outcome: string, table: ?string, airtableId: ?string, fields: array<string, mixed>, problems: list<string>}>
      * }
      */
-    public function run(bool $send, int $settleSeconds = 0, bool $retryCreates = false): array
+    public function run(bool $send, int $settleSeconds = 0, bool $retryCreates = false, ?int $afterId = null): array
     {
         $this->retryCreates = $retryCreates;
         $schema = $this->airtable->tables();
@@ -63,6 +63,8 @@ final class PortalAirtableSync
             ->whereNull('synced_at')
             // The ledger commits a moment before the portal row does; a fresh action waits a run.
             ->when($settleSeconds > 0, fn ($query) => $query->where('created_at', '<=', Carbon::now()->subSeconds($settleSeconds)))
+            // Only what came after a given action: a test scenario judges its own writes alone.
+            ->when($afterId !== null, fn ($query) => $query->where('id', '>', $afterId))
             ->orderBy('id')
             ->get();
 

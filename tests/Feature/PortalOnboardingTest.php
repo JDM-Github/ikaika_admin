@@ -592,6 +592,10 @@ class PortalOnboardingTest extends TestCase
         // Ledgered as an add, so the Airtable sync creates them there (2026-10-14, user).
         $this->assertTrue(DB::connection('core')->table('actions')->where('resource', 'employees')->where('action_type', 'add')
             ->where('record_id', (string) $row->getKey())->exists());
+        // Their New Employee Data row too: added when they submitted, edited when promotion named their ID No.
+        $dataId = (string) DB::connection('portal')->table('registrations')->where('id', $id)->value('employee_data_id');
+        $this->assertSame(['add', 'edit'], DB::connection('core')->table('actions')->where('resource', 'onboarding.employee_data')
+            ->where('record_id', $dataId)->orderBy('id')->pluck('action_type')->all());
         $this->assertSame('Liza', $row->first_name);
         $this->assertSame('Reyes', $row->last_name);
         // The work email signs them in; the address the link was bound to is kept as their personal one.
@@ -703,7 +707,11 @@ class PortalOnboardingTest extends TestCase
         $this->assertStringStartsWith('https://res.cloudinary.com/demo-cloud/', $photo['url']);
         $this->assertStringContainsString('/upload/c_fill,h_96,w_96', (string) $photo['thumbUrl']);
         $this->assertSame('image/png', $photo['mimeType']);
-        $this->assertNull($documents->firstWhere('field', 'tax_identification')['thumbUrl']);
+        $this->assertNull($photo['pagesUrl']);
+        // A PDF previews as pictures of its pages, its first page as its thumbnail (2026-10-14).
+        $tin = $documents->firstWhere('field', 'tax_identification');
+        $this->assertStringContainsString('/upload/pg_1,c_fill,h_96,w_96,f_jpg,q_auto/', (string) $tin['thumbUrl']);
+        $this->assertStringContainsString('/upload/pg_{page},f_jpg,w_1400,q_auto/', (string) $tin['pagesUrl']);
 
         // Copying again finds theirs all there already, so nothing doubles.
         $this->artisan('portal:copy-registration-documents')->expectsOutputToContain('already on Cloudinary')->assertExitCode(0);
@@ -854,8 +862,11 @@ class PortalOnboardingTest extends TestCase
         $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
             ->where('message', 'like', '%made the ID card of%')->exists());
 
-        // It prints private details, so someone who cannot see them cannot make it.
-        $this->withToken($plain)->getJson($users.'/id-card')->assertForbidden();
+        // Its own power, not Show employee information: a plain admin holds Generate ID by preset and
+        // makes the card of someone in their reach; a member holds nothing that opens it.
+        $this->withToken($plain)->getJson($users.'/id-card')->assertOk()->assertJsonPath('data.idNo', '991231-9014');
+        $member = $this->token($this->employee("LOWER(COALESCE(role, '')) = 'user' AND LOWER(COALESCE(role_level, '')) != 'executive'"));
+        $this->withToken($member)->getJson($users.'/id-card')->assertForbidden();
         $this->assertSame('Jhon Noriel D. Malabanan', PortalEmployeeIdCards::cardName(' Jhon Noriel ', 'dimaculangan', 'Malabanan'));
         $this->assertSame('Jhon Malabanan', PortalEmployeeIdCards::cardName('Jhon', '  ', 'Malabanan'));
     }

@@ -46,20 +46,6 @@ final class PortalLeaveRequests
 
     private const CORE_RESOURCE = 'requests.leave';
 
-    /**
-     * The company's leave vocabulary. The form offers exactly this list, so an unknown type is a
-     * client that has drifted rather than a new kind of leave -- move both together.
-     *
-     * @var list<string>
-     */
-    private const TYPES = [
-        '01 Vacation Leave',
-        '02 Sick Leave',
-        '03 Emergency Leave',
-        '04 Bereavement Leave',
-        '05 Maternity or Paternity Leave',
-    ];
-
     public function __construct(
         private readonly CoreLedger $ledger,
         private readonly PortalSubmittedReports $reports,
@@ -90,7 +76,7 @@ final class PortalLeaveRequests
                 'section' => 'requests',
                 'resource' => 'leave',
                 'data' => $this->ownLeave($actor, $from, $to),
-                'types' => self::TYPES,
+                'types' => $this->leaveTypes(),
                 // The form closes a day the member already reported: they worked it, so there is
                 // nothing to be away from. Sent with the history so the screen asks once.
                 'reportedDays' => $this->reportedDays((int) $actor->getKey(), $from, $to),
@@ -600,7 +586,7 @@ final class PortalLeaveRequests
     private function validatedType(Request $request): string
     {
         $value = trim((string) $request->input('leaveType', ''));
-        if (! in_array($value, self::TYPES, true)) {
+        if (! in_array($value, $this->leaveTypes(), true)) {
             abort(422, 'Choose one of the leave types the form offers.');
         }
 
@@ -754,6 +740,25 @@ final class PortalLeaveRequests
         }
 
         return $name;
+    }
+
+    /**
+     * The company's leave vocabulary, read from Manage / References' list. The form offers exactly
+     * this list, so an unknown type is a client that has drifted rather than a new kind of leave.
+     *
+     * @return list<string>
+     */
+    private function leaveTypes(): array
+    {
+        $types = [];
+        foreach ($this->connection()->table('leave_types')->orderBy('name')->pluck('name') as $name) {
+            $trimmed = trim((string) $name);
+            if ($trimmed !== '') {
+                $types[] = $trimmed;
+            }
+        }
+
+        return $types;
     }
 
     private function connection(): Connection

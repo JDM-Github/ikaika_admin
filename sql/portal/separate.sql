@@ -1011,6 +1011,45 @@ END
 WHERE description IS NULL OR TRIM(description) = '';
 
 -- ============================================================================
+-- LEAVE TYPES - Manage / References
+-- The company's leave vocabulary, editable on References' Leave types tab. The leave form offers
+-- exactly this list, so a value is a row here, not a constant in code.
+-- Existing databases: run the CREATE and its seed, or migration create_portal_leave_types.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS leave_types (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY leave_types_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO leave_types (name) VALUES
+    ('01 Vacation Leave'),
+    ('02 Sick Leave'),
+    ('03 Emergency Leave'),
+    ('04 Bereavement Leave'),
+    ('05 Maternity or Paternity Leave');
+
+-- ============================================================================
+-- TEAMS - Manage / References
+-- The offices a reimbursement line may belong to, editable on References' Teams tab.
+-- The reimbursement form offers exactly this list instead of a constant in code.
+-- Existing databases: run the CREATE and its seed, or migration create_portal_teams.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS teams (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY teams_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO teams (name) VALUES
+    ('Angeles Pampanga Office'),
+    ('Cebu Office');
+
+-- ============================================================================
 -- EMPLOYEE SIGNATURES - Manage / Users, the portal's own editable copy
 -- Airtable syncs into the portal one way and overwrites the mapped employees columns on every run,
 -- so the details an employee's signature shows are kept here instead: edited in the portal and read
@@ -1260,14 +1299,10 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
 
 -- Allowed activities per department (2026-10-13): Management is a type in four departments, each with
 -- its own list; a row with a department wins over the shared row (no department, as Airtable's are).
--- Existing databases: add_department_to_portal_allowed_activities.
-ALTER TABLE job_type_allowed_activities
-    ADD COLUMN department VARCHAR(100) NULL AFTER job_type;
-INSERT INTO job_type_allowed_activities (job_type, department, activity_code_id_initials) VALUES
-    ('Management', 'Engineering', '1004'),
-    ('Management', 'MIS',         '2002,2004'),
-    ('Management', 'General',     '2001,2003,9000,9001,9002'),
-    ('Management', 'Admin',       '2001,2003,9000,9001,9002');
+-- The column is in schema.sql (job_type_allowed_activities.department) and the four Management lists
+-- are seeded by migration add_department_to_portal_allowed_activities -- both deliberately kept out of
+-- this file: it is appended to data.sql for the Airtable import, where an ALTER on a column schema.sql
+-- already creates would fail, and a second INSERT into the table would break the exporter's cell check.
 
 -- Manage Scopes (2026-10-13): members assigned to a project's scopes, and the progress they report.
 -- Existing databases: create_portal_scope_assignees_and_progress.
@@ -1347,6 +1382,20 @@ VALUES
 INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
     ('executive', 'manage.users.information.edit', NULL, 0),
     ('developer', 'manage.users.information.edit', NULL, 0);
+
+-- Generate ID (2026-10-14, user): the person's ID card, front and back, with their blood type and
+-- emergency contact as it prints. Its own power, not Show employee information; admins and above hold
+-- it. Existing databases: add_portal_users_id_card_rule.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.users.id_card', 'manage.users', 'Generate ID',
+     'Make the ID card of someone in {UserName|Your} reach, front and back, with their blood type and emergency contact as it prints. Download it as PDF, PNG or Photoshop files.',
+     0, 1, 'admin', 852);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('admin', 'manage.users.id_card', NULL, 0),
+    ('executive', 'manage.users.id_card', NULL, 0),
+    ('developer', 'manage.users.id_card', NULL, 0);
 
 -- Bug reports (2026-10-13): anyone reports a bug with up to three screenshots; MIS reads and tracks
 -- them. Anonymous by design: no employee column and no time finer than the day.
@@ -1482,3 +1531,35 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
     ('head:mis', 'administration.logs.developers', NULL, 0),
     ('head:mis', 'administration.actions.sync', NULL, 0),
     ('head:mis', 'manage.shares.any', NULL, 0);
+
+-- Profile changes (2026-10-14): anyone changes their own employee information and documents on
+-- Settings, and the change waits here until a head admin approves it. Approve profile changes sits
+-- under Show employee information: developers by preset, the head admins by their own defaults.
+-- Existing databases: create_portal_profile_changes.
+CREATE TABLE IF NOT EXISTS employee_change_requests (
+    id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    employee_id  INT UNSIGNED NOT NULL,
+    status       VARCHAR(20)  NOT NULL DEFAULT 'Pending',
+    fields       JSON         NULL,
+    documents    JSON         NULL,
+    submitted_at DATETIME     NOT NULL,
+    decided_at   DATETIME     NULL,
+    decided_by   INT UNSIGNED NULL,
+    remarks      VARCHAR(500) NULL,
+    INDEX employee_change_requests_employee_id_status_index (employee_id, status),
+    INDEX employee_change_requests_status_submitted_at_index (status, submitted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('manage.users.information.approve', 'manage.users.information', 'Approve profile changes',
+     'Approve or reject the employee information and documents people change about themselves on Settings, before it reaches their record.',
+     0, 1, 'admin', 849);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('developer', 'manage.users.information.approve', NULL, 0);
+INSERT INTO access_personal (employee_id, permission_key, reach)
+SELECT id, 'manage.users.information.approve', NULL FROM employees WHERE id_no IN (
+    '220202-0002', -- Nathaniel Tanglao
+    '220302-0003'  -- Steven Gaurano
+);

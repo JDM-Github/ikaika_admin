@@ -1,6 +1,7 @@
-# Copies the Test Server's secret settings from this repo's local .env to ~/apps/test-server/.env and applies them;
+# Copies the server's secret settings from this repo's local .env to a target's .env and applies them;
 # see deployment/README.md. Values travel over SSH only and are never printed; a key empty here is skipped, so it
 # never blanks the server's. MAIL_MAILER is left out on purpose: which mailer a server uses is its own choice.
+# -RemoteDir points it at another target, e.g. production's ~/apps/portal-prod.
 param(
     [string[]]$Keys = @(
         'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
@@ -8,11 +9,13 @@ param(
         'MAIL_RELAY_URL', 'MAIL_RELAY_KEY',
         'PORTAL_ID_LOGIN_PASSWORD'
     ),
-    [string]$SshHost = 'bluehost'
+    [string]$SshHost = 'bluehost',
+    # The target's home-relative work folder (its .env and scripts/). Test Server by default.
+    [string]$RemoteDir = '~/apps/test-server'
 )
 
 $ErrorActionPreference = 'Stop'
-$remote  = '~/apps/test-server'
+$remote  = $RemoteDir
 $envFile = Join-Path (Split-Path $PSScriptRoot -Parent) '.env'
 if (-not (Test-Path $envFile)) { throw "No .env at $envFile" }
 
@@ -30,5 +33,6 @@ $scripts = (Join-Path $PSScriptRoot 'server/merge-env.sh'), (Join-Path $PSScript
 scp @scripts "${SshHost}:$remote/upload/"
 if ($LASTEXITCODE -ne 0) { throw 'Upload failed' }
 
-$lines | ssh $SshHost "mkdir -p $remote/scripts && mv -f $remote/upload/merge-env.sh $remote/upload/apply-env.sh $remote/scripts/ && sed -i 's/\r$//' $remote/scripts/*.sh && bash $remote/scripts/merge-env.sh"
+# ROOT is what merge-env.sh writes into and applies; without it, it defaults to the Test Server.
+$lines | ssh $SshHost "mkdir -p $remote/scripts && mv -f $remote/upload/merge-env.sh $remote/upload/apply-env.sh $remote/scripts/ && sed -i 's/\r$//' $remote/scripts/*.sh && ROOT=$remote bash $remote/scripts/merge-env.sh"
 if ($LASTEXITCODE -ne 0) { throw 'Applying the settings failed on the server; see the output above' }

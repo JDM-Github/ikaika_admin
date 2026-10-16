@@ -184,7 +184,10 @@ fi
 # it queued email never leaves. cPanel's Cron Jobs page shows this line too.
 echo "== Scheduler cron"
 CRON_LINE="* * * * * cd $APP_DIR && $(command -v php) artisan schedule:run >> /dev/null 2>&1"
-if crontab -l 2>/dev/null | grep -Fq 'artisan schedule:run'; then
+# Matched on this release's own folder: a second target on the same account (production's apps/portal-prod
+# beside the Test Server's apps/test-server) has its own line, and matching just 'schedule:run' would let
+# the other target's line read as "already set" and leave this one with no scheduler at all.
+if crontab -l 2>/dev/null | grep -Fq "cd $APP_DIR &&"; then
     echo "   already set"
 else
     { crontab -l 2>/dev/null || true; echo "$CRON_LINE"; } | crontab -

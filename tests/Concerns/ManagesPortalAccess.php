@@ -93,23 +93,4 @@ trait ManagesPortalAccess
 
         return $this->withToken($this->modeTokens[$slot]);
     }
-
-    /**
-     * @return list<Employee>
-     */
-    protected function activeWhere(string $where, int $count): array
-    {
-        $employees = Employee::query()
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->whereRaw($where)
-            ->whereNotNull('id_no')
-            ->where('id_no', '!=', '')
-            ->orderBy('id')
-            ->limit($count)
-            ->get()
-            ->all();
-        $this->assertCount($count, $employees);
-
-        return $employees;
-    }
 }

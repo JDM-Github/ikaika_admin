@@ -186,6 +186,18 @@ final class PortalScopeWork
         return array_values($entries);
     }
 
+    // An edited day's figures are replaced wholesale (2026-10-14): the rows its old lines held go with it.
+    public function clearDay(int $employeeId, string $reportDate): void
+    {
+        $deleted = $this->connection()->table('projects_scope_progress')
+            ->where('employee_id', $employeeId)
+            ->where('report_date', $reportDate)
+            ->delete();
+        if ($deleted > 0) {
+            $this->bump();
+        }
+    }
+
     /**
      * @param  list<array{project_id: int, wbs_code: string, percent: int}>  $entries
      */

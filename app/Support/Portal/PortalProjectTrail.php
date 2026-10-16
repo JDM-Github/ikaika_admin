@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -12,8 +13,9 @@ use Illuminate\Http\Request;
  * projects_action_history, the same two tables Airtable's rows already fill. Action names follow
  * Airtable's own ("Project Creation", "Project Edited") so old and new rows read alike.
  *
- * Portal-only like the writes it records: no airtable_record_id, never synced. The actor is named
- * as other people read them, so a developer's act in Developer mode reads "A developer".
+ * Each row is ledgered as it is written, so the Airtable sync adds it to Project Action History, linked
+ * to its project (2026-10-14, user). The actor is named as other people read them, so a developer's
+ * act in Developer mode reads "A developer".
  */
 final class PortalProjectTrail
 {
@@ -86,18 +88,34 @@ final class PortalProjectTrail
             : ['title' => $known[0], 'kind' => $known[1]];
     }
 
+    public function __construct(private readonly CoreLedger $ledger) {}
+
     public function record(int $projectId, string $actionName, Employee $actor, ?Request $request, ?string $remarks = null): void
     {
-        $actionId = (int) $this->connection()->table('project_action_history')->insertGetId([
-            'action_name' => $actionName,
-            'created_by' => PortalActivityCopy::actorName($actor, $request, true),
-            'remarks' => $remarks,
-            'created_at' => now(),
-        ]);
-        $this->connection()->table('projects_action_history')->insert([
-            'project_id' => $projectId,
-            'project_action_id' => $actionId,
-        ]);
+        // The row and its ledger entry commit together, so no history row is written without one.
+        $this->ledger->within($this->connection(), function () use ($projectId, $actionName, $actor, $request, $remarks): void {
+            $actionId = (int) $this->connection()->table('project_action_history')->insertGetId([
+                'action_name' => $actionName,
+                'created_by' => PortalActivityCopy::actorName($actor, $request, true),
+                'remarks' => $remarks,
+                'created_at' => now(),
+            ]);
+            $this->connection()->table('projects_action_history')->insert([
+                'project_id' => $projectId,
+                'project_action_id' => $actionId,
+            ]);
+            // Airtable keeps the same history (2026-10-14, user).
+            $this->ledger->recordAdd(
+                CoreLedger::PRODUCT_PORTAL,
+                'project_action_history:'.$actionId,
+                CoreLedger::PRODUCT_PORTAL.'.project_action_history',
+                ['id' => (string) $actionId, 'projectId' => (string) $projectId, 'actionName' => $actionName],
+                'projects.trail',
+                (string) $actionId,
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
     }
 
     private function connection(): Connection

@@ -213,6 +213,18 @@ final class PortalCloudinary
         return is_string($changed) ? $changed : $url;
     }
 
+    // A PDF's first page as a small picture, for a list of documents (2026-10-14).
+    public function pdfThumbUrl(string $url): ?string
+    {
+        return str_contains($url, '/upload/') ? $this->transformed($url, 'pg_1,c_fill,h_96,w_96,f_jpg,q_auto') : null;
+    }
+
+    // A PDF's pages as pictures to read in the portal (2026-10-14): {page} stands for the page, counted from 1.
+    public function pdfPagesUrl(string $url): ?string
+    {
+        return str_contains($url, '/upload/') ? $this->transformed($url, 'pg_{page},f_jpg,w_1400,q_auto') : null;
+    }
+
     public function thumbUrl(string $url, string $mimeType): ?string
     {
         if (! str_starts_with($mimeType, 'image/')) {

@@ -47,10 +47,11 @@ class PortalAllLogsRulesTest extends TestCase
         Mail::fake();
         $this->clearAccessTables();
 
-        $admins = "LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive'";
-        [$this->admin, $this->engineeringAdmin, $this->developer, $this->otherDeveloper] = $this->activeWhere($admins, 4);
-        [$this->member, $this->outsider] = $this->activeWhere("LOWER(COALESCE(role, '')) = 'user' AND LOWER(COALESCE(role_level, '')) != 'executive'", 2);
-        $this->executive = $this->activeWhere("LOWER(COALESCE(role_level, '')) = 'executive'", 1)[0];
+        // Shaped from the first active employees, so no roster change can starve the fixtures.
+        [$admins, $members] = $this->shapedPeople(4, 2);
+        [$this->admin, $this->engineeringAdmin, $this->developer, $this->otherDeveloper] = $admins;
+        [$this->member, $this->outsider] = $members;
+        $this->executive = $this->rosterExecutive();
         foreach ([$this->admin, $this->member] as $person) {
             $person->forceFill(['is_developer' => false, 'department' => 'MIS'])->save();
         }
