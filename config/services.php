@@ -79,4 +79,13 @@ return [
         'redirect_uri' => env('PORTAL_AZURE_REDIRECT_URI', 'http://localhost:8081'),
     ],
 
+    // The remark formatter (Report remarks -> Date/What/Changed/Wins). Keyless, it stays switched
+    // off; a "-cloud" model needs the hosted API, so the key is the account's OLLAMA_API_KEY.
+    'ollama' => [
+        'host' => env('OLLAMA_HOST', 'https://ollama.com'),
+        'key' => env('OLLAMA_API_KEY'),
+        'model' => env('OLLAMA_MODEL', 'gemma4:31b-cloud'),
+        'timeout' => (int) env('OLLAMA_TIMEOUT', 30),
+    ],
+
 ];

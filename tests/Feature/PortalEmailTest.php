@@ -192,19 +192,27 @@ class PortalEmailTest extends TestCase
         ], $headers)->assertStatus(422);
     }
 
-    public function test_a_member_cannot_send_or_build_templates(): void
+    // Every member may write and send an email as themselves (2026-10-15), but the templates-and-footers
+    // library and the All Emails list stay an administrator's.
+    public function test_a_member_can_send_as_themselves_but_not_read_all_emails_or_the_library(): void
     {
-        $headers = $this->headersFor($this->member());
+        Mail::fake();
+        $member = $this->member();
+        $member->forceFill(['email' => 'member@ikaikabim.com'])->save();
+        $headers = $this->headersFor($member);
 
+        // All Emails is an administrator's list; the composer, its audiences, are the member's.
         $this->getJson(self::BASE.'/administration/emails', $headers)->assertForbidden();
-        $this->getJson(self::BASE.'/administration/emails/audiences', $headers)->assertForbidden();
-        $this->getJson(self::BASE.'/administration/email-blocks', $headers)->assertForbidden();
-        $this->postJson(self::BASE.'/administration/emails', [
-            'category' => 'notice',
-            'subject' => 'Hi',
-            'body' => 'Hello',
-            'audience' => 'everyone',
+        $this->getJson(self::BASE.'/administration/emails/audiences', $headers)->assertOk();
+
+        // Building the library stays behind email.library.
+        $this->postJson(self::BASE.'/administration/email-blocks', [
+            'kind' => 'footer', 'name' => 'Mine', 'body' => 'Bye',
         ], $headers)->assertForbidden();
+
+        $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice', 'subject' => 'Hi', 'body' => 'Hello', 'audience' => 'everyone', 'asSender' => true,
+        ], $headers)->assertCreated();
     }
 
     public function test_the_audience_options_offer_the_active_roster(): void
@@ -885,15 +893,16 @@ class PortalEmailTest extends TestCase
 
         $sent = $this->postJson(self::BASE.'/administration/emails', [...$draft, 'asSender' => true], $this->headersFor($admin))
             ->assertCreated()
-            ->assertJsonPath('data.fromName', $name.' via '.config('mail.from.name'))
+            ->assertJsonPath('data.fromName', $name)
             ->assertJsonPath('data.replyTo', $email)
             ->json('data');
 
         Mail::assertSent(PortalEmailMail::class, function (PortalEmailMail $mail) use ($name, $email): bool {
             $envelope = $mail->envelope();
 
+            // As Me without their own address: the portal's own address, their name, replies to them.
             return $envelope->from?->address === config('mail.from.address')
-                && $envelope->from->name === $name.' via '.config('mail.from.name')
+                && $envelope->from->name === $name
                 && ($envelope->replyTo[0]->address ?? null) === $email;
         });
         $this->assertSame($email, EmailMessage::query()->whereKey($sent['id'])->value('reply_to'));
@@ -927,7 +936,7 @@ class PortalEmailTest extends TestCase
             'asSender' => true,
         ])
             ->assertCreated()
-            ->assertJsonPath('data.fromName', 'A developer via '.config('mail.from.name'))
+            ->assertJsonPath('data.fromName', 'A developer')
             ->assertJsonPath('data.replyTo', null);
     }
 
@@ -1109,6 +1118,102 @@ class PortalEmailTest extends TestCase
             'date_sent' => $createdAt,
             'date_created' => $createdAt,
         ]);
+    }
+
+    /*
+     * A queued copy is rebuilt from its row, so the From address a "send as me" chose is stored on the
+     * row and read back here. The company names itself on the portal's own address, and the portal
+     * leaves the default in place.
+     */
+    public function test_a_stored_email_leaves_from_its_own_address_only_when_the_row_carries_one(): void
+    {
+        config(['mail.from.address' => 'noreply@ikaikabim.com']);
+        $row = (object) [
+            'subject' => 'Hi', 'body' => 'Hello', 'footer_body' => null,
+            'format' => 'markup', 'footer_format' => 'markup',
+            'from_name' => 'Jane Doe', 'reply_to' => 'jane@ikaikabim.com', 'from_address' => 'jane@ikaikabim.com',
+            'category' => 'notice',
+        ];
+
+        $signed = PortalEmailMessages::mailFromRow($row)->envelope();
+        $this->assertSame('jane@ikaikabim.com', $signed->from?->address);
+        $this->assertSame('Jane Doe', $signed->from?->name);
+
+        // No stored address (a plain Me, or any other sender): the portal's own address, name still theirs.
+        $row->from_address = null;
+        $this->assertSame('noreply@ikaikabim.com', PortalEmailMessages::mailFromRow($row)->envelope()->from?->address);
+
+        // The company names itself on the portal's address; the portal leaves the default in place.
+        $row->from_name = PortalEmailMarkup::COMPANY_SENDER;
+        $this->assertSame('noreply@ikaikabim.com', PortalEmailMessages::mailFromRow($row)->envelope()->from?->address);
+
+        $row->from_name = null;
+        $this->assertNull(PortalEmailMessages::mailFromRow($row)->envelope()->from);
+    }
+
+    // "Send as me" may leave from the person's own address; an address off the domain is refused.
+    public function test_sending_as_yourself_from_your_own_address_stores_it_and_refuses_off_domain(): void
+    {
+        Mail::fake();
+        config(['mail.from.address' => 'noreply@ikaikabim.com']);
+        $admin = $this->administrator();
+        $admin->forceFill(['email' => 'ada@ikaikabim.com'])->save();
+        $draft = [
+            'category' => 'notice', 'subject' => 'From me', 'body' => 'x',
+            'audience' => 'custom', 'emails' => ['alpha@supplier.test'],
+        ];
+
+        $sent = $this->postJson(self::BASE.'/administration/emails', [...$draft, 'asSender' => true, 'ownAddress' => true], $this->headersFor($admin))
+            ->assertCreated()
+            ->json('data');
+
+        Mail::assertSent(PortalEmailMail::class, function (PortalEmailMail $mail) use ($admin): bool {
+            return $mail->envelope()->from?->address === 'ada@ikaikabim.com'
+                && $mail->envelope()->from->name === PortalActivityCopy::displayName($admin);
+        });
+        $this->assertSame('ada@ikaikabim.com', EmailMessage::query()->whereKey($sent['id'])->value('from_address'));
+
+        // Off the domain: refused, never silently sent from the portal's address as if it were theirs.
+        $admin->forceFill(['email' => 'ada@gmail.com'])->save();
+        $this->postJson(self::BASE.'/administration/emails', [...$draft, 'asSender' => true, 'ownAddress' => true], $this->headersFor($admin))
+            ->assertStatus(422);
+    }
+
+    /*
+     * The From is always the signed-in person's own. An address in the body is ignored -- the request
+     * carries only the ownAddress toggle -- so nobody can send as another, which is what keeps a
+     * tenant-wide Graph Mail.Send permission safe to hold.
+     */
+    public function test_nobody_can_send_as_someone_elses_address(): void
+    {
+        Mail::fake();
+        config(['mail.from.address' => 'noreply@ikaikabim.com']);
+        $admin = $this->administrator();
+        $admin->forceFill(['email' => 'ada@ikaikabim.com'])->save();
+
+        $sent = $this->postJson(self::BASE.'/administration/emails', [
+            'category' => 'notice', 'subject' => 'Not me', 'body' => 'x',
+            'audience' => 'custom', 'emails' => ['alpha@supplier.test'],
+            'asSender' => true, 'ownAddress' => true,
+            // A body asking for another address has no effect; there is no From field to read.
+            'from' => 'someone.else@ikaikabim.com',
+            'fromAddress' => 'someone.else@ikaikabim.com',
+        ], $this->headersFor($admin))->assertCreated()->json('data');
+
+        $this->assertSame('ada@ikaikabim.com', EmailMessage::query()->whereKey($sent['id'])->value('from_address'));
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->envelope()->from?->address === 'ada@ikaikabim.com');
+    }
+
+    // The composer rebuilds its preview every time writing pauses, so it must not share the ordinary
+    // email limit: 70 previews in a row all answer, where the 60/min ceiling would have blanked it.
+    public function test_the_preview_is_not_throttled_at_the_ordinary_email_rate(): void
+    {
+        $headers = $this->authHeaders();
+
+        for ($i = 0; $i < 70; $i++) {
+            $this->postJson(self::BASE.'/administration/emails/preview', ['body' => 'Hi', 'footerId' => null], $headers)
+                ->assertOk();
+        }
     }
 
     private function emailNotices(): int

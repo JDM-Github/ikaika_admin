@@ -65,5 +65,10 @@ class PortalLocationRequiredTest extends TestCase
         $this->withToken($this->token)->getJson(self::BASE.'/home')->assertOk();
         $this->withToken($this->token)->postJson(self::BASE.'/user/notifications/read-all')->assertSuccessful();
         $this->assertNotSame(428, $this->withToken($this->token)->patchJson(self::BASE.'/developer/mode', ['on' => true])->status());
+
+        // The remark tidy-up writes nothing, so it never needs a location either -- and without one it
+        // must reach its own endpoint (a validation refusal, not 428).
+        $this->assertNotSame(428, $this->withToken($this->token)
+            ->postJson(self::BASE.'/reports/remarks/format', ['remark' => '', 'day' => '2026-10-17'])->status());
     }
 }

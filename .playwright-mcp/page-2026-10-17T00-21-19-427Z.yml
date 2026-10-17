@@ -1,0 +1,239 @@
+- generic [ref=e1]:
+  - generic [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e16]:
+        - button "Collapse navigation" [ref=e18] [cursor=pointer]:
+          - generic [ref=e19]: 
+        - generic [ref=e20]: IKAIKA OPC
+      - generic [ref=e27]:
+        - button "Home" [ref=e28] [cursor=pointer]:
+          - generic [ref=e29]: 
+        - button "Projects" [ref=e35] [cursor=pointer]:
+          - generic [ref=e36]: 
+          - generic [ref=e39]:
+            - generic [ref=e40]: Projects
+            - generic [ref=e41]: 
+        - generic [ref=e43]:
+          - button "Reports" [ref=e44] [cursor=pointer]:
+            - generic [ref=e45]: 
+            - generic [ref=e48]:
+              - generic [ref=e49]: Reports
+              - generic [ref=e50]: 
+          - generic [ref=e53]:
+            - button "Daily Report" [ref=e56] [cursor=pointer]:
+              - generic [ref=e57]: 
+            - button "Late Report" [ref=e63] [cursor=pointer]:
+              - generic [ref=e64]: 
+            - button "Submitted Reports" [ref=e70] [cursor=pointer]:
+              - generic [ref=e71]: 
+        - button "Requests" [ref=e77] [cursor=pointer]:
+          - generic [ref=e78]: 
+          - generic [ref=e81]:
+            - generic [ref=e82]: Requests
+            - generic [ref=e83]: 
+        - button "User" [ref=e86] [cursor=pointer]:
+          - generic [ref=e87]: 
+          - generic [ref=e90]:
+            - generic [ref=e91]: User
+            - generic [ref=e92]: 
+        - button "Event Calendar" [ref=e94] [cursor=pointer]:
+          - generic [ref=e95]: 
+        - button "Access" [ref=e100] [cursor=pointer]:
+          - generic [ref=e101]: 
+        - button "Email" [ref=e106] [cursor=pointer]:
+          - generic [ref=e107]: 
+        - button "Bug Reports" [ref=e112] [cursor=pointer]:
+          - generic [ref=e113]: 
+        - generic [ref=e118]: Admin
+        - button "Manage" [ref=e121] [cursor=pointer]:
+          - generic [ref=e122]: 
+          - generic [ref=e125]:
+            - generic [ref=e126]: Manage
+            - generic [ref=e127]: 
+        - button "Finance" [ref=e130] [cursor=pointer]:
+          - generic [ref=e131]: 
+          - generic [ref=e134]:
+            - generic [ref=e135]: Finance
+            - generic [ref=e136]: 
+        - button "Administration" [ref=e139] [cursor=pointer]:
+          - generic [ref=e140]: 
+          - generic [ref=e143]:
+            - generic [ref=e144]: Administration
+            - generic [ref=e145]: 
+      - button "Account menu" [ref=e149] [cursor=pointer]:
+        - generic "Jhon Noriel Malabanan" [ref=e151]:
+          - img "Jhon Noriel Malabanan" [ref=e153]
+        - generic [ref=e155]:
+          - generic [ref=e156]:
+            - generic [ref=e157]: Jhon Noriel Malabanan
+            - generic [ref=e158]: Online
+          - generic [ref=e161]: 
+    - generic [ref=e162]:
+      - generic [ref=e163]:
+        - generic [ref=e166]:
+          - generic [ref=e167]: IKAIKA Portal
+          - generic [ref=e172]:
+            - generic [ref=e174]:
+              - generic [ref=e175]: Manila, Philippines
+              - generic [ref=e176]:
+                - generic [ref=e177]: 8:21 AM
+                - generic [ref=e178]:
+                  - generic [ref=e179]: 
+                  - generic [ref=e180]: 85°F | 30°C
+              - generic [ref=e181]: Saturday, 10/17/2026 · Overcast · 94°F / 81°F | 35°C / 27°C
+            - generic [ref=e183]:
+              - generic [ref=e184]: San Jose, CA
+              - generic [ref=e185]:
+                - generic [ref=e186]: 5:21 PM
+                - generic [ref=e187]:
+                  - generic [ref=e188]: 
+                  - generic [ref=e189]: 85°F | 29°C
+              - generic [ref=e190]: 15h behind · Friday, 10/16/2026 · Clear · 93°F / 52°F | 34°C / 11°C
+          - generic [ref=e191]:
+            - button "Notifications" [ref=e194] [cursor=pointer]:
+              - generic [ref=e195]: 
+            - button "Turn off background effect" [ref=e196] [cursor=pointer]:
+              - generic [ref=e197]: 
+            - button "Toggle theme" [ref=e198] [cursor=pointer]:
+              - generic [ref=e199]: 
+            - link "Open your profile" [ref=e200] [cursor=pointer]:
+              - generic [ref=e201]:
+                - generic "Jhon Noriel Malabanan" [ref=e203]:
+                  - img "Jhon Noriel Malabanan" [ref=e205]
+                - generic [ref=e206]:
+                  - generic [ref=e207]: Jhon Noriel Malabanan
+                  - generic [ref=e208]: 260701-0019
+        - generic [ref=e209]:
+          - link "PORTAL" [ref=e210] [cursor=pointer]
+          - generic [ref=e212]: /
+          - generic [ref=e213]: Reports
+          - generic [ref=e214]: /
+          - generic [ref=e215]: Daily Report
+      - generic [ref=e222]:
+        - generic [ref=e223]:
+          - generic [ref=e224]:
+            - generic [ref=e225]: Daily Report
+            - generic [ref=e226]: Record project work, hours, and completed items
+          - generic [ref=e230]:
+            - button "Previous report date" [ref=e231] [cursor=pointer]:
+              - generic [ref=e232]: 
+            - button "MM/DD/YYYY" [ref=e235] [cursor=pointer]:
+              - generic [ref=e236]: 
+              - generic [ref=e237]: Friday, October 16, 2026
+              - generic [ref=e238]: 
+            - button "Next report date" [disabled]:
+              - generic [ref=e239]: 
+            - button " Use Template" [ref=e241] [cursor=pointer]:
+              - generic [ref=e242]: 
+              - generic [ref=e243]: Use Template
+        - generic [ref=e244]:
+          - generic [ref=e247]:
+            - generic [ref=e248]:
+              - generic [ref=e249]:
+                - generic [ref=e250]: New Daily Entry
+                - generic [ref=e251]: 0 projects · 0 activities
+              - generic [ref=e256]:
+                - button "Clear entry" [ref=e257] [cursor=pointer]
+                - button " Add to Report" [ref=e259] [cursor=pointer]:
+                  - generic [ref=e260]: 
+                  - generic [ref=e261]: Add to Report
+            - generic [ref=e265]:
+              - generic [ref=e266]:
+                - generic [ref=e268]:
+                  - textbox "Search added projects..." [ref=e269]
+                  - generic [ref=e270]: 
+                - button "All disciplines" [ref=e273] [cursor=pointer]:
+                  - generic [ref=e275]: 
+              - generic "Added projects" [ref=e276]:
+                - generic [ref=e281]:
+                  - generic [ref=e282]:
+                    - generic [ref=e283]:
+                      - generic [ref=e284]: 
+                      - generic [ref=e286]:
+                        - generic [ref=e287]: Select project
+                        - generic [ref=e289]: 1 activity · Total 0 hrs · 0 items
+                      - generic [ref=e290]:
+                        - button "Hide activities" [ref=e291] [cursor=pointer]:
+                          - generic [ref=e292]: 
+                        - generic:
+                          - button "Remove project":
+                            - generic: 
+                    - generic [ref=e298]:
+                      - textbox "Select project search" [ref=e299]:
+                        - /placeholder: Select project
+                      - button "Select project" [ref=e300] [cursor=pointer]:
+                        - generic [ref=e301]: 
+                  - generic [ref=e303]:
+                    - generic [ref=e306]:
+                      - generic [ref=e309]:
+                        - textbox "Select a project first search" [ref=e310]:
+                          - /placeholder: Select a project first
+                        - button "Select a project first" [disabled]:
+                          - generic [ref=e311]: 
+                      - textbox "Hrs" [ref=e314]
+                      - textbox "Δ Items" [ref=e317]
+                      - generic:
+                        - button "Remove activity":
+                          - generic: 
+                    - generic [ref=e318]:
+                      - button " Add activity" [ref=e319] [cursor=pointer]:
+                        - generic [ref=e320]: 
+                        - generic [ref=e321]: Add activity
+                      - generic [ref=e322]:
+                        - generic [ref=e323]: Project total
+                        - generic [ref=e324]: 0 hrs · 0 items
+              - button " Add another project Choose a project and record its activities" [ref=e325] [cursor=pointer]:
+                - generic [ref=e326]: 
+                - generic [ref=e328]:
+                  - generic [ref=e329]: Add another project
+                  - generic [ref=e330]: Choose a project and record its activities
+              - generic [ref=e331]:
+                - generic [ref=e332]: Report total
+                - generic [ref=e333]: 0 Projects
+                - generic [ref=e334]: 0 Activities
+                - generic [ref=e335]: 0 hrs
+                - generic [ref=e336]: 0 Items
+                - generic [ref=e337]:
+                  - generic [ref=e338]: 
+                  - generic [ref=e339]: Daily target · 8 hrs remaining
+          - generic [ref=e340]:
+            - generic [ref=e342]:
+              - generic [ref=e343]:
+                - generic [ref=e344]: Report remarks
+                - button "Polish" [disabled]:
+                  - generic [ref=e348]: 
+                  - generic [ref=e349]: Polishing...
+              - generic [ref=e354]:
+                - textbox "Report remarks" [ref=e356]:
+                  - /placeholder: Add an optional note for the entire daily report...
+                  - text: i created a new portal and fixed the login page, users can log in again
+                - generic [ref=e357]: 71 / 500
+            - generic [ref=e362]:
+              - generic [ref=e363]:
+                - generic [ref=e364]: Report entries
+                - generic [ref=e365]: 0 entries
+                - generic [ref=e366]: 
+              - generic [ref=e369]:
+                - generic [ref=e370]: 
+                - generic [ref=e372]: Build daily reports
+                - generic [ref=e373]: Add project activities from the entry builder.
+              - generic [ref=e375]:
+                - button "Submit All" [ref=e376] [cursor=pointer]:
+                  - generic [ref=e377]: 
+                - generic [ref=e379]: Add at least one entry to submit.
+    - button "Report a bug" [ref=e382] [cursor=pointer]:
+      - generic [ref=e383]: 
+  - dialog [ref=e385]:
+    - generic [ref=e388]:
+      - button "Dismiss the location request" [active] [ref=e389] [cursor=pointer]
+      - generic [ref=e391]:
+        - generic [ref=e392]:
+          - generic [ref=e393]: 
+          - generic [ref=e395]: Turn on your location
+          - button "Cancel" [ref=e398] [cursor=pointer]:
+            - generic [ref=e399]: 
+        - generic [ref=e401]:
+          - generic [ref=e402]: Company policy records where every action in the portal is made, so saving needs your location. It is kept with the action in All Logs and used for nothing else.
+          - generic [ref=e403]:
+            - button "Cancel" [ref=e404] [cursor=pointer]
+            - button "Turn on location" [ref=e406] [cursor=pointer]

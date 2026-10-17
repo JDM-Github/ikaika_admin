@@ -24,6 +24,10 @@ From `C:\IKAIKA\ikaika_admin` in PowerShell:
 
 Each command asks for the SSH key passphrase twice, once for the upload and once for the server step. To type it once per session, see [Optional: passphrase once](#optional-passphrase-once).
 
+**Or use the window:** double-click `devtools\Ikaika Console.bat` (repo root). It runs these and the `migrations/` actions one at a time with live output and exit codes — including "Reset server + load local (clean)", which is `copy-databases.ps1 -Wipe`, and "Deploy all + DB reset", which is `deploy-all.ps1 -ResetDatabases`.
+
+A **Production** section (type `PROD` to confirm) adds "Load Airtable export -> prod DBs" (`import-airtable-to-prod.ps1 -Yes`) and "Deploy all prod" (`deploy-all-prod.ps1 -Force`). Production is served at **portal.ikaikabim.com/v2** (the API at `.../central-api`). Note the DB action loads the **Airtable export** in `migrations/outputs/` and **drops + recreates** the production databases — it does not push your local databases (that is Test Server only).
+
 **Deploy order:** admin first, then the portal (`ikaika-portal\deployment\deploy.ps1`), because the portal calls the admin. `deploy-all.ps1` does exactly that, after sending the settings (`-SkipSettings` leaves them out, `-SkipBuild` reuses the last builds). It expects the portal repo next to this one (`C:\IKAIKA\ikaika-portal`); `-PortalRepo` points it elsewhere.
 
 **Reset (`-ResetDatabases`)**: for when the Test Server's schema has drifted from what works locally -- a table, column or permission rule that only ever existed as hand-run SQL. It asks you to type RESET, then runs `copy-databases.ps1 -Wipe`: each server database is backed up to `backups/databases-import-<stamp>/` (the newest two kept), every table and view is dropped, and your local dump is loaded, migrations table included, so the deploy's `migrate` then only runs what is newer than your local database. Test Server only: these scripts never reach production.

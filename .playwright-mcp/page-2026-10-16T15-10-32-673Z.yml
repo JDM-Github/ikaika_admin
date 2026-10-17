@@ -1,0 +1,352 @@
+- generic [ref=f7e13]:
+  - generic [ref=f7e14]:
+    - generic [ref=f7e16]:
+      - button "Collapse navigation" [ref=f7e18] [cursor=pointer]:
+        - generic [ref=f7e19]: 
+      - generic [ref=f7e20]: IKAIKA OPC
+    - generic [ref=f7e27]:
+      - generic [ref=f7e28]:
+        - button "Projects" [ref=f7e29] [cursor=pointer]:
+          - generic [ref=f7e30]: 
+          - generic [ref=f7e33]:
+            - generic [ref=f7e34]: Projects
+            - generic [ref=f7e35]: 
+        - generic [ref=f7e38]:
+          - button "View Projects" [ref=f7e41] [cursor=pointer]:
+            - generic [ref=f7e42]: 
+          - button "Track Projects" [ref=f7e48] [cursor=pointer]:
+            - generic [ref=f7e49]: 
+          - button "Created Projects" [ref=f7e55] [cursor=pointer]:
+            - generic [ref=f7e56]: 
+      - button "User" [ref=f7e62] [cursor=pointer]:
+        - generic [ref=f7e63]: 
+        - generic [ref=f7e66]:
+          - generic [ref=f7e67]: User
+          - generic [ref=f7e68]: 
+      - button "Event Calendar" [ref=f7e70] [cursor=pointer]:
+        - generic [ref=f7e71]: 
+      - button "Access" [ref=f7e76] [cursor=pointer]:
+        - generic [ref=f7e77]: 
+      - button "Email" [ref=f7e82] [cursor=pointer]:
+        - generic [ref=f7e83]: 
+      - generic [ref=f7e88]: Admin
+      - button "Manage" [ref=f7e91] [cursor=pointer]:
+        - generic [ref=f7e92]: 
+        - generic [ref=f7e95]:
+          - generic [ref=f7e96]: Manage
+          - generic [ref=f7e97]: 
+      - button "Finance" [ref=f7e100] [cursor=pointer]:
+        - generic [ref=f7e101]: 
+        - generic [ref=f7e104]:
+          - generic [ref=f7e105]: Finance
+          - generic [ref=f7e106]: 
+      - generic [ref=f7e108]:
+        - button "Administration" [ref=f7e109] [cursor=pointer]:
+          - generic [ref=f7e110]: 
+          - generic [ref=f7e113]:
+            - generic [ref=f7e114]: Administration
+            - generic [ref=f7e115]: 
+        - generic [ref=f7e341]:
+          - button "All Logs" [ref=f7e344] [cursor=pointer]:
+            - generic [ref=f7e345]: 
+          - button "Missing Reports" [active] [ref=f7e351] [cursor=pointer]:
+            - generic [ref=f7e352]: 
+          - button "All Emails" [ref=f7e358] [cursor=pointer]:
+            - generic [ref=f7e359]: 
+    - button "Account menu" [ref=f7e119] [cursor=pointer]:
+      - generic "Don De Guzman" [ref=f7e121]:
+        - img "Don De Guzman" [ref=f7e123]
+      - generic [ref=f7e125]:
+        - generic [ref=f7e126]:
+          - generic [ref=f7e127]: Don De Guzman
+          - generic [ref=f7e128]: Online
+        - generic [ref=f7e131]: 
+  - generic [ref=f7e132]:
+    - generic [ref=f7e133]:
+      - generic [ref=f7e136]:
+        - generic [ref=f7e137]: IKAIKA Portal
+        - generic [ref=f7e142]:
+          - generic [ref=f7e144]:
+            - generic [ref=f7e145]: Manila, Philippines
+            - generic [ref=f7e146]:
+              - generic [ref=f7e147]: 11:10 PM
+              - generic [ref=f7e148]:
+                - generic [ref=f7e149]: 
+                - generic [ref=f7e150]: 84°F | 29°C
+            - generic [ref=f7e151]: Friday, 10/16/2026 · Overcast · 94°F / 80°F | 35°C / 27°C
+          - generic [ref=f7e153]:
+            - generic [ref=f7e154]: San Jose, CA
+            - generic [ref=f7e155]:
+              - generic [ref=f7e156]: 8:10 AM
+              - generic [ref=f7e157]:
+                - generic [ref=f7e158]: 
+                - generic [ref=f7e159]: 53°F | 12°C
+            - generic [ref=f7e160]: 15h behind · Friday, 10/16/2026 · Clear · 93°F / 51°F | 34°C / 11°C
+        - generic [ref=f7e161]:
+          - button "Notifications" [ref=f7e164] [cursor=pointer]:
+            - generic [ref=f7e165]: 
+          - button "Turn off background effect" [ref=f7e166] [cursor=pointer]:
+            - generic [ref=f7e167]: 
+          - button "Toggle theme" [ref=f7e168] [cursor=pointer]:
+            - generic [ref=f7e169]: 
+          - link "Open your profile" [ref=f7e170] [cursor=pointer]:
+            - generic [ref=f7e171]:
+              - generic "Don De Guzman" [ref=f7e173]:
+                - img "Don De Guzman" [ref=f7e175]
+              - generic [ref=f7e176]:
+                - generic [ref=f7e177]: Don De Guzman
+                - generic [ref=f7e178]: 220101-0001
+      - generic [ref=f7e179]:
+        - link "PORTAL" [ref=f7e180] [cursor=pointer]
+        - generic [ref=f7e364]: /
+        - link "Administration" [ref=f7e365] [cursor=pointer]
+        - generic [ref=f7e367]: /
+        - generic [ref=f7e368]: Missing Reports
+    - generic [ref=f7e372]:
+      - generic [ref=f7e373]:
+        - generic [ref=f7e374]:
+          - generic [ref=f7e375]: Missing Reports
+          - generic [ref=f7e376]: Who has not filed a report for the day you are looking at
+        - generic [ref=f7e380]:
+          - button "Previous day" [ref=f7e381] [cursor=pointer]:
+            - generic [ref=f7e382]: 
+          - button "Report date" [ref=f7e385] [cursor=pointer]:
+            - generic [ref=f7e386]: 
+            - generic [ref=f7e387]: Friday, October 16, 2026
+            - generic [ref=f7e388]: 
+          - button "Next day" [ref=f7e389] [cursor=pointer]:
+            - generic [ref=f7e390]: 
+          - button " Email everyone listed" [ref=f7e391] [cursor=pointer]:
+            - generic [ref=f7e392]: 
+            - generic [ref=f7e393]: Email everyone listed
+      - generic [ref=f7e395]:
+        - generic [ref=f7e398]:
+          - generic [ref=f7e399]: Missing
+          - generic [ref=f7e402]:
+            - generic "17" [ref=f7e403]
+            - generic [ref=f7e404]: 
+          - generic [ref=f7e406]: have not reported
+        - generic [ref=f7e409]:
+          - generic [ref=f7e410]: Have filed
+          - generic [ref=f7e413]:
+            - generic "0" [ref=f7e414]
+            - generic [ref=f7e415]: 
+          - generic [ref=f7e417]: have filed
+        - generic [ref=f7e420]:
+          - generic [ref=f7e421]: On roster
+          - generic [ref=f7e424]:
+            - generic "17" [ref=f7e425]: "15"
+            - generic [ref=f7e426]: 
+          - generic [ref=f7e428]: on the member list
+        - generic [ref=f7e431]:
+          - generic [ref=f7e432]: Never reported
+          - generic [ref=f7e435]:
+            - generic "0" [ref=f7e436]
+            - generic [ref=f7e437]: 
+          - generic [ref=f7e439]: have never filed at all
+      - generic [ref=f7e441]:
+        - generic [ref=f7e443]:
+          - generic [ref=f7e444]:
+            - generic [ref=f7e445]: 
+            - textbox "Search these members" [ref=f7e446]
+          - button "Export this table" [ref=f7e448] [cursor=pointer]:
+            - generic [ref=f7e449]: 
+            - generic [ref=f7e450]: Export as
+            - generic [ref=f7e451]: 
+        - generic [ref=f7e454]:
+          - generic [ref=f7e455]:
+            - button "Sort by Name" [ref=f7e456] [cursor=pointer]:
+              - generic [ref=f7e457]:
+                - generic [ref=f7e458]: Name
+                - generic [ref=f7e459]: 
+            - button "Sort by Email" [ref=f7e460] [cursor=pointer]:
+              - generic [ref=f7e461]:
+                - generic [ref=f7e462]: Email
+                - generic [ref=f7e463]: 
+            - button "Sort by Role" [ref=f7e464] [cursor=pointer]:
+              - generic [ref=f7e465]:
+                - generic [ref=f7e466]: Role
+                - generic [ref=f7e467]: 
+            - button "Sort by Last Reported" [ref=f7e468] [cursor=pointer]:
+              - generic [ref=f7e469]:
+                - generic [ref=f7e470]: Last Reported
+                - generic [ref=f7e471]: 
+            - button "Sort by Days Since" [ref=f7e472] [cursor=pointer]:
+              - generic [ref=f7e473]:
+                - generic [ref=f7e474]: Days Since
+                - generic [ref=f7e475]: 
+            - generic [ref=f7e476]: Notify
+          - generic [ref=f7e480]:
+            - generic [ref=f7e481]: Steven Gaurano
+            - generic [ref=f7e483]: sgaurano@ikaikabim.com
+            - generic [ref=f7e485]: Administrator
+            - generic [ref=f7e487]: 7/21/2026
+            - generic [ref=f7e489]: "87"
+            - generic [ref=f7e493]:
+              - button "Email" [ref=f7e494] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e498]:
+            - generic [ref=f7e499]: Nathaniel Tanglao
+            - generic [ref=f7e501]: ntanglao@ikaikabim.com
+            - generic [ref=f7e503]: Administrator
+            - generic [ref=f7e505]: 7/21/2026
+            - generic [ref=f7e507]: "87"
+            - generic [ref=f7e511]:
+              - button "Email" [ref=f7e512] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e516]:
+            - generic [ref=f7e517]: Kirf Andrew Pineda
+            - generic [ref=f7e519]: kapineda@ikaikabim.com
+            - generic [ref=f7e521]: Member
+            - generic [ref=f7e523]: 8/13/2026
+            - generic [ref=f7e525]: "64"
+            - generic [ref=f7e529]:
+              - button "Email" [ref=f7e530] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e534]:
+            - generic [ref=f7e535]: Michael Kevin De Mesa
+            - generic [ref=f7e537]: mkdemesa@ikaikabim.com
+            - generic [ref=f7e539]: Member
+            - generic [ref=f7e541]: 8/14/2026
+            - generic [ref=f7e543]: "63"
+            - generic [ref=f7e547]:
+              - button "Email" [ref=f7e548] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e552]:
+            - generic [ref=f7e553]: Fin Donasco
+            - generic [ref=f7e555]: fdonasco@ikaikabim.com
+            - generic [ref=f7e557]: Member
+            - generic [ref=f7e559]: 8/14/2026
+            - generic [ref=f7e561]: "63"
+            - generic [ref=f7e565]:
+              - button "Email" [ref=f7e566] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e570]:
+            - generic [ref=f7e571]: Audie Gantuangko
+            - generic [ref=f7e573]: agantuangko@ikaikabim.com
+            - generic [ref=f7e575]: Member
+            - generic [ref=f7e577]: 8/14/2026
+            - generic [ref=f7e579]: "63"
+            - generic [ref=f7e583]:
+              - button "Email" [ref=f7e584] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e588]:
+            - generic [ref=f7e589]: Jamie Pingol
+            - generic [ref=f7e591]: jpingol@ikaikabim.com
+            - generic [ref=f7e593]: Member
+            - generic [ref=f7e595]: 8/14/2026
+            - generic [ref=f7e597]: "63"
+            - generic [ref=f7e601]:
+              - button "Email" [ref=f7e602] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e606]:
+            - generic [ref=f7e607]: Joseph Cawit
+            - generic [ref=f7e609]: jcawit@ikaikabim.com
+            - generic [ref=f7e611]: Member
+            - generic [ref=f7e613]: 8/17/2026
+            - generic [ref=f7e615]: "60"
+            - generic [ref=f7e619]:
+              - button "Email" [ref=f7e620] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e624]:
+            - generic [ref=f7e625]: Carlo Magtoto
+            - generic [ref=f7e627]: cmagtoto@ikaikabim.com
+            - generic [ref=f7e629]: Member
+            - generic [ref=f7e631]: 8/17/2026
+            - generic [ref=f7e633]: "60"
+            - generic [ref=f7e637]:
+              - button "Email" [ref=f7e638] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e642]:
+            - generic [ref=f7e643]: Jolas Mendez
+            - generic [ref=f7e645]: jmendez@ikaikabim.com
+            - generic [ref=f7e647]: Member
+            - generic [ref=f7e649]: 8/17/2026
+            - generic [ref=f7e651]: "60"
+            - generic [ref=f7e655]:
+              - button "Email" [ref=f7e656] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e660]:
+            - generic [ref=f7e661]: John Dave Pega
+            - generic [ref=f7e663]: "-"
+            - generic [ref=f7e665]: Administrator
+            - generic [ref=f7e667]: 8/17/2026
+            - generic [ref=f7e669]: "60"
+            - generic [ref=f7e673]:
+              - button "Email" [ref=f7e674] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e678]:
+            - generic [ref=f7e679]: Ivan Sabado
+            - generic [ref=f7e681]: isabado@ikaikabim.com
+            - generic [ref=f7e683]: Member
+            - generic [ref=f7e685]: 8/17/2026
+            - generic [ref=f7e687]: "60"
+            - generic [ref=f7e691]:
+              - button "Email" [ref=f7e692] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e696]:
+            - generic [ref=f7e697]: Lejan Alejandro
+            - generic [ref=f7e699]: lalejandro@ikaikabim.com
+            - generic [ref=f7e701]: Member
+            - generic [ref=f7e703]: 8/18/2026
+            - generic [ref=f7e705]: "59"
+            - generic [ref=f7e709]:
+              - button "Email" [ref=f7e710] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e714]:
+            - generic [ref=f7e715]: Raphael Dayao
+            - generic [ref=f7e717]: rdayao@ikaikabim.com
+            - generic [ref=f7e719]: Member
+            - generic [ref=f7e721]: 8/18/2026
+            - generic [ref=f7e723]: "59"
+            - generic [ref=f7e727]:
+              - button "Email" [ref=f7e728] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e732]:
+            - generic [ref=f7e733]: Elkin Danis Decena
+            - generic [ref=f7e735]: edecena@ikaikabim.com
+            - generic [ref=f7e737]: Administrator
+            - generic [ref=f7e739]: 8/18/2026
+            - generic [ref=f7e741]: "59"
+            - generic [ref=f7e745]:
+              - button "Email" [ref=f7e746] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e750]:
+            - generic [ref=f7e751]: Ernesto Gaddi
+            - generic [ref=f7e753]: egaddi@ikaikabim.com
+            - generic [ref=f7e755]: Member
+            - generic [ref=f7e757]: 8/18/2026
+            - generic [ref=f7e759]: "59"
+            - generic [ref=f7e763]:
+              - button "Email" [ref=f7e764] [cursor=pointer]
+              - button "Mobile" [disabled]
+          - generic [ref=f7e768]:
+            - generic [ref=f7e769]: Jhon Noriel Malabanan
+            - generic [ref=f7e771]: jnmalabanan@ikaikabim.com
+            - generic [ref=f7e773]: Administrator
+            - generic [ref=f7e775]: 8/18/2026
+            - generic [ref=f7e777]: "59"
+            - generic [ref=f7e781]:
+              - button "Email" [ref=f7e782] [cursor=pointer]
+              - button "Mobile" [disabled]
+        - generic [ref=f7e786]:
+          - generic [ref=f7e787]:
+            - generic [ref=f7e788]: Rows
+            - generic [ref=f7e789]:
+              - 'button "Rows: 10" [ref=f7e791] [cursor=pointer]':
+                - generic [ref=f7e792]: "10"
+              - 'button "Rows: 25" [ref=f7e793] [cursor=pointer]':
+                - generic [ref=f7e794]: "25"
+              - 'button "Rows: 50" [ref=f7e795] [cursor=pointer]':
+                - generic [ref=f7e796]: "50"
+              - 'button "Rows: 100" [ref=f7e797] [cursor=pointer]':
+                - generic [ref=f7e798]: "100"
+            - generic [ref=f7e799]: 1-17 of 17
+          - generic [ref=f7e800]:
+            - generic [ref=f7e801]: Page 1 of 1
+            - button "Previous page" [disabled]:
+              - generic [ref=f7e802]: 
+            - button "Next page" [disabled]:
+              - generic [ref=f7e803]: 
+  - button "Report a bug" [ref=f7e338] [cursor=pointer]:
+    - generic [ref=f7e339]: 

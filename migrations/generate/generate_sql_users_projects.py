@@ -382,7 +382,7 @@ EMPLOYEES_COLUMNS = [
     ("role_level", select("Role Level")),
 ]
 EMPLOYEES_ATTACHMENTS = ["Photo", "QR Code", "Tax Identification", "PhilHealth ID", "SS ID",
-                          "HDMF ID", "Bank Certificate", "Employment Agreement"]
+                          "HDMF ID", "Bank Certificate", "Employment Agreement", "National ID"]
 
 NEW_EMPLOYEE_DATA_COLUMNS = [
     ("id_no", text("ID No.")),

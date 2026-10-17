@@ -23,9 +23,11 @@ What it checks, and what a failure means:
   3. Field landing     every Airtable field is either stored as a column, an
                        attachment, or a link (junction), or listed as a
                        deliberate omission. Computed fields (formula, rollup,
-                       lookup...) are expected to be omitted. A plain field
-                       that is not stored anywhere is reported, because that
-                       is exactly what a rename looks like from this side.
+                       lookup...) are expected to be omitted. Fields confirmed
+                       in that base's "accepted" list are counted, not warned.
+                       Any OTHER plain field that is not stored anywhere is
+                       reported, because that is exactly what a rename (or a
+                       brand-new field) looks like from this side.
   4. Link integrity    for every configured link field: every linked record ID
                        must exist in the target table's export. A dangling ID
                        is silently skipped by gen_junction().
@@ -168,6 +170,25 @@ BASES = {
             ("user_reports_scope_progress_t4_tasks", "User Reports - Project Scope Progress", [("T4 - Tasks", None)], {}),
             ("bim_form_elements_included", "BIM Form", [("Elements Included in Model", None)], {"mode": "value"}),
         ],
+        # Fields confirmed intentionally NOT stored (dead/empty, Airtable lookups, or
+        # text mirrors of computed data). Listed so the verifier stops asking about
+        # them and only reports a NEW or renamed field. Add one when you confirm
+        # another omission holds no real data; remove it if it turns out to.
+        "accepted": {
+            "Clients": ["Tasks & Sprints", "User Reports", "User Reports 2", "User Reports 3"],
+            "Employees": ["Job Offer", "Reports", "Request", "Timesheet", "User Reports",
+                          "User Reports 2", "User Reports 3", "User Reports 4", "Zip Code"],
+            "New Employee Data": ["Reports", "Request", "Timesheet"],
+            "Project Scope Source - T1 Processes": ["Attachment Summary", "From field: Parent",
+                "From field: Parent copy", "From field: Table 1", "Name (from Table 2)",
+                "SOP Name (from Process WBS)"],
+            "Project Scope Source - T2 Procedures": ["Attachment Summary", "Name (from Activity WBS)"],
+            "Project Scope Source - T3 Activities": ["User Reports"],
+            "Project Scope Source - T4 Tasks": ["Procedure WBS (from Activity WBS)",
+                "Process (from Activity WBS)", "Process WBS (from Activity WBS)", "User Reports"],
+            "Project/s": ["Budgeted Hrs", "Tasks & Sprints", "Timesheet", "User Reports 2"],
+            "User Reports": ["Project/s", "Project/s 2", "Request"],
+        },
     },
     "transaction-tracker": {
         "generator": "generate_sql_transaction_tracker.py",
@@ -225,6 +246,13 @@ BASES = {
                 ("Earn Code ND", "nd"), ("Earn Code ND + OT", "nd_ot"),
             ], {}),
         ],
+        "accepted": {
+            "Activity Codes": ["Request"],
+            "Earn Codes": ["Request"],
+            "Grid view - Active Status": ["Name", "Zip Code"],
+            "Project Estimates": ["Attachment Summary"],
+            "Projects": ["Date (from Label)"],
+        },
     },
 }
 
@@ -493,6 +521,15 @@ def expand_attachment_fields(module, items):
     return fields
 
 
+def accepted_pairs(cfg):
+    """(airtable table, field name) pairs confirmed intentionally not stored."""
+    pairs = set()
+    for table, fields in cfg.get("accepted", {}).items():
+        for name in fields:
+            pairs.add((table, name))
+    return pairs
+
+
 def cells_match(expected, actual):
     if expected is None or actual is None:
         return expected is None and actual is None
@@ -513,6 +550,8 @@ class Report:
         self.failures = 0
         self.warnings = 0
         self.known = 0
+        self.accepted = 0
+        self.unexplained = 0
 
     def fail(self, message):
         self.failures += 1
@@ -575,6 +614,9 @@ def check_tables(cfg, export, parsed, module, report):
             report.pass_line(f"{sql_table}: {len(records)} rows, {len(pairs)} columns, all values match")
 
     print("-- tables: Airtable fields that are not stored as a column ----------------")
+    accepted = accepted_pairs(cfg)
+    accepted_total = 0
+    unexplained_total = 0
     for airtable_table, (sql_table, cols_attr) in sorted(cfg["tables"].items()):
         records = export["records"].get(airtable_table)
         table_schema = export["schema"].get(airtable_table)
@@ -587,23 +629,34 @@ def check_tables(cfg, export, parsed, module, report):
             if att_table == airtable_table:
                 att_fields = {name for name, _ in expand_attachment_fields(module, att_items)}
         unmapped = []
+        accepted_here = 0
         links = []
         for field in table_schema:
-            if field["name"] in mapped or field["name"] in att_fields:
+            name = field["name"]
+            if name in mapped or name in att_fields:
                 continue
             if field["type"] in COMPUTED_TYPES:
                 continue
             if field["type"] == "multipleRecordLinks":
-                if (airtable_table, field["name"]) not in configured_links:
-                    links.append(field["name"])
+                if (airtable_table, name) not in configured_links:
+                    links.append(name)
                 continue
-            unmapped.append(f"{field['name']} ({field['type']})")
+            if (airtable_table, name) in accepted:
+                accepted_here += 1
+                continue
+            unmapped.append(f"{name} ({field['type']})")
+        accepted_total += accepted_here
+        unexplained_total += len(unmapped)
         if unmapped:
             report.warn(f"{airtable_table}: {len(unmapped)} field(s) not stored as a column -- "
-                        f"confirm each is intentional: {', '.join(unmapped[:6])}"
+                        f"confirm each is intentional (add to accepted_omissions): {', '.join(unmapped[:6])}"
                         + (" ..." if len(unmapped) > 6 else ""))
+        elif accepted_here:
+            report.pass_line(f"{airtable_table}: {accepted_here} field(s) accepted as intentionally not stored")
         if links:
             print(f"  info  {airtable_table}: link fields without a junction: {', '.join(links)}")
+    report.accepted = accepted_total
+    report.unexplained = unexplained_total
 
 
 def check_junctions(cfg, export, parsed, report):
@@ -739,6 +792,106 @@ def check_schema(cfg, parsed, report):
 
 
 # ============================================================================
+# Coverage report -- what was migrated and, explicitly, what was not.
+#
+# This is the artifact to share with someone who asks "is all the data there?".
+# The checks above prove data.sql == export for everything that IS mapped; this
+# lists everything that is NOT, per table, so an omission is visible rather than
+# buried in a warning line. Run against a freshly fetched export to also prove
+# Airtable == export as of now.
+# ============================================================================
+
+def attachment_counts(parsed, sql_table):
+    """(rows, null_file_urls) the attachments INSERTs carry for one sql table."""
+    rows = nulls = 0
+    for shape in value_shapes(parsed, "attachments"):
+        index = {norm_col(c): i for i, c in enumerate(shape["cols"])}
+        table_i, url_i = index.get("table_name"), index.get("file_url")
+        if table_i is None:
+            continue
+        for row in shape["rows"]:
+            if row[table_i] != sql_table:
+                continue
+            rows += 1
+            if url_i is not None and row[url_i] is None:
+                nulls += 1
+    return rows, nulls
+
+
+def build_report(base, export_dir, data_sql, cfg, export, parsed, module, verdict):
+    configured_links = {(source, field_name)
+                        for _sql, source, fields, _opt in cfg["junctions"]
+                        for field_name, _extra in fields}
+    accepted = accepted_pairs(cfg)
+    tables = []
+    totals = {"tables": 0, "airtable_records": 0, "sql_rows": 0, "columns": 0,
+              "unmapped_fields": 0, "accepted_fields": 0, "links_without_junction": 0,
+              "attachments": 0}
+    for airtable_table, (sql_table, cols_attr) in sorted(cfg["tables"].items()):
+        records = export["records"].get(airtable_table) or []
+        pairs = extract_pairs(getattr(module, cols_attr))
+        sql_rows = sum(len(s["rows"]) for s in value_shapes(parsed, sql_table))
+        schema = export["schema"].get(airtable_table) or []
+        mapped = {field for _, field, _ in pairs}
+        att_fields = set()
+        if sql_table in cfg.get("attachments", {}):
+            att_table, att_items = cfg["attachments"][sql_table]
+            if att_table == airtable_table:
+                att_fields = {name for name, _ in expand_attachment_fields(module, att_items)}
+        unmapped, accepted_fields, links = [], [], []
+        for field in schema:
+            name = field["name"]
+            if name in mapped or name in att_fields or field["type"] in COMPUTED_TYPES:
+                continue
+            if field["type"] == "multipleRecordLinks":
+                if (airtable_table, name) not in configured_links:
+                    links.append({"field": name,
+                                  "target": export["link_targets"].get((airtable_table, name))})
+                continue
+            if (airtable_table, name) in accepted:
+                accepted_fields.append({"field": name, "type": field["type"]})
+                continue
+            unmapped.append({"field": name, "type": field["type"]})
+        att_rows, _nulls = attachment_counts(parsed, sql_table)
+        tables.append({
+            "airtable_table": airtable_table, "sql_table": sql_table,
+            "airtable_records": len(records), "sql_rows": sql_rows,
+            "columns_migrated": len(pairs), "attachments_migrated": att_rows,
+            "unmapped_fields": unmapped, "accepted_fields": accepted_fields,
+            "links_without_junction": links,
+        })
+        totals["tables"] += 1
+        totals["airtable_records"] += len(records)
+        totals["sql_rows"] += sql_rows
+        totals["columns"] += len(pairs)
+        totals["unmapped_fields"] += len(unmapped)
+        totals["accepted_fields"] += len(accepted_fields)
+        totals["links_without_junction"] += len(links)
+        totals["attachments"] += att_rows
+    return {"base": base, "export_dir": str(export_dir), "data_sql": str(data_sql),
+            "verdict": verdict, "totals": totals, "tables": tables}
+
+
+def print_coverage(rep, report):
+    t = rep["totals"]
+    dropped = t["airtable_records"] - t["sql_rows"]
+    print("-- coverage: what was migrated, what was not --------------------------------")
+    report.pass_line(f"{t['airtable_records']} Airtable records / {t['tables']} tables "
+                     f"-> {t['sql_rows']} SQL rows "
+                     + ("(every record accounted for)" if dropped == 0 else f"({dropped} DROPPED)"))
+    report.pass_line(f"{t['columns']} columns migrated, {t['attachments']} attachments migrated")
+    if t["accepted_fields"]:
+        report.pass_line(f"{t['accepted_fields']} field(s) accepted as intentionally not stored "
+                         "(listed in the report)")
+    if t["unmapped_fields"]:
+        print(f"  warn  {t['unmapped_fields']} field(s) not migrated and NOT accepted "
+              "-- confirm each and add it to accepted_omissions (listed in the report)")
+    if t["links_without_junction"]:
+        print(f"  info  {t['links_without_junction']} link field(s) without a junction "
+              "-- listed in the report; most are the mirror side of an existing junction")
+
+
+# ============================================================================
 # Export loading
 # ============================================================================
 
@@ -794,6 +947,9 @@ def main():
     parser.add_argument("--data-sql", required=True, help="data.sql produced by generate_sql_*.py")
     parser.add_argument("--base", choices=sorted(BASES), default=None,
                         help="Which base the export belongs to (default: auto-detect)")
+    parser.add_argument("--report", default=None,
+                        help="Write a JSON coverage report (per-table counts + every field/link "
+                             "NOT migrated) to this path -- the shareable artifact")
     args = parser.parse_args()
 
     export_dir = Path(args.export_dir).resolve()
@@ -819,9 +975,18 @@ def main():
     check_attachments(cfg, export, parsed, module, export_dir, report)
     check_schema(cfg, parsed, report)
 
-    print()
     verdict = "PASS" if report.failures == 0 else "FAIL"
+    coverage = build_report(base, export_dir, data_sql_path, cfg, export, parsed, module, verdict)
+    print()
+    print_coverage(coverage, report)
+    if args.report:
+        report_path = Path(args.report)
+        report_path.write_text(json.dumps(coverage, indent=2), encoding="utf-8")
+        print(f"  file  coverage report written: {report_path.resolve()}")
+
+    print()
     print(f"RESULT: {verdict} -- {report.failures} failure(s), {report.warnings} warning(s)"
+          + (f", {report.accepted} accepted omission(s)" if report.accepted else "")
           + (f", {report.known} known issue(s)" if report.known else ""))
     return 1 if report.failures else 0
 

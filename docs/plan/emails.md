@@ -16,7 +16,7 @@ Last checked against the code: 2026-10-13.
 
 | Piece | What it is |
 | --- | --- |
-| Address | Always `noreply@ikaikabim.com`. |
+| Address | `noreply@ikaikabim.com`, except when **Send Email's "Me"** leaves from the person's own address: the composer's address toggle (only under Me, and only when their address is on `ikaikabim.com`) chooses it, and Reply-To is the same address. Off the domain (a personal gmail) the toggle is not offered and the mail leaves from noreply, so the route is never used to send as another domain. Stored per row as `email_messages.from_address`; `PortalEmailMail::envelope()` uses it, and the WordPress bridge keeps a given `from` only when it is on `ikaikabim.com`. |
 | Sender name | **IKAIKA Portal**. Every system email sets it; Send Email's "Portal" sender uses `MAIL_FROM_NAME`, which `deploy-admin.sh` writes as `"IKAIKA Portal"` on every deploy (it used to be "IKAIKA Platform" on the Test Server). |
 | Transport | `MAIL_MAILER=wprelay`: each email is a POST to the WordPress plugin on ikaikabim.com, which sends it with `wp_mail`. A few seconds per email. See `docs/deploy/wordpress/`. |
 | Local | The same relay, or `MAIL_MAILER=log` (emails land in `storage/logs/laravel.log`). |
@@ -139,7 +139,7 @@ one line break stays a line break.
 | 5 | Registration code | Security | The candidate | Letter | Yes | IKAIKA Portal | code box, button | After response |
 | 6 | Notification emails (11 kinds) | Request / Project / Event | Managers or the person concerned | Letter | Yes | IKAIKA Portal | button to the page | Queue |
 | 7 | Blocked access alert | Warning | Holders of Access alerts, one letter each | Letter | Yes | IKAIKA Portal | details panel | Queue |
-| 8 | Send Email (composer) | The admin's pick | Whoever the admin picks | Admin's choice | Admin's choice | IKAIKA Portal, or "{admin} via IKAIKA Portal" + Reply-To the admin | any; images, attachments | Queue, one copy per recipient |
+| 8 | Send Email (composer) | The member's or admin's pick | Whoever they pick | Their choice | Their choice | IKAIKA Portal, IKAIKA BIM, or "Me" (the person's name; From and Reply-To both the person when the address toggle is on) | any; images, attachments | Queue, one copy per recipient |
 | 9 | Mail test | Notice | The address given | Letter | Yes | IKAIKA Portal | - | Immediately |
 
 **Drafts that open Send Email (#8) pre-filled** -- nothing is sent until the admin presses Send, and
@@ -346,10 +346,10 @@ changed, project rejected, recycle bin restore, "email sent".
 
 | | |
 | --- | --- |
-| When | An admin presses **Send Email** on the Email page |
+| When | A member or an admin presses **Send Email** on the Email page. The page sits just before Bug Reports and is every member's now (2026-10-15): a member opens it preset to **Me**, their own address, and a signature footer. |
 | To | Members, departments, roles, everyone, or typed addresses; Cc and Bcc |
-| Design | The admin picks: Formatted, Formatted + **Letter design** switch, or HTML; any saved footer or none; images and attachments |
-| Sender | **Portal** (IKAIKA Portal), **IKAIKA BIM** (the company; no Reply-To; its own letterhead and footer), or **Me** ("{admin} via IKAIKA Portal" with Reply-To the admin; offered only with a valid address). Request field `sender: company`, or `asSender` for Me |
+| Design | The admin picks: Formatted, Formatted + **Letter design** switch, or HTML; a footer or none; images and attachments |
+| Sender | **Portal** (IKAIKA Portal), **IKAIKA BIM** (the company; no Reply-To; its own letterhead and footer), or **Me** (the person's own name; offered only with a valid address; Reply-To them, and the From address too when the toggle is on and their address is on ikaikabim.com). Under Me the footer picker offers only signature footers (built-in "Company signature" first). A member gets Me alone, with their own address fixed. Request fields `sender: company`, or `asSender` + `ownAddress` for Me |
 | Sent | Through the mail queue: the Send button answers at once and the row reads **Sending**. Each member gets their own copy (a `DeliverPortalEmail` job), Cc/Bcc share one more, and typed addresses go as one email. Each copy counts itself onto the row as it lands; the row settles on Sent, Partially sent or Failed once every recipient is counted. The composer's toast says "Email queued for N recipients"; All Emails re-reads itself every 10 s while a row it shows is Sending. If the queue cannot take the send at all, the row is marked Failed and the button shows the error |
 | Kept | Every send is stored and listed in All Emails |
 | Code | `PortalEmailMessages::deliver / deliverCopy / settleCopy`, `App\Jobs\DeliverPortalEmail` (server); `SendEmailScreenController`, `AllEmailsScreenController` (portal) |

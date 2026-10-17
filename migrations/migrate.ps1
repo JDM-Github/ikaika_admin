@@ -388,7 +388,8 @@ try {
 
     if ($mode.Data -and $selected.Verify -and $selected.Generator -and $freshData -and $Step -in @('all', 'generate')) {
         Write-Host '==> Verifying data.sql against the export (verify_migration.py)' -ForegroundColor Cyan
-        python verify_migration.py --export-dir $exportDir --data-sql $dataFile --base $selected.Verify
+        $coverageReport = Join-Path (Split-Path -Parent $dataFile) 'coverage_report.json'
+        python verify_migration.py --export-dir $exportDir --data-sql $dataFile --base $selected.Verify --report $coverageReport
         if ($LASTEXITCODE -ne 0) {
             Stop-WithMessage ('Verification failed (see the report above). data.sql does not prove out ' +
                 'against the export, so this run stops before printing the import commands. ' +

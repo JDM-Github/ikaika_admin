@@ -18,9 +18,11 @@ use Throwable;
  * noreply@ikaikabim.com -- the way the estimator and the cron scripts already send. It exists for as
  * long as this backend runs off that host; on it, MAIL_MAILER=sendmail does the same with no bridge.
  *
- * To, Cc and Bcc travel as the message has them, so a CC and BCC copy stays one message. The bridge's
- * own message id comes back as a "250 relayed id=..." line, which the mail report reads like any
- * server's acceptance.
+ * To, Cc and Bcc travel as the message has them, so a CC and BCC copy stays one message. From travels
+ * as the display name and the address; the bridge keeps that address only when it is one on the domain
+ * it sends for (a "send as me" mail), and otherwise sends from its own noreply. The bridge's own
+ * message id comes back as a "250 relayed id=..." line, which the mail report reads like any server's
+ * acceptance.
  *
  * A message with files goes to the bridge's v2 route instead, each file base64 in the body. The first
  * bridge only knows v1 and would send such a message without its files, so v2 is a route of its own:
@@ -54,6 +56,8 @@ final class PortalMailRelayTransport extends AbstractTransport
             'html' => self::body($email->getHtmlBody()),
             'text' => self::body($email->getTextBody()),
             'fromName' => $from?->getName() ?? '',
+            // The bridge sends from its own address unless the address is one on the domain it sends for.
+            'from' => $from?->getAddress(),
             'replyTo' => $replyTo?->getAddress(),
         ];
         if ($files !== []) {
@@ -86,7 +90,11 @@ final class PortalMailRelayTransport extends AbstractTransport
                 .(is_string($code) && $code !== '' ? ' ['.$code.']' : ''));
         }
 
-        $message->appendDebug('< 250 relayed id='.(string) $response->json('id').PHP_EOL);
+        $message->appendDebug(
+            '< 250 relayed id='.(string) $response->json('id')
+            .(($bridgeVersion = (string) $response->header('X-Ikaika-Bridge')) === '' ? '' : ' bridge=v'.$bridgeVersion)
+            .PHP_EOL,
+        );
     }
 
     public function __toString(): string

@@ -16,9 +16,11 @@ use Symfony\Component\Mime\Email;
  * own format (the toolbar's markup, or HTML sent as written). PortalEmailMarkup builds it, the same
  * builder the composer's preview shows, so the preview is the email.
  *
- * Sent as an administrator, it still leaves from the portal's own address -- only the display name
- * becomes "<Name> via IKAIKA Portal" and Reply-To points at them -- so it passes the domain's own
- * sender checks rather than looking like a spoofed personal address.
+ * Sent as an administrator, as "Me", the mail leaves from the sender's own address when it is one on
+ * the portal's own domain -- so a reply goes straight back to them and, being the same domain, it
+ * still passes the sender checks -- with the display name "<Name> via IKAIKA Portal". Any other case
+ * (the portal, the company, a developer, or an address off the domain) leaves from the portal's own
+ * address with only the display name changed, rather than looking like a spoofed personal address.
  *
  * Attached files come off the private disk under the names they were attached with. Inline images
  * (a share's QR) are embedded under their name, so the body shows them as cid:<name>. They are held
@@ -40,6 +42,8 @@ class PortalEmailMail extends Mailable
         public readonly array $inlineImages = [],
         // What it is about (notice, security, ...): in front of the subject, and a letter's pill.
         public readonly ?string $category = null,
+        // "Send as me": the sender's own address, when it is one on the domain; otherwise the domain's own.
+        public readonly ?string $fromAddress = null,
     ) {}
 
     // Called by the mailer just before it sends, after the queue has rebuilt this mail.
@@ -53,7 +57,9 @@ class PortalEmailMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            from: $this->fromName === null ? null : new Address((string) config('mail.from.address'), $this->fromName),
+            from: $this->fromName === null && $this->fromAddress === null
+                ? null
+                : new Address($this->fromAddress ?? (string) config('mail.from.address'), $this->fromName),
             replyTo: $this->replyToAddress === null ? [] : [new Address($this->replyToAddress, $this->fromName)],
             subject: PortalEmailMarkup::subject($this->category, $this->subjectLine),
         );

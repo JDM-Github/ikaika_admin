@@ -380,7 +380,8 @@ class PortalRulesTest extends TestCase
         $this->withToken($token)->getJson($base.'budget-codes')->assertOk();
     }
 
-    // Email and All Emails keep who used them before they had rules: admins, executives and developers.
+    // Email and All Emails: admins, executives and developers by preset. Every member holds the
+    // composer and sending too (2026-10-15), but never the library or the sent list.
     public function test_email_presets_match_today(): void
     {
         $keys = ['email', 'email.send', 'email.library', 'administration.emails', 'administration.emails.export'];
@@ -388,7 +389,8 @@ class PortalRulesTest extends TestCase
             $held = DB::connection('portal')->table('access_presets')->where('role', $role)->whereIn('permission_key', $keys)->pluck('permission_key')->all();
             $this->assertEqualsCanonicalizing($keys, $held, "The {$role} preset is missing an email rule.");
         }
-        $this->assertFalse(DB::connection('portal')->table('access_presets')->where('role', 'member')->whereIn('permission_key', $keys)->exists());
+        $member = DB::connection('portal')->table('access_presets')->where('role', 'member')->whereIn('permission_key', $keys)->pluck('permission_key')->all();
+        $this->assertEqualsCanonicalizing(['email', 'email.send'], $member);
         $this->assertFalse(DB::connection('portal')->table('access_permissions')->where('permission_key', 'like', 'administration.email.%')->orWhere('permission_key', 'administration.email')->exists());
         $this->assertNull(DB::connection('portal')->table('access_permissions')->where('permission_key', 'email')->value('parent_key'));
     }
@@ -433,7 +435,8 @@ class PortalRulesTest extends TestCase
 
         $member = $this->login($this->member());
         $this->withToken($member)->getJson($base.'emails')->assertForbidden();
-        $this->withToken($member)->getJson($base.'emails/audiences')->assertForbidden();
+        // A member may open the composer (and its audiences); the sent list above stays an admin's.
+        $this->withToken($member)->getJson($base.'emails/audiences')->assertOk();
     }
 
     // User follows its rules from day one without anyone losing anything: every role holds them all.

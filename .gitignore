@@ -72,6 +72,9 @@ migrations/export_*/
 migrations/*.sql
 /migrations/.token*
 /migrations/generate/__pycache__/
+# copy-to-sql.ps1 records which environment the committed sql/ snapshot came from.
+# Machine state, not a project fact - the next person's sql/ may hold the other one.
+sql/status.txt
 # Local copies of other systems' code, kept for reference while working on email.
 email-test/
 
