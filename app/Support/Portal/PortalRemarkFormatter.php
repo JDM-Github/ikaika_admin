@@ -183,31 +183,38 @@ class PortalRemarkFormatter
         if ($values === []) {
             throw new RuntimeException('The formatter answered off-template; try again.');
         }
+        $allowed = self::LOG_ORDER;
+        if (self::LOG[$context]) {
+            $allowed[] = 'Reason';
+        }
         foreach (array_keys($values) as $label) {
-            if ($label !== 'Date' && ! in_array($label, self::LOG[$context], true) && $label !== 'What'
-                && $label !== 'Changed' && $label !== 'Wins') {
+            if (! in_array($label, $allowed, true)) {
                 throw new RuntimeException('The formatter answered off-template; try again.');
             }
         }
 
-        $lines = ["Date: {$day}"];
-        foreach (self::LOG_ORDER as $label) {
-            $allowed = $label !== 'Reason' || in_array('Reason', self::LOG[$context], true);
-            if (! $allowed) {
-                continue;
-            }
-            $value = $values[$label] ?? '';
-            if ($value === '' && ! in_array($label, self::LOG_REQUIRED, true) && $label !== 'Reason') {
-                continue;
-            }
-            $lines[] = $label.': '.($value === '' ? self::BLANK : $value);
+        // Date is the form's own day, never the model's rendering of it; What and Wins always carry
+        // something, since a work log without them says nothing.
+        $lines = ["Date: {$day}", 'What: '.$this->said($values, 'What')];
+        if (($values['Changed'] ?? '') !== '') {
+            $lines[] = 'Changed: '.$values['Changed'];
+        }
+        $lines[] = 'Wins: '.$this->said($values, 'Wins');
+        if (self::LOG[$context]) {
+            $lines[] = 'Reason: '.$this->said($values, 'Reason');
         }
 
-        if (count($lines) === 1 || strlen(implode("\n", $lines)) > 500) {
-            throw new RuntimeException('The formatter lost the remark; write it yourself.');
+        if (strlen(implode("\n", $lines)) > 500) {
+            throw new RuntimeException('The tidy is longer than the box; shorten the note.');
         }
 
         return $lines;
+    }
+
+    /** A line's words, or the marker that says the person has to write it. */
+    private function said(array $values, string $label): string
+    {
+        return ($values[$label] ?? '') === '' ? self::BLANK : $values[$label];
     }
 
     /**
