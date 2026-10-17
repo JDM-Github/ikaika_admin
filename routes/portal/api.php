@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Route;
  *   routes/portal/projects.php  View Projects
  *   routes/portal/manage.php    Manage / Users
  *   routes/portal/reports.php   Reports / Submitted
+ *   routes/portal/remarks.php   The "Polish" tidy-up every remarks box shares
  *   routes/portal/requests.php  Requests / Overtime
  *   routes/portal/calendar.php        Calendar / Holidays
  *   routes/portal/access.php          Access
@@ -27,6 +28,7 @@ Route::prefix('portal')->middleware(RequirePortalLocation::class)->group(functio
     require __DIR__.'/projects.php';
     require __DIR__.'/manage.php';
     require __DIR__.'/reports.php';
+    require __DIR__.'/remarks.php';
     require __DIR__.'/requests.php';
     require __DIR__.'/calendar.php';
     require __DIR__.'/signature.php';

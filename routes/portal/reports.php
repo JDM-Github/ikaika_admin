@@ -38,11 +38,6 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::get('reports/reviews', [SubmittedController::class, 'reviews'])->middleware('portal.rule:requests.own');
     });
 
-    // The Report remarks card's Polish button, for the forms that carry Report remarks. It files
-    // nothing -- it only tidies the note in the box -- but it reaches a model, so it has a throttle of its own.
-    Route::middleware(['throttle:portal-report-remark', 'portal.rule:reports.daily|reports.late|reports.submitted.edit'])
-        ->post('reports/remarks/format', [SubmittedController::class, 'formatRemarks']);
-
     Route::middleware('throttle:portal-reports-submitted-write')->group(function (): void {
         // Filing checks Daily or Late by the kind it is sent, once the kind is read. Each is the
         // person's own work, so Developer mode past Default waits for confirmation (portal.own).

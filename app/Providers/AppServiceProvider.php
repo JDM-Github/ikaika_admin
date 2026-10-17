@@ -226,10 +226,11 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(240)->by('email-preview:'.$this->portalLimiterKey($request));
         });
 
-        // The Report remarks "Polish" button reaches a model on every press, so it gets its own
-        // modest ceiling: nobody tidies a note ten times a minute, and the model is not free.
+        // The "Polish" buttons reach a model on every press, so they get a ceiling of their own:
+        // nobody tidies a note forty times a minute, and the model is not free. Roomy enough that a
+        // review panel's batch (up to ten rows, or a per-row retry of one) cannot trip itself.
         RateLimiter::for('portal-report-remark', function (Request $request) {
-            return Limit::perMinute(10)->by('report-remark:'.$this->portalLimiterKey($request));
+            return Limit::perMinute(40)->by('report-remark:'.$this->portalLimiterKey($request));
         });
 
         RateLimiter::for('portal-administration-email-write', function (Request $request) {

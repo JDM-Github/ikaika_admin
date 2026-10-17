@@ -32,8 +32,9 @@ class RequirePortalLocation
         // The composer's email preview: a read-only dry run, carried on a POST because the draft is
         // too long for a query string. It writes nothing, so it asks for no location.
         '*/portal/administration/emails/preview',
-        // The Report remarks tidy-up: a POST that stores nothing, only returns wording. Same reason.
-        '*/portal/reports/remarks/format',
+        // The remarks tidy-up: a POST that stores nothing, only returns wording. Same reason.
+        '*/portal/remarks/format',
+        '*/portal/remarks/format-many',
     ];
 
     public function handle(Request $request, Closure $next): Response

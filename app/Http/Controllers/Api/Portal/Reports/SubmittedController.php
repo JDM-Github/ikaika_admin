@@ -4,19 +4,13 @@ namespace App\Http\Controllers\Api\Portal\Reports;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
-use App\Support\Portal\PortalRemarkFormatter;
 use App\Support\Portal\PortalSubmittedReports;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
-use RuntimeException;
 
 class SubmittedController extends Controller
 {
-    public function __construct(
-        private readonly PortalSubmittedReports $reports,
-        private readonly PortalRemarkFormatter $formatter,
-    ) {}
+    public function __construct(private readonly PortalSubmittedReports $reports) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -90,34 +84,5 @@ class SubmittedController extends Controller
         $this->reports->destroy($actor, $id, $request);
 
         return response()->json(null, 204);
-    }
-
-    // The Report remarks card's Polish button: the person's own note, tidied into the house template.
-    // Nothing is filed here -- the answer only fills the box the person can still edit.
-    public function formatRemarks(Request $request): JsonResponse
-    {
-        $actor = $request->attributes->get('portalEmployee');
-        if (! $actor instanceof Employee) {
-            abort(401, 'Authentication is required.');
-        }
-
-        $validated = $request->validate([
-            'remark' => ['required', 'string', 'max:500'],
-            'day' => ['required', 'date_format:Y-m-d'],
-        ]);
-
-        $day = Carbon::createFromFormat('Y-m-d', $validated['day'])->format('F j, Y');
-
-        try {
-            $remark = $this->formatter->format($validated['remark'], $day);
-        } catch (RuntimeException $error) {
-            abort(503, $error->getMessage());
-        }
-
-        return response()->json([
-            'section' => 'reports',
-            'resource' => 'remarks',
-            'data' => ['remark' => $remark],
-        ]);
     }
 }

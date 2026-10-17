@@ -36,6 +36,8 @@ class PortalRemarkFormatter
     private const PROSE = [
         'request.leave' => 500,
         'request.reimbursement' => 120,
+        // An approver's note on a decision: short, and the review panel tidies a whole batch of them.
+        'approval.remark' => 120,
     ];
 
     /** Marks a line the note could not support, so the person fills it in. Never stored by a submit. */
@@ -57,9 +59,15 @@ class PortalRemarkFormatter
         return array_key_exists($context, self::LOG);
     }
 
+    /** The boxes a batch may carry: prose only, since a work log has no list shape. */
+    public static function batchContexts(): array
+    {
+        return array_keys(self::PROSE);
+    }
+
     /**
      * @param  string  $context  one of contexts(): the box being tidied
-     * @param  string  $day      the day as its form shows it ("October 17, 2026"), for a log only
+     * @param  string  $day  the day as its form shows it ("October 17, 2026"), for a log only
      *
      * @throws RuntimeException when the tidy is off, unreachable, or answers off its shape
      */
@@ -80,8 +88,128 @@ class PortalRemarkFormatter
         $reply = $this->ask($key, $context, trim($remark), $day);
 
         return array_key_exists($context, self::LOG)
-            ? $this->asLog($reply, (string) $day, $context)
+            ? implode("\n", $this->asLog($reply, (string) $day, $context))
             : $this->asProse($reply, self::PROSE[$context]);
+    }
+
+    /**
+     * Tidies a whole batch of notes in ONE call, for the box that holds several at once (an approver's
+     * rows on the review panel). The answer is a JSON array of the same count, and the schema it is
+     * asked in makes a malformed one all but impossible -- so the items map back by position, and
+     * nothing is ever guessed or re-quoted. A slot whose note breaks a rule comes back null, which
+     * leaves that row exactly as it was typed.
+     *
+     * @param  list<string>  $remarks
+     * @return list<string|null>
+     *
+     * @throws RuntimeException when the tidy is off, unreachable, or answers off its shape
+     */
+    public function formatMany(string $context, array $remarks): array
+    {
+        if (! array_key_exists($context, self::PROSE)) {
+            throw new RuntimeException('That box cannot be tidied in a batch.');
+        }
+
+        $notes = [];
+        foreach ($remarks as $remark) {
+            if (! is_string($remark) || trim($remark) === '') {
+                throw new RuntimeException('Write the remarks first.');
+            }
+            $notes[] = trim($remark);
+        }
+        if ($notes === []) {
+            throw new RuntimeException('Write the remarks first.');
+        }
+
+        $key = (string) config('services.ollama.key');
+        if ($key === '') {
+            throw new RuntimeException('The remark formatter is not configured.');
+        }
+
+        $cap = self::PROSE[$context];
+        $items = $this->askMany($key, $notes, $cap);
+        if (count($items) !== count($notes)) {
+            throw new RuntimeException('The formatter answered off-template; try again.');
+        }
+
+        return array_map(fn (mixed $item): ?string => $this->batchItem($item, $cap), $items);
+    }
+
+    /** One item of a batch answer, or null when it broke a rule and its row should be left alone. */
+    private function batchItem(mixed $item, int $cap): ?string
+    {
+        if (! is_string($item)) {
+            return null;
+        }
+        $text = trim(preg_replace('/\s+/', ' ', $item) ?? '');
+        if ($text === '' || strlen($text) > $cap) {
+            return null;
+        }
+        foreach (explode("\n", $item) as $line) {
+            if (preg_match('/^(date|what|changed|wins|reason)\s*:/i', trim($line)) === 1) {
+                return null;
+            }
+        }
+
+        return $text;
+    }
+
+    /**
+     * The batch call itself: the notes as a JSON array, the same schema'd array back.
+     *
+     * @param  list<string>  $notes
+     * @return list<mixed>
+     */
+    private function askMany(string $key, array $notes, int $cap): array
+    {
+        $host = rtrim((string) config('services.ollama.host'), '/');
+        $count = count($notes);
+
+        $response = Http::withToken($key)
+            ->timeout((int) config('services.ollama.timeout'))
+            ->acceptJson()
+            ->post("{$host}/api/chat", [
+                'model' => (string) config('services.ollama.model'),
+                'messages' => [
+                    ['role' => 'system', 'content' => self::batchPrompt($cap)],
+                    ['role' => 'user', 'content' => (string) json_encode(array_values($notes), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)],
+                ],
+                'stream' => false,
+                'options' => ['temperature' => 0],
+                // The sampler itself keeps the array well-formed, the right length and each note short.
+                'format' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string', 'maxLength' => $cap],
+                    'minItems' => $count,
+                    'maxItems' => $count,
+                ],
+            ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException('The remark formatter is unavailable right now.');
+        }
+
+        $reply = $response->json('message.content');
+        if (! is_string($reply) || trim($reply) === '') {
+            throw new RuntimeException('The remark formatter gave no answer; try again.');
+        }
+        $reply = trim($reply);
+
+        $decoded = json_decode($reply, true);
+        if (! is_array($decoded)) {
+            // One retry around the array itself, for an endpoint that ignored the schema. This only
+            // trims what surrounds it; the content is never repaired.
+            $start = strpos($reply, '[');
+            $end = strrpos($reply, ']');
+            if ($start !== false && $end !== false && $end > $start) {
+                $decoded = json_decode(substr($reply, $start, $end - $start + 1), true);
+            }
+        }
+        if (! is_array($decoded)) {
+            throw new RuntimeException('The formatter answered off-template; try again.');
+        }
+
+        return array_values($decoded);
     }
 
     private function ask(string $key, string $context, string $remark, ?string $day): string
@@ -118,11 +246,11 @@ class PortalRemarkFormatter
 
     private static function logPrompt(string $context): string
     {
-        $reason = in_array('Reason', self::LOG[$context], true);
+        $reason = self::LOG[$context];
         $template = "Date: <the date you were given, word for word>\n"
             ."What: <what the person did>\n"
             ."Changed: <what changed because of it>\n"
-            ."Wins: <anything worth calling a win>";
+            .'Wins: <anything worth calling a win>';
         if ($reason) {
             $template .= "\nReason: <why this was late, needed, or asked for>";
         }
@@ -149,6 +277,24 @@ class PortalRemarkFormatter
         Remark: fix login bug n remove old banner, users can log in now
         What: Fixed the login bug and removed the old banner.
         Changed: Users can log in again.
+        PROMPT;
+    }
+
+    /** The batch's own prompt: a list in, the same list out, nothing said about it. */
+    private static function batchPrompt(int $cap): string
+    {
+        return <<<PROMPT
+        You tidy short notes. You are given a JSON array of notes.
+        Reply with ONLY a JSON array of strings -- the same notes, in the same order, the same count,
+        one string per note. No commentary, no code fences, nothing before or after the array.
+
+        Rules:
+        - Fix grammar, spelling, punctuation and word order. Keep each note's meaning exactly.
+        - Add no fact, number, name or date that a note does not state.
+        - One short sentence per note, at most {$cap} characters. Never start a string with a word and a colon.
+
+        Example
+        ["no reciept", "taxi to client"] -> ["No receipt.", "Taxi to the client."]
         PROMPT;
     }
 
@@ -233,13 +379,19 @@ class PortalRemarkFormatter
             if (str_starts_with($line, '```')) {
                 continue;
             }
-            if (preg_match('/^(date|what|changed|wins|reason)\s*:\s*(.*)$/i', $line, $match) !== 1) {
+            if (preg_match('/^(date|what|changed|wins|reason)\s*:\s*(.*)$/i', $line, $match) === 1) {
+                $label = ucfirst(strtolower($match[1]));
+                $value = trim($match[2], ' `*_');
+                if ($label !== 'Date' && ! isset($values[$label])) {
+                    $values[$label] = $value;
+                }
+
                 continue;
             }
-            $label = ucfirst(strtolower($match[1]));
-            $value = trim($match[2], " `*_");
-            if ($label !== 'Date' && ! isset($values[$label])) {
-                $values[$label] = $value;
+            // Any other field name means the model wrote a shape we did not ask for; better to refuse
+            // than to swallow whatever it put there.
+            if (preg_match('/^[A-Za-z][A-Za-z ]{0,20}:\s/', $line) === 1) {
+                throw new RuntimeException('The formatter answered off-template; try again.');
             }
         }
 
