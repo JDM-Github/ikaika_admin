@@ -83,7 +83,7 @@ class PortalReimbursementRequestsTest extends TestCase
         foreach ($rows as $row) {
             $this->assertSame($date, substr((string) $row->reimb_date, 0, 10));
             $this->assertSame('Pending', $row->status);
-            $this->assertSame('Angeles Pampanga Office', $row->team);
+            $this->assertSame('01 Angeles Pampanga Office', $row->team);
             $this->assertSame($this->memberName($actor), $row->employee_name_input);
             $this->assertTrue(DB::connection('portal')->table('employees_reimbursements')
                 ->where('employee_id', $actor->getKey())
@@ -101,7 +101,7 @@ class PortalReimbursementRequestsTest extends TestCase
                 ->first();
             $this->assertNotNull($action);
             $parameters = $action->parameters['parameters'];
-            $this->assertSame('Angeles Pampanga Office', $parameters['team']);
+            $this->assertSame('01 Angeles Pampanga Office', $parameters['team']);
             $this->assertSame('Pending', $parameters['status']);
             $labels[] = $parameters['item'];
         }
@@ -157,7 +157,7 @@ class PortalReimbursementRequestsTest extends TestCase
         $this->assertSame([$mine], $list->json('data.*.id'));
         $this->assertSame('Key duplicates', $list->json('data.0.items.0.label'));
         $this->assertSame(
-            ['Angeles Pampanga Office', 'Cebu Office'],
+            ['01 Angeles Pampanga Office', '02 Cebu Office'],
             $list->json('teams'),
         );
         $this->assertSame($this->memberName($actor), $list->json('data.0.memberName'));
@@ -563,7 +563,7 @@ class PortalReimbursementRequestsTest extends TestCase
         float $cost,
         float $quantity,
         ?string $purpose = null,
-        string $team = 'Angeles Pampanga Office',
+        string $team = '01 Angeles Pampanga Office',
     ): array {
         return [
             'label' => $label,
@@ -612,7 +612,7 @@ class PortalReimbursementRequestsTest extends TestCase
             'qty' => $qty,
             'purpose' => 'seeded',
             'employee_name_input' => $this->memberName($actor),
-            'team' => 'Angeles Pampanga Office',
+            'team' => '01 Angeles Pampanga Office',
             'status' => $status,
             'date_created' => $createdAt,
         ]);

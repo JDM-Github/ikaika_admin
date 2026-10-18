@@ -12,10 +12,10 @@ use Illuminate\Support\Facades\Schema;
  */
 return new class extends Migration
 {
-    /** @var list<string> */
+    /** @var list<array{0: string, 1: string}> */
     private const SEED = [
-        'Angeles Pampanga Office',
-        'Cebu Office',
+        ['01', 'Angeles Pampanga Office'],
+        ['02', 'Cebu Office'],
     ];
 
     public function up(): void
@@ -28,14 +28,17 @@ return new class extends Migration
         if (! $schema->hasTable('teams')) {
             $schema->create('teams', function (Blueprint $table): void {
                 $table->increments('id');
+                $table->string('code', 10);
                 $table->string('name', 100);
+                $table->string('description', 255)->nullable();
                 $table->timestamp('created_at')->useCurrent();
+                $table->unique('code', 'teams_code');
                 $table->unique('name', 'teams_name');
             });
         }
 
-        foreach (self::SEED as $name) {
-            DB::connection('portal')->table('teams')->insertOrIgnore(['name' => $name]);
+        foreach (self::SEED as [$code, $name]) {
+            DB::connection('portal')->table('teams')->insertOrIgnore(['code' => $code, 'name' => $name]);
         }
     }
 

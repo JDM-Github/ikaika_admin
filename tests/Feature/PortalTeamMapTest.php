@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalAddressResolver;
 use App\Support\Portal\PortalHomeLocations;
+use App\Support\Portal\PortalPlaces;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Routing\Middleware\ThrottleRequests;
@@ -49,6 +51,12 @@ class PortalTeamMapTest extends TestCase
         return (string) $this->postJson('/api/development/portal/auth/login', ['id_no' => $employee->id_no])->assertOk()->json('token');
     }
 
+    // The geocoder without its one-request-a-second pause, so a test does not sleep.
+    private function homes(): PortalHomeLocations
+    {
+        return new PortalHomeLocations(new PortalAddressResolver(new PortalPlaces), false);
+    }
+
     // The reported ask: each person at their address on record, trying shorter forms, then their region.
     public function test_each_person_is_placed_from_their_address_then_their_region(): void
     {
@@ -60,21 +68,21 @@ class PortalTeamMapTest extends TestCase
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
             $asked[] = $query['q'];
 
-            // Only the town and province, or the region, are found, as house details throw Nominatim.
+            // Only the barangay, town and province, or the region, are found, as house details throw
+            // Nominatim.
             return Http::response(match ($query['q']) {
-                'Angeles City, Pampanga, Philippines' => [['lat' => '15.1450', 'lon' => '120.5887']],
+                'Cutud, City of Angeles, Pampanga, Philippines' => [['lat' => '15.1450', 'lon' => '120.5887']],
+                'City of Angeles, Pampanga, Philippines' => [['lat' => '15.1450', 'lon' => '120.5887']],
                 'Pampanga, Philippines' => [['lat' => '15.05', 'lon' => '120.64']],
                 default => [],
             });
         });
 
-        $homes = new PortalHomeLocations(false);
+        $homes = $this->homes();
         $this->assertSame(['placed' => 1, 'failed' => 0, 'unchanged' => 0], $homes->refresh());
-        $this->assertSame([
-            'Blk 12 Lot 3 Cutud Homes, Angeles City, Pampanga, (2009) Philippines',
-            'Blk 12 Lot 3 Cutud Homes, Angeles City, Pampanga, Philippines',
-            'Angeles City, Pampanga, Philippines',
-        ], $asked);
+        // The address's own PSGC parts lead -- Cutud is a barangay of Angeles -- so the messy line is
+        // never asked at all.
+        $this->assertSame(['Cutud, City of Angeles, Pampanga, Philippines'], $asked);
         // An unchanged address is not asked again.
         $this->assertSame(['placed' => 0, 'failed' => 0, 'unchanged' => 1], $homes->refresh());
 
@@ -136,7 +144,9 @@ class PortalTeamMapTest extends TestCase
         $this->withToken($token)->getJson($home)->assertOk()
             ->assertJsonPath('data.home', null)
             ->assertJsonPath('data.required', true)
-            ->assertJsonPath('data.suggested.latitude', 15.145);
+            ->assertJsonPath('data.suggested.latitude', 15.145)
+            // The line their address placed them at, for the picker's search box to open on.
+            ->assertJsonPath('data.suggestedLabel', 'Angeles City, Pampanga');
 
         $this->withToken($token)->putJson($home, ['latitude' => 15.15, 'longitude' => 120.6, 'method' => 'teleport'])->assertStatus(422);
         $this->withToken($token)->putJson($home, ['latitude' => 95, 'longitude' => 120.6, 'method' => 'gps'])->assertStatus(422);
@@ -147,7 +157,7 @@ class PortalTeamMapTest extends TestCase
         // A changed address does not move a home the person set.
         $member->forceFill(['address' => 'Somewhere Else, Laguna'])->save();
         Http::fake();
-        (new PortalHomeLocations(false))->refresh();
+        $this->homes()->refresh();
         $this->assertSame('15.1501000', (string) DB::connection('portal')->table('employee_home_locations')->where('employee_id', $member->getKey())->value('latitude'));
 
         // An executive is never asked.
@@ -155,6 +165,25 @@ class PortalTeamMapTest extends TestCase
         if ($executive instanceof Employee) {
             $this->withToken($this->token($executive))->getJson($home)->assertOk()->assertJsonPath('data.required', false);
         }
+    }
+
+    // The reported bug (2026-10-17, user): after setting a home, Use default must still point at the
+    // address on record, never the pin they placed.
+    public function test_use_default_keeps_the_address_on_record_after_a_home_is_set(): void
+    {
+        $member = $this->employee('user');
+        DB::connection('portal')->table('employee_home_locations')->insert([
+            'employee_id' => $member->getKey(),
+            'query' => 'Cebu Office', 'source' => 'map', 'latitude' => 10.3157, 'longitude' => 123.8854,
+            'suggested_query' => 'Lecheria, City of Calamba, Laguna, Philippines',
+            'suggested_latitude' => 14.2117, 'suggested_longitude' => 121.1642,
+        ]);
+
+        $this->withToken($this->token($member))->getJson(self::BASE_HOME)->assertOk()
+            ->assertJsonPath('data.home.latitude', 10.3157)
+            ->assertJsonPath('data.suggested.latitude', 14.2117)
+            ->assertJsonPath('data.suggested.longitude', 121.1642)
+            ->assertJsonPath('data.suggestedLabel', 'Lecheria, City of Calamba, Laguna, Philippines');
     }
 
     // The reported ask (2026-10-14, user): the map follows its reach, narrowed to a department here.

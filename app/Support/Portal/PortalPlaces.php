@@ -91,6 +91,24 @@ final class PortalPlaces
     }
 
     /**
+     * Every city and municipality, whatever its province, for reading a typed address back into parts.
+     *
+     * @return list<array{code: string, name: string, province_code: string}>
+     */
+    public function allCities(): array
+    {
+        return $this->remember('cities:all', fn (): array => $this->connection()->table('psgc_cities')
+            ->orderBy('name')
+            ->get(['code', 'name', 'province_code'])
+            ->map(static fn (object $row): array => [
+                'code' => (string) $row->code,
+                'name' => (string) $row->name,
+                'province_code' => (string) $row->province_code,
+            ])
+            ->all());
+    }
+
+    /**
      * One address as sent, its parts already cleaned: in the Philippines each picked code must sit in
      * the one above it, and its name is the list's; elsewhere the typed names stand. The line is null
      * until every part it needs is there -- in the Philippines a barangay too.

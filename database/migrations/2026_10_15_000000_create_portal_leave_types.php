@@ -13,13 +13,13 @@ use Illuminate\Support\Facades\Schema;
  */
 return new class extends Migration
 {
-    /** @var list<string> */
+    /** @var list<array{0: string, 1: string}> */
     private const SEED = [
-        '01 Vacation Leave',
-        '02 Sick Leave',
-        '03 Emergency Leave',
-        '04 Bereavement Leave',
-        '05 Maternity or Paternity Leave',
+        ['01', 'Vacation Leave'],
+        ['02', 'Sick Leave'],
+        ['03', 'Emergency Leave'],
+        ['04', 'Bereavement Leave'],
+        ['05', 'Maternity or Paternity Leave'],
     ];
 
     public function up(): void
@@ -32,14 +32,17 @@ return new class extends Migration
         if (! $schema->hasTable('leave_types')) {
             $schema->create('leave_types', function (Blueprint $table): void {
                 $table->increments('id');
+                $table->string('code', 10);
                 $table->string('name', 100);
+                $table->string('description', 255)->nullable();
                 $table->timestamp('created_at')->useCurrent();
+                $table->unique('code', 'leave_types_code');
                 $table->unique('name', 'leave_types_name');
             });
         }
 
-        foreach (self::SEED as $name) {
-            DB::connection('portal')->table('leave_types')->insertOrIgnore(['name' => $name]);
+        foreach (self::SEED as [$code, $name]) {
+            DB::connection('portal')->table('leave_types')->insertOrIgnore(['code' => $code, 'name' => $name]);
         }
     }
 

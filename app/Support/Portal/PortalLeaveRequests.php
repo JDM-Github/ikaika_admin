@@ -751,10 +751,10 @@ final class PortalLeaveRequests
     private function leaveTypes(): array
     {
         $types = [];
-        foreach ($this->connection()->table('leave_types')->orderBy('name')->pluck('name') as $name) {
-            $trimmed = trim((string) $name);
-            if ($trimmed !== '') {
-                $types[] = $trimmed;
+        foreach ($this->connection()->table('leave_types')->orderBy('code')->get(['code', 'name']) as $row) {
+            $name = trim((string) $row->name);
+            if ($name !== '') {
+                $types[] = trim((string) $row->code).' '.$name;
             }
         }
 

@@ -788,7 +788,7 @@ class PortalBudgetEnvelopesTest extends TestCase
                 'qty' => $qty,
                 'purpose' => 'seeded',
                 'employee_name_input' => $this->memberName($member),
-                'team' => 'Angeles Pampanga Office',
+                'team' => '01 Angeles Pampanga Office',
                 'status' => 'Pending',
                 'date_created' => $createdAt,
             ]);

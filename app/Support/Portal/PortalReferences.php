@@ -53,21 +53,45 @@ final class PortalReferences
             ];
         }
 
+        // How many requests name each leave type, and how many lines each office, so the tabs can
+        // narrow to what is in use: a type or office nothing references is the only safe one to
+        // remove. A request stores the pair as "code name", which is what this joins on.
+        $leaveUsage = [];
+        foreach ($this->connection()->table('requests')->where('type', 'Leave')
+            ->groupBy('category')->selectRaw('category, COUNT(*) as total')->get() as $row) {
+            $leaveUsage[trim((string) $row->category)] = (int) $row->total;
+        }
+        $teamUsage = [];
+        foreach ($this->connection()->table('reimbursements')
+            ->groupBy('team')->selectRaw('team, COUNT(*) as total')->get() as $row) {
+            $teamUsage[trim((string) $row->team)] = (int) $row->total;
+        }
+
         // The company's leave vocabulary, the list the leave form offers.
         $leaveTypes = [];
-        foreach ($this->connection()->table('leave_types')->orderBy('name')->get(['id', 'name']) as $row) {
+        foreach ($this->connection()->table('leave_types')->orderBy('code')->get(['id', 'code', 'name', 'description']) as $row) {
+            $code = trim((string) $row->code);
+            $name = trim((string) $row->name);
             $leaveTypes[] = [
                 'id' => (string) (int) $row->id,
-                'name' => trim((string) $row->name),
+                'code' => $code,
+                'name' => $name,
+                'description' => self::cleanDescription($row->description),
+                'usages' => $leaveUsage[$code.' '.$name] ?? 0,
             ];
         }
 
         // The offices a reimbursement line may belong to, the list it offers.
         $teams = [];
-        foreach ($this->connection()->table('teams')->orderBy('name')->get(['id', 'name']) as $row) {
+        foreach ($this->connection()->table('teams')->orderBy('code')->get(['id', 'code', 'name', 'description']) as $row) {
+            $code = trim((string) $row->code);
+            $name = trim((string) $row->name);
             $teams[] = [
                 'id' => (string) (int) $row->id,
-                'name' => trim((string) $row->name),
+                'code' => $code,
+                'name' => $name,
+                'description' => self::cleanDescription($row->description),
+                'usages' => $teamUsage[$code.' '.$name] ?? 0,
             ];
         }
 
@@ -411,18 +435,23 @@ final class PortalReferences
 
     /**
      * The company's leave vocabulary: the list the leave form offers, so a change here is what the
-     * form offers next. A leave type carries no department, code or project count.
+     * form offers next. The code is assigned automatically, so the form sends only a name and a
+     * description.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function addLeaveType(Employee $actor, Request $request): array
     {
-        $name = $this->validatedLeaveType($request);
+        [$name, $description] = $this->validatedLeaveType($request);
         if ($this->leaveTypeTaken($name)) {
             abort(422, 'That leave type is already on the list.');
         }
 
-        $id = (int) $this->connection()->table('leave_types')->insertGetId(['name' => $name]);
+        $id = (int) $this->connection()->table('leave_types')->insertGetId([
+            'code' => $this->nextCode('leave_types'),
+            'name' => $name,
+            'description' => $description,
+        ]);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.leave-type', '{UserName|You} added the leave type '.$name, (string) $id, $request);
 
@@ -430,6 +459,8 @@ final class PortalReferences
     }
 
     /**
+     * The code is fixed once assigned, so only the name and description change here.
+     *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function updateLeaveType(Employee $actor, Request $request, int $id): array
@@ -438,12 +469,12 @@ final class PortalReferences
         if ($row === null) {
             abort(404, 'That leave type was not found.');
         }
-        $name = $this->validatedLeaveType($request);
+        [$name, $description] = $this->validatedLeaveType($request);
         if ($this->leaveTypeTaken($name, $id)) {
             abort(422, 'That leave type is already on the list.');
         }
 
-        $this->connection()->table('leave_types')->where('id', $id)->update(['name' => $name]);
+        $this->connection()->table('leave_types')->where('id', $id)->update(['name' => $name, 'description' => $description]);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.leave-type', '{UserName|You} changed the leave type '.$name, (string) $id, $request);
 
@@ -468,18 +499,23 @@ final class PortalReferences
     }
 
     /**
-     * The offices a reimbursement line may belong to. Like a leave type, a team is a bare name.
+     * The offices a reimbursement line may belong to. Like a leave type, a team carries a name, an
+     * automatically assigned code and a description.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function addTeam(Employee $actor, Request $request): array
     {
-        $name = $this->validatedTeam($request);
+        [$name, $description] = $this->validatedTeam($request);
         if ($this->teamTaken($name)) {
             abort(422, 'That team is already on the list.');
         }
 
-        $id = (int) $this->connection()->table('teams')->insertGetId(['name' => $name]);
+        $id = (int) $this->connection()->table('teams')->insertGetId([
+            'code' => $this->nextCode('teams'),
+            'name' => $name,
+            'description' => $description,
+        ]);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::INSERT, 'projects.references.team', '{UserName|You} added the team '.$name, (string) $id, $request);
 
@@ -487,6 +523,8 @@ final class PortalReferences
     }
 
     /**
+     * The code is fixed once assigned, so only the name and description change here.
+     *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function updateTeam(Employee $actor, Request $request, int $id): array
@@ -495,12 +533,12 @@ final class PortalReferences
         if ($row === null) {
             abort(404, 'That team was not found.');
         }
-        $name = $this->validatedTeam($request);
+        [$name, $description] = $this->validatedTeam($request);
         if ($this->teamTaken($name, $id)) {
             abort(422, 'That team is already on the list.');
         }
 
-        $this->connection()->table('teams')->where('id', $id)->update(['name' => $name]);
+        $this->connection()->table('teams')->where('id', $id)->update(['name' => $name, 'description' => $description]);
         $this->bump();
         $this->audit->record($actor, PortalLogAction::PATCH, 'projects.references.team', '{UserName|You} changed the team '.$name, (string) $id, $request);
 
@@ -657,16 +695,20 @@ final class PortalReferences
         return $this->taken('activity_codes', 'id_no', $code, $exceptId);
     }
 
-    // A leave type's name, trimmed and non-empty, from the request the form sent.
-    private function validatedLeaveType(Request $request): string
+    // A leave type's name, trimmed and non-empty, and its optional description, from the form. The
+    // code is assigned automatically, so the form does not send one.
+    private function validatedLeaveType(Request $request): array
     {
-        $data = $request->validate(['name' => ['required', 'string', 'max:100']]);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'description' => ['nullable', 'string', 'max:255'],
+        ]);
         $name = trim($data['name']);
         if ($name === '') {
             abort(422, 'Give the leave type a name.');
         }
 
-        return $name;
+        return [$name, self::cleanDescription($data['description'] ?? null)];
     }
 
     private function leaveTypeTaken(string $name, ?int $exceptId = null): bool
@@ -674,16 +716,37 @@ final class PortalReferences
         return $this->taken('leave_types', 'name', $name, $exceptId);
     }
 
-    // A team's name, trimmed and non-empty, from the request the form sent.
-    private function validatedTeam(Request $request): string
+    // A team's name, trimmed and non-empty, and its optional description, from the form.
+    private function validatedTeam(Request $request): array
     {
-        $data = $request->validate(['name' => ['required', 'string', 'max:100']]);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'description' => ['nullable', 'string', 'max:255'],
+        ]);
         $name = trim($data['name']);
         if ($name === '') {
             abort(422, 'Give the team a name.');
         }
 
-        return $name;
+        return [$name, self::cleanDescription($data['description'] ?? null)];
+    }
+
+    // The lowest two-digit code the list does not use, for a new leave type or team.
+    private function nextCode(string $table): string
+    {
+        $used = [];
+        foreach ($this->connection()->table($table)->pluck('code') as $value) {
+            $code = trim((string) $value);
+            if ($code !== '') {
+                $used[$code] = true;
+            }
+        }
+        for ($next = 1; ; $next++) {
+            $code = sprintf('%02d', $next);
+            if (! isset($used[$code])) {
+                return $code;
+            }
+        }
     }
 
     private function teamTaken(string $name, ?int $exceptId = null): bool

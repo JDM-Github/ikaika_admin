@@ -28,6 +28,10 @@ return new class extends Migration
             $table->decimal('latitude', 10, 7);
             $table->decimal('longitude', 10, 7);
             $table->timestamp('geocoded_at')->nullable();
+            // The address on record's own point, kept apart from the home they set (2026-10-17).
+            $table->string('suggested_query', 500)->nullable();
+            $table->decimal('suggested_latitude', 10, 7)->nullable();
+            $table->decimal('suggested_longitude', 10, 7)->nullable();
             $table->foreign('employee_id')->references('id')->on('employees')->cascadeOnDelete();
         });
     }

@@ -12,7 +12,9 @@ use Throwable;
  * their own home after signing in, by GPS or by a pin on the map (sources gps and map); executives are
  * not asked. Until they do, their address on record stands in: turned into coordinates once through
  * OpenStreetMap's Nominatim (sources address and region), and looked up again only when it changes. A
- * home a person set is never overwritten by the address. Nominatim allows one request a second.
+ * home a person set is never overwritten by the address, and the address's own point is kept apart in
+ * the suggested_* columns, so "Use default" always returns to their data. Nominatim allows one request
+ * a second.
  */
 final class PortalHomeLocations
 {
@@ -26,7 +28,10 @@ final class PortalHomeLocations
     // Homes a person set themselves; the address lookup leaves these alone.
     public const OWN_SOURCES = ['gps', 'map'];
 
-    public function __construct(private readonly bool $pauses = true) {}
+    public function __construct(
+        private readonly PortalAddressResolver $resolver,
+        private readonly bool $pauses = true,
+    ) {}
 
     /**
      * Looks up every active person whose address or region is new or changed since their point was kept.
@@ -39,12 +44,13 @@ final class PortalHomeLocations
         $counts = ['placed' => 0, 'failed' => 0, 'unchanged' => 0];
         $asked = false;
         foreach ($this->activePeople() as $person) {
-            $queries = self::queries($person);
+            $queries = $this->queries($person);
             if ($queries === []) {
                 continue;
             }
             $previous = $kept[(int) $person->id] ?? null;
-            if ($previous !== null && (in_array($previous->source, self::OWN_SOURCES, true) || $previous->query === $queries[0]['text'])) {
+            // The address's own line is what is looked up, so it is also what says nothing changed.
+            if ($previous !== null && $previous->suggested_query === $queries[0]['text']) {
                 $counts['unchanged']++;
 
                 continue;
@@ -66,16 +72,23 @@ final class PortalHomeLocations
 
                 continue;
             }
-            $this->connection()->table('employee_home_locations')->updateOrInsert(
-                ['employee_id' => (int) $person->id],
-                [
+            $own = $previous !== null && in_array($previous->source, self::OWN_SOURCES, true);
+            $payload = [
+                'suggested_query' => $queries[0]['text'],
+                'suggested_latitude' => $point['latitude'],
+                'suggested_longitude' => $point['longitude'],
+            ];
+            // Their own home is the point the map shows; the address only stands in until they set one.
+            if (! $own) {
+                $payload += [
                     'query' => $queries[0]['text'],
                     'source' => $point['source'],
                     'latitude' => $point['latitude'],
                     'longitude' => $point['longitude'],
                     'geocoded_at' => now(),
-                ],
-            );
+                ];
+            }
+            $this->connection()->table('employee_home_locations')->updateOrInsert(['employee_id' => (int) $person->id], $payload);
             $counts['placed']++;
         }
 
@@ -84,24 +97,41 @@ final class PortalHomeLocations
 
     /**
      * The signed-in person's home, whether they still have to set it, and where the picker starts: their
-     * own home, else the point their address gave, else nothing.
+     * own home, else the point their address gave, else nothing. The address's own canonical line rides
+     * along as `suggestedLabel`, for the picker's search box to open on.
      *
-     * @return array{home: array{latitude: float, longitude: float, method: string}|null, required: bool, suggested: array{latitude: float, longitude: float}|null}
+     * @return array{home: array{latitude: float, longitude: float, method: string}|null, required: bool, suggested: array{latitude: float, longitude: float}|null, suggestedLabel: string|null}
      */
     public function mine(object $employee): array
     {
         $row = $this->connection()->table('employee_home_locations')->where('employee_id', (int) $employee->id)->first();
         $own = $row !== null && in_array($row->source, self::OWN_SOURCES, true);
 
+        // The address on record's own point, which survives them setting a home. Its own columns hold
+        // it; a row geocoded before those existed still reads from the row's point.
+        $suggested = null;
+        $label = null;
+        if ($row !== null) {
+            if ($row->suggested_latitude !== null && $row->suggested_longitude !== null) {
+                $suggested = ['latitude' => (float) $row->suggested_latitude, 'longitude' => (float) $row->suggested_longitude];
+                $label = trim((string) $row->suggested_query);
+            } elseif (! $own) {
+                $suggested = ['latitude' => (float) $row->latitude, 'longitude' => (float) $row->longitude];
+                $label = trim((string) $row->query);
+            }
+        }
+
         return [
             'home' => $own ? ['latitude' => (float) $row->latitude, 'longitude' => (float) $row->longitude, 'method' => (string) $row->source] : null,
             // Executives are not asked; everyone else sets theirs before using the portal.
             'required' => ! $own && ! PortalRole::isExecutive($employee->role ?? null, $employee->role_level ?? null),
-            'suggested' => $row === null ? null : ['latitude' => (float) $row->latitude, 'longitude' => (float) $row->longitude],
+            'suggested' => $suggested,
+            'suggestedLabel' => $label === null || $label === '' ? null : $label,
         ];
     }
 
-    // Kept as the person's own home: the address lookup will not move it again.
+    // Kept as the person's own home: the address lookup will not move it again. The address on
+    // record's own point (suggested_*) is left untouched, so Use default still returns to their data.
     public function setOwn(int $employeeId, float $latitude, float $longitude, string $method): void
     {
         $this->connection()->table('employee_home_locations')->updateOrInsert(
@@ -111,31 +141,38 @@ final class PortalHomeLocations
     }
 
     /**
-     * The address first, then the region, each as the text Nominatim is asked.
+     * The address's own PSGC parts first, then the typed line, then the region, each as the text
+     * Nominatim is asked. The canonical parts lead because a city the list knows places far more
+     * reliably than the typed line, whose lot numbers and streets throw Nominatim.
      *
      * @return list<array{text: string, source: string}>
      */
-    private static function queries(object $person): array
+    private function queries(object $person): array
     {
         $queries = [];
+        $seen = [];
+        $push = static function (string $text, string $source) use (&$queries, &$seen): void {
+            if ($text !== '' && ! isset($seen[$text])) {
+                $seen[$text] = true;
+                $queries[] = ['text' => $text, 'source' => $source];
+            }
+        };
+
         $address = trim((string) preg_replace('/\s+/u', ' ', (string) ($person->address ?? '')));
+        $region = trim((string) ($person->location ?? ''));
         if ($address !== '') {
-            $queries[] = ['text' => $address, 'source' => 'address'];
-            // Lot and block numbers throw Nominatim, so the address is tried again from its end: the
-            // subdivision or barangay with the town and province, then the town and province alone.
-            $parts = self::addressParts($address);
-            foreach ([3, 2] as $tail) {
-                if (count($parts) >= $tail) {
-                    $text = implode(', ', array_slice($parts, -$tail)).', Philippines';
-                    if (! in_array($text, array_column($queries, 'text'), true)) {
-                        $queries[] = ['text' => $text, 'source' => 'address'];
-                    }
-                }
+            foreach ($this->resolver->queries($address, $region === '' ? null : $region) as $query) {
+                $push($query['text'], $query['source']);
+            }
+            $push($address, 'address');
+        } elseif ($region !== '') {
+            // No address to read: the region's own province is all there is.
+            foreach ($this->resolver->queries('', $region) as $query) {
+                $push($query['text'], $query['source']);
             }
         }
-        $region = trim((string) ($person->location ?? ''));
         if ($region !== '') {
-            $queries[] = ['text' => self::REGION_QUERIES[strtolower($region)] ?? $region.', Philippines', 'source' => 'region'];
+            $push(self::REGION_QUERIES[strtolower($region)] ?? $region.', Philippines', 'region');
         }
 
         return $queries;
@@ -149,8 +186,14 @@ final class PortalHomeLocations
     public static function addressParts(string $address): array
     {
         return array_values(array_filter(
-            array_map(static fn (string $part): string => trim((string) preg_replace('/\s+\d{4}$/', '', trim($part))), explode(',', $address)),
-            static fn (string $part): bool => $part !== '' && preg_match('/^\(?\d+\)?(\s*Philippines)?$/i', $part) !== 1 && strcasecmp($part, 'Philippines') !== 0,
+            array_map(static function (string $part): string {
+                $part = (string) preg_replace('/\bphilippines\b/i', ' ', trim($part));
+                // A four-digit run is the postcode, not a house number; dropped wherever it sits.
+                $part = (string) preg_replace(['/\b\d{4}\b/', '/[()]/'], ' ', $part);
+
+                return trim((string) preg_replace('/\s+/', ' ', $part));
+            }, explode(',', $address)),
+            static fn (string $part): bool => $part !== '' && preg_match('/^\(?\d+\)?$/', $part) !== 1,
         ));
     }
 
