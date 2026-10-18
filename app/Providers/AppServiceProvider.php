@@ -220,6 +220,19 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(60)->by('administration-email:'.$this->portalLimiterKey($request));
         });
 
+        // The composer rebuilds its preview every time writing pauses, so the ordinary email limit
+        // would blank it after a paragraph. It writes nothing, so it gets a ceiling of its own.
+        RateLimiter::for('portal-email-preview', function (Request $request) {
+            return Limit::perMinute(240)->by('email-preview:'.$this->portalLimiterKey($request));
+        });
+
+        // The "Polish" buttons reach a model on every press, so they get a ceiling of their own:
+        // nobody tidies a note forty times a minute, and the model is not free. Roomy enough that a
+        // review panel's batch (up to ten rows, or a per-row retry of one) cannot trip itself.
+        RateLimiter::for('portal-report-remark', function (Request $request) {
+            return Limit::perMinute(40)->by('report-remark:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-administration-email-write', function (Request $request) {
             return Limit::perMinute(20)->by('administration-email-write:'.$this->portalLimiterKey($request));
         });

@@ -1,0 +1,485 @@
+- generic [ref=f2e1]:
+  - generic [ref=f2e13]:
+    - generic [ref=f2e14]:
+      - generic [ref=f2e16]:
+        - button "Collapse navigation" [ref=f2e18] [cursor=pointer]:
+          - generic [ref=f2e19]: 
+        - generic [ref=f2e20]: IKAIKA OPC
+      - generic [ref=f2e27]:
+        - generic [ref=f2e28]:
+          - button "Projects" [ref=f2e29] [cursor=pointer]:
+            - generic [ref=f2e30]: 
+            - generic [ref=f2e33]:
+              - generic [ref=f2e34]: Projects
+              - generic [ref=f2e35]: 
+          - generic [ref=f2e38]:
+            - button "View Projects" [ref=f2e41] [cursor=pointer]:
+              - generic [ref=f2e42]: 
+            - button "Track Projects" [ref=f2e48] [cursor=pointer]:
+              - generic [ref=f2e49]: 
+            - button "Created Projects" [ref=f2e55] [cursor=pointer]:
+              - generic [ref=f2e56]: 
+        - button "User" [ref=f2e62] [cursor=pointer]:
+          - generic [ref=f2e63]: 
+          - generic [ref=f2e66]:
+            - generic [ref=f2e67]: User
+            - generic [ref=f2e68]: 
+        - button "Event Calendar" [ref=f2e70] [cursor=pointer]:
+          - generic [ref=f2e71]: 
+        - button "Access" [ref=f2e76] [cursor=pointer]:
+          - generic [ref=f2e77]: 
+        - button "Email" [ref=f2e82] [cursor=pointer]:
+          - generic [ref=f2e83]: 
+        - generic [ref=f2e88]: Admin
+        - button "Manage" [ref=f2e91] [cursor=pointer]:
+          - generic [ref=f2e92]: 
+          - generic [ref=f2e95]:
+            - generic [ref=f2e96]: Manage
+            - generic [ref=f2e97]: 
+        - button "Finance" [ref=f2e100] [cursor=pointer]:
+          - generic [ref=f2e101]: 
+          - generic [ref=f2e104]:
+            - generic [ref=f2e105]: Finance
+            - generic [ref=f2e106]: 
+        - button "Administration" [ref=f2e109] [cursor=pointer]:
+          - generic [ref=f2e110]: 
+          - generic [ref=f2e113]:
+            - generic [ref=f2e114]: Administration
+            - generic [ref=f2e115]: 
+      - button "Account menu" [ref=f2e119] [cursor=pointer]:
+        - generic "Don De Guzman" [ref=f2e121]:
+          - img "Don De Guzman" [ref=f2e123]
+        - generic [ref=f2e125]:
+          - generic [ref=f2e126]:
+            - generic [ref=f2e127]: Don De Guzman
+            - generic [ref=f2e128]: Online
+          - generic [ref=f2e131]: 
+    - generic [ref=f2e132]:
+      - generic [ref=f2e133]:
+        - generic [ref=f2e136]:
+          - generic [ref=f2e137]: IKAIKA Portal
+          - generic [ref=f2e142]:
+            - generic [ref=f2e144]:
+              - generic [ref=f2e145]: Manila, Philippines
+              - generic [ref=f2e146]: 8:01 AM
+              - generic [ref=f2e148]: Saturday, 10/17/2026
+            - generic [ref=f2e150]:
+              - generic [ref=f2e151]: San Jose, CA
+              - generic [ref=f2e152]: 5:01 PM
+              - generic [ref=f2e154]: 15h behind · Friday, 10/16/2026
+          - generic [ref=f2e155]:
+            - button "Notifications" [ref=f2e158] [cursor=pointer]:
+              - generic [ref=f2e159]: 
+            - button "Turn off background effect" [ref=f2e160] [cursor=pointer]:
+              - generic [ref=f2e161]: 
+            - button "Toggle theme" [ref=f2e162] [cursor=pointer]:
+              - generic [ref=f2e163]: 
+            - link "Open your profile" [ref=f2e164] [cursor=pointer]:
+              - generic [ref=f2e165]:
+                - generic "Don De Guzman" [ref=f2e167]:
+                  - img "Don De Guzman" [ref=f2e169]
+                - generic [ref=f2e170]:
+                  - generic [ref=f2e171]: Don De Guzman
+                  - generic [ref=f2e172]: 220101-0001
+        - generic [ref=f2e173]:
+          - link "PORTAL" [ref=f2e174] [cursor=pointer]
+          - generic [ref=f2e176]: /
+          - generic [ref=f2e177]: Projects
+          - generic [ref=f2e178]: /
+          - generic [ref=f2e179]: View Projects
+      - generic [ref=f2e185]:
+        - generic [ref=f2e186]:
+          - generic [ref=f2e187]:
+            - generic [ref=f2e188]: Projects
+            - generic [ref=f2e189]: "Find a project and see the work behind it: hours, people and scopes"
+          - generic [ref=f2e190]:
+            - button "Tour" [ref=f2e191] [cursor=pointer]:
+              - generic [ref=f2e192]: 
+            - generic [ref=f2e196]:
+              - button " Delete Project" [ref=f2e199] [cursor=pointer]:
+                - generic [ref=f2e200]: 
+                - generic [ref=f2e201]: Delete Project
+              - button " Edit project" [ref=f2e203] [cursor=pointer]:
+                - generic [ref=f2e204]: 
+                - generic [ref=f2e205]: Edit project
+              - button " Add New Project" [ref=f2e207] [cursor=pointer]:
+                - generic [ref=f2e208]: 
+                - generic [ref=f2e209]: Add New Project
+        - generic [ref=f2e210]:
+          - generic [ref=f2e211]:
+            - generic [ref=f2e216]:
+              - generic [ref=f2e217]:
+                - button "All Departments" [ref=f2e220] [cursor=pointer]:
+                  - generic [ref=f2e222]: 
+                - button "All Status" [ref=f2e225] [cursor=pointer]:
+                  - generic [ref=f2e226]: Ongoing
+                  - generic [ref=f2e227]: 
+                - button "Newest" [ref=f2e228] [cursor=pointer]
+              - generic [ref=f2e231]:
+                - generic [ref=f2e232]: 
+                - textbox "Search Projects..." [ref=f2e233]
+            - generic [ref=f2e235]:
+              - generic [ref=f2e240]:
+                - button "260208 Stockton Facility Engineering Ongoing 120 hrs" [ref=f2e241] [cursor=pointer]:
+                  - generic [ref=f2e242]:
+                    - generic [ref=f2e243]: "260208"
+                    - generic [ref=f2e244]: Stockton Facility
+                  - generic [ref=f2e245]:
+                    - generic [ref=f2e246]: Engineering
+                    - generic [ref=f2e247]: Ongoing
+                    - generic [ref=f2e249]: 120 hrs
+                - button "260207 E Ink Engineering Ongoing 597 hrs" [ref=f2e250] [cursor=pointer]:
+                  - generic [ref=f2e251]:
+                    - generic [ref=f2e252]: "260207"
+                    - generic [ref=f2e253]: E Ink
+                  - generic [ref=f2e254]:
+                    - generic [ref=f2e255]: Engineering
+                    - generic [ref=f2e256]: Ongoing
+                    - generic [ref=f2e258]: 597 hrs
+                - button "260206 2241 Lundy Ave Engineering Ongoing 52 hrs" [ref=f2e259] [cursor=pointer]:
+                  - generic [ref=f2e260]:
+                    - generic [ref=f2e261]: "260206"
+                    - generic [ref=f2e262]: 2241 Lundy Ave
+                  - generic [ref=f2e263]:
+                    - generic [ref=f2e264]: Engineering
+                    - generic [ref=f2e265]: Ongoing
+                    - generic [ref=f2e267]: 52 hrs
+                - button "260205 1215 Welch Rd - Electrical Engineering Ongoing 231 hrs" [ref=f2e268] [cursor=pointer]:
+                  - generic [ref=f2e269]:
+                    - generic [ref=f2e270]: "260205"
+                    - generic [ref=f2e271]: 1215 Welch Rd - Electrical
+                  - generic [ref=f2e272]:
+                    - generic [ref=f2e273]: Engineering
+                    - generic [ref=f2e274]: Ongoing
+                    - generic [ref=f2e276]: 231 hrs
+                - button "260203 1215 Welch Rd. Engineering Ongoing 63 hrs" [ref=f2e277] [cursor=pointer]:
+                  - generic [ref=f2e278]:
+                    - generic [ref=f2e279]: "260203"
+                    - generic [ref=f2e280]: 1215 Welch Rd.
+                  - generic [ref=f2e281]:
+                    - generic [ref=f2e282]: Engineering
+                    - generic [ref=f2e283]: Ongoing
+                    - generic [ref=f2e285]: 63 hrs
+                - button "260202 25175 Coresite Phase 4 Engineering Ongoing 72 hrs" [ref=f2e286] [cursor=pointer]:
+                  - generic [ref=f2e287]:
+                    - generic [ref=f2e288]: "260202"
+                    - generic [ref=f2e289]: 25175 Coresite Phase 4
+                  - generic [ref=f2e290]:
+                    - generic [ref=f2e291]: Engineering
+                    - generic [ref=f2e292]: Ongoing
+                    - generic [ref=f2e294]: 72 hrs
+                - button "260201 Cityline B200/250 Databricks TI Engineering Ongoing 96 hrs" [ref=f2e295] [cursor=pointer]:
+                  - generic [ref=f2e296]:
+                    - generic [ref=f2e297]: "260201"
+                    - generic [ref=f2e298]: Cityline B200/250 Databricks TI
+                  - generic [ref=f2e299]:
+                    - generic [ref=f2e300]: Engineering
+                    - generic [ref=f2e301]: Ongoing
+                    - generic [ref=f2e303]: 96 hrs
+                - button "260134 JMH PH2 Engineering Ongoing 40 hrs" [ref=f2e304] [cursor=pointer]:
+                  - generic [ref=f2e305]:
+                    - generic [ref=f2e306]: "260134"
+                    - generic [ref=f2e307]: JMH PH2
+                  - generic [ref=f2e308]:
+                    - generic [ref=f2e309]: Engineering
+                    - generic [ref=f2e310]: Ongoing
+                    - generic [ref=f2e312]: 40 hrs
+                - button "260133 JMH Clinical Lab Engineering Ongoing 112 hrs" [ref=f2e313] [cursor=pointer]:
+                  - generic [ref=f2e314]:
+                    - generic [ref=f2e315]: "260133"
+                    - generic [ref=f2e316]: JMH Clinical Lab
+                  - generic [ref=f2e317]:
+                    - generic [ref=f2e318]: Engineering
+                    - generic [ref=f2e319]: Ongoing
+                    - generic [ref=f2e321]: 112 hrs
+                - button "260132 Microsoft L2 Seas Engineering Ongoing 216 hrs" [ref=f2e322] [cursor=pointer]:
+                  - generic [ref=f2e323]:
+                    - generic [ref=f2e324]: "260132"
+                    - generic [ref=f2e325]: Microsoft L2 Seas
+                  - generic [ref=f2e326]:
+                    - generic [ref=f2e327]: Engineering
+                    - generic [ref=f2e328]: Ongoing
+                    - generic [ref=f2e330]: 216 hrs
+                - button "260129 Dallas Infomart Engineering Ongoing 725 hrs" [ref=f2e331] [cursor=pointer]:
+                  - generic [ref=f2e332]:
+                    - generic [ref=f2e333]: "260129"
+                    - generic [ref=f2e334]: Dallas Infomart
+                  - generic [ref=f2e335]:
+                    - generic [ref=f2e336]: Engineering
+                    - generic [ref=f2e337]: Ongoing
+                    - generic [ref=f2e339]: 725 hrs
+                - button "260125 GNE -B45 Engineering Ongoing 322 hrs" [ref=f2e340] [cursor=pointer]:
+                  - generic [ref=f2e341]:
+                    - generic [ref=f2e342]: "260125"
+                    - generic [ref=f2e343]: GNE -B45
+                  - generic [ref=f2e344]:
+                    - generic [ref=f2e345]: Engineering
+                    - generic [ref=f2e346]: Ongoing
+                    - generic [ref=f2e348]: 322 hrs
+                - button "260118 SHC-Standford Engineering Ongoing 4 hrs" [ref=f2e349] [cursor=pointer]:
+                  - generic [ref=f2e350]:
+                    - generic [ref=f2e351]: "260118"
+                    - generic [ref=f2e352]: SHC-Standford
+                  - generic [ref=f2e353]:
+                    - generic [ref=f2e354]: Engineering
+                    - generic [ref=f2e355]: Ongoing
+                    - generic [ref=f2e357]: 4 hrs
+                - button "260005 IKAIKA Portal V2 MIS Ongoing 40 hrs" [ref=f2e358] [cursor=pointer]:
+                  - generic [ref=f2e359]:
+                    - generic [ref=f2e360]: "260005"
+                    - generic [ref=f2e361]: IKAIKA Portal V2
+                  - generic [ref=f2e362]:
+                    - generic [ref=f2e363]: MIS
+                    - generic [ref=f2e364]: Ongoing
+                    - generic [ref=f2e366]: 40 hrs
+                - button "260004 BIM Clash Coordination Using Navisworks General Ongoing 36 hrs" [ref=f2e367] [cursor=pointer]:
+                  - generic [ref=f2e368]:
+                    - generic [ref=f2e369]: "260004"
+                    - generic [ref=f2e370]: BIM Clash Coordination Using Navisworks
+                  - generic [ref=f2e371]:
+                    - generic [ref=f2e372]: General
+                    - generic [ref=f2e373]: Ongoing
+                    - generic [ref=f2e375]: 36 hrs
+                - button "260003 Standard Operating Procedures General Ongoing 160 hrs" [ref=f2e376] [cursor=pointer]:
+                  - generic [ref=f2e377]:
+                    - generic [ref=f2e378]: "260003"
+                    - generic [ref=f2e379]: Standard Operating Procedures
+                  - generic [ref=f2e380]:
+                    - generic [ref=f2e381]: General
+                    - generic [ref=f2e382]: Ongoing
+                    - generic [ref=f2e384]: 160 hrs
+                - button "260002 Irvington_ Engineering Ongoing 16 hrs" [ref=f2e385] [cursor=pointer]:
+                  - generic [ref=f2e386]:
+                    - generic [ref=f2e387]: "260002"
+                    - generic [ref=f2e388]: Irvington_
+                  - generic [ref=f2e389]:
+                    - generic [ref=f2e390]: Engineering
+                    - generic [ref=f2e391]: Ongoing
+                    - generic [ref=f2e393]: 16 hrs
+                - button "260001 25072 Coresite SV9 Phase 3 Engineering Ongoing 144 hrs" [ref=f2e394] [cursor=pointer]:
+                  - generic [ref=f2e395]:
+                    - generic [ref=f2e396]: "260001"
+                    - generic [ref=f2e397]: 25072 Coresite SV9 Phase 3
+                  - generic [ref=f2e398]:
+                    - generic [ref=f2e399]: Engineering
+                    - generic [ref=f2e400]: Ongoing
+                    - generic [ref=f2e402]: 144 hrs
+                - button "25304 RNO Engineering Ongoing 366 hrs" [ref=f2e403] [cursor=pointer]:
+                  - generic [ref=f2e404]:
+                    - generic [ref=f2e405]: "25304"
+                    - generic [ref=f2e406]: RNO
+                  - generic [ref=f2e407]:
+                    - generic [ref=f2e408]: Engineering
+                    - generic [ref=f2e409]: Ongoing
+                    - generic [ref=f2e411]: 366 hrs
+                - button "25226 2243 Lundy Ave Bestronics Engineering Ongoing 80 hrs" [ref=f2e412] [cursor=pointer]:
+                  - generic [ref=f2e413]:
+                    - generic [ref=f2e414]: "25226"
+                    - generic [ref=f2e415]: 2243 Lundy Ave Bestronics
+                  - generic [ref=f2e416]:
+                    - generic [ref=f2e417]: Engineering
+                    - generic [ref=f2e418]: Ongoing
+                    - generic [ref=f2e420]: 80 hrs
+                - button "25220 2245 Lundy Ave Engineering Ongoing 65 hrs" [ref=f2e421] [cursor=pointer]:
+                  - generic [ref=f2e422]:
+                    - generic [ref=f2e423]: "25220"
+                    - generic [ref=f2e424]: 2245 Lundy Ave
+                  - generic [ref=f2e425]:
+                    - generic [ref=f2e426]: Engineering
+                    - generic [ref=f2e427]: Ongoing
+                    - generic [ref=f2e429]: 65 hrs
+                - button "25218 1710 Fortune Ave. Engineering Ongoing 88 hrs" [ref=f2e430] [cursor=pointer]:
+                  - generic [ref=f2e431]:
+                    - generic [ref=f2e432]: "25218"
+                    - generic [ref=f2e433]: 1710 Fortune Ave.
+                  - generic [ref=f2e434]:
+                    - generic [ref=f2e435]: Engineering
+                    - generic [ref=f2e436]: Ongoing
+                    - generic [ref=f2e438]: 88 hrs
+                - button "25217 Coinbase Mission Rock Engineering Ongoing 1,238 hrs" [ref=f2e439] [cursor=pointer]:
+                  - generic [ref=f2e440]:
+                    - generic [ref=f2e441]: "25217"
+                    - generic [ref=f2e442]: Coinbase Mission Rock
+                  - generic [ref=f2e443]:
+                    - generic [ref=f2e444]: Engineering
+                    - generic [ref=f2e445]: Ongoing
+                    - generic [ref=f2e447]: 1,238 hrs
+                - button "25207 Irvington Engineering Ongoing 112 hrs" [ref=f2e448] [cursor=pointer]:
+                  - generic [ref=f2e449]:
+                    - generic [ref=f2e450]: "25207"
+                    - generic [ref=f2e451]: Irvington
+                  - generic [ref=f2e452]:
+                    - generic [ref=f2e453]: Engineering
+                    - generic [ref=f2e454]: Ongoing
+                    - generic [ref=f2e456]: 112 hrs
+                - button "25206 Fortinet Engineering Ongoing 0 hrs" [ref=f2e457] [cursor=pointer]:
+                  - generic [ref=f2e458]:
+                    - generic [ref=f2e459]: "25206"
+                    - generic [ref=f2e460]: Fortinet
+                  - generic [ref=f2e461]:
+                    - generic [ref=f2e462]: Engineering
+                    - generic [ref=f2e463]: Ongoing
+                    - generic [ref=f2e465]: 0 hrs
+                - button "25104 Coinbase Engineering Ongoing 598 hrs" [ref=f2e466] [cursor=pointer]:
+                  - generic [ref=f2e467]:
+                    - generic [ref=f2e468]: "25104"
+                    - generic [ref=f2e469]: Coinbase
+                  - generic [ref=f2e470]:
+                    - generic [ref=f2e471]: Engineering
+                    - generic [ref=f2e472]: Ongoing
+                    - generic [ref=f2e474]: 598 hrs
+                - button "28 Company Event General Ongoing 175 hrs" [ref=f2e475] [cursor=pointer]:
+                  - generic [ref=f2e476]:
+                    - generic [ref=f2e477]: "28"
+                    - generic [ref=f2e478]: Company Event
+                  - generic [ref=f2e479]:
+                    - generic [ref=f2e480]: General
+                    - generic [ref=f2e481]: Ongoing
+                    - generic [ref=f2e483]: 175 hrs
+                - button "80 Management Admin Ongoing 1,588 hrs" [ref=f2e484] [cursor=pointer]:
+                  - generic [ref=f2e485]:
+                    - generic [ref=f2e486]: "80"
+                    - generic [ref=f2e487]: Management
+                  - generic [ref=f2e488]:
+                    - generic [ref=f2e489]: Admin
+                    - generic [ref=f2e490]: Ongoing
+                    - generic [ref=f2e492]: 1,588 hrs
+                - button "112 Management Information System MIS Ongoing 4,600 hrs" [ref=f2e493] [cursor=pointer]:
+                  - generic [ref=f2e494]:
+                    - generic [ref=f2e495]: "112"
+                    - generic [ref=f2e496]: Management Information System
+                  - generic [ref=f2e497]:
+                    - generic [ref=f2e498]: MIS
+                    - generic [ref=f2e499]: Ongoing
+                    - generic [ref=f2e501]: 4,600 hrs
+                - button "44 Project Estimator MIS Ongoing 664 hrs" [ref=f2e502] [cursor=pointer]:
+                  - generic [ref=f2e503]:
+                    - generic [ref=f2e504]: "44"
+                    - generic [ref=f2e505]: Project Estimator
+                  - generic [ref=f2e506]:
+                    - generic [ref=f2e507]: MIS
+                    - generic [ref=f2e508]: Ongoing
+                    - generic [ref=f2e510]: 664 hrs
+                - button "53 Training Engineering Ongoing 3,648 hrs" [ref=f2e511] [cursor=pointer]:
+                  - generic [ref=f2e512]:
+                    - generic [ref=f2e513]: "53"
+                    - generic [ref=f2e514]: Training
+                  - generic [ref=f2e515]:
+                    - generic [ref=f2e516]: Engineering
+                    - generic [ref=f2e517]: Ongoing
+                    - generic [ref=f2e519]: 3,648 hrs
+              - generic [ref=f2e520]: 31 projects
+          - generic [ref=f2e522]:
+            - generic [ref=f2e523]:
+              - generic [ref=f2e527]:
+                - generic [ref=f2e528]: "260208"
+                - generic [ref=f2e529]: Stockton Facility
+                - generic [ref=f2e530]: Ongoing
+              - generic [ref=f2e536]:
+                - tab "Project dashboard" [ref=f2e537] [cursor=pointer]
+                - tab "Project details" [ref=f2e539] [cursor=pointer]
+                - tab "Activity" [ref=f2e541] [cursor=pointer]
+                - tab "Trail history" [ref=f2e543] [cursor=pointer]
+            - generic [ref=f2e545]:
+              - generic [ref=f2e548]:
+                - generic [ref=f2e551]:
+                  - generic [ref=f2e552]: Hours logged
+                  - generic [ref=f2e555]:
+                    - generic "120" [ref=f2e557]
+                    - generic [ref=f2e558]: 
+                  - generic [ref=f2e560]: 0 hrs in 30 days
+                - generic [ref=f2e563]:
+                  - generic [ref=f2e564]: People reporting
+                  - generic [ref=f2e567]:
+                    - generic "7" [ref=f2e569]
+                    - generic [ref=f2e570]: 
+                  - generic [ref=f2e572]: filed a report
+                - generic [ref=f2e575]:
+                  - generic [ref=f2e576]: Scope progress
+                  - generic [ref=f2e579]:
+                    - generic "-" [ref=f2e581]
+                    - generic [ref=f2e582]: 
+                  - generic [ref=f2e584]: No progress reported yet
+                - generic [ref=f2e587]:
+                  - generic [ref=f2e588]: Last report
+                  - generic [ref=f2e591]:
+                    - generic "Aug 14" [ref=f2e593]
+                    - generic [ref=f2e594]: 
+                  - generic [ref=f2e596]: since 8/10/2026
+                - generic [ref=f2e599]:
+                  - generic [ref=f2e600]: Items
+                  - generic [ref=f2e603]:
+                    - generic "1,069" [ref=f2e605]
+                    - generic [ref=f2e606]: 
+                  - generic [ref=f2e608]: change in elements
+              - generic [ref=f2e611]:
+                - generic [ref=f2e612]: Hours by activity
+                - generic [ref=f2e617]:
+                  - generic [ref=f2e618]:
+                    - generic [ref=f2e619]:
+                      - generic [ref=f2e620]: ARCHITECTURAL REVIT MODELING
+                      - generic [ref=f2e621]: 3 people · Aug 12, 2026
+                    - generic [ref=f2e622]: "8301"
+                    - generic [ref=f2e623]: Idle
+                    - generic [ref=f2e625]: 40 hrs
+                  - generic [ref=f2e626]:
+                    - generic [ref=f2e627]:
+                      - generic [ref=f2e628]: STRUCTURAL REVIT MODELING
+                      - generic [ref=f2e629]: 3 people · Aug 14, 2026
+                    - generic [ref=f2e630]: "8302"
+                    - generic [ref=f2e631]: Idle
+                    - generic [ref=f2e633]: 40 hrs
+                  - generic [ref=f2e634]:
+                    - generic [ref=f2e635]:
+                      - generic [ref=f2e636]: MISC REVIT MODELING
+                      - generic [ref=f2e637]: 2 people · Aug 13, 2026
+                    - generic [ref=f2e638]: "8308"
+                    - generic [ref=f2e639]: Idle
+                    - generic [ref=f2e641]: 40 hrs
+              - generic [ref=f2e644]:
+                - generic [ref=f2e645]: Project Scopes
+                - generic [ref=f2e648]:
+                  - button "All" [ref=f2e649] [cursor=pointer]
+                  - button "BIM Modeling" [ref=f2e651] [cursor=pointer]
+                - generic [ref=f2e656]:
+                  - generic [ref=f2e657]:
+                    - button "Collapse BIM Modeling" [ref=f2e658] [cursor=pointer]:
+                      - generic [ref=f2e659]: 
+                    - generic [ref=f2e661]: BIM Modeling
+                    - generic [ref=f2e662]: "500"
+                    - generic [ref=f2e663]: 3 scopes
+                    - generic [ref=f2e664]: Idle
+                  - generic [ref=f2e666]:
+                    - button "Collapse Architectural Revit Modeling" [disabled]:
+                      - generic [ref=f2e667]: 
+                    - generic [ref=f2e668]: Architectural Revit Modeling
+                    - generic [ref=f2e669]: 500-02
+                    - generic [ref=f2e670]: Idle
+                  - generic [ref=f2e672]:
+                    - button "Collapse Structural Revit Modeling" [disabled]:
+                      - generic [ref=f2e673]: 
+                    - generic [ref=f2e674]: Structural Revit Modeling
+                    - generic [ref=f2e675]: 500-03
+                    - generic [ref=f2e676]: Idle
+                  - generic [ref=f2e678]:
+                    - button "Collapse Misc Revit Modeling" [disabled]:
+                      - generic [ref=f2e679]: 
+                    - generic [ref=f2e680]: Misc Revit Modeling
+                    - generic [ref=f2e681]: 500-09
+                    - generic [ref=f2e682]: Idle
+    - button "Report a bug" [ref=f2e686] [cursor=pointer]:
+      - generic [ref=f2e687]: 
+  - dialog [ref=f2e708]:
+    - generic [ref=f2e711]:
+      - button "Close the sign out question" [ref=f2e712] [cursor=pointer]
+      - generic [ref=f2e714]:
+        - generic [ref=f2e715]:
+          - generic [ref=f2e716]: 
+          - generic [ref=f2e718]: Sign out?
+          - button "Stay signed in" [ref=f2e721] [cursor=pointer]:
+            - generic [ref=f2e722]: 
+        - generic [ref=f2e724]:
+          - generic [ref=f2e725]: You will need to sign in again to use the portal. Anything not yet saved on this page is lost.
+          - generic [ref=f2e726]:
+            - button "Stay signed in" [ref=f2e727] [cursor=pointer]
+            - button "Sign Out" [active] [ref=f2e729] [cursor=pointer]

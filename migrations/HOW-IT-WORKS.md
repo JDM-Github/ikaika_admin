@@ -33,6 +33,20 @@ migrate.ps1
 Run it with prompts: `.\migrate.ps1`. Or skip the prompts:
 `.\migrate.ps1 -Target users-projects-prod -Produce both`.
 
+To do every base of an environment at once, three wrappers sit on top (they share
+`lib/targets.ps1`, so they cannot disagree about a base):
+
+- `migrate-all.ps1 -Env test|prod` — migrates portal, estimator and tracker, stopping on the first failure.
+- `verify_migrations.ps1 -Env test|prod` — runs the verifier per base and prints one summary.
+- `copy-to-sql.ps1 -Env test|prod` — adopts each generated `data.sql` into `sql/<product>/data.sql` (data-only, `USE` pointed at the local DB) and writes `sql/status.txt` with the env.
+- `check_live.ps1 -Env test|prod` — counts Airtable live vs the export and flags a STALE export (records added since the fetch), so a snapshot taken before a new record existed cannot be imported without anyone noticing.
+- `reset.ps1` — reloads all four local databases from `sql/` (the all-bases `sql/portal/reset.ps1`).
+
+`devtools\Ikaika Console.bat` is a window over all of the above plus the Test
+Server actions (`deployment/*.ps1`) and a Production section (`import-airtable-to-prod.ps1`,
+`deploy-all-prod.ps1`, type `PROD` to confirm): pick an action, watch it run, see
+the exit code.
+
 Nothing touches MySQL automatically. `schema.sql` starts with `DROP DATABASE`, so the
 last step is always a deliberate hand-run import:
 
@@ -212,7 +226,7 @@ The verifier never trusts the generator's own summary. It:
 | --- | --- | --- |
 | **Row counts** | Does every export record land as a row? | the generator dropped records |
 | **Cell values** | For **every column of every row**, does the value the extractor produces from the raw record equal the value written to `data.sql`? | renamed field (NULLs), wrong extractor, ordering or escaping bug |
-| **Field landing** | Is every Airtable field stored as a column, an attachment, a junction, or listed as computed? | a plain field is stored nowhere — often a rename |
+| **Field landing** | Is every Airtable field stored as a column, an attachment, a junction, on the base's `accepted` list, or computed? | a plain field is stored nowhere and is not accepted — a rename or a new field |
 | **Link integrity** | Does every linked record ID exist in the target table's export? | dangling links `gen_junction()` would skip |
 | **Junction counts** | Does the number of distinct link pairs in the export equal the rows written? | wrong id_map target, links that go nowhere |
 | **Attachments** | Do the `attachments` rows equal the export's attachment count? Any failed downloads / missing files / NULL `file_url`s? | attachments lost or broken |
@@ -232,20 +246,54 @@ So yes — this answers row count, column count, per-row, per-field, and per-val
 
 ```
   ok    user_reports: 4309 rows, 16 columns, all values match
-  warn  Employees: 7 field(s) not stored as a column -- confirm each is intentional: ...
+  ok    Employees: 9 field(s) accepted as intentionally not stored
   KNOWN projects_activity_scope: export has 606 distinct link row(s), data.sql has 0
         -> schema FK + generator use project_scope_t3_activities, Airtable links to Activity Code/s (NOTE.md)
-RESULT: PASS -- 0 failure(s), 9 warning(s), 1 known issue(s)
+RESULT: PASS -- 0 failure(s), 0 warning(s), 36 accepted omission(s), 1 known issue(s)
 ```
 
 - `ok` — checked and clean.
 - `FAIL` — real mismatch; the run should not be imported.
-- `warn` — informational: fields intentionally not stored, NULL `file_url`s, local
-  files missing. Read them; they are the list you re-confirm after every Airtable change.
+- `warn` — a plain field stored **nowhere** that is not on the base's accepted list
+  (see below). Read it: it is a rename or a brand-new field, or a real omission to add.
 - `info` — link fields that exist in Airtable but have no junction (mirrors,
   Airtable-internal links). Not data loss unless you expected them.
 - `KNOWN` — a documented, accepted problem, downgraded from FAIL so it cannot hide
   the exit code. Currently one exists (see §7).
+
+### Accepted omissions — why there are usually no warnings
+
+Each base in `verify_migration.py` carries an `accepted` list: the Airtable fields
+confirmed on purpose NOT to be stored (dead/empty fields, Airtable lookups, text
+mirrors of computed data). Those are counted as `N field(s) accepted ...`, not
+warned about, so the output for a known-good export is clean.
+
+The tripwire is still live: any plain field that is stored nowhere and is **not**
+on that list is reported, which is exactly what a renamed or newly added field
+looks like. To clear a legitimate one, add its display name to that table's
+`accepted` list (a one-line edit in `verify_migration.py`); to investigate a
+suspicious one, check it against a fresh export with `inspect_schema.py`.
+
+### The coverage report — the shareable "is all the data there?" artifact
+
+Every run also prints a coverage summary, and writes a JSON file (via `migrate.ps1`,
+or `--report <path>`) listing, per table, the Airtable record count vs SQL row count
+plus **every field and link that was not migrated**. That file is what to hand to
+someone who asks whether the migration is complete:
+
+```
+-- coverage: what was migrated, what was not --------------------------------
+  ok    6333 Airtable records / 20 tables -> 6333 SQL rows (every record accounted for)
+  ok    256 columns migrated, 257 attachments migrated
+  warn  36 Airtable field(s) not migrated (computed excluded) -- every one is listed in the report
+  info  43 link field(s) without a junction -- listed in the report
+```
+
+`0 failure(s)` means `data.sql` reproduces the export exactly; the report's
+`unmapped_fields` and `links_without_junction` arrays are the honest remainder. Most
+are dead (never-filled) fields, or the mirror side of a junction that already exists;
+anything holding real data is the short list to sign off. To *also* prove
+`Airtable == export` as of now, re-fetch first (see below).
 
 ### Re-checking against the live base
 
@@ -281,11 +329,18 @@ existing databases), then add the COLUMNS entry to the generator and verify.
 | File | Role |
 | --- | --- |
 | `migrate.ps1` | orchestrator: fetch -> upload -> generate -> verify -> assemble schema |
+| `migrate-all.ps1` | `migrate.ps1` for every base of an env (`-Env test\|prod`) |
+| `verify_migrations.ps1` | verifier for every base of an env; one summary table |
+| `check_live.ps1` / `livecheck.py` | counts Airtable live vs the export; flags a STALE export (records added since the fetch) |
+| `copy-to-sql.ps1` | adopts generated `data.sql` into `sql/<product>/`, writes `sql/status.txt` |
+| `reset.ps1` | reloads all four local databases from `sql/` |
+| `lib/targets.ps1` | the shared env -> base/folder/sql-dir table the three wrappers read |
 | `fetch_airtable.py` | generic exporter (any base, `--base-id`); downloads attachments |
 | `inspect_schema.py` | prints live field display names from an export (`_base_schema.json`) |
 | `upload_attachments_to_cloudinary.py` | uploads downloaded files, caches URLs |
 | `generate/generate_sql_*.py` | export -> `data.sql` per base |
 | `verify_migration.py` | export vs `data.sql` health check (this document, §4) |
+| `../devtools/ikaika-console.ps1` | the window over all of the above (plus `deployment/`) |
 | `NOTE.md` | per-base inventory and caveats (estimator quirks, reimbursement notes) |
 | `outputs/` | **gitignored** — real personal data (IDs, bank certificates, photos) |
 

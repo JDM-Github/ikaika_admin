@@ -166,6 +166,10 @@ CREATE TABLE email_messages (
     bcc             JSON         NULL,
     from_name       VARCHAR(191) NULL,
     reply_to        VARCHAR(191) NULL,
+    -- "Send as me": the sender's own address, when they chose it, so the From is theirs (a reply and
+    -- the visible sender both the person). Null leaves from the portal's own noreply.
+    -- Existing databases: add_portal_email_from_address.
+    from_address    VARCHAR(191) NULL,
     audience        VARCHAR(32)  NOT NULL,
     audience_filter JSON         NULL,
     recipients      JSON         NULL,
@@ -875,7 +879,11 @@ WHERE permission_key IN (
     'requests.leave', 'requests.overtime', 'requests.offset', 'requests.reimbursement',
     'user', 'user.logs', 'user.logs.export', 'user.recycle', 'user.recycle.restore', 'user.recycle.export',
     'calendar', 'calendar.download',
-    'access'
+    'access',
+    -- Every member may write and send an email as themselves (2026-10-15): the composer opens with
+    -- Me, their own address and a signature footer, and the page sits before Bug Reports.
+    -- Existing databases: grant_portal_email_to_members.
+    'email', 'email.send'
 );
 
 -- Admins: everything but the developer tools, Backup, the Airtable sync, Manage other admins and

@@ -1,0 +1,224 @@
+- generic [ref=f7e13]:
+  - generic [ref=f7e14]:
+    - generic [ref=f7e16]:
+      - button "Collapse navigation" [ref=f7e18] [cursor=pointer]:
+        - generic [ref=f7e19]: 
+      - generic [ref=f7e20]: IKAIKA OPC
+    - generic [ref=f7e27]:
+      - generic [ref=f7e28]:
+        - button "Projects" [ref=f7e29] [cursor=pointer]:
+          - generic [ref=f7e30]: 
+          - generic [ref=f7e33]:
+            - generic [ref=f7e34]: Projects
+            - generic [ref=f7e35]: 
+        - generic [ref=f7e38]:
+          - button "View Projects" [ref=f7e41] [cursor=pointer]:
+            - generic [ref=f7e42]: 
+          - button "Track Projects" [ref=f7e48] [cursor=pointer]:
+            - generic [ref=f7e49]: 
+          - button "Created Projects" [ref=f7e55] [cursor=pointer]:
+            - generic [ref=f7e56]: 
+      - button "User" [ref=f7e62] [cursor=pointer]:
+        - generic [ref=f7e63]: 
+        - generic [ref=f7e66]:
+          - generic [ref=f7e67]: User
+          - generic [ref=f7e68]: 
+      - button "Event Calendar" [ref=f7e70] [cursor=pointer]:
+        - generic [ref=f7e71]: 
+      - button "Access" [ref=f7e76] [cursor=pointer]:
+        - generic [ref=f7e77]: 
+      - button "Email" [ref=f7e82] [cursor=pointer]:
+        - generic [ref=f7e83]: 
+      - generic [ref=f7e88]: Admin
+      - button "Manage" [ref=f7e91] [cursor=pointer]:
+        - generic [ref=f7e92]: 
+        - generic [ref=f7e95]:
+          - generic [ref=f7e96]: Manage
+          - generic [ref=f7e97]: 
+      - button "Finance" [ref=f7e100] [cursor=pointer]:
+        - generic [ref=f7e101]: 
+        - generic [ref=f7e104]:
+          - generic [ref=f7e105]: Finance
+          - generic [ref=f7e106]: 
+      - generic [ref=f7e108]:
+        - button "Administration" [active] [ref=f7e109] [cursor=pointer]:
+          - generic [ref=f7e110]: 
+          - generic [ref=f7e113]:
+            - generic [ref=f7e114]: Administration
+            - generic [ref=f7e115]: 
+        - generic [ref=f7e341]:
+          - button "All Logs" [ref=f7e344] [cursor=pointer]:
+            - generic [ref=f7e345]: 
+          - button "Missing Reports" [ref=f7e351] [cursor=pointer]:
+            - generic [ref=f7e352]: 
+          - button "All Emails" [ref=f7e358] [cursor=pointer]:
+            - generic [ref=f7e359]: 
+    - button "Account menu" [ref=f7e119] [cursor=pointer]:
+      - generic "Don De Guzman" [ref=f7e121]:
+        - img "Don De Guzman" [ref=f7e123]
+      - generic [ref=f7e125]:
+        - generic [ref=f7e126]:
+          - generic [ref=f7e127]: Don De Guzman
+          - generic [ref=f7e128]: Online
+        - generic [ref=f7e131]: 
+  - generic [ref=f7e132]:
+    - generic [ref=f7e133]:
+      - generic [ref=f7e136]:
+        - generic [ref=f7e137]: IKAIKA Portal
+        - generic [ref=f7e142]:
+          - generic [ref=f7e144]:
+            - generic [ref=f7e145]: Manila, Philippines
+            - generic [ref=f7e146]:
+              - generic [ref=f7e147]: 11:10 PM
+              - generic [ref=f7e148]:
+                - generic [ref=f7e149]: 
+                - generic [ref=f7e150]: 84°F | 29°C
+            - generic [ref=f7e151]: Friday, 10/16/2026 · Overcast · 94°F / 80°F | 35°C / 27°C
+          - generic [ref=f7e153]:
+            - generic [ref=f7e154]: San Jose, CA
+            - generic [ref=f7e155]:
+              - generic [ref=f7e156]: 8:10 AM
+              - generic [ref=f7e157]:
+                - generic [ref=f7e158]: 
+                - generic [ref=f7e159]: 53°F | 12°C
+            - generic [ref=f7e160]: 15h behind · Friday, 10/16/2026 · Clear · 93°F / 51°F | 34°C / 11°C
+        - generic [ref=f7e161]:
+          - button "Notifications" [ref=f7e164] [cursor=pointer]:
+            - generic [ref=f7e165]: 
+          - button "Turn off background effect" [ref=f7e166] [cursor=pointer]:
+            - generic [ref=f7e167]: 
+          - button "Toggle theme" [ref=f7e168] [cursor=pointer]:
+            - generic [ref=f7e169]: 
+          - link "Open your profile" [ref=f7e170] [cursor=pointer]:
+            - generic [ref=f7e171]:
+              - generic "Don De Guzman" [ref=f7e173]:
+                - img "Don De Guzman" [ref=f7e175]
+              - generic [ref=f7e176]:
+                - generic [ref=f7e177]: Don De Guzman
+                - generic [ref=f7e178]: 220101-0001
+      - generic [ref=f7e179]:
+        - link "PORTAL" [ref=f7e180] [cursor=pointer]
+        - generic [ref=f7e182]: /
+        - generic [ref=f7e183]: Email
+    - generic [ref=f7e190]:
+      - generic [ref=f7e191]:
+        - generic [ref=f7e192]:
+          - generic [ref=f7e193]: Send Email
+          - generic [ref=f7e194]: "One email for everyone: notices, events, complaints, and the footers that ride under them."
+        - generic [ref=f7e198]:
+          - button " Use Template" [ref=f7e202] [cursor=pointer]:
+            - generic [ref=f7e203]: 
+            - generic [ref=f7e204]: Use Template
+          - button " Letter Formats" [ref=f7e208] [cursor=pointer]:
+            - generic [ref=f7e209]: 
+            - generic [ref=f7e210]: Letter Formats
+      - generic [ref=f7e211]:
+        - generic [ref=f7e215]:
+          - generic [ref=f7e216]:
+            - generic [ref=f7e217]: 
+            - generic [ref=f7e219]:
+              - generic [ref=f7e220]: Compose
+              - generic [ref=f7e221]: Write it once, then send it to the people who need it.
+          - generic [ref=f7e223]:
+            - generic [ref=f7e224]:
+              - generic [ref=f7e225]:
+                - generic [ref=f7e226]: From
+                - generic [ref=f7e228]:
+                  - radiogroup "Who the email is from" [ref=f7e229]:
+                    - button "Portal" [ref=f7e230] [cursor=pointer]
+                    - button "IKAIKA BIM" [ref=f7e232] [cursor=pointer]
+                    - button "Me" [ref=f7e234] [cursor=pointer]
+                  - generic [ref=f7e236]:
+                    - generic [ref=f7e237]: IKAIKA Portal
+                    - generic [ref=f7e238]: No-reply address
+              - generic [ref=f7e239]:
+                - generic [ref=f7e240]: To
+                - button "Choose audience" [ref=f7e245] [cursor=pointer]:
+                  - generic [ref=f7e247]: 
+                - generic [ref=f7e248]:
+                  - button "Cc" [ref=f7e249] [cursor=pointer]
+                  - button "Bcc" [ref=f7e251] [cursor=pointer]
+              - generic [ref=f7e253]:
+                - generic [ref=f7e254]: Subject
+                - generic [ref=f7e256]:
+                  - textbox "Subject" [ref=f7e257]:
+                    - /placeholder: What is this about?
+                  - button "Choose a category" [ref=f7e260] [cursor=pointer]:
+                    - generic [ref=f7e262]: 
+            - generic [ref=f7e263]:
+              - toolbar [ref=f7e265]:
+                - generic [ref=f7e266]:
+                  - radiogroup "How the message is written" [ref=f7e267]:
+                    - button "Formatted" [ref=f7e268] [cursor=pointer]
+                    - button "HTML" [ref=f7e270] [cursor=pointer]
+                  - switch "Letter design" [ref=f7e272] [cursor=pointer]:
+                    - generic [ref=f7e273]: 
+                - generic [ref=f7e275]:
+                  - button "Image" [ref=f7e276] [cursor=pointer]:
+                    - generic [ref=f7e277]: 
+                  - button "Attach files" [ref=f7e278] [cursor=pointer]:
+                    - generic [ref=f7e279]: 
+                - generic [ref=f7e280]:
+                  - button "Bold" [ref=f7e281] [cursor=pointer]:
+                    - generic [ref=f7e282]: B
+                  - button "Italic" [ref=f7e283] [cursor=pointer]:
+                    - generic [ref=f7e284]: I
+                  - button "Heading" [ref=f7e285] [cursor=pointer]:
+                    - generic [ref=f7e286]: H
+                - generic [ref=f7e287]:
+                  - button "Bulleted list" [ref=f7e288] [cursor=pointer]:
+                    - generic [ref=f7e289]: 
+                  - button "Numbered list" [ref=f7e290] [cursor=pointer]:
+                    - generic [ref=f7e291]: "1."
+                  - button "Quote" [ref=f7e292] [cursor=pointer]:
+                    - generic [ref=f7e293]: “
+                - button "Link" [ref=f7e295] [cursor=pointer]:
+                  - generic [ref=f7e296]: 
+                - generic [ref=f7e297]: Formatting shows in the preview
+              - textbox "Message" [ref=f7e299]:
+                - /placeholder: Write the message...
+            - generic [ref=f7e300]:
+              - generic [ref=f7e301]:
+                - generic [ref=f7e302]: Footer
+                - button "No footer" [ref=f7e305] [cursor=pointer]:
+                  - generic [ref=f7e306]: Company footer
+                  - generic [ref=f7e307]: 
+              - generic [ref=f7e308]: Recipients are counted when it sends.
+              - button " Send Email" [ref=f7e310] [cursor=pointer]:
+                - generic [ref=f7e311]: 
+                - generic [ref=f7e312]: Send Email
+        - generic [ref=f7e314]:
+          - generic [ref=f7e315]:
+            - generic [ref=f7e316]: 
+            - generic [ref=f7e318]:
+              - generic [ref=f7e319]: How it lands
+              - generic [ref=f7e320]: What the recipient opens in their inbox.
+            - radiogroup "Show the email light or dark" [ref=f7e322]:
+              - button "Light" [ref=f7e323] [cursor=pointer]
+              - button "Dark" [ref=f7e325] [cursor=pointer]
+          - generic [ref=f7e328]:
+            - generic [ref=f7e329]:
+              - generic [ref=f7e330]: No subject yet.
+              - generic [ref=f7e331]: "From: IKAIKA Portal"
+              - generic [ref=f7e332]: "To: Choose audience"
+            - iframe [ref=f7e335]:
+              - generic [ref=f8e2]:
+                - img "IKAIKA BIM" [ref=f8e3]
+                - generic [ref=f8e4]: IKAIKA BIM
+                - generic [ref=f8e5]: IKAIKA PORTAL
+                - separator [ref=f8e6]
+                - generic [ref=f8e7]:
+                  - img "IKAIKA BIM" [ref=f8e8]
+                  - generic [ref=f8e9]: IKAIKA BIM
+                  - generic [ref=f8e10]: IKAIKA PORTAL
+                  - generic [ref=f8e11]: Automated communication
+                  - link "ikaikabim.com" [ref=f8e12] [cursor=pointer]:
+                    - /url: https://ikaikabim.com
+                  - link "info@ikaikabim.com" [ref=f8e14] [cursor=pointer]:
+                    - /url: mailto:info@ikaikabim.com
+                  - link "11th Floor, SM Aura Office Tower 26th St. corner McKinley Parkway Fort Bonifacio, Taguig City, Metro Manila, Philippines" [ref=f8e15] [cursor=pointer]:
+                    - /url: https://www.google.com/maps/search/?api=1&query=SM+Aura+Office+Tower+Taguig
+                    - text: 11th Floor, SM Aura Office Tower26th St. corner McKinley ParkwayFort Bonifacio, Taguig City,Metro Manila, Philippines
+                  - text: This message may contain confidential information and is meant only for the people it is addressed to. If you received it by mistake, please let the sender know and delete it.
+  - button "Report a bug" [ref=f7e338] [cursor=pointer]:
+    - generic [ref=f7e339]: 

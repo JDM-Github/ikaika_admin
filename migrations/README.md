@@ -38,6 +38,27 @@ Like Users & Projects, the Transaction Tracker has two bases: PRODUCTION
 app to try Finance against). Both generate into the same `test_tracker_database`
 with the same schema and generator; only the base and the output folder differ.
 
+## Do it all at once, or from a window
+
+Three wrappers drive the whole set, so you do not run `migrate.ps1` per base:
+
+| Script | Does |
+| --- | --- |
+| `migrate-all.ps1 -Env test\|prod` | fetch → upload → generate → verify for every base of that env (portal, estimator, tracker), stopping on the first failure |
+| `verify_migrations.ps1 -Env test\|prod` | re-checks every generated `data.sql` against its export, writing `coverage_report.json` per base, and prints one summary table |
+| `check_live.ps1 -Env test\|prod` | counts records in Airtable now and compares to the export — flags a STALE export (records added since the fetch) before you generate or import |
+| `copy-to-sql.ps1 -Env test\|prod` | adopts the generated `data.sql` into `sql/<product>/data.sql` (strips the appended portal DDL, points `USE` at the local database) and records the env in `sql/status.txt` |
+
+`reset.ps1` reloads every local database (core, portal, estimator, tracker) from
+the committed `sql/` folder in one go — the all-bases version of
+`sql/portal/reset.ps1`. It reads `sql/status.txt` and warns loudly if the
+snapshot is production data.
+
+For a window instead of remembering the commands — with the Test Server deploy
+and database actions alongside — double-click **`devtools\Ikaika Console.bat`**.
+Each action runs one at a time with live output, an exit code, and errors in
+red; destructive actions ask you to type `yes` first.
+
 ## What you get
 
 One folder per base, holding everything an import needs:
@@ -66,8 +87,8 @@ mysql -u root -pPASSWORD --default-character-set=utf8mb4 < outputs/users_project
 mysql -u root -pPASSWORD --default-character-set=utf8mb4 < outputs/users_projects_prod/data.sql
 ```
 
-To reload the local portal database instead, use `sql/portal/reset.ps1` — that
-one runs the checked-in files directly and does the confirmation for you.
+To reload the local portal database instead, use `sql/portal/reset.ps1` (portal
+only), or `reset.ps1` here, which reloads all four local databases at once.
 
 ## Schema is copied, data is generated
 
@@ -109,7 +130,15 @@ python verify_migration.py --export-dir outputs\users_projects_prod\export --dat
 Exit code 0 = pass (warnings are informational), 1 = failure. `migrate.ps1`
 runs it automatically and refuses to print the import commands on failure.
 Which check catches what, and how to re-check against the live base, is in
-HOW-IT-WORKS.md §4.
+HOW-IT-WORKS.md §4. Add `--report <path>` to also write a JSON coverage report
+(per-table record/row counts plus every field and link that was not migrated) —
+the shareable "is all the data there?" artifact. `migrate.ps1` writes it to
+`outputs\<base>\coverage_report.json` on every run.
+
+Fields confirmed intentionally not stored live in each base's `accepted` list in
+`verify_migration.py`, so a known-good export verifies with **0 warnings**; only a
+new or renamed field is reported. Add a field there once you have confirmed it holds
+no real data.
 
 ## Credentials
 
@@ -153,7 +182,9 @@ name nothing would query. They also upload to the app's own
 `export/` holds real downloaded documents — bank certificates, SSS/PhilHealth/TIN
 scans, employee photos — and `data.sql` holds real employee records. The
 `migrations/outputs/` rule in `.gitignore` covers all of it. When a generated
-`data.sql` is good enough to keep, promote it by hand to `sql/portal/data.sql`.
+`data.sql` is good enough to keep, `copy-to-sql.ps1` promotes it to
+`sql/<product>/data.sql` (committed); `sql/status.txt` records which environment
+that snapshot came from and is gitignored (machine state).
 
 ## The scripts underneath
 

@@ -1,0 +1,189 @@
+- generic [ref=f2e13]:
+  - generic [ref=f2e14]:
+    - generic [ref=f2e16]:
+      - button "Collapse navigation" [ref=f2e18] [cursor=pointer]:
+        - generic [ref=f2e19]: 
+      - generic [ref=f2e20]: IKAIKA OPC
+    - generic [ref=f2e27]:
+      - generic [ref=f2e28]:
+        - button "Projects" [ref=f2e29] [cursor=pointer]:
+          - generic [ref=f2e30]: 
+          - generic [ref=f2e33]:
+            - generic [ref=f2e34]: Projects
+            - generic [ref=f2e35]: 
+        - generic [ref=f2e38]:
+          - button "View Projects" [ref=f2e41] [cursor=pointer]:
+            - generic [ref=f2e42]: 
+          - button "Track Projects" [ref=f2e48] [cursor=pointer]:
+            - generic [ref=f2e49]: 
+          - button "Created Projects" [ref=f2e55] [cursor=pointer]:
+            - generic [ref=f2e56]: 
+      - button "User" [ref=f2e62] [cursor=pointer]:
+        - generic [ref=f2e63]: 
+        - generic [ref=f2e66]:
+          - generic [ref=f2e67]: User
+          - generic [ref=f2e68]: 
+      - button "Event Calendar" [ref=f2e70] [cursor=pointer]:
+        - generic [ref=f2e71]: 
+      - button "Access" [ref=f2e76] [cursor=pointer]:
+        - generic [ref=f2e77]: 
+      - button "Email" [active] [ref=f2e82] [cursor=pointer]:
+        - generic [ref=f2e83]: 
+      - generic [ref=f2e88]: Admin
+      - button "Manage" [ref=f2e91] [cursor=pointer]:
+        - generic [ref=f2e92]: 
+        - generic [ref=f2e95]:
+          - generic [ref=f2e96]: Manage
+          - generic [ref=f2e97]: 
+      - button "Finance" [ref=f2e100] [cursor=pointer]:
+        - generic [ref=f2e101]: 
+        - generic [ref=f2e104]:
+          - generic [ref=f2e105]: Finance
+          - generic [ref=f2e106]: 
+      - button "Administration" [ref=f2e109] [cursor=pointer]:
+        - generic [ref=f2e110]: 
+        - generic [ref=f2e113]:
+          - generic [ref=f2e114]: Administration
+          - generic [ref=f2e115]: 
+    - button "Account menu" [ref=f2e119] [cursor=pointer]:
+      - generic "Don De Guzman" [ref=f2e121]:
+        - img "Don De Guzman" [ref=f2e123]
+      - generic [ref=f2e125]:
+        - generic [ref=f2e126]:
+          - generic [ref=f2e127]: Don De Guzman
+          - generic [ref=f2e128]: Online
+        - generic [ref=f2e131]: 
+  - generic [ref=f2e132]:
+    - generic [ref=f2e133]:
+      - generic [ref=f2e136]:
+        - generic [ref=f2e137]: IKAIKA Portal
+        - generic [ref=f2e144]:
+          - generic [ref=f2e145]: Manila, Philippines
+          - generic [ref=f2e146]:
+            - generic [ref=f2e147]: 10:55 PM
+            - generic [ref=f2e148]:
+              - generic [ref=f2e149]: 
+              - generic [ref=f2e150]: 84°F | 29°C
+          - generic [ref=f2e151]: Friday, 10/16/2026 · Overcast · 94°F / 80°F | 35°C / 27°C
+        - generic [ref=f2e152]:
+          - button "Notifications" [ref=f2e155] [cursor=pointer]:
+            - generic [ref=f2e156]: 
+          - button "Turn off background effect" [ref=f2e157] [cursor=pointer]:
+            - generic [ref=f2e158]: 
+          - button "Toggle theme" [ref=f2e159] [cursor=pointer]:
+            - generic [ref=f2e160]: 
+          - link "Open your profile" [ref=f2e161] [cursor=pointer]:
+            - generic [ref=f2e162]:
+              - generic "Don De Guzman" [ref=f2e164]:
+                - img "Don De Guzman" [ref=f2e166]
+              - generic [ref=f2e167]:
+                - generic [ref=f2e168]: Don De Guzman
+                - generic [ref=f2e169]: 220101-0001
+      - generic [ref=f2e170]:
+        - link "PORTAL" [ref=f2e171] [cursor=pointer]
+        - generic [ref=f2e173]: /
+        - generic [ref=f2e174]: Email
+    - generic [ref=f2e181]:
+      - generic [ref=f2e182]:
+        - generic [ref=f2e183]:
+          - generic [ref=f2e184]: Send Email
+          - generic [ref=f2e185]: "One email for everyone: notices, events, complaints, and the footers that ride under them."
+        - generic [ref=f2e189]:
+          - button " Use Template" [ref=f2e193] [cursor=pointer]:
+            - generic [ref=f2e194]: 
+            - generic [ref=f2e195]: Use Template
+          - button " Letter Formats" [ref=f2e199] [cursor=pointer]:
+            - generic [ref=f2e200]: 
+            - generic [ref=f2e201]: Letter Formats
+      - generic [ref=f2e202]:
+        - generic [ref=f2e206]:
+          - generic [ref=f2e207]:
+            - generic [ref=f2e208]: 
+            - generic [ref=f2e210]:
+              - generic [ref=f2e211]: Compose
+              - generic [ref=f2e212]: Write it once, then send it to the people who need it.
+          - generic [ref=f2e213]:
+            - generic [ref=f2e214]:
+              - generic [ref=f2e215]:
+                - generic [ref=f2e216]: From
+                - generic [ref=f2e218]:
+                  - radiogroup "Who the email is from" [ref=f2e219]:
+                    - button "Portal" [ref=f2e220] [cursor=pointer]
+                    - button "IKAIKA BIM" [ref=f2e222] [cursor=pointer]
+                    - button "Me" [ref=f2e224] [cursor=pointer]
+                  - generic [ref=f2e226]:
+                    - generic [ref=f2e227]: IKAIKA Portal
+                    - generic [ref=f2e228]: No-reply address
+              - generic [ref=f2e229]:
+                - generic [ref=f2e230]: To
+                - button "Choose audience" [ref=f2e235] [cursor=pointer]:
+                  - generic [ref=f2e237]: 
+                - generic [ref=f2e238]:
+                  - button "Cc" [ref=f2e239] [cursor=pointer]
+                  - button "Bcc" [ref=f2e241] [cursor=pointer]
+              - generic [ref=f2e243]:
+                - generic [ref=f2e244]: Subject
+                - generic [ref=f2e246]:
+                  - textbox "Subject" [ref=f2e247]:
+                    - /placeholder: What is this about?
+                  - button "Choose a category" [ref=f2e250] [cursor=pointer]:
+                    - generic [ref=f2e252]: 
+            - generic [ref=f2e253]:
+              - toolbar [ref=f2e255]:
+                - generic [ref=f2e256]:
+                  - radiogroup "How the message is written" [ref=f2e257]:
+                    - button "Formatted" [ref=f2e258] [cursor=pointer]
+                    - button "HTML" [ref=f2e260] [cursor=pointer]
+                  - switch "Letter design" [ref=f2e262] [cursor=pointer]:
+                    - generic [ref=f2e263]: 
+                - generic [ref=f2e265]:
+                  - button "Image" [ref=f2e266] [cursor=pointer]:
+                    - generic [ref=f2e267]: 
+                  - button "Attach files" [ref=f2e268] [cursor=pointer]:
+                    - generic [ref=f2e269]: 
+                - generic [ref=f2e270]:
+                  - button "Bold" [ref=f2e271] [cursor=pointer]:
+                    - generic [ref=f2e272]: B
+                  - button "Italic" [ref=f2e273] [cursor=pointer]:
+                    - generic [ref=f2e274]: I
+                  - button "Heading" [ref=f2e275] [cursor=pointer]:
+                    - generic [ref=f2e276]: H
+                - generic [ref=f2e277]:
+                  - button "Bulleted list" [ref=f2e278] [cursor=pointer]:
+                    - generic [ref=f2e279]: 
+                  - button "Numbered list" [ref=f2e280] [cursor=pointer]:
+                    - generic [ref=f2e281]: "1."
+                  - button "Quote" [ref=f2e282] [cursor=pointer]:
+                    - generic [ref=f2e283]: “
+                - button "Link" [ref=f2e285] [cursor=pointer]:
+                  - generic [ref=f2e286]: 
+                - generic [ref=f2e287]: Formatting shows in the preview
+              - textbox "Message" [ref=f2e289]:
+                - /placeholder: Write the message...
+            - generic [ref=f2e290]:
+              - generic [ref=f2e291]:
+                - generic [ref=f2e292]: Footer
+                - button "No footer" [ref=f2e295] [cursor=pointer]:
+                  - generic [ref=f2e296]: Company footer
+                  - generic [ref=f2e297]: 
+              - generic [ref=f2e298]: Recipients are counted when it sends.
+              - button " Send Email" [ref=f2e300] [cursor=pointer]:
+                - generic [ref=f2e301]: 
+                - generic [ref=f2e302]: Send Email
+        - generic [ref=f2e304]:
+          - generic [ref=f2e305]:
+            - generic [ref=f2e306]: 
+            - generic [ref=f2e308]:
+              - generic [ref=f2e309]: How it lands
+              - generic [ref=f2e310]: What the recipient opens in their inbox.
+            - radiogroup "Show the email light or dark" [ref=f2e311]:
+              - button "Light" [ref=f2e312] [cursor=pointer]
+              - button "Dark" [ref=f2e314] [cursor=pointer]
+          - generic [ref=f2e317]:
+            - generic [ref=f2e318]:
+              - generic [ref=f2e319]: No subject yet.
+              - generic [ref=f2e320]: "From: IKAIKA Portal"
+              - generic [ref=f2e321]: "To: Choose audience"
+            - iframe [ref=f2e324]
+  - button "Report a bug" [ref=f2e327] [cursor=pointer]:
+    - generic [ref=f2e328]: 

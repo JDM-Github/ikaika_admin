@@ -1,0 +1,28 @@
+- generic [ref=f2e731]:
+  - button "Toggle theme" [ref=f2e733] [cursor=pointer]:
+    - generic [ref=f2e734]: 
+  - generic [ref=f2e735]:
+    - generic [ref=f2e740]:
+      - generic [ref=f2e741]: Sign in
+      - generic [ref=f2e742]: Use your Ikaika Microsoft account, or your work email.
+    - generic [ref=f2e743]:
+      - button "Sign in with Microsoft" [ref=f2e744] [cursor=pointer]
+      - generic [ref=f2e746]: or
+      - generic [ref=f2e750]:
+        - generic [ref=f2e751]: Work email
+        - textbox "Work email" [ref=f2e753]:
+          - /placeholder: you@ikaikabim.com
+      - button "Email me a code" [ref=f2e754] [cursor=pointer]
+      - generic [ref=f2e756]: Development only
+      - generic [ref=f2e760]:
+        - generic [ref=f2e761]: ID number
+        - textbox "ID number" [ref=f2e763]:
+          - /placeholder: 220101-0001
+      - generic [ref=f2e764]:
+        - generic [ref=f2e765]: Password
+        - generic [ref=f2e766]:
+          - textbox "Password" [ref=f2e767]:
+            - /placeholder: Given by MIS
+          - button "Show password" [ref=f2e768] [cursor=pointer]:
+            - generic [ref=f2e769]: 
+      - button "Sign in with ID number" [ref=f2e770] [cursor=pointer]

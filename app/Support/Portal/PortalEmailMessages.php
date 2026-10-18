@@ -249,9 +249,16 @@ final class PortalEmailMessages
         $bcc = PortalEmailAudience::validatedAddresses($request->input('bcc', []), PortalEmailAudience::MAX_COPIES, 'BCC', false);
         $footerId = $this->validatedFooterId($request);
         $linkPath = $this->validatedLinkPath($request);
-        [$fromName, $replyTo] = $this->sender($actor, $request);
+        [$fromName, $replyTo, $fromAddress] = $this->sender($actor, $request);
         $attachments = $this->attachments->staged($actor, $request->input('attachmentIds', []));
         $footer = $footerId === null ? null : $this->blocks->footer($footerId);
+        // "Send as me" may only wear a signature footer: the composer limits the picker to them, and
+        // this refuses anything else, so a plain footer never leaves under a person's own name.
+        $isMe = ($request->boolean('asSender') || $request->input('sender') === 'me')
+            && ! in_array($fromName, [PortalEmailMarkup::COMPANY_SENDER, PortalAccessGraph::DEVELOPER_NAME_CAPITAL], true);
+        if ($isMe && $footer !== null && ! PortalSignature::carriesSignature((string) $footer->body)) {
+            abort(422, 'A footer sent as you must be a signature.');
+        }
         $footerBody = $footer === null ? null : trim((string) $footer->body);
         $footerFormat = $footer === null ? null : $this->blockFormat($footer);
         // A footer carrying signature placeholders reads for whoever is sending, like a signature.
@@ -273,6 +280,7 @@ final class PortalEmailMessages
             $bcc,
             $fromName,
             $replyTo,
+            $fromAddress,
             $linkPath,
             $attachments,
         );
@@ -306,6 +314,7 @@ final class PortalEmailMessages
             [],
             PortalNotificationEmails::FROM_NAME,
             null,
+            null,
             $linkPath,
         );
     }
@@ -335,6 +344,7 @@ final class PortalEmailMessages
         array $bcc,
         ?string $fromName,
         ?string $replyTo,
+        ?string $fromAddress,
         ?string $linkPath,
         array $attachments = [],
     ): array {
@@ -362,6 +372,7 @@ final class PortalEmailMessages
             $bcc,
             $fromName,
             $replyTo,
+            $fromAddress,
             $recipients,
             $employeeId,
         ));
@@ -434,7 +445,7 @@ final class PortalEmailMessages
     public function deliverCopy(int $messageId, array $to, array $cc, array $bcc): bool
     {
         $row = $this->connection()->table('email_messages')->where('id', $messageId)
-            ->first(['category', 'subject', 'body', 'format', 'footer_body', 'footer_format', 'from_name', 'reply_to']);
+            ->first(['category', 'subject', 'body', 'format', 'footer_body', 'footer_format', 'from_name', 'reply_to', 'from_address']);
         if ($row === null) {
             return false;
         }
@@ -562,6 +573,8 @@ final class PortalEmailMessages
      */
     public static function mailFromRow(object $row, array $files = []): PortalEmailMail
     {
+        $fromAddress = is_string($row->from_address ?? null) ? $row->from_address : null;
+
         return new PortalEmailMail(
             (string) $row->subject,
             (string) $row->body,
@@ -573,31 +586,33 @@ final class PortalEmailMessages
             $files,
             [],
             PortalEmail::category($row->category),
+            // "Send as me": the sender chose to leave from their own address; null leaves it to the portal's.
+            $fromAddress,
         );
     }
 
     /**
-     * "Send as me": the sender's own name on the portal's address, and replies to their own mailbox.
-     * A developer acting in Developer mode goes out as "A developer" with no reply address, so the
-     * mail never names who stood behind it. As the company it goes out as IKAIKA BIM, with no reply
-     * address; otherwise both are null and the mail is the portal's.
+     * "Send as me": the sender's own name, and replies to their own mailbox. They may also send from
+     * their own address -- but only one on the portal's own domain, or the mail would look spoofed and
+     * fail its sender checks; off the domain it leaves from the portal's noreply. A developer acting in
+     * Developer mode names nobody and replies nowhere. As the company it goes out as IKAIKA BIM, with
+     * no reply address; otherwise every value is null and the mail is the portal's.
      *
-     * @return array{0: ?string, 1: ?string}
+     * @return array{0: ?string, 1: ?string, 2: ?string}
      */
     private function sender(Employee $actor, Request $request): array
     {
         // As the company: its own name on the portal's address, with no one person to reply to.
         if ($request->input('sender') === self::SENDER_COMPANY) {
-            return [PortalEmailMarkup::COMPANY_SENDER, null];
+            return [PortalEmailMarkup::COMPANY_SENDER, null, null];
         }
         if (! $request->boolean('asSender') && $request->input('sender') !== 'me') {
-            return [null, null];
+            return [null, null, null];
         }
 
         $name = PortalActivityCopy::actorName($actor, $request, true);
-        $fromName = $name.' via '.(string) config('mail.from.name');
         if ($name === PortalAccessGraph::DEVELOPER_NAME_CAPITAL) {
-            return [$fromName, null];
+            return [$name, null, null];
         }
 
         $email = strtolower(trim((string) ($actor->email ?? '')));
@@ -605,7 +620,25 @@ final class PortalEmailMessages
             abort(422, 'Your account has no email address for replies to go to.');
         }
 
-        return [$fromName, $email];
+        // Their own address only when they asked for it and it is one on the domain the portal sends for.
+        // It is ALWAYS the signed-in person's own: the body carries only the ownAddress toggle, never an
+        // address, so nobody can send as another -- which is what keeps the tenant-wide Graph Mail.Send
+        // permission safe. Do not read a From from the request here.
+        $fromAddress = $request->boolean('ownAddress') ? $this->ownAddress($email) : null;
+
+        return [$name, $email, $fromAddress];
+    }
+
+    // The sender's own address, refused unless it is on the portal's own domain (SPF/DKIM).
+    private function ownAddress(string $email): string
+    {
+        $from = strtolower(trim((string) config('mail.from.address')));
+        $domain = str_contains($from, '@') ? substr($from, strpos($from, '@') + 1) : '';
+        if ($domain === '' || substr(strrchr($email, '@') ?: '', 1) !== $domain) {
+            abort(422, 'Sending as yourself needs an email address on the company domain.');
+        }
+
+        return $email;
     }
 
     /**
@@ -632,6 +665,7 @@ final class PortalEmailMessages
         array $bcc,
         ?string $fromName,
         ?string $replyTo,
+        ?string $fromAddress,
         array $recipients,
         ?int $employeeId,
     ): int {
@@ -649,6 +683,7 @@ final class PortalEmailMessages
             $bcc,
             $fromName,
             $replyTo,
+            $fromAddress,
             $recipients,
             $employeeId,
         );
@@ -679,6 +714,7 @@ final class PortalEmailMessages
         array $bcc,
         ?string $fromName,
         ?string $replyTo,
+        ?string $fromAddress,
         array $recipients,
         ?int $employeeId,
     ): int {
@@ -701,6 +737,7 @@ final class PortalEmailMessages
             'bcc' => $bcc === [] ? null : json_encode($bcc),
             'from_name' => $fromName,
             'reply_to' => $replyTo,
+            'from_address' => $fromAddress,
             'recipient_count' => count($recipients),
             'sent_count' => 0,
             'failed_count' => 0,

@@ -1,0 +1,207 @@
+- generic [ref=f2e776]:
+  - generic [ref=f2e777]:
+    - generic [ref=f2e779]:
+      - button "Collapse navigation" [ref=f2e781] [cursor=pointer]:
+        - generic [ref=f2e782]: 
+      - generic [ref=f2e783]: IKAIKA OPC
+    - generic [ref=f2e790]:
+      - button "Home" [ref=f2e791] [cursor=pointer]:
+        - generic [ref=f2e792]: 
+      - generic [ref=f2e797]:
+        - button "Projects" [ref=f2e798] [cursor=pointer]:
+          - generic [ref=f2e799]: 
+          - generic [ref=f2e802]:
+            - generic [ref=f2e803]: Projects
+            - generic [ref=f2e804]: 
+        - generic [ref=f2e807]:
+          - button "View Projects" [ref=f2e810] [cursor=pointer]:
+            - generic [ref=f2e811]: 
+          - button "Track Projects" [ref=f2e817] [cursor=pointer]:
+            - generic [ref=f2e818]: 
+          - button "Created Projects" [ref=f2e824] [cursor=pointer]:
+            - generic [ref=f2e825]: 
+      - button "Reports" [ref=f2e831] [cursor=pointer]:
+        - generic [ref=f2e832]: 
+        - generic [ref=f2e835]:
+          - generic [ref=f2e836]: Reports
+          - generic [ref=f2e837]: 
+      - button "Requests" [ref=f2e840] [cursor=pointer]:
+        - generic [ref=f2e841]: 
+        - generic [ref=f2e844]:
+          - generic [ref=f2e845]: Requests
+          - generic [ref=f2e846]: 
+      - button "User" [ref=f2e849] [cursor=pointer]:
+        - generic [ref=f2e850]: 
+        - generic [ref=f2e853]:
+          - generic [ref=f2e854]: User
+          - generic [ref=f2e855]: 
+      - button "Event Calendar" [ref=f2e857] [cursor=pointer]:
+        - generic [ref=f2e858]: 
+      - button "Access" [ref=f2e863] [cursor=pointer]:
+        - generic [ref=f2e864]: 
+      - button "Email" [ref=f2e869] [cursor=pointer]:
+        - generic [ref=f2e870]: 
+      - button "Bug Reports" [ref=f2e875] [cursor=pointer]:
+        - generic [ref=f2e876]: 
+      - generic [ref=f2e881]: Admin
+      - button "Manage" [ref=f2e884] [cursor=pointer]:
+        - generic [ref=f2e885]: 
+        - generic [ref=f2e888]:
+          - generic [ref=f2e889]: Manage
+          - generic [ref=f2e890]: 
+      - button "Finance" [ref=f2e893] [cursor=pointer]:
+        - generic [ref=f2e894]: 
+        - generic [ref=f2e897]:
+          - generic [ref=f2e898]: Finance
+          - generic [ref=f2e899]: 
+      - button "Administration" [ref=f2e902] [cursor=pointer]:
+        - generic [ref=f2e903]: 
+        - generic [ref=f2e906]:
+          - generic [ref=f2e907]: Administration
+          - generic [ref=f2e908]: 
+    - button "Account menu" [ref=f2e912] [cursor=pointer]:
+      - generic "Jhon Noriel Malabanan" [ref=f2e914]:
+        - img "Jhon Noriel Malabanan" [ref=f2e916]
+      - generic [ref=f2e918]:
+        - generic [ref=f2e919]:
+          - generic [ref=f2e920]: Jhon Noriel Malabanan
+          - generic [ref=f2e921]: Online
+        - generic [ref=f2e924]: 
+  - generic [ref=f2e925]:
+    - generic [ref=f2e926]:
+      - generic [ref=f2e929]:
+        - generic [ref=f2e930]: IKAIKA Portal
+        - generic [ref=f2e935]:
+          - generic [ref=f2e937]:
+            - generic [ref=f2e938]: Manila, Philippines
+            - generic [ref=f2e939]:
+              - generic [ref=f2e940]: 8:01 AM
+              - generic [ref=f2e941]:
+                - generic [ref=f2e942]: 
+                - generic [ref=f2e943]: 85°F | 29°C
+            - generic [ref=f2e944]: Saturday, 10/17/2026 · Overcast · 94°F / 81°F | 35°C / 27°C
+          - generic [ref=f2e946]:
+            - generic [ref=f2e947]: San Jose, CA
+            - generic [ref=f2e948]:
+              - generic [ref=f2e949]: 5:01 PM
+              - generic [ref=f2e950]:
+                - generic [ref=f2e951]: 
+                - generic [ref=f2e952]: 86°F | 30°C
+            - generic [ref=f2e953]: 15h behind · Friday, 10/16/2026 · Clear · 93°F / 52°F | 34°C / 11°C
+        - generic [ref=f2e954]:
+          - button "Notifications" [ref=f2e957] [cursor=pointer]:
+            - generic [ref=f2e958]: 
+          - button "Turn off background effect" [ref=f2e959] [cursor=pointer]:
+            - generic [ref=f2e960]: 
+          - button "Toggle theme" [ref=f2e961] [cursor=pointer]:
+            - generic [ref=f2e962]: 
+          - link "Open your profile" [ref=f2e963] [cursor=pointer]:
+            - generic [ref=f2e964]:
+              - generic "Jhon Noriel Malabanan" [ref=f2e966]:
+                - img "Jhon Noriel Malabanan" [ref=f2e968]
+              - generic [ref=f2e969]:
+                - generic [ref=f2e970]: Jhon Noriel Malabanan
+                - generic [ref=f2e971]: 260701-0019
+      - generic [ref=f2e972]:
+        - link "PORTAL" [ref=f2e973] [cursor=pointer]
+        - generic [ref=f2e975]: /
+        - generic [ref=f2e976]: Home
+    - generic [ref=f2e983]:
+      - generic [ref=f2e984]:
+        - generic [ref=f2e985]:
+          - generic [ref=f2e986]: Dashboard
+          - generic [ref=f2e987]: Your month, and where every active project stands
+        - generic [ref=f2e988]:
+          - generic [ref=f2e989]: Quick Actions
+          - generic [ref=f2e992]:
+            - button " File Daily Report" [ref=f2e993] [cursor=pointer]:
+              - generic [ref=f2e994]: 
+              - generic [ref=f2e995]: File Daily Report
+            - button " File Late Report" [ref=f2e996] [cursor=pointer]:
+              - generic [ref=f2e997]: 
+              - generic [ref=f2e998]: File Late Report
+            - button " Add Project" [ref=f2e999] [cursor=pointer]:
+              - generic [ref=f2e1000]: 
+              - generic [ref=f2e1001]: Add Project
+            - button " Submitted Reports" [ref=f2e1002] [cursor=pointer]:
+              - generic [ref=f2e1003]: 
+              - generic [ref=f2e1004]: Submitted Reports
+      - generic [ref=f2e1006]:
+        - generic [ref=f2e1009]:
+          - generic [ref=f2e1010]: Hours Rendered
+          - generic [ref=f2e1013]:
+            - generic [ref=f2e1014]: 
+            - generic "0" [ref=f2e1015]
+          - generic [ref=f2e1016]: logged in October 2026
+        - generic [ref=f2e1019]:
+          - generic [ref=f2e1020]: Reports Filed
+          - generic [ref=f2e1023]:
+            - generic [ref=f2e1024]: 
+            - generic "0" [ref=f2e1025]
+          - generic [ref=f2e1026]: filed in October 2026
+        - generic [ref=f2e1029]:
+          - generic [ref=f2e1030]: Active Projects
+          - generic [ref=f2e1033]:
+            - generic [ref=f2e1034]: 
+            - generic "3" [ref=f2e1035]
+          - generic [ref=f2e1036]: ongoing across all disciplines
+      - generic [ref=f2e1037]:
+        - generic [ref=f2e1039]:
+          - generic [ref=f2e1040]:
+            - generic [ref=f2e1041]: Hours & Reports — October 2026
+            - generic [ref=f2e1042]: Hours Rendered (hrs)
+            - generic [ref=f2e1045]: Reports Filed
+          - generic [ref=f2e1048]: No activity to chart for this month yet.
+        - generic [ref=f2e1053]:
+          - generic [ref=f2e1054]:
+            - generic [ref=f2e1056]: 
+            - generic [ref=f2e1057]: Recent Reports
+            - button "View all" [ref=f2e1058] [cursor=pointer]
+          - generic [ref=f2e1060]: No reports filed yet. Use File Daily Report to add the first one.
+          - button "View all reports " [ref=f2e1063] [cursor=pointer]:
+            - generic [ref=f2e1064]: View all reports
+            - generic [ref=f2e1065]: 
+        - generic [ref=f2e1067]:
+          - generic [ref=f2e1068]: Project Mix
+          - generic [ref=f2e1071]:
+            - generic [ref=f2e1077]:
+              - generic [ref=f2e1078]: "3"
+              - generic [ref=f2e1079]: Projects
+            - generic [ref=f2e1081]:
+              - generic [ref=f2e1085]: MIS
+              - generic [ref=f2e1086]: 100%
+        - generic [ref=f2e1088]:
+          - generic [ref=f2e1089]:
+            - generic [ref=f2e1091]: 
+            - generic [ref=f2e1092]: Project Progress
+            - button "Manage" [ref=f2e1093] [cursor=pointer]
+          - generic [ref=f2e1097]:
+            - generic [ref=f2e1098]:
+              - generic [ref=f2e1099]:
+                - generic [ref=f2e1100]: "44"
+                - generic [ref=f2e1101]: Project Estimator
+                - generic [ref=f2e1102]: MIS
+              - generic [ref=f2e1103]:
+                - generic [ref=f2e1104]: 664 hrs
+                - generic [ref=f2e1105]: 8/17/2026
+            - generic [ref=f2e1106]:
+              - generic [ref=f2e1107]:
+                - generic [ref=f2e1108]: "260005"
+                - generic [ref=f2e1109]: IKAIKA Portal V2
+                - generic [ref=f2e1110]: MIS
+              - generic [ref=f2e1111]:
+                - generic [ref=f2e1112]: 40 hrs
+                - generic [ref=f2e1113]: 8/18/2026
+            - generic [ref=f2e1114]:
+              - generic [ref=f2e1115]:
+                - generic [ref=f2e1116]: "112"
+                - generic [ref=f2e1117]: Management Information System
+                - generic [ref=f2e1118]: MIS
+              - generic [ref=f2e1119]:
+                - generic [ref=f2e1120]: 4600 hrs
+                - generic [ref=f2e1121]: 8/18/2026
+          - button "View all projects " [ref=f2e1122] [cursor=pointer]:
+            - generic [ref=f2e1123]: View all projects
+            - generic [ref=f2e1124]: 
+  - button "Report a bug" [ref=f2e1127] [cursor=pointer]:
+    - generic [ref=f2e1128]: 

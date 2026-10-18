@@ -54,10 +54,14 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:email', 'throttle:portal-administration-email'])->group(function (): void {
         // Before the {id} route so the fixed path is never read as an id.
         Route::get('administration/emails/audiences', [EmailMessagesController::class, 'audiences']);
-        // Read-only despite the POST: the draft rides in the body, too long for a query string.
-        Route::post('administration/emails/preview', [EmailMessagesController::class, 'preview']);
         Route::get('administration/email-images', [EmailImagesController::class, 'index']);
     });
+
+    // The composer's own preview, on a ceiling of its own: it is rebuilt every time writing pauses,
+    // so the ordinary email limit would blank it after a paragraph. Read-only despite the POST: the
+    // draft rides in the body, too long for a query string.
+    Route::middleware(['portal.rule:email', 'throttle:portal-email-preview'])
+        ->post('administration/emails/preview', [EmailMessagesController::class, 'preview']);
 
     // Administration / All Emails: the sent list and one sent email.
     Route::middleware(['portal.rule:administration.emails', 'throttle:portal-administration-email'])->group(function (): void {

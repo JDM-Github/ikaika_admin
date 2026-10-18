@@ -44,7 +44,7 @@ class PortalMailRelayTest extends TestCase
             ->to('alpha@supplier.test')
             ->cc('boss@ikaika.test')
             ->bcc('audit@ikaika.test')
-            ->send(new PortalEmailMail('Hello', '**Hi** there', null, 'markup', 'markup', 'Jane Doe via IKAIKA Portal', 'jane@ikaika.test'));
+            ->send(new PortalEmailMail('Hello', '**Hi** there', null, 'markup', 'markup', 'Jane Doe via IKAIKA Portal', 'jane@ikaika.test', [], [], null, 'jane@ikaika.test'));
 
         Http::assertSent(function (Request $request): bool {
             return $request->url() === self::URL
@@ -55,6 +55,7 @@ class PortalMailRelayTest extends TestCase
                 && $request['subject'] === 'Hello'
                 && str_contains((string) $request['html'], '<strong>Hi</strong>')
                 && $request['fromName'] === 'Jane Doe via IKAIKA Portal'
+                && $request['from'] === 'jane@ikaika.test'
                 && $request['replyTo'] === 'jane@ikaika.test';
         });
         $this->assertSame('250 relayed id=abc-123', PortalEmailMessages::acceptance($sent));
