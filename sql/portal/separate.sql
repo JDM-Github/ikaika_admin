@@ -257,7 +257,7 @@ SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width
     </td>
   </tr>
 </table>', 'html', id
-FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+FROM employees WHERE id_no IN ('260701-0020', '260720-0020') LIMIT 1; -- John Dave Pega (test data, production data)
 -- A signature footer (database/seeders/email/company-signature.html): the $SIGNATURE token is replaced with the person's own details when it is used
 -- as an email signature (Manage / Signatures, and each employee's Settings). The plain Company footer
 -- above has no token, so it is usable in email but cannot be a signature.
@@ -303,7 +303,7 @@ SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" wi
     </td>
   </tr>
 </table>', 'html', id
-FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+FROM employees WHERE id_no IN ('260701-0020', '260720-0020') LIMIT 1; -- John Dave Pega (test data, production data)
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
 SELECT 'template', 'Portal email test', 'notice', 'Portal email test', '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
   <tr>
@@ -337,7 +337,7 @@ SELECT 'template', 'Portal email test', 'notice', 'Portal email test', '<table r
     </td>
   </tr>
 </table>', 'html', id
-FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+FROM employees WHERE id_no IN ('260701-0020', '260720-0020') LIMIT 1; -- John Dave Pega (test data, production data)
 
 -- The IKAIKA BIM footer: the company writing as itself (From: IKAIKA BIM), without the portal's lines.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
@@ -387,7 +387,7 @@ SELECT 'footer', 'IKAIKA BIM footer', NULL, NULL, '<table role="presentation" wi
     </td>
   </tr>
 </table>', 'html', id
-FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+FROM employees WHERE id_no IN ('260701-0020', '260720-0020') LIMIT 1; -- John Dave Pega (test data, production data)
 
 
 -- ============================================================================
@@ -430,6 +430,7 @@ UPDATE employees
 SET is_developer = 1
 WHERE id_no IN (
     '260701-0020', -- John Dave Pega
+    '260720-0020', -- John Dave Pega, as production's Airtable records him
     '260701-0019', -- Jhon Noriel Malabanan
     '260701-0018', -- Jolas Mendez
     '250407-0009', -- Jolas Mendez

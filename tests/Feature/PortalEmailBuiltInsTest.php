@@ -21,6 +21,9 @@ class PortalEmailBuiltInsTest extends TestCase
      */
     protected array $connectionsToTransact = ['portal'];
 
+    // The built-ins' creator: the test data's id_no, then production's.
+    private const CREATOR_ID_NOS = ['260701-0020', '260720-0020'];
+
     private function migration(): object
     {
         return require database_path('migrations/2026_09_29_090000_seed_portal_email_built_in_blocks.php');
@@ -36,7 +39,7 @@ class PortalEmailBuiltInsTest extends TestCase
     private function assertBuiltInsStored(): void
     {
         $migration = $this->migration();
-        $creator = DB::connection('portal')->table('employees')->where('id_no', '260701-0020')->value('id');
+        $creator = DB::connection('portal')->table('employees')->whereIn('id_no', self::CREATOR_ID_NOS)->orderBy('id')->value('id');
         foreach ($migration::blocks() as $block) {
             $rows = DB::connection('portal')->table('email_blocks')->where('kind', $block['kind'])->where('name', $block['name'])->get();
             $this->assertCount(1, $rows, $block['name']);
@@ -55,6 +58,42 @@ class PortalEmailBuiltInsTest extends TestCase
         $this->migration()->up();
 
         $this->assertBuiltInsStored();
+    }
+
+    public function test_production_id_no_gets_every_built_in_and_the_developer_flag(): void
+    {
+        $portal = DB::connection('portal');
+        $creator = (int) $portal->table('employees')->whereIn('id_no', self::CREATOR_ID_NOS)->orderBy('id')->value('id');
+        // Production's Airtable records the creator under another id_no; the 2026-09-29 seed matched nobody there.
+        $portal->table('employees')->where('id', $creator)->update(['id_no' => '260720-0020', 'is_developer' => 0]);
+        $migration = require database_path('migrations/2026_10_19_200000_seed_built_ins_for_production_creator.php');
+        foreach ($migration::blocks() as $block) {
+            $portal->table('email_blocks')->where('kind', $block['kind'])->where('name', $block['name'])->delete();
+        }
+
+        $migration->up();
+        $migration->up();
+
+        foreach ($migration::blocks() as $block) {
+            $rows = $portal->table('email_blocks')->where('kind', $block['kind'])->where('name', $block['name'])->get();
+            $this->assertCount(1, $rows, $block['name']);
+            $this->assertSame($creator, (int) $rows[0]->created_by);
+        }
+        $this->assertSame(1, (int) $portal->table('employees')->where('id', $creator)->value('is_developer'));
+    }
+
+    public function test_separate_sql_matches_the_production_id_no_too(): void
+    {
+        $sql = str_replace("\r\n", "\n", (string) file_get_contents(base_path('sql/portal/separate.sql')));
+        $this->assertSame(1, preg_match('/-- Built-in blocks.*?\n\n/s', $sql, $section));
+        $portal = DB::connection('portal');
+        $creator = (int) $portal->table('employees')->whereIn('id_no', self::CREATOR_ID_NOS)->orderBy('id')->value('id');
+        $portal->table('employees')->where('id', $creator)->update(['id_no' => '260720-0020']);
+        $this->forgetBuiltIns();
+
+        $portal->unprepared($section[0]);
+
+        $this->assertSame($creator, (int) $portal->table('email_blocks')->where('kind', 'footer')->where('name', 'Company footer')->value('created_by'));
     }
 
     public function test_separate_sql_seeds_the_same_html(): void
