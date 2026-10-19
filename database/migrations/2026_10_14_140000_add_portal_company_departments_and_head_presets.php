@@ -51,6 +51,8 @@ return new class extends Migration
 
         if (! $schema->hasTable('company_departments')) {
             $schema->create('company_departments', function (Blueprint $table): void {
+                // Pinned: a MyISAM default leaves tests' rollbacks undone and the heads emptied (2026-10-19).
+                $table->engine = 'InnoDB';
                 $table->increments('id');
                 $table->string('name', 100)->unique('company_departments_name');
                 $table->integer('head_employee_id')->nullable();

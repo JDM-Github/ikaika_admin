@@ -20,7 +20,7 @@ class InformationController extends Controller
 
     public function show(Request $request): JsonResponse
     {
-        return response()->json($this->changes->mine($this->employee($request)));
+        return response()->json($this->changes->mine($this->employee($request), $request));
     }
 
     public function submit(Request $request): JsonResponse
