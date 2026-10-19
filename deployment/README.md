@@ -200,6 +200,28 @@ ssh bluehost "cd ~/apps/test-server/app && php artisan portal:jira-sync"
 
 It prints `Sent N, failed N, read back N, gone from Jira N.` and fails when Jira refuses the account or does not answer.
 
+### Testing against a Jira space from your PC
+
+**Where the credentials go:** the `JIRA_*` lines in this repo's local `.env` (gitignored, so they never leave your PC; `.env.example` lists them). Point them at the sandbox project, never the real one:
+
+```text
+JIRA_BASE_URL=https://<site>.atlassian.net     the site, https, no path
+JIRA_EMAIL=you-or-the-service-account@...       the Atlassian account the token belongs to
+JIRA_API_TOKEN=...                              id.atlassian.com → Security → Create and manage API tokens
+JIRA_PROJECT_KEY=...                            the sandbox project's key, e.g. IKPS
+JIRA_WEBHOOK_SECRET=                            leave empty locally: no webhook can reach your PC
+```
+
+Your own account's token works for a first try, but every issue it makes is reported by you; use the service account's to see what the servers will send. Run `php artisan config:clear` after editing `.env` if you ever cached the config. The tests never see these values: `phpunit.xml` blanks every `JIRA_*`.
+
+**Then:**
+
+1. `php artisan portal:jira-check` — the account, the project and the issue type each kind becomes. A `401` is the email or token, a `404` the project key.
+2. File a report from the corner button (local `QUEUE_CONNECTION=sync`, so it goes to Jira during the submit), or press **Send to Jira** on its sheet in Issues & Requests.
+3. Move the issue in Jira, then `php artisan portal:jira-sync` to read it back — locally that stands in for the webhook.
+
+Empty the `JIRA_*` lines again when you are done, so a local report does not quietly become a sandbox issue.
+
 ## Roll back
 
 ```powershell
