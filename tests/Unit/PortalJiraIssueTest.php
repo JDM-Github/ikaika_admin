@@ -65,7 +65,7 @@ class PortalJiraIssueTest extends TestCase
 
         return [
             'to do' => [['status' => ['statusCategory' => ['key' => 'new']]], 'new'],
-            'in review' => [['status' => ['statusCategory' => ['key' => 'indeterminate']]], 'in_progress'],
+            'in progress, unnamed' => [['status' => ['statusCategory' => ['key' => 'indeterminate']]], 'in_progress'],
             'done, unresolved' => [$done(null), 'fixed'],
             'done' => [$done('Done'), 'fixed'],
             "won't do" => [$done("Won't Do"), 'wont_fix'],
@@ -77,7 +77,9 @@ class PortalJiraIssueTest extends TestCase
             // IPS's own board (2026-10-19, user): the column's name wins over the category its owner left it in.
             'done, filed in progress' => [['status' => ['name' => 'Done', 'statusCategory' => ['key' => 'indeterminate']]], 'fixed'],
             'cancelled, filed done' => [['status' => ['name' => 'Cancelled', 'statusCategory' => ['key' => 'done']]], 'wont_fix'],
-            'in review, by name' => [['status' => ['name' => 'In Review', 'statusCategory' => ['key' => 'done']]], 'in_progress'],
+            'in review, by name' => [['status' => ['name' => 'In Review', 'statusCategory' => ['key' => 'indeterminate']]], 'in_review'],
+            'testing on staging' => [['status' => ['name' => 'On Staging', 'statusCategory' => ['key' => 'done']]], 'in_review'],
+            'in progress, by name' => [['status' => ['name' => 'In Progress', 'statusCategory' => ['key' => 'done']]], 'in_progress'],
             'to do, by name' => [['status' => ['name' => ' to do ', 'statusCategory' => ['key' => 'indeterminate']]], 'new'],
             'a name not listed keeps its category' => [['status' => ['name' => 'Waiting on QA', 'statusCategory' => ['key' => 'done']]], 'fixed'],
         ];

@@ -42,6 +42,9 @@ final class PortalBugReports
 
     public const STATUS_IN_PROGRESS = 'in_progress';
 
+    // On staging, being tested (2026-10-20, user): the board's In Review, between the work and the release.
+    public const STATUS_IN_REVIEW = 'in_review';
+
     public const STATUS_FIXED = 'fixed';
 
     public const STATUS_WONT_FIX = 'wont_fix';
@@ -52,6 +55,7 @@ final class PortalBugReports
     public const STATUS_LABELS = [
         self::STATUS_NEW => 'New',
         self::STATUS_IN_PROGRESS => 'In progress',
+        self::STATUS_IN_REVIEW => 'In review',
         self::STATUS_FIXED => 'Fixed',
         self::STATUS_WONT_FIX => "Won't fix",
     ];
@@ -242,7 +246,7 @@ final class PortalBugReports
         if ($request->has('status')) {
             $status = (string) $request->input('status');
             if (! array_key_exists($status, self::STATUS_LABELS)) {
-                abort(422, "Choose New, In progress, Fixed or Won't fix.");
+                abort(422, "Choose New, In progress, In review, Fixed or Won't fix.");
             }
             $changes['status'] = $status;
         }

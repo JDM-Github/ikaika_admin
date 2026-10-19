@@ -159,7 +159,7 @@ class PortalBugReportsTest extends TestCase
 
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['note' => ''])->assertOk()->assertJsonPath('data.note', null);
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'closed'])
-            ->assertStatus(422)->assertJsonPath('message', "Choose New, In progress, Fixed or Won't fix.");
+            ->assertStatus(422)->assertJsonPath('message', "Choose New, In progress, In review, Fixed or Won't fix.");
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, [])
             ->assertStatus(422)->assertJsonPath('message', 'Change its kind, status, note, who handles it or its version.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/999999999', ['status' => 'fixed'])->assertNotFound();
@@ -262,11 +262,15 @@ class PortalBugReportsTest extends TestCase
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => ''])
             ->assertStatus(422)->assertJsonPath('message', 'Choose Bug, Feature request or Feedback.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])->assertOk();
+        // In review (2026-10-20, user): on staging, being tested.
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_review'])
+            ->assertOk()->assertJsonPath('data.status', 'in_review');
 
         $this->assertSame('feature', DB::connection('portal')->table('bug_reports')->where('id', $id)->value('kind'));
         $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->where('record_id', (string) $id)->pluck('message');
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'filed the feedback Dark mode for the calendar as a feature request')));
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the feature request Dark mode for the calendar In progress')));
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the feature request Dark mode for the calendar In review')));
     }
 
     // The Access page names the rule as the sidebar does, and an MIS member holds Send to Jira beneath it (2026-10-19).

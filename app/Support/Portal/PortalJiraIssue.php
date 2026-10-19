@@ -10,8 +10,8 @@ namespace App\Support\Portal;
  * -- and that it came anonymously from the portal. Never a person: not the sender, who is unknown, and
  * not MIS's note or who handles it, which stay in the portal.
  *
- * Back from Jira, by the board's column first (2026-10-19, user): To Do is New, In Progress and In Review
- * are In progress, Done is Fixed -- or Won't fix when it was resolved as not to be done -- and Cancelled is
+ * Back from Jira, by the board's column first (2026-10-19, user): To Do is New, In Progress is In progress,
+ * In Review -- or a testing or staging column -- is In review (2026-10-20, user), Done is Fixed -- or Won't fix when it was resolved as not to be done -- and Cancelled is
  * Won't fix. The name leads because a team-managed project's categories are whatever its owner left them:
  * IPS files Done under "in progress" and Cancelled under "done". A name not listed falls back to the
  * category. The fix version is the highest X.Y.Z among the issue's fix versions, "v" or not.
@@ -24,7 +24,9 @@ final class PortalJiraIssue
     // A status by its name, lowercased, a curly apostrophe made straight; 'done' still asks the resolution.
     private const BY_NAME = [
         'to do' => 'new', 'open' => 'new', 'backlog' => 'new', 'selected for development' => 'new',
-        'in progress' => 'indeterminate', 'in review' => 'indeterminate',
+        'in progress' => 'indeterminate',
+        'in review' => 'review', 'review' => 'review', 'in testing' => 'review', 'testing' => 'review',
+        'in qa' => 'review', 'qa' => 'review', 'on staging' => 'review', 'staging' => 'review',
         'done' => 'done', 'closed' => 'done', 'resolved' => 'done', 'fixed' => 'done',
         'cancelled' => 'not_done', 'canceled' => 'not_done', "won't do" => 'not_done', "won't fix" => 'not_done',
         'declined' => 'not_done', 'rejected' => 'not_done', 'duplicate' => 'not_done',
@@ -77,6 +79,7 @@ final class PortalJiraIssue
             'new' => PortalBugReports::STATUS_NEW,
             'indeterminate' => PortalBugReports::STATUS_IN_PROGRESS,
             'done' => self::isNotDone($fields) ? PortalBugReports::STATUS_WONT_FIX : PortalBugReports::STATUS_FIXED,
+            'review' => PortalBugReports::STATUS_IN_REVIEW,
             'not_done' => PortalBugReports::STATUS_WONT_FIX,
             default => $current,
         };
