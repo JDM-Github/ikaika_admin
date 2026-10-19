@@ -2,8 +2,10 @@
 
 namespace App\Support\Portal;
 
+use Composer\CaBundle\CaBundle;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Throwable;
 
@@ -20,13 +22,32 @@ final class PortalHomeLocations
 {
     private const ENDPOINT = 'https://nominatim.openstreetmap.org/search';
 
+    // What sits at a point, for Profile's Use my pin (2026-10-19, user).
+    private const REVERSE_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
+
+    // An address's own parts, by the keys Nominatim names them under, most specific first.
+    private const PROVINCE_KEYS = ['province', 'state', 'county', 'region'];
+
+    private const CITY_KEYS = ['city', 'town', 'municipality'];
+
+    private const BARANGAY_KEYS = ['village', 'suburb', 'quarter', 'neighbourhood', 'hamlet'];
+
+    // What is not part of the place itself, so is left out of the line the PSGC lists are matched against.
+    private const NOT_PLACES = ['country', 'country_code', 'postcode', 'road', 'house_number'];
+
     private const PAUSE_MICROSECONDS = 1_100_000;
 
     // The region field holds "NCR" for Metro Manila, which Nominatim does not read.
     private const REGION_QUERIES = ['ncr' => 'Metro Manila, Philippines', 'usa' => 'United States'];
 
-    // Homes a person set themselves; the address lookup leaves these alone.
-    public const OWN_SOURCES = ['gps', 'map'];
+    // The ways a person sets their home themselves, the only ones the portal may send.
+    public const PICKED_SOURCES = ['gps', 'map'];
+
+    // A home moved to a new address a head admin approved (2026-10-19, user), kept as theirs like a pin.
+    public const APPROVED_SOURCE = 'approved';
+
+    // Homes a person set themselves, or had moved with an approved address; the address lookup leaves these alone.
+    public const OWN_SOURCES = [...self::PICKED_SOURCES, self::APPROVED_SOURCE];
 
     public function __construct(
         private readonly PortalAddressResolver $resolver,
@@ -55,18 +76,7 @@ final class PortalHomeLocations
 
                 continue;
             }
-            $point = null;
-            foreach ($queries as $query) {
-                if ($asked && $this->pauses) {
-                    usleep(self::PAUSE_MICROSECONDS);
-                }
-                $asked = true;
-                $point = $this->lookUp($query['text']);
-                if ($point !== null) {
-                    $point['source'] = $query['source'];
-                    break;
-                }
-            }
+            $point = $this->place($queries, $asked);
             if ($point === null) {
                 $counts['failed']++;
 
@@ -127,6 +137,122 @@ final class PortalHomeLocations
             'required' => ! $own && ! PortalRole::isExecutive($employee->role ?? null, $employee->role_level ?? null),
             'suggested' => $suggested,
             'suggestedLabel' => $label === null || $label === '' ? null : $label,
+        ];
+    }
+
+    /**
+     * Their home follows a new address on record once a head admin approved it (2026-10-19, user): the
+     * address is placed now, and its point becomes their home, kept as theirs, and their address's own
+     * point too. False, and their home left where it was, when the address cannot be placed.
+     */
+    public function followAddress(int $employeeId): bool
+    {
+        $person = $this->connection()->table('employees')->where('id', $employeeId)->first(['id', 'address', 'location']);
+        $queries = $person === null ? [] : $this->queries($person);
+        $asked = false;
+        $point = $queries === [] ? null : $this->place($queries, $asked);
+        if ($point === null) {
+            return false;
+        }
+        $this->connection()->table('employee_home_locations')->updateOrInsert(['employee_id' => $employeeId], [
+            'query' => $queries[0]['text'],
+            'source' => self::APPROVED_SOURCE,
+            'latitude' => $point['latitude'],
+            'longitude' => $point['longitude'],
+            'geocoded_at' => now(),
+            'suggested_query' => $queries[0]['text'],
+            'suggested_latitude' => $point['latitude'],
+            'suggested_longitude' => $point['longitude'],
+        ]);
+
+        return true;
+    }
+
+    /**
+     * The first of the queries Nominatim places, one request a second.
+     *
+     * @param  list<array{text: string, source: string}>  $queries
+     * @return array{latitude: float, longitude: float, source: string}|null
+     */
+    private function place(array $queries, bool &$asked): ?array
+    {
+        foreach ($queries as $query) {
+            if ($asked && $this->pauses) {
+                usleep(self::PAUSE_MICROSECONDS);
+            }
+            $asked = true;
+            $point = $this->lookUp($query['text']);
+            if ($point !== null) {
+                return $point + ['source' => $query['source']];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The address at their own pin (2026-10-19, user), for Profile's edit to fill its parts from: in the
+     * Philippines the province, city and barangay the PSGC lists name there, elsewhere the names
+     * Nominatim gives, and the house number and road as the street. Null with no pin of their own, or
+     * nothing found there.
+     *
+     * @return array{country: ?string, provinceCode: ?string, province: ?string, cityCode: ?string, city: ?string, barangayCode: ?string, barangay: ?string, street: ?string}|null
+     */
+    public function addressAtHome(object $employee): ?array
+    {
+        $home = $this->mine($employee)['home'];
+        if ($home === null) {
+            return null;
+        }
+        try {
+            $response = $this->nominatim()->get(self::REVERSE_ENDPOINT, [
+                'lat' => $home['latitude'], 'lon' => $home['longitude'], 'format' => 'json',
+                'addressdetails' => 1, 'zoom' => 18, 'accept-language' => 'en',
+            ]);
+        } catch (Throwable) {
+            return null;
+        }
+        $address = $response->successful() ? ($response->json()['address'] ?? null) : null;
+        if (! is_array($address) || $address === []) {
+            return null;
+        }
+        $first = static function (array $keys) use ($address): ?string {
+            foreach ($keys as $key) {
+                $value = $address[$key] ?? null;
+                if (is_string($value) && trim($value) !== '') {
+                    return trim($value);
+                }
+            }
+
+            return null;
+        };
+        $street = trim(implode(' ', array_filter([$first(['house_number']), $first(['road'])])));
+        $street = $street === '' ? null : $street;
+
+        if (strtolower((string) ($address['country_code'] ?? '')) === 'ph') {
+            $names = [];
+            foreach ($address as $key => $value) {
+                if (is_string($value) && ! in_array($key, self::NOT_PLACES, true) && ! str_starts_with((string) $key, 'ISO')) {
+                    $names[] = $value;
+                }
+            }
+            $place = $this->resolver->identify(implode(', ', $names), null);
+
+            return [
+                'country' => 'Philippines',
+                'provinceCode' => $place['provinceCode'], 'province' => $place['province'],
+                'cityCode' => $place['cityCode'], 'city' => $place['city'],
+                'barangayCode' => $place['barangayCode'], 'barangay' => $place['barangay'],
+                'street' => $street,
+            ];
+        }
+
+        return [
+            'country' => $first(['country']),
+            'provinceCode' => null, 'province' => $first(self::PROVINCE_KEYS),
+            'cityCode' => null, 'city' => $first(self::CITY_KEYS),
+            'barangayCode' => null, 'barangay' => $first(self::BARANGAY_KEYS),
+            'street' => $street,
         ];
     }
 
@@ -203,9 +329,7 @@ final class PortalHomeLocations
     private function lookUp(string $query): ?array
     {
         try {
-            $response = Http::timeout(15)
-                ->withHeaders(['User-Agent' => 'IKAIKA Portal ('.config('app.url').')'])
-                ->get(self::ENDPOINT, ['q' => $query, 'format' => 'json', 'limit' => 1]);
+            $response = $this->nominatim()->get(self::ENDPOINT, ['q' => $query, 'format' => 'json', 'limit' => 1]);
         } catch (Throwable) {
             return null;
         }
@@ -227,6 +351,17 @@ final class PortalHomeLocations
             ->orderBy('id')
             ->get(['id', 'address', 'location'])
             ->all();
+    }
+
+    /*
+     * Nominatim asks every caller to name itself. Windows PHP often ships without curl.cainfo, so the
+     * certificate is checked against Composer's CA bundle, as every other call out of the portal is.
+     */
+    private function nominatim(): PendingRequest
+    {
+        return Http::timeout(15)
+            ->withOptions(['verify' => CaBundle::getSystemCaRootBundlePath()])
+            ->withHeaders(['User-Agent' => 'IKAIKA Portal ('.config('app.url').')']);
     }
 
     private function connection(): Connection

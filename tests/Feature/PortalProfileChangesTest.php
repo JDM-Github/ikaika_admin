@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalNotificationType;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Cache;
@@ -14,7 +15,7 @@ use Tests\TestCase;
 
 /**
  * Profile changes (2026-10-14, user): anyone changes their own employee information and documents on
- * Settings, nothing reaches their record until a head admin approves it, and the head admins are told.
+ * Profile, nothing reaches their record until a head admin approves it, and the head admins are told.
  */
 class PortalProfileChangesTest extends TestCase
 {
@@ -40,6 +41,13 @@ class PortalProfileChangesTest extends TestCase
      */
     private array $temporary = [];
 
+    /**
+     * Nominatim's address at the pin.
+     *
+     * @var array<string, string>
+     */
+    private array $atPin = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -52,6 +60,11 @@ class PortalProfileChangesTest extends TestCase
         ]);
         $uploads = 0;
         Http::fake([
+            // Where an approved address is placed on the map (2026-10-19).
+            // What sits at a pin, for Use my pin (2026-10-19).
+            'https://nominatim.openstreetmap.org/*' => fn (ClientRequest $request) => str_contains($request->url(), '/reverse')
+                ? Http::response(['address' => $this->atPin])
+                : Http::response([['lat' => '14.2117', 'lon' => '121.1653']]),
             'https://api.cloudinary.com/v1_1/demo-cloud/auto/upload' => function () use (&$uploads) {
                 $uploads++;
 
@@ -117,7 +130,7 @@ class PortalProfileChangesTest extends TestCase
         $this->assertSame('09171234567', $after['phone_number']);
         $this->assertFalse(DB::connection('portal')->table('attachments')->where('id', $kept)->exists());
         $this->assertSame(1, $this->files($member, 'ss_id'));
-        $this->assertSame('/settings', $this->notice($member, PortalNotificationType::PROFILE_CHANGES_APPROVED, $asked['id'])->link_path);
+        $this->assertSame('/profile', $this->notice($member, PortalNotificationType::PROFILE_CHANGES_APPROVED, $asked['id'])->link_path);
 
         $mine = $this->withToken($session)->getJson(self::MINE)->assertOk()->json('data');
         $this->assertNull($mine['pending']);
@@ -146,6 +159,115 @@ class PortalProfileChangesTest extends TestCase
         // They may ask again, and the old rejection gives way to the new request.
         $this->withToken($session)->post(self::MINE.'/changes', ['bloodType' => 'B+'], ['Accept' => 'application/json'])->assertCreated()
             ->assertJsonPath('data.lastDecision', null);
+    }
+
+    // The reported ask (2026-10-19): their profile warns while a detail or a document a registration needs is missing.
+    public function test_their_information_names_what_a_registration_needs_and_they_have_not_got(): void
+    {
+        $member = $this->member();
+        DB::connection('portal')->table('employees')->where('id', (int) $member->getKey())->update(['blood_type' => null, 'personal_email' => null, 'phone_number' => '09171234567']);
+        DB::connection('portal')->table('attachments')->where('table_name', 'employees')->where('record_id', (int) $member->getKey())->whereIn('field_name', ['signature', 'national_id'])->delete();
+        $this->attachment($member, 'tax_identification');
+
+        $missing = $this->withToken($this->token($member))->getJson(self::MINE)->assertOk()->json('data.missing');
+
+        $this->assertContains('bloodType', $missing['fields']);
+        $this->assertContains('signature', $missing['documents']);
+        // The personal email and the national ID are never asked for; what they have is not named.
+        $this->assertNotContains('personalEmail', $missing['fields']);
+        $this->assertNotContains('phoneNumber', $missing['fields']);
+        $this->assertNotContains('national_id', $missing['documents']);
+        $this->assertNotContains('tax_identification', $missing['documents']);
+    }
+
+    // The reported ask (2026-10-19): Profile edits both addresses in parts, as the registration asks for them.
+    public function test_addresses_are_read_back_into_their_places_and_sent_in_parts(): void
+    {
+        $member = $this->member();
+        DB::connection('portal')->table('employees')->where('id', (int) $member->getKey())->update([
+            'address' => '377 Chipeco Avenue, Barangay Lecheria, Calamba City, Laguna',
+            'emergency_contact_address' => null,
+        ]);
+        // The pickers' lists are theirs to read once signed in, and no one else's.
+        $this->getJson('/api/development/portal/user/places/provinces')->assertUnauthorized();
+        $session = $this->token($member);
+
+        $places = $this->withToken($session)->getJson(self::MINE)->assertOk()->json('data.addressPlaces');
+        $this->assertSame(['provinceCode' => '043400000', 'cityCode' => '043405000', 'barangayCode' => '043405020'], $places['address']);
+        $this->assertNull($places['emergencyContactAddress']);
+
+        $this->assertContains(['code' => '043400000', 'name' => 'Laguna'], $this->withToken($session)->getJson('/api/development/portal/user/places/provinces')->assertOk()->json('data'));
+        $this->assertContains('City of Calamba', array_column($this->withToken($session)->getJson('/api/development/portal/user/places/provinces/043400000/cities')->assertOk()->json('data'), 'name'));
+        $this->assertContains('Lecheria', array_column($this->withToken($session)->getJson('/api/development/portal/user/places/cities/043405000/barangays')->assertOk()->json('data'), 'name'));
+
+        // A part left out is refused, and so is a city outside the province picked.
+        $this->withToken($session)->post(self::MINE.'/changes', ['addressCountry' => 'Philippines', 'addressProvinceCode' => '043400000'], ['Accept' => 'application/json'])
+            ->assertStatus(422)->assertJsonPath('message', 'Finish your address: every part down to the house number and street.');
+        $this->withToken($session)->post(self::MINE.'/changes', [
+            'emergencyContactCountry' => 'Philippines', 'emergencyContactProvinceCode' => '043400000', 'emergencyContactCityCode' => '012801000',
+            'emergencyContactBarangayCode' => '043405020', 'emergencyContactStreet' => '12 Rizal Street',
+        ], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonPath('message', 'Choose the city or municipality again; it is not in that province.');
+
+        $pending = $this->withToken($session)->post(self::MINE.'/changes', [
+            'addressCountry' => 'Philippines', 'addressProvinceCode' => '043400000', 'addressCityCode' => '043405000',
+            'addressBarangayCode' => '043405020', 'addressStreet' => '12 Rizal Street',
+            'emergencyContactCountry' => 'Japan', 'emergencyContactProvince' => 'Tokyo', 'emergencyContactCity' => 'Shinjuku',
+            'emergencyContactStreet' => '3-1 Nishi-Shinjuku',
+        ], ['Accept' => 'application/json'])->assertCreated()->json('data.pending');
+        $asked = $pending['fields'];
+
+        $this->assertContains(['key' => 'address', 'from' => '377 Chipeco Avenue, Barangay Lecheria, Calamba City, Laguna', 'to' => '12 Rizal Street, Lecheria, City of Calamba, Laguna, Philippines'], $asked);
+        $this->assertContains(['key' => 'emergencyContactAddress', 'from' => null, 'to' => '3-1 Nishi-Shinjuku, Shinjuku, Tokyo, Japan'], $asked);
+
+        // The reported ask (2026-10-19): once approved, their home on the map moves to the new address, and stays theirs.
+        $homes = DB::connection('portal')->table('employee_home_locations');
+        $homes->where('employee_id', (int) $member->getKey())->delete();
+        DB::connection('portal')->table('employee_home_locations')->insert([
+            'employee_id' => (int) $member->getKey(), 'query' => 'map', 'source' => 'map', 'latitude' => 10.5, 'longitude' => 122.5, 'geocoded_at' => now(),
+        ]);
+        $this->withToken($this->token($this->employee("id_no = '".self::NATHANIEL."'")))->patchJson(self::CHANGES.'/'.$pending['id'], ['decision' => 'approve'])->assertOk();
+
+        $home = DB::connection('portal')->table('employee_home_locations')->where('employee_id', (int) $member->getKey())->first();
+        $this->assertSame('approved', $home->source);
+        $this->assertEqualsWithDelta(14.2117, (float) $home->latitude, 0.0001);
+        $this->assertEqualsWithDelta(121.1653, (float) $home->longitude, 0.0001);
+        $this->assertEqualsWithDelta(14.2117, (float) $home->suggested_latitude, 0.0001);
+        $this->assertStringContainsString('Your home on the map moved to your new address.', (string) $this->notice($member, PortalNotificationType::PROFILE_CHANGES_APPROVED, $pending['id'])->message);
+        $mine = $this->withToken($this->token($member))->getJson('/api/development/portal/user/home')->assertOk()->json('data');
+        $this->assertSame(['latitude' => 14.2117, 'longitude' => 121.1653, 'method' => 'approved'], $mine['home']);
+        $this->assertFalse($mine['required']);
+    }
+
+    // The reported ask (2026-10-19): Use my pin fills the address in from what sits at their pin.
+    public function test_the_address_at_their_pin_is_read_into_its_places(): void
+    {
+        $member = $this->member();
+        DB::connection('portal')->table('employee_home_locations')->where('employee_id', (int) $member->getKey())->delete();
+        $session = $this->token($member);
+        $this->withToken($session)->getJson('/api/development/portal/user/home/address')
+            ->assertNotFound()->assertJsonPath('message', 'We could not read an address at your pin. Move it on the map, or type your address in.');
+
+        DB::connection('portal')->table('employee_home_locations')->insert([
+            'employee_id' => (int) $member->getKey(), 'query' => 'map', 'source' => 'map', 'latitude' => 14.2117, 'longitude' => 121.1653, 'geocoded_at' => now(),
+        ]);
+        $this->atPin = [
+            'house_number' => '12', 'road' => 'Rizal Street', 'village' => 'Lecheria', 'city' => 'Calamba',
+            'state' => 'Laguna', 'region' => 'Calabarzon', 'ISO3166-2-lvl3' => 'PH-LAG', 'postcode' => '4027', 'country' => 'Philippines', 'country_code' => 'ph',
+        ];
+        $this->withToken($session)->getJson('/api/development/portal/user/home/address')->assertOk()->assertJsonPath('data', [
+            'country' => 'Philippines', 'provinceCode' => '043400000', 'province' => 'Laguna', 'cityCode' => '043405000', 'city' => 'City of Calamba',
+            'barangayCode' => '043405020', 'barangay' => 'Lecheria', 'street' => '12 Rizal Street',
+        ]);
+
+        // Abroad, the names stand as Nominatim gives them.
+        $this->atPin = ['road' => 'Nishi-Shinjuku', 'suburb' => 'Nishi-Shinjuku', 'city' => 'Shinjuku', 'state' => 'Tokyo', 'country' => 'Japan', 'country_code' => 'jp'];
+        $this->withToken($session)->getJson('/api/development/portal/user/home/address')->assertOk()->assertJsonPath('data', [
+            'country' => 'Japan', 'provinceCode' => null, 'province' => 'Tokyo', 'cityCode' => null, 'city' => 'Shinjuku',
+            'barangayCode' => null, 'barangay' => 'Nishi-Shinjuku', 'street' => 'Nishi-Shinjuku',
+        ]);
+
+        $this->atPin = [];
+        $this->withToken($session)->getJson('/api/development/portal/user/home/address')->assertNotFound();
     }
 
     public function test_withdrawn_changes_let_them_ask_again_and_can_no_longer_be_decided(): void
