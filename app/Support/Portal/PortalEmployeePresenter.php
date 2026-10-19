@@ -29,6 +29,8 @@ class PortalEmployeePresenter
             // Portal-only (separate.sql): may switch Developer mode on; it grants nothing by itself.
             'is_developer' => (bool) ($employee->is_developer ?? false),
             'developer_mode' => PortalDeveloperMode::isOn($employee, $request),
+            // location_exemptions: the portal never asks this person's device for a place.
+            'location_exempt' => PortalLocationExemptions::covers($employee),
             // Active rule => reach, so the portal hides what cannot be opened; the server still checks.
             'rules' => (object) PortalRules::active($employee, $request),
             // Rules off by the person's own switch, with every page under them: only these earn the

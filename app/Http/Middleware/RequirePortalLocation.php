@@ -2,9 +2,12 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\Portal\PortalJwt;
+use App\Support\Portal\PortalLocationExemptions;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Company policy (2026-10-01): every portal write is located. A write without X-Portal-Location is
@@ -14,7 +17,7 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * Exempt, as the portal's ApiManager is: signing in, Developer mode's own password, marking
  * notices read when a page opens, and reporting a bug -- a report is anonymous, so where it was sent
- * from is not asked (2026-10-13).
+ * from is not asked (2026-10-13). A person on location_exemptions goes without one too (2026-10-19).
  */
 class RequirePortalLocation
 {
@@ -37,13 +40,15 @@ class RequirePortalLocation
         '*/portal/remarks/format-many',
     ];
 
+    public function __construct(private readonly PortalJwt $jwt) {}
+
     public function handle(Request $request, Closure $next): Response
     {
         if ($request->isMethodSafe() || $request->is(...self::EXEMPT)) {
             return $next($request);
         }
 
-        if (trim((string) $request->header('X-Portal-Location', '')) === '') {
+        if (trim((string) $request->header('X-Portal-Location', '')) === '' && ! $this->isExemptSession($request)) {
             return response()->json([
                 'message' => 'Saving needs your location. Turn location on for the portal and try again.',
                 'code' => 'location_required',
@@ -51,5 +56,23 @@ class RequirePortalLocation
         }
 
         return $next($request);
+    }
+
+    // Signing in has not run yet at this point, so the token is read only to learn who is asking; the
+    // auth middleware after this still checks it in full.
+    private function isExemptSession(Request $request): bool
+    {
+        $header = (string) $request->header('Authorization', '');
+        if (! str_starts_with($header, 'Bearer ')) {
+            return false;
+        }
+        try {
+            $payload = $this->jwt->parse(trim(substr($header, 7)));
+        } catch (Throwable) {
+            return false;
+        }
+        $sub = $payload['sub'] ?? null;
+
+        return ($payload['guest'] ?? false) !== true && is_numeric($sub) && PortalLocationExemptions::covers((int) $sub);
     }
 }

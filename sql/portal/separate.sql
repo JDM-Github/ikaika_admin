@@ -1612,3 +1612,20 @@ SELECT id, 'manage.users.information.approve', NULL FROM employees WHERE id_no I
     '220202-0002', -- Nathaniel Tanglao
     '220302-0003'  -- Steven Gaurano
 );
+
+-- ============================================================================
+-- LOCATION EXEMPTIONS (2026-10-19, user)
+-- ============================================================================
+-- People whose actions are never located: no device or IP place is stored on their records (the label
+-- reads Unknown, the IP stays for security), the portal never asks their device, they set no home pin
+-- and never appear on Manage / Map. Managed in the table itself; there is no screen.
+-- Existing databases: create_portal_location_exemptions.
+CREATE TABLE IF NOT EXISTS location_exemptions (
+    employee_id INT          NOT NULL PRIMARY KEY,
+    reason      VARCHAR(255) NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO location_exemptions (employee_id, reason)
+SELECT id, 'Asked that his location is never recorded' FROM employees WHERE id_no = '220302-0003'; -- Steven Gaurano

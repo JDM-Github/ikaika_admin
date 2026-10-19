@@ -133,8 +133,9 @@ final class PortalHomeLocations
 
         return [
             'home' => $own ? ['latitude' => (float) $row->latitude, 'longitude' => (float) $row->longitude, 'method' => (string) $row->source] : null,
-            // Executives are not asked; everyone else sets theirs before using the portal.
-            'required' => ! $own && ! PortalRole::isExecutive($employee->role ?? null, $employee->role_level ?? null),
+            // Executives and the location-exempt are not asked; everyone else sets theirs before using the portal.
+            'required' => ! $own && ! PortalRole::isExecutive($employee->role ?? null, $employee->role_level ?? null)
+                && ! PortalLocationExemptions::covers($employee),
             'suggested' => $suggested,
             'suggestedLabel' => $label === null || $label === '' ? null : $label,
         ];
@@ -147,6 +148,9 @@ final class PortalHomeLocations
      */
     public function followAddress(int $employeeId): bool
     {
+        if (PortalLocationExemptions::covers($employeeId)) {
+            return false;
+        }
         $person = $this->connection()->table('employees')->where('id', $employeeId)->first(['id', 'address', 'location']);
         $queries = $person === null ? [] : $this->queries($person);
         $asked = false;
@@ -260,6 +264,9 @@ final class PortalHomeLocations
     // record's own point (suggested_*) is left untouched, so Use default still returns to their data.
     public function setOwn(int $employeeId, float $latitude, float $longitude, string $method): void
     {
+        if (PortalLocationExemptions::covers($employeeId)) {
+            abort(422, 'Your location is not recorded, so there is no home to set.');
+        }
         $this->connection()->table('employee_home_locations')->updateOrInsert(
             ['employee_id' => $employeeId],
             ['query' => $method, 'source' => $method, 'latitude' => $latitude, 'longitude' => $longitude, 'geocoded_at' => now()],
@@ -348,6 +355,8 @@ final class PortalHomeLocations
     {
         return $this->connection()->table('employees')
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            // The location-exempt are never placed, not even from their address on record.
+            ->whereNotIn('id', PortalLocationExemptions::ids())
             ->orderBy('id')
             ->get(['id', 'address', 'location'])
             ->all();
