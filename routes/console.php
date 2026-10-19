@@ -303,10 +303,14 @@ Artisan::command('portal:remind-missing-reports
     {--dry-run : List who would be reminded and for which days; sends nothing}
     {--to= : Send one sample reminder to this address only, outside the outbox}', function (PortalReportReminders $reminders): int {
     $plan = $reminders->missing(now());
+    $summaries = $reminders->summaries($plan);
     foreach ($plan as $row) {
         $this->line($row['name'].' <'.$row['email'].'>: '.implode(', ', $row['days']));
     }
-    $this->info(count($plan).' '.(count($plan) === 1 ? 'person is' : 'people are').' missing a report.');
+    foreach ($summaries as $summary) {
+        $this->line('Summary to '.$summary['name'].' ('.$summary['department'].'): '.implode(', ', array_column($summary['members'], 'name')));
+    }
+    $this->info(count($plan).' '.(count($plan) === 1 ? 'person is' : 'people are').' missing a report; '.count($summaries).' department '.(count($summaries) === 1 ? 'summary' : 'summaries').'.');
 
     $to = trim((string) $this->option('to'));
     if ($this->option('dry-run')) {
@@ -324,24 +328,30 @@ Artisan::command('portal:remind-missing-reports
             return 0;
         }
         try {
-            $reminders->sample($to, $plan[0]['days']);
+            $reminders->sample($to, $reminders->letter($plan[0]['days']));
+            if ($summaries !== []) {
+                $reminders->sample($to, $reminders->summaryLetter($summaries[0]));
+            }
         } catch (Throwable $error) {
             $this->error('Not sent: '.$error->getMessage());
 
             return 1;
         }
-        $this->info('Sample sent to '.$to.' with '.$plan[0]['name']."'s days.");
+        $this->info('Samples sent to '.$to.': '.$plan[0]['name']."'s reminder".($summaries === [] ? '' : ' and the '.$summaries[0]['department'].' summary').'.');
     } else {
         foreach ($plan as $row) {
             $reminders->remind($row['employee'], $row['days']);
         }
-        Log::info('portal.report-reminders.sent', ['count' => count($plan)]);
+        foreach ($summaries as $summary) {
+            $reminders->summarize($summary);
+        }
+        Log::info('portal.report-reminders.sent', ['count' => count($plan), 'summaries' => count($summaries)]);
     }
     // A console run has no response to send the mail after, so the queue is worked here.
     Artisan::call('queue:work', ['--stop-when-empty' => true, '--max-time' => 50, '--tries' => 3]);
 
     return 0;
-})->purpose('Email everyone missing a report in the last five work days');
+})->purpose('Email everyone missing a report in the last five work days, and each department head their team');
 
 Artisan::command('portal:jira-sync', function (PortalBugReportsJira $jira, PortalJiraClient $client): int {
     if (! $jira->isConfigured()) {

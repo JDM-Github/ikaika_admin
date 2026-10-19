@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailMessage;
 use App\Modules\Portal\Models\Employee;
+use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Portal\PortalReportReminders;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
@@ -102,10 +103,54 @@ class PortalReportRemindersTest extends TestCase
         Mail::fake();
         $before = (int) EmailMessage::query()->max('id');
 
-        $this->reminders()->sample('dev@ikaika.test', ['2020-03-09']);
+        $this->reminders()->sample('dev@ikaika.test', $this->reminders()->letter(['2020-03-09']));
 
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('dev@ikaika.test'));
         $this->assertSame($before, (int) EmailMessage::query()->max('id'));
+    }
+
+    public function test_each_department_head_gets_only_their_own_team_and_never_themselves(): void
+    {
+        $head = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereNotIn('id', [$this->member->getKey(), $this->starter->getKey(), $this->leaver->getKey()])
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->orderBy('id')
+            ->firstOrFail();
+        $head->forceFill(['email' => 'head@ikaika.test', 'department' => 'QA Test', 'role_level' => 'Management'])->save();
+        $executive = $this->rosterExecutive();
+        $executive->forceFill(['email' => 'boss@ikaika.test', 'department' => 'QA Test'])->save();
+        $row = fn (Employee $person, string $department): array => ['employee' => $person, 'name' => (string) $person->first_name, 'email' => 'x@ikaika.test', 'department' => $department, 'days' => ['2020-03-09']];
+
+        $summaries = $this->reminders()->summaries([
+            $row($this->member, 'QA Test'),
+            $row($this->starter, 'qa test'),
+            $row($this->leaver, 'Other'),
+            $row($head, 'QA Test'),
+        ]);
+
+        $ours = collect($summaries)->filter(fn (array $summary): bool => $summary['head']->is($head))->values();
+        $this->assertCount(1, $ours);
+        $this->assertSame([(string) $this->member->first_name, (string) $this->starter->first_name], array_column($ours[0]['members'], 'name'));
+        $this->assertFalse(collect($summaries)->contains(fn (array $summary): bool => $summary['head']->is($executive)));
+    }
+
+    public function test_a_summary_lands_in_the_head_outbox_linking_missing_reports(): void
+    {
+        Mail::fake();
+
+        $this->reminders()->summarize([
+            'head' => $this->member,
+            'department' => 'QA Test',
+            'members' => [['name' => 'Ana Cruz', 'days' => ['2020-03-09', '2020-03-10']]],
+        ]);
+
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('member@ikaika.test'));
+        $row = EmailMessage::query()->latest('id')->firstOrFail();
+        $this->assertSame('Reminder: QA Test team missing report dates', $row->subject);
+        $this->assertStringContainsString('- Ana Cruz (2 missing): Mon, Mar 9, Tue, Mar 10', (string) $row->body);
+        $notice = PortalNotification::query()->where('employee_id', $this->member->getKey())->latest('id')->firstOrFail();
+        $this->assertSame('/administration/missing-reports', $notice->link_path);
     }
 
     public function test_the_command_dry_run_sends_nothing_and_a_bad_address_is_refused(): void

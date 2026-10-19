@@ -34,7 +34,7 @@ final class PortalReportReminders
      * Who is missing which work days in the window ending yesterday, never a day before they started,
      * after they left, or one their leave or an offset already covers.
      *
-     * @return list<array{employee: Employee, name: string, email: string, days: list<string>}>
+     * @return list<array{employee: Employee, name: string, email: string, department: string, days: list<string>}>
      */
     public function missing(Carbon $today): array
     {
@@ -57,7 +57,7 @@ final class PortalReportReminders
 
         $plan = [];
         $people = Employee::query()
-            ->select(['id', 'first_name', 'last_name', 'email', 'role', 'role_level', 'start_date', 'end_date'])
+            ->select(['id', 'first_name', 'last_name', 'email', 'department', 'role', 'role_level', 'start_date', 'end_date'])
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->orderBy('last_name')
             ->orderBy('first_name')
@@ -85,11 +85,57 @@ final class PortalReportReminders
                     is_string($person->last_name) ? $person->last_name : null,
                 ),
                 'email' => $email,
+                'department' => trim((string) ($person->department ?? '')),
                 'days' => array_reverse($days),
             ];
         }
 
         return $plan;
+    }
+
+    /**
+     * Each department head's view of the plan: everyone else in their department who is missing a report.
+     * A head is role_level Management, as the old script's hardcoded list was; an executive never gets one.
+     *
+     * @param  list<array{employee: Employee, name: string, email: string, department: string, days: list<string>}>  $plan
+     * @return list<array{head: Employee, name: string, department: string, members: list<array{name: string, days: list<string>}>}>
+     */
+    public function summaries(array $plan): array
+    {
+        $heads = Employee::query()
+            ->select(['id', 'first_name', 'last_name', 'email', 'department', 'role', 'role_level'])
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(TRIM(COALESCE(role_level, ''))) = 'management'")
+            ->orderBy('department')
+            ->orderBy('id')
+            ->get();
+
+        $summaries = [];
+        foreach ($heads as $head) {
+            $department = trim((string) ($head->department ?? ''));
+            if ($department === '' || trim((string) ($head->email ?? '')) === '' || PortalRole::isExecutive($head->role, $head->role_level)) {
+                continue;
+            }
+            $members = [];
+            foreach ($plan as $row) {
+                if (strcasecmp($row['department'], $department) === 0 && ! $row['employee']->is($head)) {
+                    $members[] = ['name' => $row['name'], 'days' => $row['days']];
+                }
+            }
+            if ($members !== []) {
+                $summaries[] = [
+                    'head' => $head,
+                    'name' => PortalSubmittedReportPresenter::memberName(
+                        is_string($head->first_name) ? $head->first_name : null,
+                        is_string($head->last_name) ? $head->last_name : null,
+                    ),
+                    'department' => $department,
+                    'members' => $members,
+                ];
+            }
+        }
+
+        return $summaries;
     }
 
     /**
@@ -99,27 +145,35 @@ final class PortalReportReminders
      */
     public function remind(Employee $recipient, array $days): void
     {
-        [$subject, $body] = $this->wording($days);
+        [$subject, $body] = $this->letter($days);
         $this->messages->sendToMembers(new Employee, Request::create('/'), [(int) $recipient->getKey()], $subject, $body, PortalShellPath::LATE_REPORT);
     }
 
     /**
-     * A developer's preview: the same letter straight to any address, kept out of the outbox and the bell.
+     * @param  array{head: Employee, department: string, members: list<array{name: string, days: list<string>}>}  $summary
+     */
+    public function summarize(array $summary): void
+    {
+        [$subject, $body] = $this->summaryLetter($summary);
+        $this->messages->sendToMembers(new Employee, Request::create('/'), [(int) $summary['head']->getKey()], $subject, $body, PortalShellPath::MISSING_REPORTS);
+    }
+
+    /**
+     * A developer's preview: a letter straight to any address, kept out of the outbox and the bell.
      * Sent now rather than queued, so a refused send throws to the command instead of only reaching the log.
      *
-     * @param  list<string>  $days
+     * @param  array{0: string, 1: string}  $letter  subject and body, from letter() or summaryLetter()
      */
-    public function sample(string $to, array $days): void
+    public function sample(string $to, array $letter): void
     {
-        [$subject, $body] = $this->wording($days);
-        Mail::to($to)->send(PortalLetters::letter('notice', '[Test] '.$subject, PortalLetters::body(null, $body)));
+        Mail::to($to)->send(PortalLetters::letter('notice', '[Test] '.$letter[0], PortalLetters::body(null, $letter[1])));
     }
 
     /**
      * @param  list<string>  $days
      * @return array{0: string, 1: string}
      */
-    private function wording(array $days): array
+    public function letter(array $days): array
     {
         $lines = array_map(static fn (string $day): string => '- '.Carbon::createFromFormat('Y-m-d', $day)->format('l, F j, Y'), $days);
 
@@ -127,6 +181,22 @@ final class PortalReportReminders
             'Reminder: '.(count($days) === 1 ? 'a report' : count($days).' reports').' not yet filed',
             "Our records show you have not yet filed a report for:\n\n".implode("\n", $lines)
                 ."\n\nPlease file them as late reports as soon as you can.",
+        ];
+    }
+
+    /**
+     * @param  array{department: string, members: list<array{name: string, days: list<string>}>}  $summary
+     * @return array{0: string, 1: string}
+     */
+    public function summaryLetter(array $summary): array
+    {
+        $lines = array_map(static fn (array $member): string => '- '.$member['name'].' ('.count($member['days']).' missing): '
+            .implode(', ', array_map(static fn (string $day): string => Carbon::createFromFormat('Y-m-d', $day)->format('D, M j'), $member['days'])), $summary['members']);
+
+        return [
+            'Reminder: '.$summary['department'].' team missing report dates',
+            'These members of '.$summary['department']." have not yet filed a report in the last five work days:\n\n".implode("\n", $lines)
+                ."\n\nEach of them has been reminded too. The full list is on Administration / Missing Reports.",
         ];
     }
 

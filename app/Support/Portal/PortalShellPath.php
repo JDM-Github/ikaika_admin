@@ -27,6 +27,8 @@ final class PortalShellPath
 
     public const LATE_REPORT = '/reports/late-report';
 
+    public const MISSING_REPORTS = '/administration/missing-reports';
+
     // A top-level page, so it has no group in front of it.
     public const EVENT_CALENDAR = '/event-calendar';
 
