@@ -14,8 +14,9 @@ use Throwable;
 
 /**
  * The one door to Jira Cloud for Issues & Requests (2026-10-19): a service account's email and API token,
- * one project. The credentials go only to the configured site, and an error carries Jira's status and its
- * own message, never the request -- so never the token or the email.
+ * one project. The credentials go only to the configured site -- or, with JIRA_CLOUD_ID set for a scoped
+ * token, to Atlassian's gateway for that site -- and an error carries Jira's status and its own message,
+ * never the request -- so never the token or the email. A link a person opens is always the site's.
  *
  * Reads are retried on a dropped connection, a 429 or a 5xx; creating an issue and attaching a file are
  * not, because Jira takes no idempotency key and a retry could file the same report twice. A failed
@@ -39,6 +40,8 @@ final class PortalJiraClient
 
     private const CONNECTION_KEY = 'portal:jira:connection';
 
+    private const GATEWAY = 'https://api.atlassian.com/ex/jira/';
+
     private const ISSUE_TYPES_KEY = 'portal:jira:issue-types:';
 
     // The fields a sync reads; nothing else of an issue is ever fetched.
@@ -58,7 +61,7 @@ final class PortalJiraClient
     }
 
     /**
-     * The env keys still blank, or a base URL that is not https.
+     * The env keys still blank, a base URL that is not https, or a cloud id that is not one.
      *
      * @return list<string>
      */
@@ -73,6 +76,10 @@ final class PortalJiraClient
         $base = $this->setting('base_url');
         if ($base !== null && ! str_starts_with($base, 'https://') && ! in_array('JIRA_BASE_URL', $missing, true)) {
             $missing[] = 'JIRA_BASE_URL';
+        }
+        $cloud = $this->setting('cloud_id');
+        if ($cloud !== null && preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $cloud) !== 1) {
+            $missing[] = 'JIRA_CLOUD_ID';
         }
 
         return $missing;
@@ -363,8 +370,8 @@ final class PortalJiraClient
     // Every request stays on the configured site, so the credentials never leave it.
     private function url(string $path): string
     {
-        $url = $this->base().$path;
-        if (! str_starts_with($url, $this->base().'/')) {
+        $url = $this->apiBase().$path;
+        if (! str_starts_with($url, $this->apiBase().'/')) {
             throw new RuntimeException('That address is outside the Jira site.');
         }
 
@@ -376,6 +383,31 @@ final class PortalJiraClient
         $base = $this->setting('base_url');
 
         return $base === null ? null : rtrim($base, '/');
+    }
+
+    // Where the requests go: the site itself, or the gateway for it when a cloud id is set.
+    private function apiBase(): ?string
+    {
+        $cloud = $this->setting('cloud_id');
+
+        return $cloud === null ? $this->base() : self::GATEWAY.strtolower($cloud);
+    }
+
+    // The id Atlassian's gateway names this site by, which the site gives anyone who asks; null without an answer.
+    public function siteCloudId(): ?string
+    {
+        $base = $this->base();
+        if ($base === null) {
+            return null;
+        }
+        try {
+            $id = Http::withOptions(['verify' => CaBundle::getSystemCaRootBundlePath()])->timeout(10)
+                ->get($base.'/_edge/tenant_info')->json('cloudId');
+        } catch (Throwable) {
+            return null;
+        }
+
+        return is_string($id) && $id !== '' ? $id : null;
     }
 
     private function setting(string $key): ?string

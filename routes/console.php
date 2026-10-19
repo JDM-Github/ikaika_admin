@@ -344,6 +344,10 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         }
     } catch (RuntimeException $error) {
         $this->error($error->getMessage());
+        if ($error->getCode() === 401 && trim((string) config('services.jira.cloud_id')) === '') {
+            $cloud = $client->siteCloudId();
+            $this->line('A scoped API token is refused at the site: set JIRA_CLOUD_ID'.($cloud === null ? ' (the cloudId at '.rtrim((string) config('services.jira.base_url'), '/').'/_edge/tenant_info)' : '='.$cloud).', or use a classic token.');
+        }
 
         return 1;
     }

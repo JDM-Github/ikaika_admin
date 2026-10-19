@@ -43,6 +43,7 @@
         <env name="JIRA_EMAIL" value=""/>
         <env name="JIRA_API_TOKEN" value=""/>
         <env name="JIRA_PROJECT_KEY" value=""/>
+        <env name="JIRA_CLOUD_ID" value=""/>
         <env name="JIRA_WEBHOOK_SECRET" value=""/>
     </php>
 </phpunit>
