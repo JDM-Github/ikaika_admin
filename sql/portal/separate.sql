@@ -1424,7 +1424,19 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     fixed_in      VARCHAR(20)  NULL,
     reported_on DATE         NOT NULL,
     updated_at  TIMESTAMP    NULL,
-    INDEX bug_reports_status_reported_on_index (status, reported_on)
+    -- The Jira issue it became, and where sending it got to (2026-10-19): state is null (never sent),
+    -- pending, sent, failed or deleted; attached counts the screenshots already there, attempts the
+    -- scheduler's tries. Existing databases: add_portal_bug_report_jira.
+    jira_issue_id  VARCHAR(20)      NULL,
+    jira_issue_key VARCHAR(32)      NULL,
+    jira_state     VARCHAR(16)      NULL,
+    jira_status    VARCHAR(100)     NULL,
+    jira_error     VARCHAR(255)     NULL,
+    jira_attached  TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    jira_attempts  TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    jira_synced_at TIMESTAMP        NULL,
+    INDEX bug_reports_status_reported_on_index (status, reported_on),
+    UNIQUE KEY bug_reports_jira_issue_id_unique (jira_issue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS bug_report_images (
@@ -1448,6 +1460,19 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
     ('member', 'bug-reports', NULL, 0),
     ('admin', 'bug-reports', NULL, 0),
     ('developer', 'bug-reports', NULL, 0);
+
+-- Send to Jira (2026-10-19): send an issue or request by hand, try a failed one again, and turn sending
+-- new ones on or off; the same people as the page. Existing databases: add_portal_bug_report_jira.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, only_department, sort_order)
+VALUES
+    ('bug-reports.jira', 'bug-reports', 'Send to Jira',
+     'Send an issue or request to Jira by hand, try a failed one again, and turn sending new ones to Jira on or off.',
+     0, 1, 'MIS', 991);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('member', 'bug-reports.jira', NULL, 0),
+    ('admin', 'bug-reports.jira', NULL, 0),
+    ('developer', 'bug-reports.jira', NULL, 0);
 
 -- Edit transactions (2026-10-13): a transaction's name, date, payor or payee, notes and receipt, never
 -- its money; admins, executives and developers hold it like the rest of Finance.

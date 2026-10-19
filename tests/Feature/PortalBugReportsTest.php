@@ -62,7 +62,8 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame(now()->toDateString(), substr((string) $row->reported_on, 0, 10));
         // Nothing in the table can hold who sent it, and no activity was logged for it.
         $this->assertSame(
-            ['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reported_on', 'updated_at'],
+            ['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reported_on', 'updated_at',
+                'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at'],
             Schema::connection('portal')->getColumnListing('bug_reports'),
         );
         $this->assertSame($logged, PortalLog::query()->count());
@@ -265,14 +266,16 @@ class PortalBugReportsTest extends TestCase
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the feature request Dark mode for the calendar In progress')));
     }
 
-    // The Access page names the rule as the sidebar does.
-    public function test_the_access_page_names_the_rule_issues_and_requests(): void
+    // The Access page names the rule as the sidebar does, and an MIS member holds Send to Jira beneath it (2026-10-19).
+    public function test_the_access_page_names_the_rule_issues_and_requests_with_send_to_jira_beneath(): void
     {
         $mis = $this->headersFor($this->memberOf('MIS'));
 
-        $power = collect($this->withHeaders($mis)->getJson(self::BASE.'access')->assertOk()->json('data'))->firstWhere('key', 'bug-reports');
+        $powers = collect($this->withHeaders($mis)->getJson(self::BASE.'access')->assertOk()->json('data'))->keyBy('key');
 
-        $this->assertSame('Issues & Requests', $power['label']);
+        $this->assertSame('Issues & Requests', $powers['bug-reports']['label']);
+        $this->assertSame('Send to Jira', $powers['bug-reports.jira']['label']);
+        $this->assertSame('bug-reports', $powers['bug-reports.jira']['parentKey']);
     }
 
     // An active ordinary member of the department.
