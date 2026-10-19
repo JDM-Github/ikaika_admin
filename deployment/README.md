@@ -218,6 +218,8 @@ JIRA_WEBHOOK_SECRET=                            leave empty locally: no webhook 
 
 Your own account's token works for a first try, but every issue it makes is reported by you; use the service account's to see what the servers will send. Run `php artisan config:clear` after editing `.env` if you ever cached the config. The tests never see these values: `phpunit.xml` blanks every `JIRA_*`.
 
+**Screenshots need Cloudinary too.** A report's screenshots go to Cloudinary first and to Jira from there, so with `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` empty in your `.env` a report with one is refused ("Cloudinary is not set up") and only text-only reports go through. Use the same values the Test Server has.
+
 **Then:**
 
 1. `php artisan portal:jira-check` — the account, the project and the issue type each kind becomes. A `401` is the email or token (a scoped token without `JIRA_CLOUD_ID`, which the check then prints), a `404` the project key.

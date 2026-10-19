@@ -93,6 +93,25 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame(['mis'], $departments);
     }
 
+    // A PC with no Cloudinary keys (2026-10-20, user): the screenshot is refused by name, and nothing half-saved.
+    public function test_a_report_with_screenshots_is_refused_whole_where_cloudinary_is_not_set_up(): void
+    {
+        Http::preventStrayRequests();
+        config(['services.cloudinary.api_secret' => '']);
+        $headers = $this->headersFor($this->memberOf('Engineering'));
+        $before = DB::connection('portal')->table('bug_reports')->count();
+
+        $this->withHeaders($headers)->post(self::BASE.'bug-reports', [
+            'title' => 'In review',
+            'description' => 'With a screenshot.',
+            'images' => [UploadedFile::fake()->image('shot.png')],
+        ])->assertStatus(503)->assertJsonPath('message', 'Screenshots cannot be uploaded on this server yet: Cloudinary is not set up. Send it without them for now.');
+
+        $this->assertSame($before, DB::connection('portal')->table('bug_reports')->count());
+        Http::assertNothingSent();
+        $this->withHeaders($headers)->post(self::BASE.'bug-reports', ['title' => 'In review', 'description' => 'Without one.'])->assertCreated();
+    }
+
     public function test_a_report_needs_a_title_and_a_description_and_three_screenshots_at_most(): void
     {
         Http::fake();

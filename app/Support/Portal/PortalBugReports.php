@@ -130,6 +130,10 @@ final class PortalBugReports
         $description = $this->requiredText($request, 'description', self::MAX_DESCRIPTION, 'Say what happened or what you need.', 'Keep the description under 5,000 characters.');
         $page = $this->optionalText($request, 'page', self::MAX_PAGE);
         $images = $this->validatedImages($request);
+        // Said for what it is (2026-10-20, user): the shared upload's own refusal speaks of receipts.
+        if ($images !== [] && ! $this->cloudinary->isConfigured()) {
+            abort(503, 'Screenshots cannot be uploaded on this server yet: Cloudinary is not set up. Send it without them for now.');
+        }
 
         // Uploaded before the row, so a failed upload adds nothing.
         $stored = [];
