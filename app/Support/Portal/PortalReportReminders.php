@@ -95,30 +95,28 @@ final class PortalReportReminders
 
     /**
      * Each department head's view of the plan: everyone else in their department who is missing a report.
-     * A head is role_level Management, as the old script's hardcoded list was; an executive never gets one.
+     * Heads are the ones company_departments names, as every other head email reads them; an executive never gets one.
      *
      * @param  list<array{employee: Employee, name: string, email: string, department: string, days: list<string>}>  $plan
      * @return list<array{head: Employee, name: string, department: string, members: list<array{name: string, days: list<string>}>}>
      */
     public function summaries(array $plan): array
     {
-        $heads = Employee::query()
-            ->select(['id', 'first_name', 'last_name', 'email', 'department', 'role', 'role_level'])
-            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->whereRaw("LOWER(TRIM(COALESCE(role_level, ''))) = 'management'")
-            ->orderBy('department')
-            ->orderBy('id')
-            ->get();
+        $departments = DB::connection('portal')->table('company_departments')
+            ->whereNotNull('head_employee_id')
+            ->orderBy('name')
+            ->pluck('name');
 
         $summaries = [];
-        foreach ($heads as $head) {
-            $department = trim((string) ($head->department ?? ''));
-            if ($department === '' || trim((string) ($head->email ?? '')) === '' || PortalRole::isExecutive($head->role, $head->role_level)) {
+        foreach ($departments as $name) {
+            $department = trim((string) $name);
+            $head = PortalDepartments::headOf($department);
+            if ($head === null || trim((string) ($head->email ?? '')) === '' || PortalRole::isExecutive($head->role, $head->role_level)) {
                 continue;
             }
             $members = [];
             foreach ($plan as $row) {
-                if (strcasecmp($row['department'], $department) === 0 && ! $row['employee']->is($head)) {
+                if (PortalPreview::department($row['department']) === PortalPreview::department($department) && ! $row['employee']->is($head)) {
                     $members[] = ['name' => $row['name'], 'days' => $row['days']];
                 }
             }

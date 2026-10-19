@@ -12,14 +12,13 @@ use App\Modules\Portal\Models\Employee;
  * inboxes sends nothing, and the inbox row is written either way: a send that fails is logged and
  * dropped, never allowed to fail the write it was telling about. The email waits in the mail queue,
  * so a notice to several managers no longer holds the action for a relay round trip each. A submission
- * on the report pages (a daily or late report, an overtime or offset request) emails only the head of
- * the submitter's department instead, whoever else its inbox notice reaches (2026-10-13, user).
+ * on the report pages (a daily or late report, an overtime or offset request) and a leave request (2026-10-19)
+ * emails only the head of the submitter's department instead, whoever else its inbox notice reaches (2026-10-13, user).
  */
 final class PortalNotificationEmails
 {
     // The notices that also go by email; every other type stays in the portal.
     public const TYPES = [
-        PortalNotificationType::REQUEST_FILED_LEAVE => true,
         PortalNotificationType::REQUEST_FILED_REIMBURSEMENT => true,
         'requests.leave.approved' => true,
         'requests.leave.rejected' => true,
