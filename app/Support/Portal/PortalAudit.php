@@ -89,8 +89,9 @@ final class PortalAudit
         array $payload = [],
         ?bool $asDeveloper = null,
     ): int {
-        // The place belongs to whoever is signed in, so an exempt person's act is Unknown on every row it writes.
-        $location = PortalLocationExemptions::covers($request?->attributes->get('portalEmployee'))
+        // The place belongs to whoever is signed in (the row's owner while signing in, before a session exists),
+        // so an exempt person's act is Unknown on every row it writes.
+        $location = PortalLocationExemptions::covers($request?->attributes->get('portalEmployee') ?? $owner)
             ? ['label' => PortalLocationExemptions::UNKNOWN, 'source' => null, 'lat' => null, 'lng' => null]
             : $this->locationResolver->resolve($request);
 

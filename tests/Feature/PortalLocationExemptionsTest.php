@@ -88,6 +88,15 @@ class PortalLocationExemptionsTest extends TestCase
         $this->assertSame('203.0.113.9', $row->ip_address);
     }
 
+    public function test_signing_in_records_no_place_for_an_exempt_person(): void
+    {
+        $this->flushHeaders();
+        $this->withHeader('X-Portal-Location', 'Calamba, Laguna')->postJson(self::BASE.'/auth/login', ['id_no' => $this->exempt->id_no])->assertOk();
+
+        $row = DB::connection('portal')->table('logs')->where('employee_id', $this->exempt->getKey())->orderByDesc('id')->first();
+        $this->assertSame(PortalLocationExemptions::UNKNOWN, $row->location_label);
+    }
+
     public function test_an_exempt_person_is_never_asked_for_or_given_a_home(): void
     {
         $homes = app(PortalHomeLocations::class);
