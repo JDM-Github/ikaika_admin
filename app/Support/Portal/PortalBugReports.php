@@ -2,10 +2,12 @@
 
 namespace App\Support\Portal;
 
+use App\Jobs\SendBugReportToJira;
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 
 /**
  * Bug reports (2026-10-13, user): anyone signed in sends one from the button in the portal's corner,
@@ -135,9 +137,12 @@ final class PortalBugReports
             ];
         }
 
-        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored): int {
+        // On its way to Jira as it comes in, unless MIS turned that off (2026-10-19).
+        $toJira = $this->jira->shouldSendNew();
+        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored, $toJira): int {
             $id = (int) DB::connection('portal')->table('bug_reports')->insertGetId([
                 'kind' => $kind,
+                'jira_state' => $toJira ? PortalBugReportsJira::STATE_PENDING : null,
                 'title' => $title,
                 'description' => $description,
                 'page' => $page,
@@ -169,6 +174,10 @@ final class PortalBugReports
             'Open Issues & Requests',
             ['recordId' => (string) $id],
         );
+        if ($toJira) {
+            Queue::push(new SendBugReportToJira($id));
+            PortalQueueNow::afterResponse();
+        }
 
         return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => ['id' => (string) $id]];
     }

@@ -59,6 +59,8 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame('finance/transactions', $row->page);
         $this->assertSame('new', $row->status);
         $this->assertSame('bug', $row->kind);
+        // No Jira on this server, so nothing waits to go there.
+        $this->assertNull($row->jira_state);
         $this->assertSame(now()->toDateString(), substr((string) $row->reported_on, 0, 10));
         // Nothing in the table can hold who sent it, and no activity was logged for it.
         $this->assertSame(

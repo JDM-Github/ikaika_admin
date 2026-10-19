@@ -2,13 +2,17 @@
 
 use App\Modules\Portal\Models\EmailMessage;
 use App\Support\Airtable\PortalAirtableSync;
+use App\Support\ApiPath;
 use App\Support\Portal\PortalBitbucketPreview;
 use App\Support\Portal\PortalBitbucketSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
+use App\Support\Portal\PortalBugReports;
+use App\Support\Portal\PortalBugReportsJira;
 use App\Support\Portal\PortalEmailAttachments;
 use App\Support\Portal\PortalEmailMessages;
 use App\Support\Portal\PortalEmployeeDocuments;
 use App\Support\Portal\PortalHomeLocations;
+use App\Support\Portal\PortalJiraClient;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
 use App\Support\Portal\PortalPlaces;
@@ -292,7 +296,73 @@ Artisan::command('portal:geocode-homes', function (PortalHomeLocations $homes): 
     return 0;
 })->purpose('Turn every address into a point for Manage / Map');
 
+Artisan::command('portal:jira-sync', function (PortalBugReportsJira $jira, PortalJiraClient $client): int {
+    if (! $jira->isConfigured()) {
+        $this->info('Jira is not configured here; nothing to send or read.');
+
+        return 0;
+    }
+    try {
+        $done = $jira->run();
+    } catch (RuntimeException $error) {
+        $this->error($error->getMessage());
+
+        return 1;
+    }
+    $this->info("Sent {$done['sent']}, failed {$done['failed']}, read back {$done['synced']}, gone from Jira {$done['deleted']}.");
+    $connection = $client->connection();
+    if (in_array($connection['state'], [PortalJiraClient::REFUSED, PortalJiraClient::UNREACHABLE], true)) {
+        $this->error('Jira: '.$connection['message']);
+
+        return 1;
+    }
+
+    return 0;
+})->purpose('Send the issues and requests waiting for Jira, and read every linked one back');
+
+Artisan::command('portal:jira-check', function (PortalJiraClient $client, PortalBugReportsJira $jira): int {
+    $missing = $client->missingSettings();
+    if ($missing !== []) {
+        $this->error('Jira is not configured: set '.implode(', ', $missing).' (JIRA_BASE_URL as https://<site>.atlassian.net).');
+
+        return 1;
+    }
+    $failed = false;
+    try {
+        $account = $client->myself();
+        $this->info('Account: '.$account['displayName'].' ('.$account['accountId'].')');
+        $project = $client->project();
+        $this->info('Project: '.$project['key'].' - '.$project['name']);
+        foreach (PortalBugReports::KINDS as $kind => $words) {
+            $type = $jira->issueTypeFor($kind);
+            if ($type['id'] === null) {
+                $failed = true;
+                $this->error($words['label'].': no issue type '.$type['wanted'].' or Task. The project has: '.implode(', ', array_column($client->issueTypes(), 'name')).'.');
+            } else {
+                $this->info($words['label'].' -> '.$type['name'].($type['name'] === $type['wanted'] ? '' : ' (no '.$type['wanted'].' in the project)'));
+            }
+        }
+    } catch (RuntimeException $error) {
+        $this->error($error->getMessage());
+
+        return 1;
+    }
+    $this->info('New ones go to Jira on their own: '.($jira->autoSend() ? 'on' : 'off'));
+    $hasSecret = trim((string) config('services.jira.webhook_secret')) !== '';
+    $hasSecret ? $this->info('Webhook secret: set') : $this->warn('Webhook secret: not set - every delivery will be refused until JIRA_WEBHOOK_SECRET is.');
+    $this->line('');
+    $this->line('A Jira admin registers the webhook in Jira settings > System > WebHooks:');
+    $this->line('  URL:    '.url(ApiPath::join((string) config('products.channel'), 'jira', 'webhook')));
+    $this->line('  Events: Issue updated, Issue deleted');
+    $this->line('  JQL:    project = '.$client->projectKey().' AND labels = '.config('services.jira.label'));
+    $this->line('  Secret: the value of JIRA_WEBHOOK_SECRET');
+
+    return $failed ? 1 : 0;
+})->purpose('Check the Jira account, project and issue types, and print the webhook to register');
+
 Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
+// Jira's backstop: what failed or waits is sent again, and every linked issue is read back, if a delivery was lost.
+Schedule::command('portal:jira-sync')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();
 
 // The mail queue's worker. The server runs no daemon, so the minute cron starts one that leaves when the queue is

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\SendBugReportToJira;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -9,6 +10,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\Concerns\ActsAsPortalEmployee;
 use Tests\TestCase;
 
@@ -203,6 +205,57 @@ class PortalBugReportsJiraTest extends TestCase
         DB::connection('portal')->table('bug_reports')->where('id', $id)->update(['jira_state' => 'deleted']);
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed'])
             ->assertOk()->assertJsonPath('data.status', 'fixed')->assertJsonPath('data.jira.state', 'deleted');
+    }
+
+    // The reported ask (2026-10-19): every new one goes to Jira as it comes in, and submitting never waits on Jira.
+    public function test_a_new_report_is_queued_for_jira_as_it_comes_in(): void
+    {
+        $this->connectJira();
+        Queue::fake([SendBugReportToJira::class]);
+        Http::preventStrayRequests();
+
+        $id = $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->post(self::BASE.'bug-reports', [
+            'kind' => 'feedback', 'title' => 'Love the map', 'description' => 'It saves a call every morning.',
+        ])->assertCreated()->json('data.id');
+
+        $this->assertSame('pending', DB::connection('portal')->table('bug_reports')->where('id', $id)->value('jira_state'));
+        Queue::assertPushed(SendBugReportToJira::class, fn (SendBugReportToJira $job): bool => $job->reportId === (int) $id);
+        Http::assertNothingSent();
+    }
+
+    public function test_with_sending_turned_off_a_new_report_stays_out_of_jira(): void
+    {
+        $this->connectJira();
+        DB::connection('core')->table('settings')->insert(['product' => 'portal', 'setting_key' => 'jira.auto_send', 'setting_value' => '0']);
+        Queue::fake([SendBugReportToJira::class]);
+
+        $id = $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->post(self::BASE.'bug-reports', [
+            'title' => 'Save does nothing', 'description' => 'The form stays open.',
+        ])->assertCreated()->json('data.id');
+
+        $this->assertNull(DB::connection('portal')->table('bug_reports')->where('id', $id)->value('jira_state'));
+        Queue::assertNotPushed(SendBugReportToJira::class);
+    }
+
+    // On the sync queue the job runs as it is pushed: the whole way from the corner button to a Jira issue.
+    public function test_a_new_report_becomes_a_jira_issue_once_its_job_runs(): void
+    {
+        $this->connectJira();
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => []]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug']]]),
+            self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10077', 'key' => 'IKP-30'], 201),
+            self::SITE.'/rest/api/3/issue/10077*' => Http::response(['id' => '10077', 'key' => 'IKP-30', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]]),
+        ]);
+
+        $id = $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->post(self::BASE.'bug-reports', [
+            'title' => 'Save does nothing', 'description' => 'The form stays open.',
+        ])->assertCreated()->json('data.id');
+
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $this->assertSame('sent', $row->jira_state);
+        $this->assertSame('IKP-30', $row->jira_issue_key);
     }
 
     private function connectJira(): void

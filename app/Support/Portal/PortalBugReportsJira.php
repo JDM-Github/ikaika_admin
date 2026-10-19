@@ -312,20 +312,34 @@ final class PortalBugReportsJira
         return $this->row((int) $row->id) ?? $row;
     }
 
-    // The issue type a kind is filed as, by name, else Task; a project with neither cannot take it.
-    private function issueTypeId(string $kind): string
+    /**
+     * The issue type a kind is filed as: the one named for it, else Task, else none the project has.
+     *
+     * @return array{wanted: string, id: ?string, name: ?string}
+     */
+    public function issueTypeFor(string $kind): array
     {
         $types = $this->jira->issueTypes();
         $wanted = trim((string) config('services.jira.issue_types.'.$kind, self::FALLBACK_TYPE));
         foreach ([$wanted, self::FALLBACK_TYPE] as $name) {
             foreach ($types as $type) {
                 if (strcasecmp($type['name'], $name) === 0) {
-                    return $type['id'];
+                    return ['wanted' => $wanted, 'id' => $type['id'], 'name' => $type['name']];
                 }
             }
         }
 
-        throw new RuntimeException('Jira has no issue type '.$wanted.' or '.self::FALLBACK_TYPE.' in '.$this->jira->projectKey().'.');
+        return ['wanted' => $wanted, 'id' => null, 'name' => null];
+    }
+
+    private function issueTypeId(string $kind): string
+    {
+        $type = $this->issueTypeFor($kind);
+        if ($type['id'] === null) {
+            throw new RuntimeException('Jira has no issue type '.$type['wanted'].' or '.self::FALLBACK_TYPE.' in '.$this->jira->projectKey().'.');
+        }
+
+        return $type['id'];
     }
 
     /**
