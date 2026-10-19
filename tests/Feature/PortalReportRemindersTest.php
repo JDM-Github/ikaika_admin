@@ -57,7 +57,7 @@ class PortalReportRemindersTest extends TestCase
         $this->leaver->forceFill(['email' => 'leaver@ikaika.test', 'start_date' => null, 'end_date' => '2020-03-09'])->save();
     }
 
-    public function test_the_window_skips_filed_days_leave_and_days_outside_employment(): void
+    public function test_the_window_skips_filed_days_leave_offsets_and_days_outside_employment(): void
     {
         $this->insertLine($this->member, '2020-03-10');
         DB::connection('portal')->table('requests')->insert([
@@ -66,11 +66,19 @@ class PortalReportRemindersTest extends TestCase
             'status' => 'Approved',
             'request_date' => '2020-03-11',
         ]);
+        DB::connection('portal')->table('requests')->insert([
+            'name' => trim($this->starter->first_name.' '.$this->starter->last_name),
+            'type' => 'Offset',
+            'status' => 'Approved',
+            'original_work_day' => '2020-03-07',
+            'offset_work_day' => '2020-03-13',
+        ]);
 
         $plan = collect($this->reminders()->missing(Carbon::parse(self::TODAY, PortalReportReminders::ZONE)))->keyBy('email');
 
         $this->assertSame(['2020-03-09', '2020-03-12', '2020-03-13'], $plan['member@ikaika.test']['days']);
-        $this->assertSame(['2020-03-12', '2020-03-13'], $plan['starter@ikaika.test']['days']);
+        // The offset's day off is covered, so only the 12th is missing.
+        $this->assertSame(['2020-03-12'], $plan['starter@ikaika.test']['days']);
         $this->assertSame(['2020-03-09'], $plan['leaver@ikaika.test']['days']);
         $executive = $this->rosterExecutive();
         $this->assertFalse($plan->contains(fn (array $row): bool => $row['employee']->is($executive)));

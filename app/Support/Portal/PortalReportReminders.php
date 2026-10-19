@@ -32,7 +32,7 @@ final class PortalReportReminders
 
     /**
      * Who is missing which work days in the window ending yesterday, never a day before they started,
-     * after they left, or one their leave already keeps them out of.
+     * after they left, or one their leave or an offset already covers.
      *
      * @return list<array{employee: Employee, name: string, email: string, days: list<string>}>
      */
@@ -70,7 +70,7 @@ final class PortalReportReminders
             }
             $start = $this->date($person->start_date);
             $end = $this->date($person->end_date);
-            $away = array_flip($this->reports->leaveDays($person, $from, $to));
+            $away = array_flip([...$this->reports->leaveDays($person, $from, $to), ...$this->reports->offsetDays($person, $from, $to)]);
             $days = array_values(array_filter($window, static fn (string $day): bool => ! isset($filed[(int) $person->getKey()][$day])
                 && ! isset($away[$day])
                 && ($start === null || $day >= $start)
