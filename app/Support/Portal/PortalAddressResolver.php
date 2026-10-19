@@ -46,7 +46,12 @@ final class PortalAddressResolver
             $province = $this->match($this->provinces(), $this->tokens($region), null, true);
             $fromRegion = $province !== null;
         }
-        $city = $this->match($this->cities(), $tokens, $province['code'] ?? null, true);
+        // The word that named the province also names its capital (Batangas, Batangas City), so it is set
+        // aside first and only read again when nothing else names a city (2026-10-19, user).
+        $provinceName = $province === null ? null : self::base($province['name']);
+        $cityTokens = array_values(array_filter($tokens, static fn (string $token): bool => $token !== $provinceName));
+        $city = $this->match($this->cities(), $cityTokens, $province['code'] ?? null, true)
+            ?? $this->match($this->cities(), $tokens, $province['code'] ?? null, true);
         // The city's own province settles it when the address never named one.
         if ($city !== null && $province === null) {
             $province = ['code' => $city['province_code'], 'name' => $this->provinceName($city['province_code'])];

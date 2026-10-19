@@ -34,6 +34,9 @@ final class PortalShellPath
 
     public const SETTINGS = '/settings';
 
+    // The person's own details and documents, a sidebar row of its own.
+    public const PROFILE = '/profile';
+
     /**
      * Where an email's inbox notice may open: pages every member can reach, so a notice never links
      * a recipient to a screen they are not allowed to see.

@@ -33,6 +33,17 @@ class PortalAddressResolverTest extends TestCase
         $this->assertSame('Lecheria', $id['barangay']);
     }
 
+    // A pin in Lobo (2026-10-19, user): "Batangas" names the province and its capital, which must not
+    // stand against the town the address names; the capital is still found when it is the one named.
+    public function test_the_province_word_does_not_count_as_its_capital_city(): void
+    {
+        $lobo = $this->resolver()->identify('Calumpit, Lobo, Batangas, Calabarzon', null);
+        $this->assertSame(['Lobo', 'Calumpit'], [$lobo['city'], $lobo['barangay']]);
+
+        $capital = $this->resolver()->identify('Kumintang Ibaba, Batangas City, Batangas', null);
+        $this->assertSame(['Batangas City', 'Kumintang Ibaba'], [$capital['city'], $capital['barangay']]);
+    }
+
     public function test_the_queries_lead_with_the_barangay_and_end_in_the_country(): void
     {
         $queries = $this->resolver()->queries(
