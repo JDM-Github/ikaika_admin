@@ -70,6 +70,10 @@ final class PortalManageUserPresenter
             'id' => (string) $employee->getKey(),
             'idNo' => $text($employee->id_no),
             'name' => PortalAccessGraph::name($employee),
+            // The name's parts, for Edit details to open on (2026-10-20, user).
+            'firstName' => $text($employee->first_name),
+            'middleName' => $text($employee->middle_name),
+            'lastName' => $text($employee->last_name),
             'nickname' => $text($employee->nickname),
             'email' => $text($employee->email),
             'jobTitle' => $text($employee->job_title),

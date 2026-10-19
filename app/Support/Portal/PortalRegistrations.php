@@ -321,9 +321,9 @@ final class PortalRegistrations
         $details = $this->detailsOf($row);
         $employee = $this->users->createEmployee($actor, [
             'id_no' => $idNo,
-            'first_name' => $this->text($details['firstName'] ?? null) ?? 'New',
-            'middle_name' => $this->text($details['middleName'] ?? null),
-            'last_name' => $this->text($details['lastName'] ?? null) ?? 'Employee',
+            'first_name' => PortalNameCase::proper($this->text($details['firstName'] ?? null)) ?? 'New',
+            'middle_name' => PortalNameCase::proper($this->text($details['middleName'] ?? null)),
+            'last_name' => PortalNameCase::proper($this->text($details['lastName'] ?? null)) ?? 'Employee',
             'nickname' => $this->text($details['nickname'] ?? null),
             'email' => $email,
             'personal_email' => strtolower(trim((string) $row->email)),
@@ -561,9 +561,9 @@ final class PortalRegistrations
         }
 
         $record = [
-            'first_name' => $this->text($details['firstName'] ?? null),
-            'middle_name' => $this->text($details['middleName'] ?? null),
-            'last_name' => $this->text($details['lastName'] ?? null),
+            'first_name' => PortalNameCase::proper($this->text($details['firstName'] ?? null)),
+            'middle_name' => PortalNameCase::proper($this->text($details['middleName'] ?? null)),
+            'last_name' => PortalNameCase::proper($this->text($details['lastName'] ?? null)),
             'nickname' => $this->text($details['nickname'] ?? null),
             'email' => strtolower(trim((string) $row->email)),
             'start_date' => $this->text($details['startDate'] ?? null),

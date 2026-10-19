@@ -303,6 +303,8 @@ class PortalProfileChangesTest extends TestCase
         $nathaniel = $this->employee("id_no = '".self::NATHANIEL."'");
         $steven = $this->employee("id_no = '".self::STEVEN."'");
         $kept = $this->attachment($nathaniel, 'tax_identification');
+        // A change of theirs already waiting on this database is set aside for the test, undone after it.
+        DB::connection('portal')->table('employee_change_requests')->where('employee_id', (int) $nathaniel->getKey())->where('status', 'Pending')->update(['status' => 'Withdrawn']);
         $session = $this->token($nathaniel);
         $this->assertTrue($this->withToken($session)->getJson(self::MINE)->assertOk()->json('data.approvesOwn'));
 

@@ -162,6 +162,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::delete('manage/users/{id}/documents/{documentId}', [UsersController::class, 'destroyDocument'])
             ->whereNumber(['id', 'documentId']);
     });
+    // Edit details (2026-10-20, user): the record's name, job title, work email, location, employment and start date.
+    Route::middleware(['portal.rule:manage.users.information.edit', 'throttle:portal-manage-users-write'])
+        ->patch('manage/users/{id}/details', [UsersController::class, 'updateDetails'])
+        ->whereNumber('id');
     // Activate and deactivate: an account Active or Inactive, which sign-in follows (2026-10-12).
     Route::middleware(['portal.rule:manage.users.status', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/status', [UsersController::class, 'updateStatus'])
