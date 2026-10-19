@@ -38,5 +38,11 @@
         <env name="CLOUDINARY_CLOUD_NAME" value="test-cloud"/>
         <env name="CLOUDINARY_API_KEY" value="test-key"/>
         <env name="CLOUDINARY_API_SECRET" value="test-secret"/>
+        <!-- A developer's own Jira in .env never reaches a test; the Jira tests configure their own. -->
+        <env name="JIRA_BASE_URL" value=""/>
+        <env name="JIRA_EMAIL" value=""/>
+        <env name="JIRA_API_TOKEN" value=""/>
+        <env name="JIRA_PROJECT_KEY" value=""/>
+        <env name="JIRA_WEBHOOK_SECRET" value=""/>
     </php>
 </phpunit>

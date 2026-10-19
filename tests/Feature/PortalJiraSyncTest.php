@@ -1,0 +1,184 @@
+<?php
+
+namespace Tests\Feature;
+
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+
+// Jira's backstop (2026-10-19, user): the scheduled run sends what waits and reads every linked issue back; the check command.
+class PortalJiraSyncTest extends TestCase
+{
+    use DatabaseTransactions;
+
+    /**
+     * @var list<string>
+     */
+    protected array $connectionsToTransact = ['portal', 'core'];
+
+    private const SITE = 'https://ikaika-test.atlassian.net';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::flush();
+        DB::connection('core')->table('settings')->where('product', 'portal')->where('setting_key', 'jira.auto_send')->delete();
+        // Only this test's reports: the database may hold others from a copied server.
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        config(['services.jira' => [
+            ...config('services.jira'),
+            'base_url' => self::SITE,
+            'email' => 'svc@ikaika.test',
+            'token' => 'secret-token',
+            'project' => 'IKP',
+            'webhook_secret' => 'fixture-secret',
+        ]]);
+    }
+
+    public function test_the_run_sends_what_waits_skips_what_ran_out_of_tries_and_reads_linked_issues_back(): void
+    {
+        $waiting = $this->report(['jira_state' => 'pending']);
+        $spent = $this->report(['jira_state' => 'failed', 'jira_attempts' => 5]);
+        $linked = $this->report(['jira_state' => 'sent', 'jira_issue_id' => '10003', 'jira_issue_key' => 'IKP-3']);
+        $gone = $this->report(['jira_state' => 'sent', 'jira_issue_id' => '10004', 'jira_issue_key' => 'IKP-4']);
+        $sandbox = $this->report(['jira_state' => 'sent', 'jira_issue_id' => '20001', 'jira_issue_key' => 'PROD-1']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => []]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug']]]),
+            self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+                ['id' => '10003', 'key' => 'IKP-3', 'fields' => ['status' => ['name' => 'Done', 'statusCategory' => ['key' => 'done']], 'fixVersions' => [['name' => '1.2.0']]]],
+                ['id' => '10090', 'key' => 'IKP-9', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]],
+            ], 'issueErrors' => []]),
+            self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10090', 'key' => 'IKP-9'], 201),
+            self::SITE.'/rest/api/3/issue/10090*' => Http::response(['id' => '10090', 'key' => 'IKP-9', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]]),
+        ]);
+
+        $this->artisan('portal:jira-sync')->expectsOutputToContain('Sent 1, failed 0, read back 2, gone from Jira 1.')->assertExitCode(0);
+
+        $this->assertSame('sent', $this->state($waiting));
+        $this->assertSame('failed', $this->state($spent));
+        $this->assertSame(['fixed', '1.2.0'], [$this->column($linked, 'status'), $this->column($linked, 'fixed_in')]);
+        $this->assertSame('deleted', $this->state($gone));
+        // Another project's issue - production's, on a copied database - is never asked about.
+        $this->assertSame('sent', $this->state($sandbox));
+        Http::assertSent(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue/bulkfetch'
+            && $request['issueIdsOrKeys'] === ['10090', '10003', '10004']);
+    }
+
+    public function test_with_sending_off_nothing_waiting_is_sent_but_linked_issues_are_still_read(): void
+    {
+        DB::connection('core')->table('settings')->insert(['product' => 'portal', 'setting_key' => 'jira.auto_send', 'setting_value' => '0']);
+        $waiting = $this->report(['jira_state' => 'pending']);
+        $this->report(['jira_state' => 'sent', 'jira_issue_id' => '10003', 'jira_issue_key' => 'IKP-3']);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [['id' => '10003', 'key' => 'IKP-3', 'fields' => []]]])]);
+
+        $this->artisan('portal:jira-sync')->assertExitCode(0);
+
+        $this->assertSame('pending', $this->state($waiting));
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_refused_account_stops_the_run_and_the_command_fails(): void
+    {
+        $first = $this->report(['jira_state' => 'pending']);
+        $second = $this->report(['jira_state' => 'pending']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['errorMessages' => ['Client must be authenticated to access this resource.']], 401),
+        ]);
+
+        $this->artisan('portal:jira-sync')->expectsOutputToContain('Jira: Jira HTTP 401')->assertExitCode(1);
+
+        $this->assertSame('failed', $this->state($first));
+        $this->assertSame('pending', $this->state($second));
+        Http::assertSentCount(1);
+    }
+
+    // Every issue asked about missing at once says the account lost the project, not that the issues went.
+    public function test_every_linked_issue_missing_at_once_marks_none_deleted(): void
+    {
+        $one = $this->report(['jira_state' => 'sent', 'jira_issue_id' => '10003', 'jira_issue_key' => 'IKP-3']);
+        $two = $this->report(['jira_state' => 'sent', 'jira_issue_id' => '10004', 'jira_issue_key' => 'IKP-4']);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [], 'issueErrors' => [['id' => '10003'], ['id' => '10004']]])]);
+
+        $this->artisan('portal:jira-sync')->expectsOutputToContain('check the account can still browse the project')->assertExitCode(1);
+
+        $this->assertSame(['sent', 'sent'], [$this->state($one), $this->state($two)]);
+    }
+
+    public function test_the_check_names_the_account_project_and_types_and_prints_the_webhook(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+        ]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('Account: IKAIKA Portal Bot')
+            ->expectsOutputToContain('Feature request -> Task (no Story in the project)')
+            ->expectsOutputToContain('/api/development/jira/webhook')
+            ->expectsOutputToContain('JQL:    project = IKP AND labels = ikaika-portal')
+            ->assertExitCode(0);
+    }
+
+    public function test_the_check_fails_on_a_refused_account_without_showing_its_token(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/myself' => Http::response(['errorMessages' => ['Client must be authenticated to access this resource.']], 401)]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('Jira HTTP 401: Client must be authenticated to access this resource.')
+            ->doesntExpectOutputToContain('secret-token')
+            ->assertExitCode(1);
+    }
+
+    public function test_the_check_names_the_settings_still_missing(): void
+    {
+        config(['services.jira.token' => '', 'services.jira.project' => '']);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('Jira is not configured: set JIRA_API_TOKEN, JIRA_PROJECT_KEY')
+            ->assertExitCode(1);
+    }
+
+    public function test_the_run_is_scheduled_every_fifteen_minutes(): void
+    {
+        $events = collect(app(Schedule::class)->events())->filter(fn ($event): bool => str_contains((string) $event->command, 'portal:jira-sync'));
+
+        $this->assertCount(1, $events);
+        $this->assertSame('*/15 * * * *', $events->first()->expression);
+    }
+
+    /**
+     * @param  array<string, mixed>  $columns
+     */
+    private function report(array $columns): int
+    {
+        return (int) DB::connection('portal')->table('bug_reports')->insertGetId([
+            'title' => 'Calendar skips Sunday',
+            'description' => 'The month view jumps from Saturday to Monday.',
+            'status' => 'new',
+            'reported_on' => '2026-10-19',
+            ...$columns,
+        ]);
+    }
+
+    private function state(int $id): ?string
+    {
+        return $this->column($id, 'jira_state');
+    }
+
+    private function column(int $id, string $column): mixed
+    {
+        return DB::connection('portal')->table('bug_reports')->where('id', $id)->value($column);
+    }
+}

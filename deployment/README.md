@@ -103,7 +103,7 @@ ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
 
 **Email** goes through the WordPress bridge on ikaikabim.com (`MAIL_MAILER=wprelay`), the same as local. That route arrives in Outlook without the "can't verify sender" banner.
 
-**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`, `PORTAL_ID_LOGIN_PASSWORD`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
+**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_WEBHOOK_SECRET`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`, `PORTAL_ID_LOGIN_PASSWORD`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
 
 - Cloudinary (email images, reimbursement receipts): until its keys are on the server, uploads answer "Image upload is not configured." / "Receipt upload is not configured.".
 - ID-number sign-in (Settings > Advanced switch) also needs `PORTAL_ID_LOGIN_PASSWORD`; until it is on the server, every ID sign-in is refused.
@@ -112,7 +112,7 @@ ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
 To see which settings the server has (names only, no values):
 
 ```powershell
-ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET MAIL_RELAY_URL MAIL_RELAY_KEY PORTAL_ID_LOGIN_PASSWORD; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
+ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET JIRA_BASE_URL JIRA_EMAIL JIRA_API_TOKEN JIRA_PROJECT_KEY JIRA_WEBHOOK_SECRET MAIL_RELAY_URL MAIL_RELAY_KEY PORTAL_ID_LOGIN_PASSWORD; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
 ```
 
 **Tracker tables** (e.g. Finance / Accounts' `account_fund_transfers`): the tracker database is the transaction tracker's own, so no Laravel migration reaches it. Its changes live in `sql/transaction_tracker/patches/` and every admin deploy runs each one, so they must be safe to rerun (`CREATE TABLE IF NOT EXISTS`, ...). A new one: add a dated file there; fresh installs also need it in `schema.sql`. A missing table shows as "We could not load the accounts." or a similar load error.
@@ -150,6 +150,77 @@ ssh bluehost "cd ~/apps/test-server/app && php artisan portal:bitbucket-sync"
 ```
 
 The preview shows one day's commits and saves nothing; the sync prints `<repository>: N new commits, N counted` per linked repository. A first sync of a long history takes a few minutes.
+
+## Jira (Issues & Requests)
+
+Every issue or request people send from the portal's corner button becomes a Jira issue: as it comes in (MIS can turn that off on the Issues & Requests page), or sent by hand. Jira then owns its status, fix version and kind, and the portal reads them back by webhook and every fifteen minutes. Production files into the real project; the Test Server into a sandbox project, so trying things out never lands in the real board.
+
+**1. A service account and its token.** In Atlassian, a dedicated user (not a Jira admin) with an API token (id.atlassian.com → Security → API tokens). On each project it needs **Browse projects**, **Create issues** and **Create attachments**. Every issue the portal makes is reported by this account, so nobody's name is on an anonymous report.
+
+**2. The settings.** In your local `.env` (the Test Server's, with the sandbox project):
+
+```text
+JIRA_BASE_URL=        https://<site>.atlassian.net
+JIRA_EMAIL=           the service account's email
+JIRA_API_TOKEN=       its API token
+JIRA_PROJECT_KEY=     the sandbox project's key on the Test Server, the real one on production
+JIRA_WEBHOOK_SECRET=  any long random string, also typed into the webhook below
+```
+
+Optional: `JIRA_ISSUE_TYPE_BUG`, `JIRA_ISSUE_TYPE_FEATURE`, `JIRA_ISSUE_TYPE_FEEDBACK` (default Bug, Story, Task; a type the project lacks falls back to Task).
+
+`push-env.ps1` sends them to the Test Server with the rest. Production's differ (its own project, its own secret), so keep them in a file of their own and push only those:
+
+```powershell
+.\deployment\push-env.ps1 -RemoteDir ~/apps/portal-prod -EnvFile C:\path\to\jira-production.env -Keys JIRA_BASE_URL,JIRA_EMAIL,JIRA_API_TOKEN,JIRA_PROJECT_KEY,JIRA_WEBHOOK_SECRET
+```
+
+Never give the Test Server production's project: it runs on copies of production's database, and would send the copied reports again.
+
+**3. Check it, and get the webhook to register:**
+
+```powershell
+ssh bluehost "cd ~/apps/test-server/app && php artisan portal:jira-check"
+```
+
+It names the account, the project and the issue type each kind becomes, and prints the webhook. A Jira admin adds it once per server in Jira settings → System → WebHooks:
+
+| Field | Value |
+| --- | --- |
+| URL | what `portal:jira-check` prints, e.g. `https://test.ikaikabim.com/central-api/api/staging/jira/webhook` |
+| Secret | the `JIRA_WEBHOOK_SECRET` value |
+| Events | Issue updated, Issue deleted |
+| JQL | `project = <KEY> AND labels = ikaika-portal` |
+
+**4. The scheduler** sends what failed or waited and reads every linked issue back, in case a delivery was lost. It rides the same every-minute cron as everything else; to run it by hand:
+
+```powershell
+ssh bluehost "cd ~/apps/test-server/app && php artisan portal:jira-sync"
+```
+
+It prints `Sent N, failed N, read back N, gone from Jira N.` and fails when Jira refuses the account or does not answer.
+
+### Testing against a Jira space from your PC
+
+**Where the credentials go:** the `JIRA_*` lines in this repo's local `.env` (gitignored, so they never leave your PC; `.env.example` lists them). Point them at the sandbox project, never the real one:
+
+```text
+JIRA_BASE_URL=https://<site>.atlassian.net     the site, https, no path
+JIRA_EMAIL=you-or-the-service-account@...       the Atlassian account the token belongs to
+JIRA_API_TOKEN=...                              id.atlassian.com → Security → Create and manage API tokens
+JIRA_PROJECT_KEY=...                            the sandbox project's key, e.g. IKPS
+JIRA_WEBHOOK_SECRET=                            leave empty locally: no webhook can reach your PC
+```
+
+Your own account's token works for a first try, but every issue it makes is reported by you; use the service account's to see what the servers will send. Run `php artisan config:clear` after editing `.env` if you ever cached the config. The tests never see these values: `phpunit.xml` blanks every `JIRA_*`.
+
+**Then:**
+
+1. `php artisan portal:jira-check` — the account, the project and the issue type each kind becomes. A `401` is the email or token, a `404` the project key.
+2. File a report from the corner button (local `QUEUE_CONNECTION=sync`, so it goes to Jira during the submit), or press **Send to Jira** on its sheet in Issues & Requests.
+3. Move the issue in Jira, then `php artisan portal:jira-sync` to read it back — locally that stands in for the webhook.
+
+Empty the `JIRA_*` lines again when you are done, so a local report does not quietly become a sandbox issue.
 
 ## Roll back
 
@@ -251,3 +322,8 @@ Run `deploy.ps1` here, then the portal's `deploy.ps1`.
 | Microsoft login: redirect mismatch | Azure and `PORTAL_AZURE_REDIRECT_URI` must both be exactly the portal URL |
 | `Bitbucket HTTP 401` from the sync | `BITBUCKET_TOKEN` is wrong, expired (they last a year at most) or lacks `read:repository:bitbucket` |
 | Webhook deliveries answer `401` | The webhook's secret and `BITBUCKET_WEBHOOK_SECRET` differ, or the setting was not applied |
+| Issues & Requests says Jira is "not connected" | One of `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` is empty on that server; `portal:jira-check` names it |
+| `Jira HTTP 401` | The token is wrong or expired, or `JIRA_EMAIL` is not the token's owner |
+| `Jira HTTP 403` or `404` on the project | The service account lacks Browse projects / Create issues / Create attachments on it, or `JIRA_PROJECT_KEY` names another project |
+| `Jira HTTP 400` naming a field | The project requires a field the portal does not fill (a required custom field); make it optional for these issue types |
+| Jira webhook deliveries answer `401` | The webhook's secret and `JIRA_WEBHOOK_SECRET` differ, or the setting was not applied |

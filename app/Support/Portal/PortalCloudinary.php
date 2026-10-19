@@ -7,6 +7,7 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -193,6 +194,24 @@ final class PortalCloudinary
             Log::warning('portal.cloudinary.image_delete_rejected', ['status' => $response->status()]);
             abort(502, 'The image could not be deleted.');
         }
+    }
+
+    // A stored file's bytes (2026-10-19: a screenshot handed on to Jira), only from this account's own delivery URLs.
+    public function download(string $url): string
+    {
+        if (! $this->isOwnedUrl($url)) {
+            throw new RuntimeException('That file is not one of the portal\'s.');
+        }
+        try {
+            $response = $this->client()->get($url);
+        } catch (Throwable) {
+            throw new RuntimeException('Cloudinary did not answer.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('Cloudinary HTTP '.$response->status());
+        }
+
+        return $response->body();
     }
 
     public function isOwnedUrl(string $url): bool

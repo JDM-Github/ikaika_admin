@@ -15,6 +15,7 @@ use Tests\Concerns\ActsAsPortalEmployee;
 use Tests\TestCase;
 
 // Bug reports (2026-10-13, user): anyone reports one anonymously, with screenshots; MIS reads and tracks them.
+// Issues & Requests (2026-10-19, user): a report is a bug, a feature request or feedback, and MIS can refile it.
 class PortalBugReportsTest extends TestCase
 {
     use ActsAsPortalEmployee;
@@ -57,10 +58,14 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame('Save does nothing on Transactions', $row->title);
         $this->assertSame('finance/transactions', $row->page);
         $this->assertSame('new', $row->status);
+        $this->assertSame('bug', $row->kind);
+        // No Jira on this server, so nothing waits to go there.
+        $this->assertNull($row->jira_state);
         $this->assertSame(now()->toDateString(), substr((string) $row->reported_on, 0, 10));
         // Nothing in the table can hold who sent it, and no activity was logged for it.
         $this->assertSame(
-            ['id', 'title', 'description', 'page', 'status', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reported_on', 'updated_at'],
+            ['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reported_on', 'updated_at',
+                'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at'],
             Schema::connection('portal')->getColumnListing('bug_reports'),
         );
         $this->assertSame($logged, PortalLog::query()->count());
@@ -79,7 +84,9 @@ class PortalBugReportsTest extends TestCase
             ->filter(fn (PortalNotification $notice): bool => ($notice->payload['recordId'] ?? null) === $id);
         $this->assertNotEmpty($notices);
         $this->assertTrue($notices->every(fn (PortalNotification $notice): bool => $notice->actor_id === null
+            && $notice->title === 'New bug report'
             && $notice->link_path === '/bug-reports'
+            && $notice->link_label === 'Open Issues & Requests'
             && $notice->message === '"Save does nothing on Transactions" was reported on finance/transactions.'));
         $departments = Employee::query()->whereIn('id', $notices->pluck('employee_id'))->pluck('department')
             ->map(fn (?string $department): string => strtolower(trim((string) $department)))->unique()->values()->all();
@@ -93,9 +100,11 @@ class PortalBugReportsTest extends TestCase
         $body = ['title' => 'Broken', 'description' => 'It broke.'];
 
         $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'title' => ' '])
-            ->assertStatus(422)->assertJsonPath('message', 'Give the bug a short title.');
+            ->assertStatus(422)->assertJsonPath('message', 'Give it a short title.');
         $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'description' => ''])
-            ->assertStatus(422)->assertJsonPath('message', 'Say what went wrong.');
+            ->assertStatus(422)->assertJsonPath('message', 'Say what happened or what you need.');
+        $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'kind' => 'question'])
+            ->assertStatus(422)->assertJsonPath('message', 'Choose Bug, Feature request or Feedback.');
         $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'images' => array_map(
             fn (int $index): UploadedFile => UploadedFile::fake()->image("shot{$index}.png"),
             [1, 2, 3, 4],
@@ -129,7 +138,8 @@ class PortalBugReportsTest extends TestCase
         $engineering = $this->headersFor($this->memberOf('Engineering'));
 
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame(['id', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'versionLevel', 'fixedIn', 'images'], array_keys($listed));
+        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'versionLevel', 'fixedIn', 'images', 'jira'], array_keys($listed));
+        $this->assertNull($listed['jira']);
         $this->assertSame('2026-10-12', $listed['reportedOn']);
         $this->assertStringContainsString('c_fill', (string) $listed['images'][0]['thumbUrl']);
         $this->withHeaders($engineering)->getJson(self::BASE.'bug-reports')->assertForbidden();
@@ -151,7 +161,7 @@ class PortalBugReportsTest extends TestCase
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'closed'])
             ->assertStatus(422)->assertJsonPath('message', "Choose New, In progress, Fixed or Won't fix.");
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, [])
-            ->assertStatus(422)->assertJsonPath('message', 'Change the status, the note, who handles it or its version.');
+            ->assertStatus(422)->assertJsonPath('message', 'Change its kind, status, note, who handles it or its version.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/999999999', ['status' => 'fixed'])->assertNotFound();
         $this->withHeaders($engineering)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'new'])->assertForbidden();
     }
@@ -208,6 +218,67 @@ class PortalBugReportsTest extends TestCase
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['assigneeId' => null, 'versionLevel' => 'patch'])
             ->assertStatus(422)->assertJsonPath('message', 'Assign someone to handle it before changing it.');
         $this->assertTrue(PortalLog::query()->where('employee_id', $analyst->getKey())->where('message', 'like', '%unassigned the bug report Export drops the last row')->exists());
+    }
+
+    // The reported ask (2026-10-19): the button also takes feature requests and feedback, and MIS hears of each by its kind.
+    public function test_a_feature_request_is_filed_as_one_and_mis_hears_of_it_as_one(): void
+    {
+        $headers = $this->headersFor($this->memberOf('Engineering'));
+        $mis = $this->headersFor($this->memberOf('MIS'));
+
+        $id = $this->withHeaders($headers)->post(self::BASE.'bug-reports', [
+            'kind' => 'feature',
+            'title' => 'Export the map',
+            'description' => 'A PDF of the team map for the weekly meeting.',
+        ])->assertCreated()->json('data.id');
+
+        $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', $id);
+        $this->assertSame('feature', $listed['kind']);
+        $notice = PortalNotification::query()->where('type', 'bug-reports.filed')->get()
+            ->first(fn (PortalNotification $notice): bool => ($notice->payload['recordId'] ?? null) === $id);
+        $this->assertNotNull($notice);
+        $this->assertSame('New feature request', $notice->title);
+        $this->assertSame('"Export the map" was requested.', $notice->message);
+    }
+
+    // The reported ask (2026-10-19): a bug that is really a feature request is filed as one, like any change, once handled.
+    public function test_mis_files_a_report_under_another_kind_and_the_log_says_so(): void
+    {
+        $id = (int) DB::connection('portal')->table('bug_reports')->insertGetId([
+            'title' => 'Dark mode for the calendar',
+            'description' => 'The calendar stays white at night.',
+            'status' => 'new',
+            'reported_on' => '2026-10-19',
+        ]);
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => 'feature'])
+            ->assertStatus(422)->assertJsonPath('message', 'Assign someone to handle it before changing it.');
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => 'feedback', 'assigneeId' => (string) $analyst->getKey()])
+            ->assertOk()->assertJsonPath('data.kind', 'feedback');
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => 'feature'])
+            ->assertOk()->assertJsonPath('data.kind', 'feature');
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => ''])
+            ->assertStatus(422)->assertJsonPath('message', 'Choose Bug, Feature request or Feedback.');
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])->assertOk();
+
+        $this->assertSame('feature', DB::connection('portal')->table('bug_reports')->where('id', $id)->value('kind'));
+        $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->where('record_id', (string) $id)->pluck('message');
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'filed the feedback Dark mode for the calendar as a feature request')));
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the feature request Dark mode for the calendar In progress')));
+    }
+
+    // The Access page names the rule as the sidebar does, and an MIS member holds Send to Jira beneath it (2026-10-19).
+    public function test_the_access_page_names_the_rule_issues_and_requests_with_send_to_jira_beneath(): void
+    {
+        $mis = $this->headersFor($this->memberOf('MIS'));
+
+        $powers = collect($this->withHeaders($mis)->getJson(self::BASE.'access')->assertOk()->json('data'))->keyBy('key');
+
+        $this->assertSame('Issues & Requests', $powers['bug-reports']['label']);
+        $this->assertSame('Send to Jira', $powers['bug-reports.jira']['label']);
+        $this->assertSame('bug-reports', $powers['bug-reports.jira']['parentKey']);
     }
 
     // An active ordinary member of the department.

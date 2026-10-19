@@ -9,6 +9,7 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 ### Added
 
 - Staging and production are checked before a build - check-targets says what either lacks and -Fix fills in what the deploy config and the server tell it; build-release offers that fix and -FixTarget applies it first
+- Issues & Requests - each report is a bug or a feature request or feedback and becomes a Jira issue as it comes in (MIS can switch that off or send one by hand) and Jira's progress comes back by webhook and every fifteen minutes
 
 ### Other
 

@@ -16,13 +16,7 @@ final class PortalBitbucketWebhook
 
     public function isSigned(Request $request): bool
     {
-        $secret = config('services.bitbucket.webhook_secret');
-        $header = (string) $request->header('X-Hub-Signature', '');
-        if (! is_string($secret) || $secret === '' || preg_match('/^sha256=([0-9a-f]{64})$/', $header, $match) !== 1) {
-            return false;
-        }
-
-        return hash_equals(hash_hmac('sha256', $request->getContent(), $secret), $match[1]);
+        return PortalWebhookSignature::matches($request, config('services.bitbucket.webhook_secret'));
     }
 
     // The linked repository a push is for, or null for any other event or a repository no project links.

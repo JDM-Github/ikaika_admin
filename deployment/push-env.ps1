@@ -1,22 +1,27 @@
 # Copies the server's secret settings from this repo's local .env to a target's .env and applies them;
 # see deployment/README.md. Values travel over SSH only and are never printed; a key empty here is skipped, so it
 # never blanks the server's. MAIL_MAILER is left out on purpose: which mailer a server uses is its own choice.
-# -RemoteDir points it at another target, e.g. production's ~/apps/portal-prod.
+# -RemoteDir points it at another target, e.g. production's ~/apps/portal-prod. -EnvFile reads another file than .env,
+# for a target whose values differ: Jira's project is a sandbox on the Test Server and the real one on production, so
+# production's JIRA_* come from their own file (see deployment/README.md, Jira).
 param(
     [string[]]$Keys = @(
         'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
         'BITBUCKET_TOKEN', 'BITBUCKET_WEBHOOK_SECRET',
+        'JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_PROJECT_KEY', 'JIRA_WEBHOOK_SECRET',
         'MAIL_RELAY_URL', 'MAIL_RELAY_KEY',
         'PORTAL_ID_LOGIN_PASSWORD'
     ),
     [string]$SshHost = 'bluehost',
     # The target's home-relative work folder (its .env and scripts/). Test Server by default.
-    [string]$RemoteDir = '~/apps/test-server'
+    [string]$RemoteDir = '~/apps/test-server',
+    # The settings file to read; this repo's .env when left out.
+    [string]$EnvFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $remote  = $RemoteDir
-$envFile = Join-Path (Split-Path $PSScriptRoot -Parent) '.env'
+$envFile = if ($EnvFile) { $EnvFile } else { Join-Path (Split-Path $PSScriptRoot -Parent) '.env' }
 if (-not (Test-Path $envFile)) { throw "No .env at $envFile" }
 
 $lines   = @()
