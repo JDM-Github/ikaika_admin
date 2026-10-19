@@ -413,6 +413,11 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame('Liza Mae', $saved['firstName']);
         $this->assertSame('BNORPHMM', $saved['bankSwiftCode']);
 
+        // Names are written the company's way (2026-10-20, user); a nickname stays as typed.
+        $named = $this->withToken($session)->patchJson(self::REGISTER.'/details', ['middleName' => ' CRUZ ', 'lastName' => '  dela  REYES-santos ', 'nickname' => 'LIZ'])
+            ->assertOk()->json('data.details');
+        $this->assertSame(['Cruz', 'Dela Reyes-Santos', 'LIZ'], [$named['middleName'], $named['lastName'], $named['nickname']]);
+
         // A refused save changes nothing.
         $this->withToken($session)->patchJson(self::REGISTER.'/details', ['firstName' => 'Liza2'])
             ->assertStatus(422)

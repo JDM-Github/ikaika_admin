@@ -8,7 +8,8 @@ namespace App\Support\Portal;
  * runs of space collapsed -- then held to its field's shape: names in letters, numbers in digits of
  * the length their ID carries, a SWIFT code as banks write one, a blood type from the list. Mashed
  * keys are refused too (2026-10-12): a letter three times running in a name, a number of one digit.
- * New Employee Data only ever receives plain text an HR reviewer can trust.
+ * New Employee Data only ever receives plain text an HR reviewer can trust. A name is written the
+ * company's way (2026-10-20, user): "JAYCRIS PAMINTUAN" is "Jaycris Pamintuan"; a nickname stays as typed.
  *
  * An address comes in parts since 2026-10-13 (user): its street, and -- outside the Philippines, where
  * nothing is picked from a list -- its province, city and barangay as typed. A start date is today or
@@ -161,7 +162,7 @@ final class PortalRegistrationInput
             abort(422, ucfirst($label).' needs at least '.self::MIN_LETTERS[$field].' letters.');
         }
 
-        return $value;
+        return $field === 'nickname' ? $value : (string) PortalNameCase::proper($value);
     }
 
     private function text(string $field, string $value, string $label): string

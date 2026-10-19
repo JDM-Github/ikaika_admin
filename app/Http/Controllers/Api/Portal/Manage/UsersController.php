@@ -58,6 +58,11 @@ class UsersController extends Controller
         return response()->json($this->users->changeDepartment($this->actor($request), $id, $request));
     }
 
+    public function updateDetails(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->users->updateDetails($this->actor($request), $id, $request));
+    }
+
     public function updateStatus(Request $request, int $id): JsonResponse
     {
         return response()->json($this->users->changeStatus($this->actor($request), $id, $request));
