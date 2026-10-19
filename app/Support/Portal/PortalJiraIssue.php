@@ -10,14 +10,25 @@ namespace App\Support\Portal;
  * -- and that it came anonymously from the portal. Never a person: not the sender, who is unknown, and
  * not MIS's note or who handles it, which stay in the portal.
  *
- * Back from Jira: To Do is New, anything in progress is In progress, and Done is Fixed -- or Won't fix
- * when it was resolved as not to be done. The fix version is the highest X.Y.Z among the issue's fix
- * versions, "v" or not.
+ * Back from Jira, by the board's column first (2026-10-19, user): To Do is New, In Progress and In Review
+ * are In progress, Done is Fixed -- or Won't fix when it was resolved as not to be done -- and Cancelled is
+ * Won't fix. The name leads because a team-managed project's categories are whatever its owner left them:
+ * IPS files Done under "in progress" and Cancelled under "done". A name not listed falls back to the
+ * category. The fix version is the highest X.Y.Z among the issue's fix versions, "v" or not.
  */
 final class PortalJiraIssue
 {
     // Labels hold no spaces; a resolution is matched lowercased, with a curly apostrophe made straight.
     private const NOT_DONE = ["won't do", "won't fix", 'declined', 'duplicate', 'cannot reproduce', "can't reproduce"];
+
+    // A status by its name, lowercased, a curly apostrophe made straight; 'done' still asks the resolution.
+    private const BY_NAME = [
+        'to do' => 'new', 'open' => 'new', 'backlog' => 'new', 'selected for development' => 'new',
+        'in progress' => 'indeterminate', 'in review' => 'indeterminate',
+        'done' => 'done', 'closed' => 'done', 'resolved' => 'done', 'fixed' => 'done',
+        'cancelled' => 'not_done', 'canceled' => 'not_done', "won't do" => 'not_done', "won't fix" => 'not_done',
+        'declined' => 'not_done', 'rejected' => 'not_done', 'duplicate' => 'not_done',
+    ];
 
     private const EXTENSIONS = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', 'image/gif' => 'gif'];
 
@@ -52,18 +63,21 @@ final class PortalJiraIssue
     }
 
     /**
-     * The portal status an issue's fields stand for, or the current one when the category says nothing.
+     * The portal status an issue's fields stand for, or the current one when neither name nor category says.
      *
      * @param  array<string, mixed>  $fields
      */
     public static function portalStatus(array $fields, string $current): string
     {
-        $category = $fields['status']['statusCategory']['key'] ?? null;
+        $name = $fields['status']['name'] ?? null;
+        $category = (is_string($name) ? self::BY_NAME[self::normalised($name)] ?? null : null)
+            ?? $fields['status']['statusCategory']['key'] ?? null;
 
         return match ($category) {
             'new' => PortalBugReports::STATUS_NEW,
             'indeterminate' => PortalBugReports::STATUS_IN_PROGRESS,
             'done' => self::isNotDone($fields) ? PortalBugReports::STATUS_WONT_FIX : PortalBugReports::STATUS_FIXED,
+            'not_done' => PortalBugReports::STATUS_WONT_FIX,
             default => $current,
         };
     }
@@ -115,7 +129,12 @@ final class PortalJiraIssue
             return false;
         }
 
-        return in_array(str_replace("\u{2019}", "'", mb_strtolower(trim($resolution))), self::NOT_DONE, true);
+        return in_array(self::normalised($resolution), self::NOT_DONE, true);
+    }
+
+    private static function normalised(string $name): string
+    {
+        return str_replace("\u{2019}", "'", mb_strtolower(trim($name)));
     }
 
     private static function oneLine(string $text): string

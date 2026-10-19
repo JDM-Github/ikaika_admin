@@ -45,5 +45,8 @@
         <env name="JIRA_PROJECT_KEY" value=""/>
         <env name="JIRA_CLOUD_ID" value=""/>
         <env name="JIRA_WEBHOOK_SECRET" value=""/>
+        <env name="JIRA_ISSUE_TYPE_BUG" value="Bug"/>
+        <env name="JIRA_ISSUE_TYPE_FEATURE" value="Story"/>
+        <env name="JIRA_ISSUE_TYPE_FEEDBACK" value="Task"/>
     </php>
 </phpunit>

@@ -74,6 +74,12 @@ class PortalJiraIssueTest extends TestCase
             'duplicate' => [$done('Duplicate'), 'wont_fix'],
             'cannot reproduce' => [$done('Cannot Reproduce'), 'wont_fix'],
             'no category' => [['status' => ['name' => 'Odd']], 'in_progress'],
+            // IPS's own board (2026-10-19, user): the column's name wins over the category its owner left it in.
+            'done, filed in progress' => [['status' => ['name' => 'Done', 'statusCategory' => ['key' => 'indeterminate']]], 'fixed'],
+            'cancelled, filed done' => [['status' => ['name' => 'Cancelled', 'statusCategory' => ['key' => 'done']]], 'wont_fix'],
+            'in review, by name' => [['status' => ['name' => 'In Review', 'statusCategory' => ['key' => 'done']]], 'in_progress'],
+            'to do, by name' => [['status' => ['name' => ' to do ', 'statusCategory' => ['key' => 'indeterminate']]], 'new'],
+            'a name not listed keeps its category' => [['status' => ['name' => 'Waiting on QA', 'statusCategory' => ['key' => 'done']]], 'fixed'],
         ];
     }
 
