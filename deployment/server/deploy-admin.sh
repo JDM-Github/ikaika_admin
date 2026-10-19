@@ -226,6 +226,16 @@ rm -f "$ZIP"
 prune admin-app
 prune admin-public
 
+# CLEAN=1, from build-release -Clean: only the release just replaced stays in backups/, and what a failed deploy left in upload/ goes.
+if [ "${CLEAN:-}" = 1 ]; then
+    echo "== Cleaning"
+    for kind in admin-app admin-public; do
+        old=$(ls -1dt "$BACKUPS/$kind"-* 2>/dev/null | tail -n +2) || true
+        [ -z "$old" ] || { echo "$old" | sed 's#^#   removed #'; echo "$old" | xargs rm -rf; }
+    done
+    find "$ROOT/upload" -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tmp' -o -name '*.part' \) -print -delete 2>/dev/null | sed 's#^#   removed #' || true
+fi
+
 # 200 only when the portal database answers; anything else -- 503, a 500, no answer -- fails the deploy.
 echo "== Health"
 HEALTH_URL="$SITE_ORIGIN$API_URL_PATH/api/$API_CHANNEL/portal/health"

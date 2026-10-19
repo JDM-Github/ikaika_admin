@@ -88,4 +88,6 @@ email-test/
 
 # The sealed secrets archive kept in the repo for secrets -Import and -Export; every secret is in it.
 /.ikaika_scripts_configs/*.7z
+# build-release's versioned release copies, which the GitHub release takes.
+/dist/
 .playwright-mcp/

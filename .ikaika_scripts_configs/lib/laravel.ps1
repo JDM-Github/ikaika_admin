@@ -5,10 +5,10 @@
 # a working PHP on PATH, which is the very thing these commands exist to set up or start.
 # So the .env is parsed directly, and the product list below mirrors config/products.php.
 #
-# THE PRODUCT LIST IS DUPLICATED HERE, and that is worth saying out loud because it is a
-# thing that can drift. config/products.php is PHP and cannot be read from here without a
-# PHP; what is copied is only the three env KEY NAMES, which change about as often as the
-# products themselves. If a fourth product lands, add a line.
+# THE PRODUCT LIST IS READ FROM config/products.php, not copied: a copy is what left the
+# transaction tracker out of update-database when it landed. The catalog is PHP, so its
+# entries are matched rather than evaluated - a key, a 'name', and a 'database' that reads
+# env('<PREFIX>_DB_DATABASE', '<fallback>') - which is the shape every entry has had.
 
 # One value from a dotenv file. Only the first '=' splits, quotes are stripped, and a
 # missing file or key gives $Default - the same contract Laravel's own reader has, so a
@@ -35,26 +35,37 @@ function Get-DotEnvValue {
     return $Default
 }
 
-# The three product databases, each with the credentials that reach it. Mirrors the
-# catalog in config/products.php, including its fallbacks to the DB_* keys.
+# Every product database in config/products.php's catalog, each with the credentials that
+# reach it, including the catalog's fallbacks to the DB_* keys.
 #
 # Key is the sql/ FOLDER name rather than the catalog key, because that is what this is
 # used for: sql/project_estimator is the folder, 'project-estimator' is the catalog key,
-# and confusing the two silently applies nothing.
-function Get-ProductDatabase([string]$EnvPath) {
+# and confusing the two silently applies nothing. Key keeps the catalog key, which is what
+# the core ledger's product column holds.
+# CatalogPath is the catalog to read; config/products.php beside .env when left out.
+function Get-ProductDatabase([string]$EnvPath, [string]$CatalogPath = '') {
     $host_ = Get-DotEnvValue $EnvPath 'DB_HOST' '127.0.0.1'
     $port = Get-DotEnvValue $EnvPath 'DB_PORT' '3306'
     $user = Get-DotEnvValue $EnvPath 'DB_USERNAME' 'root'
     $pass = Get-DotEnvValue $EnvPath 'DB_PASSWORD' ''
 
-    $products = [ordered]@{}
-    foreach ($entry in @(
-            @{ Folder = 'core'; Prefix = 'CORE'; Fallback = 'ikaika_platform'; Name = 'Core Platform' }
-            @{ Folder = 'portal'; Prefix = 'PORTAL'; Fallback = 'test_portal_database'; Name = 'Employee Portal' }
-            @{ Folder = 'project_estimator'; Prefix = 'ESTIMATOR'; Fallback = 'test_estimator_database'; Name = 'Project Estimator' })) {
+    $catalogPath = if ($CatalogPath) { $CatalogPath } else { Join-Path (Split-Path -Parent $EnvPath) 'config\products.php' }
+    if (-not (Test-Path -LiteralPath $catalogPath)) { throw "There is no product catalog at $catalogPath." }
+    $catalog = Get-Content -LiteralPath $catalogPath -Raw
+    $pattern = "'([a-z0-9-]+)'\s*=>\s*\[\s*'name'\s*=>\s*'([^']+)'.*?'database'\s*=>\s*env\('([A-Z0-9_]+)_DB_DATABASE',\s*'([^']*)'\)"
+    $entries = @([regex]::Matches($catalog, $pattern, 'Singleline') | ForEach-Object {
+            $connection = if ($_.Value -match "'connection'\s*=>\s*'([A-Za-z0-9_]+)'") { $Matches[1] } else { '' }
+            @{ Key = $_.Groups[1].Value; Name = $_.Groups[2].Value; Connection = $connection; Prefix = $_.Groups[3].Value; Fallback = $_.Groups[4].Value }
+        })
+    if (-not $entries.Count) { throw "No product in $catalogPath has a 'database' => env('<PREFIX>_DB_DATABASE', ...) to read." }
 
-        $products[$entry.Folder] = [pscustomobject]@{
-            Name     = $entry.Name
+    $products = [ordered]@{}
+    foreach ($entry in $entries) {
+        $products[$entry.Key -replace '-', '_'] = [pscustomobject]@{
+            Key        = $entry.Key
+            Name       = $entry.Name
+            # The Laravel connection the catalog gives it, which is how a migration names the database it writes to.
+            Connection = $entry.Connection
             Database = Get-DotEnvValue $EnvPath "$($entry.Prefix)_DB_DATABASE" $entry.Fallback
             DbHost   = Get-DotEnvValue $EnvPath "$($entry.Prefix)_DB_HOST" $host_
             Port     = Get-DotEnvValue $EnvPath "$($entry.Prefix)_DB_PORT" $port

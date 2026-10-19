@@ -1,5 +1,7 @@
 # The Build release dialog as a form: builds the API's release archive, and installs it on the server with the repo's own deploy-admin.sh when asked, by hand only.
-# Version, package and upload are steps of their own - tag-version, build-release, server/deploy-release - the version first since the archive carries it, so the run shows which one it is in.
+# Build, version and upload are steps of their own, in the project estimator's order - build-release bumping VERSION uncommitted so the archive carries the
+# version it is built as, tag-version once the build is good, server/deploy-release once the tag is - so the run shows which one it is in, and a build
+# that fails spends no version.
 # Each run first syncs GitHub from Bitbucket, unless told not to, then builds Bitbucket's commit of the branch or tag picked under "Use workflow from".
 # A bump is committed and tagged by github-actions[bot] on that branch, with the changelog filed under it: Bitbucket first, the source of truth, then GitHub.
 # Staging is the Bluehost Test Server; production is refused until ikaika_scripts.env names one. Upload the API before the portal, which calls it.
@@ -31,7 +33,7 @@ on:
         type: boolean
         default: false
       github_release:
-        description: Keep a version-bumped build as a GitHub release instead of an artifact - release files do not count toward the 500 MB of Actions storage
+        description: Keep a version-bumped build as a GitHub release - release files do not count toward the 500 MB of Actions storage, so its artifacts are kept a day, not three
         type: boolean
         default: true
       upload:
@@ -40,6 +42,10 @@ on:
         default: false
       dry_run:
         description: Dry run - name what would go up and run, upload nothing
+        type: boolean
+        default: false
+      clean:
+        description: Remove older backups and a failed deploy's leftovers on the server
         type: boolean
         default: false
 
@@ -53,7 +59,7 @@ concurrency:
 
 jobs:
   build-release:
-    name: ${{ format('Package the API for {0}{1}', inputs.target, inputs.upload && (inputs.dry_run && ', upload dry run' || ', then upload') || '') }}
+    name: ${{ format('Build the API for {0}{1}', inputs.target, inputs.upload && (inputs.dry_run && ', upload dry run' || ', then upload') || '') }}
     runs-on: windows-2025
     timeout-minutes: 30
     # github-actions[bot] pushes the version commit and tag to GitHub.
@@ -79,6 +85,7 @@ jobs:
 
       # main carries only the workflow files until the CI work is merged into it, so a run from there stops here and names the branches that can run it.
       - name: Check the choices before anything is fetched or built
+        id: plan
         env:
           INPUTS_JSON: ${{ toJSON(inputs) }}
           GH_TOKEN: ${{ github.token }}
@@ -173,10 +180,28 @@ jobs:
           SHARED_FILES_PASSWORD: ${{ secrets.SHARED_FILES_PASSWORD }}
         run: ./script.ps1 secrets -For $env:PURPOSES -Ci
 
-      # VERSION bumped, the changelog filed under it, committed and tagged: a staging build v<version>, production v<version>-released.
-      - name: ${{ format('Version {0}, committed and tagged on Bitbucket', inputs.version == 'custom' && inputs.custom_version || inputs.version) }}
-        id: version
-        if: env.TAGGING == 'true'
+      # build-release bumps VERSION as it builds, uncommitted, as the estimator's bumps pubspec.yaml, so the archive carries the version it is built as.
+      - name: ${{ format('Build the API for {0} with build-release{1}', inputs.target, inputs.version != 'same' && format(', bumping {0}', inputs.version == 'custom' && inputs.custom_version || inputs.version) || '') }}
+        id: build
+        run: |
+          $plan = Get-Content -LiteralPath $env:BUILD_PLAN -Raw | ConvertFrom-Json -AsHashtable
+          ./script.ps1 build-release @plan
+          exit $LASTEXITCODE
+
+      # Its own artifact; a day when the GitHub release keeps the files, three days otherwise.
+      - name: Keep the build
+        if: ${{ !cancelled() && hashFiles('dist/*.zip') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.plan.outputs.artifact }}
+          path: dist/*.zip*
+          retention-days: ${{ steps.plan.outputs.retention }}
+          compression-level: 0
+
+      # Every tagged build files its notes under its version, so the next one shows only what is new; a production release takes in the staging builds since the last one.
+      - name: ${{ format('File the changelog under the new version, then tag it as a {0}', inputs.target == 'staging' && 'staging build' || 'production release') }}
+        id: tag
+        if: ${{ !cancelled() && env.TAGGING == 'true' && steps.build.outcome == 'success' }}
         env:
           GIT_CONFIG_COUNT: '2'
           GIT_CONFIG_KEY_0: ${{ format('url.https://{0}:{1}@bitbucket.org/.insteadOf', secrets.BITBUCKET_REPO_USER || 'x-token-auth', secrets.BITBUCKET_REPO_TOKEN) }}
@@ -184,13 +209,22 @@ jobs:
           GIT_CONFIG_KEY_1: credential.helper
           GIT_CONFIG_VALUE_1: ''
         run: |
-          if ($env:BUILD_DEBUG -eq 'true') { ./script.ps1 tag-version -Debug -Bump $env:VERSION_BUMP } else { ./script.ps1 tag-version -Bump $env:VERSION_BUMP }
+          if ($env:BUILD_DEBUG -eq 'true') { ./script.ps1 tag-version -Debug } else { ./script.ps1 tag-version }
           exit $LASTEXITCODE
 
-      # Looked for on Bitbucket itself before anything is packaged or uploaded, so nothing reaches the server that git has no record of.
+      # Only after the version is tagged, so nothing reaches the server that git has no record of.
+      - name: ${{ format('Upload to {0}{1}', inputs.target, inputs.dry_run && ', a dry run that sends nothing' || ' - composer, the swap, migrations, the health check') }}
+        id: upload
+        if: ${{ !cancelled() && env.UPLOADING == 'true' && steps.build.outcome == 'success' && (env.TAGGING != 'true' || steps.tag.outcome == 'success') }}
+        run: |
+          $deploy = $env:DEPLOY_PLAN | ConvertFrom-Json -AsHashtable
+          ./script.ps1 server/deploy-release @deploy
+          exit $LASTEXITCODE
+
+      # tag-version looks for the tag on Bitbucket too; looked for here as well, to hand GitHub's push its name.
       - name: Check the version reached Bitbucket
         id: bitbucket
-        if: ${{ !cancelled() && env.TAGGING == 'true' && steps.version.outcome == 'success' }}
+        if: ${{ !cancelled() && env.TAGGING == 'true' && steps.tag.outcome == 'success' }}
         env:
           GIT_CONFIG_COUNT: '2'
           GIT_CONFIG_KEY_0: ${{ format('url.https://{0}:{1}@bitbucket.org/.insteadOf', secrets.BITBUCKET_REPO_USER || 'x-token-auth', secrets.BITBUCKET_REPO_TOKEN) }}
@@ -201,27 +235,11 @@ jobs:
           $version = (Get-Content -LiteralPath VERSION | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1).Trim()
           $tag = if ($env:BUILD_DEBUG -eq 'true') { "v$version" } else { "v$version-released" }
           if (-not (git ls-remote --tags origin "refs/tags/$tag")) {
-            Write-Output "::error title=$tag is not on Bitbucket::The version was bumped, but its commit or tag did not reach Bitbucket - see tag-version's output above. BITBUCKET_REPO_TOKEN needs write access, and the branch must not restrict pushes."
+            Write-Output "::error title=$tag is not on Bitbucket::The build finished, but the version commit or tag did not reach Bitbucket - see tag-version's warnings above. BITBUCKET_REPO_TOKEN needs write access, and the branch must not restrict pushes."
             exit 1
           }
           Write-Output "Tagged $tag on Bitbucket."
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "tag=$tag"
-
-      - name: ${{ format('Package the API for {0}', inputs.target) }}
-        id: build
-        if: env.TAGGING != 'true' || steps.bitbucket.outcome == 'success'
-        run: |
-          $plan = Get-Content -LiteralPath $env:BUILD_PLAN -Raw | ConvertFrom-Json -AsHashtable
-          ./script.ps1 build-release @plan
-          exit $LASTEXITCODE
-
-      - name: ${{ format('Upload to {0}{1}', inputs.target, inputs.dry_run && ', a dry run that sends nothing' || ' - composer, the swap, migrations, the health check') }}
-        id: upload
-        if: env.UPLOADING == 'true'
-        run: |
-          $deploy = $env:DEPLOY_PLAN | ConvertFrom-Json -AsHashtable
-          ./script.ps1 server/deploy-release @deploy
-          exit $LASTEXITCODE
 
       # The same commit and tag, pushed by github-actions[bot], so GitHub matches Bitbucket without waiting for the next sync.
       - name: Push the version commit and tag to GitHub
@@ -242,23 +260,26 @@ jobs:
             exit 1
           }
           Write-Output "Pushed $env:GITHUB_REF_NAME and $env:TAG to GitHub as github-actions[bot]."
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Tagged **$env:TAG** by github-actions[bot] on Bitbucket, then GitHub ($env:GITHUB_REF_NAME at $(git log -1 --format=%h HEAD))."
 
       # A release keeps the build where it costs no Actions storage; a staging build is a prerelease, production the latest release.
-      - name: Keep the build as a GitHub release, with this version's changelog
+      - name: GitHub release, from the changelog
         id: release
-        if: ${{ !cancelled() && env.RELEASING == 'true' && steps.github.outcome == 'success' && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && env.RELEASING == 'true' && steps.github.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.bitbucket.outputs.tag }}
-        run: ./.ikaika_scripts_configs/ci-github-release.ps1 -DistDir deployment/out
+        run: ./.ikaika_scripts_configs/ci-github-release.ps1 -DistDir dist
 
-      # Only when no GitHub release has the build - github_release off, a build that kept its version, or a release that failed - and also after a failed upload or push, so a finished build is never thrown away with the run.
-      - name: Keep what was built
-        if: ${{ !cancelled() && hashFiles('deployment/out/*.zip') != '' && steps.release.outcome != 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: deployment/out/*.zip
-          if-no-files-found: error
-          retention-days: 30
+      - name: Summary of what was built and where it went
+        if: ${{ !cancelled() }}
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          TAG_OUTCOME: ${{ steps.tag.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          BITBUCKET_OUTCOME: ${{ steps.bitbucket.outcome }}
+          GITHUB_OUTCOME: ${{ steps.github.outcome }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          TARGET: ${{ inputs.target }}
+          ARTIFACT: ${{ steps.plan.outputs.artifact }}
+          RETENTION: ${{ steps.plan.outputs.retention }}
+        run: ./.ikaika_scripts_configs/ci-run-summary.ps1
