@@ -13,6 +13,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -113,13 +114,24 @@ class PortalReportRemindersTest extends TestCase
         Carbon::setTestNow();
     }
 
-    public function test_it_is_scheduled_on_weekdays_at_five_manila(): void
+    public function test_a_refused_sample_is_reported_not_claimed_as_sent(): void
+    {
+        Carbon::setTestNow(Carbon::parse(self::TODAY, PortalReportReminders::ZONE));
+        Mail::shouldReceive('to')->andThrow(new RuntimeException('bridge refused'));
+
+        $this->artisan('portal:remind-missing-reports', ['--to' => 'dev@ikaika.test'])
+            ->expectsOutputToContain('Not sent: bridge refused')
+            ->assertExitCode(1);
+        Carbon::setTestNow();
+    }
+
+    public function test_it_is_scheduled_on_weekdays_at_six_manila(): void
     {
         $event = collect(app(Schedule::class)->events())
             ->first(fn (Event $event): bool => str_contains((string) $event->command, 'portal:remind-missing-reports'));
 
         $this->assertNotNull($event);
-        $this->assertSame('0 17 * * 1-5', $event->expression);
+        $this->assertSame('0 18 * * 1-5', $event->expression);
         $this->assertSame('Asia/Manila', $event->timezone);
     }
 

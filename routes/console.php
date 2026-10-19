@@ -298,7 +298,7 @@ Artisan::command('portal:geocode-homes', function (PortalHomeLocations $homes): 
     return 0;
 })->purpose('Turn every address into a point for Manage / Map');
 
-// Weekdays at 17:00 Manila (schedule below): replaces the WordPress cron that read Airtable.
+// Weekdays at 18:00 Manila, the old cron's time (schedule below): replaces the WordPress cron that read Airtable.
 Artisan::command('portal:remind-missing-reports
     {--dry-run : List who would be reminded and for which days; sends nothing}
     {--to= : Send one sample reminder to this address only, outside the outbox}', function (PortalReportReminders $reminders): int {
@@ -323,7 +323,13 @@ Artisan::command('portal:remind-missing-reports
 
             return 0;
         }
-        $reminders->sample($to, $plan[0]['days']);
+        try {
+            $reminders->sample($to, $plan[0]['days']);
+        } catch (Throwable $error) {
+            $this->error('Not sent: '.$error->getMessage());
+
+            return 1;
+        }
         $this->info('Sample sent to '.$to.' with '.$plan[0]['name']."'s days.");
     } else {
         foreach ($plan as $row) {
@@ -405,7 +411,7 @@ Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
 // Jira's backstop: what failed or waits is sent again, and every linked issue is read back, if a delivery was lost.
 Schedule::command('portal:jira-sync')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();
-Schedule::command('portal:remind-missing-reports')->weekdays()->at('17:00')->timezone('Asia/Manila')->withoutOverlapping();
+Schedule::command('portal:remind-missing-reports')->weekdays()->at('18:00')->timezone('Asia/Manila')->withoutOverlapping();
 
 // The mail queue's worker. The server runs no daemon, so the minute cron starts one that leaves when the queue is
 // empty or after 55 s, before the next one starts; two that do meet cannot take the same job.

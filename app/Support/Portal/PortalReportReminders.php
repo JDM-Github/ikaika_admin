@@ -7,6 +7,7 @@ use App\Modules\ProjectEstimator\Models\Holiday;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Throwable;
 
 /**
@@ -104,13 +105,14 @@ final class PortalReportReminders
 
     /**
      * A developer's preview: the same letter straight to any address, kept out of the outbox and the bell.
+     * Sent now rather than queued, so a refused send throws to the command instead of only reaching the log.
      *
      * @param  list<string>  $days
      */
     public function sample(string $to, array $days): void
     {
         [$subject, $body] = $this->wording($days);
-        PortalLetters::send($to, 'notice', '[Test] '.$subject, PortalLetters::body(null, $body));
+        Mail::to($to)->send(PortalLetters::letter('notice', '[Test] '.$subject, PortalLetters::body(null, $body)));
     }
 
     /**
