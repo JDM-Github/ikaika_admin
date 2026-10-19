@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 
 /**
  * Bug reports (2026-10-13, user): anyone signed in sends one from the button in the portal's corner,
@@ -320,6 +321,26 @@ final class PortalBugReports
         }
 
         return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($saved)];
+    }
+
+    /**
+     * Refresh (2026-10-19, user): every linked report read back from Jira now, rather than at the next webhook
+     * or the quarter-hour run, then the list. Only reads Jira, so it is anyone's who sees the list; a Jira that
+     * refuses or does not answer still returns the list, and its connection says why.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>, assignees: list<array{id: string, name: string}>, jira: array<string, mixed>}
+     */
+    public function refreshFromJira(): array
+    {
+        if ($this->jira->isConfigured()) {
+            try {
+                $this->jira->reconcile();
+            } catch (RuntimeException) {
+                // The client has already recorded the connection the list reports.
+            }
+        }
+
+        return $this->list();
     }
 
     /**

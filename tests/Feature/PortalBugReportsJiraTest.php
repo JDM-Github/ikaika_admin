@@ -258,6 +258,41 @@ class PortalBugReportsJiraTest extends TestCase
         $this->assertSame('IKP-30', $row->jira_issue_key);
     }
 
+    // Refresh (2026-10-19, user): a move on the Jira board shows at once, not at the next webhook or quarter hour.
+    public function test_refresh_reads_every_linked_report_back_from_jira_and_returns_the_list(): void
+    {
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $id = $this->report(['jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent', 'jira_status' => 'To Do']);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+            ['id' => '10050', 'key' => 'IKP-20', 'fields' => ['status' => ['name' => 'In Progress', 'statusCategory' => ['key' => 'indeterminate']]]],
+        ], 'issueErrors' => []])]);
+
+        $response = $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+
+        $row = collect($response->json('data'))->firstWhere('id', (string) $id);
+        $this->assertSame('in_progress', $row['status']);
+        $this->assertSame('In Progress', $row['jira']['status']);
+        $response->assertJsonPath('jira.connection', 'ok');
+    }
+
+    public function test_refresh_still_lists_without_jira_or_when_jira_refuses_and_is_only_for_who_sees_the_list(): void
+    {
+        $headers = $this->headersFor($this->memberOf('MIS'));
+        $this->report(['jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/sync')->assertOk()->assertJsonPath('jira.connection', 'not_configured');
+        Http::assertNothingSent();
+        $this->connectJira();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['errorMessages' => ['Client must be authenticated to access this resource.']], 401)]);
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/sync')->assertOk()
+            ->assertJsonPath('jira.connection', 'refused')
+            ->assertJsonPath('jira.connectionMessage', 'Jira HTTP 401: Client must be authenticated to access this resource.');
+        $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->postJson(self::BASE.'bug-reports/jira/sync')->assertForbidden();
+    }
+
     private function connectJira(): void
     {
         config(['services.jira' => [

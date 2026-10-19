@@ -10,7 +10,8 @@ use Illuminate\Http\Request;
 
 /**
  * Issues & Requests. `store` is anyone's, and anonymous: it never reads who is signed in. `index` and
- * `update` are MIS's, behind the bug-reports rule; `sendToJira` and `updateJira` behind bug-reports.jira.
+ * `update` are MIS's, behind the bug-reports rule, as is `refreshFromJira`, which only reads Jira;
+ * `sendToJira` and `updateJira` are behind bug-reports.jira.
  */
 class BugReportsController extends Controller
 {
@@ -29,6 +30,11 @@ class BugReportsController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         return response()->json($this->reports->update($this->actor($request), $id, $request));
+    }
+
+    public function refreshFromJira(): JsonResponse
+    {
+        return response()->json($this->reports->refreshFromJira());
     }
 
     public function sendToJira(Request $request, int $id): JsonResponse
