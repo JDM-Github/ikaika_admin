@@ -283,7 +283,7 @@ class PortalProfileChangesTest extends TestCase
         $this->withToken($session)->post(self::MINE.'/changes', ['bloodType' => 'AB+'], ['Accept' => 'application/json'])->assertCreated();
     }
 
-    public function test_an_empty_or_foreign_change_is_refused_and_a_head_admin_does_not_approve_their_own(): void
+    public function test_an_empty_or_foreign_change_is_refused(): void
     {
         $member = $this->member();
         $session = $this->token($member);
@@ -294,17 +294,40 @@ class PortalProfileChangesTest extends TestCase
             ->assertStatus(422)->assertJsonPath('message', 'One of the documents to take off is not yours, or is gone.');
         $this->withToken($session)->post(self::MINE.'/changes', ['files' => ['signature' => $this->upload('signature.pdf')]], ['Accept' => 'application/json'])
             ->assertStatus(422)->assertJsonPath('message', 'The signature has to be a JPG, PNG, WebP or GIF picture.');
+        $this->assertFalse($this->withToken($session)->getJson(self::MINE)->assertOk()->json('data.approvesOwn'));
+    }
 
-        // A head admin's own change waits for the other head admin, who alone is told.
+    // The reported ask (2026-10-19): a head admin's own changes reach their record as they are sent, telling no one.
+    public function test_a_head_admin_s_own_changes_reach_their_record_at_once(): void
+    {
         $nathaniel = $this->employee("id_no = '".self::NATHANIEL."'");
         $steven = $this->employee("id_no = '".self::STEVEN."'");
-        $id = $this->withToken($this->token($nathaniel))->post(self::MINE.'/changes', ['bloodType' => 'AB+'], ['Accept' => 'application/json'])->assertCreated()->json('data.pending.id');
-        $this->assertNull($this->notice($nathaniel, PortalNotificationType::PROFILE_CHANGES_TO_REVIEW, $id));
-        $this->assertNotNull($this->notice($steven, PortalNotificationType::PROFILE_CHANGES_TO_REVIEW, $id));
-        $this->withToken($this->token($nathaniel))->patchJson(self::CHANGES.'/'.$id, ['decision' => 'approve'])
-            ->assertForbidden()->assertJsonPath('message', 'Someone else approves changes to your own information.');
-        $this->withToken($this->token($steven))->patchJson(self::CHANGES.'/'.$id, ['decision' => 'approve'])->assertOk();
+        $kept = $this->attachment($nathaniel, 'tax_identification');
+        $session = $this->token($nathaniel);
+        $this->assertTrue($this->withToken($session)->getJson(self::MINE)->assertOk()->json('data.approvesOwn'));
+
+        $mine = $this->withToken($session)->post(self::MINE.'/changes', [
+            'bloodType' => 'AB+',
+            'files' => ['ss_id' => $this->upload('sss.pdf')],
+            'removeDocumentIds' => [$kept],
+        ], ['Accept' => 'application/json'])->assertCreated()->json('data');
+
+        $this->assertNull($mine['pending']);
+        $this->assertSame('Approved', $mine['lastDecision']['status']);
         $this->assertSame('AB+', $this->record($nathaniel)['blood_type']);
+        $this->assertSame(1, $this->files($nathaniel, 'ss_id'));
+        $this->assertFalse(DB::connection('portal')->table('attachments')->where('id', $kept)->exists());
+        $row = DB::connection('portal')->table('employee_change_requests')->where('employee_id', (int) $nathaniel->getKey())->orderByDesc('id')->first();
+        $this->assertSame((int) $nathaniel->getKey(), (int) $row->decided_by);
+        $this->assertNull($this->notice($steven, PortalNotificationType::PROFILE_CHANGES_TO_REVIEW, (string) $row->id));
+
+        // One sent before that, still waiting, they may approve themselves.
+        $waiting = (int) DB::connection('portal')->table('employee_change_requests')->insertGetId([
+            'employee_id' => (int) $nathaniel->getKey(), 'status' => 'Pending', 'fields' => json_encode(['bloodType' => 'B+']),
+            'documents' => json_encode(['add' => [], 'remove' => []]), 'submitted_at' => now(),
+        ]);
+        $this->withToken($session)->patchJson(self::CHANGES.'/'.$waiting, ['decision' => 'approve'])->assertOk();
+        $this->assertSame('B+', $this->record($nathaniel)['blood_type']);
     }
 
     private function employee(string $where): Employee

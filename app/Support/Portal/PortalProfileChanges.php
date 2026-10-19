@@ -14,9 +14,10 @@ use Illuminate\Support\Facades\DB;
  * details asked for -- cleaned by the same rules an administrator's edit follows -- the files put on
  * Cloudinary for it, and the files to take off. One waits at a time; withdrawing it lets them ask again.
  *
- * Whoever holds Approve profile changes is told when one comes in, and decides it on Manage / Users,
- * though never their own; the one who asked is told how it went. Logs and notices name the details
- * and the slots, never their values.
+ * Whoever holds Approve profile changes is told when one comes in, and decides it on Manage / Users;
+ * the one who asked is told how it went. Their own changes need no one else (2026-10-19, user): a head
+ * admin's reach their record as they are sent, and one sent before that they may approve themselves.
+ * Logs and notices name the details and the slots, never their values.
  *
  * Both addresses are edited in parts as the registration asks for them (2026-10-19, user): the record
  * keeps one line, so its place is read back into the pickers, and the parts sent are joined into the
@@ -65,7 +66,7 @@ final class PortalProfileChanges
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function mine(Employee $employee): array
+    public function mine(Employee $employee, Request $request): array
     {
         $employee = $this->whole($employee);
         $pending = $this->rowsOf($employee)->where('status', self::PENDING)->orderByDesc('id')->first();
@@ -77,6 +78,8 @@ final class PortalProfileChanges
 
         return ['section' => 'user', 'resource' => 'information', 'data' => [
             'information' => $information,
+            // Whoever approves profile changes saves their own straight onto their record (2026-10-19, user).
+            'approvesOwn' => PortalRules::holds($employee, $request, self::RULE),
             // Where each address line places them in the Philippines, for the pickers to open on.
             'addressPlaces' => array_map(fn (string $line): ?array => $this->placeOf($information[$line] ?? null), array_combine(array_keys(self::ADDRESSES), array_keys(self::ADDRESSES))),
             'documents' => $documents,
@@ -143,13 +146,41 @@ final class PortalProfileChanges
 
         // On Cloudinary first, so a file that fails leaves nothing waiting.
         $stored = array_map(fn (array $file): array => $this->documents->stored($file[0], $file[1]), $files);
-        $id = (int) DB::connection('portal')->table(self::TABLE)->insertGetId([
+        $row = [
             'employee_id' => (int) $employee->getKey(),
             'status' => self::PENDING,
             'fields' => json_encode((object) $fields, JSON_THROW_ON_ERROR),
             'documents' => json_encode(['add' => $stored, 'remove' => $removedIds], JSON_THROW_ON_ERROR),
             'submitted_at' => now(),
-        ]);
+        ];
+
+        // A head admin's own changes are approved by them as they are sent, and reach their record now.
+        if (PortalRules::holds($employee, $request, self::RULE)) {
+            $id = DB::connection('portal')->transaction(function () use ($row, $employee): int {
+                $id = (int) DB::connection('portal')->table(self::TABLE)->insertGetId(
+                    ['status' => self::APPROVED, 'decided_at' => now(), 'decided_by' => (int) $employee->getKey()] + $row,
+                );
+                $this->apply($employee, self::fieldsOf((object) $row), self::documentsOf((object) $row));
+
+                return $id;
+            });
+            if (array_key_exists('address', $fields)) {
+                $this->homes->followAddress((int) $employee->getKey());
+            }
+            $this->audit->record(
+                $employee,
+                PortalLogAction::PATCH,
+                self::RULE,
+                '{UserName|You} changed {UserName|your} own employee information',
+                (string) $id,
+                $request,
+                ['fields' => array_keys($fields), 'documents' => array_values(array_unique($addedFields)), 'removed' => count($removedIds)],
+            );
+
+            return $this->mine($employee, $request);
+        }
+
+        $id = (int) DB::connection('portal')->table(self::TABLE)->insertGetId($row);
 
         $name = PortalAccessGraph::name($employee);
         $this->audit->record(
@@ -178,7 +209,7 @@ final class PortalProfileChanges
             (int) $employee->getKey(),
         );
 
-        return $this->mine($employee);
+        return $this->mine($employee, $request);
     }
 
     /**
@@ -196,7 +227,7 @@ final class PortalProfileChanges
             ->update(['status' => self::WITHDRAWN, 'decided_at' => now()]);
         $this->audit->record($employee, PortalLogAction::PATCH, self::RULE, '{UserName|You} withdrew profile changes', (string) $pending->id, $request);
 
-        return $this->mine($employee);
+        return $this->mine($employee, $request);
     }
 
     /**
@@ -246,24 +277,10 @@ final class PortalProfileChanges
             if (! $employee instanceof Employee || ! $this->users->seesPrivate($reviewer, $employee, $request)) {
                 abort(404, 'Those profile changes were not found.');
             }
-            if ((int) $employee->getKey() === (int) $reviewer->getKey()) {
-                abort(403, 'Someone else approves changes to your own information.');
-            }
-
             $documents = self::documentsOf($row);
             $fields = self::fieldsOf($row);
             if ($isApproved) {
-                foreach ($documents['remove'] as $documentId) {
-                    if ($this->documents->fieldOf($employee, $documentId) !== null) {
-                        $this->documents->remove($employee, $documentId);
-                    }
-                }
-                $this->documents->assertRoom($employee, array_column($documents['add'], 'field'), []);
-                foreach ($documents['add'] as $stored) {
-                    $this->documents->attach($employee, $stored);
-                }
-                $this->users->applyInformation($employee, $fields);
-                $this->users->bumpCache();
+                $this->apply($employee, $fields, $documents);
             }
             DB::connection('portal')->table(self::TABLE)->where('id', $id)->update([
                 'status' => $isApproved ? self::APPROVED : self::REJECTED,
@@ -431,6 +448,28 @@ final class PortalProfileChanges
             }
             $request->merge([$line => $joined]);
         }
+    }
+
+    /**
+     * Approved changes put on their record: the files to take off that are still theirs, the files
+     * asked for, and the details.
+     *
+     * @param  array<string, string|null>  $fields
+     * @param  array{add: list<array{field: string, fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}>, remove: list<int>}  $documents
+     */
+    private function apply(Employee $employee, array $fields, array $documents): void
+    {
+        foreach ($documents['remove'] as $documentId) {
+            if ($this->documents->fieldOf($employee, $documentId) !== null) {
+                $this->documents->remove($employee, $documentId);
+            }
+        }
+        $this->documents->assertRoom($employee, array_column($documents['add'], 'field'), []);
+        foreach ($documents['add'] as $stored) {
+            $this->documents->attach($employee, $stored);
+        }
+        $this->users->applyInformation($employee, $fields);
+        $this->users->bumpCache();
     }
 
     // The signed-in employee comes with their session's columns only; their details are read from the whole row.
