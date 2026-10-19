@@ -24,8 +24,7 @@ final class PortalTeamMap
     {
         // The people the rule lets this actor open: never an executive, and within their reach.
         $inReach = PortalRules::people($actor, $request, self::RULE);
-        // The location-exempt are never on the map, placed or not.
-        $ids = array_values(array_diff(array_map(static fn (Employee $person): int => (int) $person->getKey(), $inReach), PortalLocationExemptions::ids()));
+        $ids = array_map(static fn (Employee $person): int => (int) $person->getKey(), $inReach);
         if ($ids === []) {
             return ['section' => 'manage', 'resource' => 'map', 'data' => ['people' => [], 'unplaced' => []]];
         }

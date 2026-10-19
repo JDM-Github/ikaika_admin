@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalAddressResolver;
 use App\Support\Portal\PortalHomeLocations;
-use App\Support\Portal\PortalLocationExemptions;
 use App\Support\Portal\PortalPlaces;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request as ClientRequest;
@@ -122,13 +121,11 @@ class PortalTeamMapTest extends TestCase
         $ids = collect($response->json('data.people'))->pluck('id')->all();
 
         $this->assertNotContains((string) $executive->getKey(), $ids);
-        // Placed and unplaced together are the non-executive active people: an executive is neither a pin nor a gap,
-        // and neither is anyone on location_exemptions.
+        // Placed and unplaced together are the non-executive active people: an executive is neither a pin nor a gap.
         $actives = Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
             ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
             ->whereRaw("LOWER(COALESCE(role, '')) != 'executive'")
-            ->whereNotIn('id', PortalLocationExemptions::ids())
             ->count();
         $this->assertSame($actives, count($ids) + count($response->json('data.unplaced')));
     }
