@@ -29,6 +29,9 @@ use Illuminate\Support\Facades\DB;
  * Issues & Requests (2026-10-19, user): the button is used for feature requests and feedback as much as
  * for bugs, so a report has a kind the sender picks -- a bug when none is sent, as every report before
  * this was -- and MIS may file it under another. The page, notices and log name it by its kind.
+ *
+ * Each report becomes a Jira issue (PortalBugReportsJira). Once it is one, Jira owns its status, its
+ * fix version and its kind, so those are refused here and read back from Jira instead.
  */
 final class PortalBugReports
 {
@@ -105,6 +108,7 @@ final class PortalBugReports
     public function __construct(
         private readonly PortalCloudinary $cloudinary,
         private readonly PortalAudit $audit,
+        private readonly PortalBugReportsJira $jira,
     ) {}
 
     /**
@@ -173,7 +177,7 @@ final class PortalBugReports
      * Every report, newest first, with its screenshots and who handles it, and the MIS members it can be
      * given to. Nothing in a row says who sent it.
      *
-     * @return array{section: string, resource: string, data: list<array<string, mixed>>, assignees: list<array{id: string, name: string}>}
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>, assignees: list<array{id: string, name: string}>, jira: array<string, mixed>}
      */
     public function list(): array
     {
@@ -191,6 +195,7 @@ final class PortalBugReports
             'resource' => 'bug-reports',
             'data' => $rows->map(fn (object $row): array => $this->present($row, $images->get($row->id, collect())->all(), $names))->values()->all(),
             'assignees' => $this->assignees(),
+            'jira' => $this->jira->settings(),
         ];
     }
 
@@ -205,6 +210,19 @@ final class PortalBugReports
         $row = $portal->table('bug_reports')->where('id', $id)->first();
         if ($row === null) {
             abort(404, 'That issue or request was not found.');
+        }
+
+        if ($this->jira->owns($row)) {
+            $key = (string) $row->jira_issue_key;
+            if ($request->has('status')) {
+                abort(422, 'Its status is managed in Jira ('.$key.').');
+            }
+            if ($request->has('fixedIn')) {
+                abort(422, 'Its fixed-in version is managed in Jira ('.$key.').');
+            }
+            if ($request->has('kind')) {
+                abort(422, 'Its kind is set in Jira ('.$key.').');
+            }
         }
 
         $changes = [];
@@ -252,13 +270,76 @@ final class PortalBugReports
         $names = $this->namesOf([$saved->assignee_id]);
         $this->audit->record($actor, PortalLogAction::PATCH, 'bug-reports', $this->logMessage($actor, $row, $changes, $names), (string) $id, $request, $changes);
 
-        $images = $portal->table('bug_report_images')->where('bug_report_id', $id)->orderBy('id')->get()->all();
+        return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($saved)];
+    }
 
-        return [
-            'section' => 'bug-reports',
-            'resource' => 'bug-reports',
-            'data' => $this->present($saved, $images, $names),
-        ];
+    /**
+     * MIS sends a report to Jira by hand, or tries a failed one again; the answer says where it got to.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function sendToJira(Employee $actor, int $id, Request $request): array
+    {
+        $portal = DB::connection('portal');
+        $row = $portal->table('bug_reports')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That issue or request was not found.');
+        }
+        if (! $this->jira->isConfigured()) {
+            abort(503, 'Jira is not connected yet.');
+        }
+        if ($this->jira->owns($row) && $this->jira->isFullySent($row)) {
+            abort(409, 'It is already in Jira as '.$row->jira_issue_key.'.');
+        }
+        // By hand, a report starts its automatic tries over.
+        $portal->table('bug_reports')->where('id', $id)->update(['jira_attempts' => 0]);
+        if (! $this->jira->push($id)) {
+            abort(409, 'It is being sent right now.');
+        }
+
+        $saved = $portal->table('bug_reports')->where('id', $id)->first();
+        if ($saved->jira_state === PortalBugReportsJira::STATE_SENT) {
+            $this->audit->record(
+                $actor,
+                PortalLogAction::POST,
+                'bug-reports',
+                PortalActivityCopy::sentBugReportToJira((string) $saved->title, self::KINDS[$this->kindOf($saved)]['noun'], (string) $saved->jira_issue_key),
+                (string) $id,
+                $request,
+                ['jiraIssueKey' => $saved->jira_issue_key],
+            );
+        }
+
+        return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($saved)];
+    }
+
+    /**
+     * MIS turns sending new reports to Jira on its own on or off.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function updateJira(Employee $actor, Request $request): array
+    {
+        $on = $request->input('autoSend');
+        if (! is_bool($on)) {
+            abort(422, 'Say whether new ones go to Jira on their own.');
+        }
+        $this->jira->setAutoSend($on);
+        $this->audit->record($actor, PortalLogAction::PATCH, 'bug-reports', PortalActivityCopy::switchedJiraAutoSend($on), null, $request, ['autoSend' => $on]);
+
+        return ['section' => 'bug-reports', 'resource' => 'jira', 'data' => $this->jira->settings()];
+    }
+
+    /**
+     * One report as the page shows it.
+     *
+     * @return array<string, mixed>
+     */
+    private function item(object $row): array
+    {
+        $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->orderBy('id')->get()->all();
+
+        return $this->present($row, $images, $this->namesOf([$row->assignee_id]));
     }
 
     /**
@@ -403,6 +484,7 @@ final class PortalBugReports
                 'mimeType' => (string) $image->mime_type,
                 'thumbUrl' => $this->cloudinary->thumbUrl((string) $image->file_url, (string) $image->mime_type),
             ], $images),
+            'jira' => $this->jira->present($row),
         ];
     }
 

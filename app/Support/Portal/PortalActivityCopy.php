@@ -275,6 +275,18 @@ final class PortalActivityCopy
             : self::YOU.' assigned the '.$noun.' '.$title.' to '.$assigneeName;
     }
 
+    // MIS sending an issue or request to Jira by hand (2026-10-19), named by the issue it became.
+    public static function sentBugReportToJira(string $title, string $noun, string $issueKey): string
+    {
+        return self::YOU.' sent the '.$noun.' '.$title.' to Jira as '.$issueKey;
+    }
+
+    // The switch that sends new issues and requests to Jira on their own (2026-10-19).
+    public static function switchedJiraAutoSend(bool $on): string
+    {
+        return self::YOU.' turned sending new issues and requests to Jira '.($on ? 'on' : 'off');
+    }
+
     // MIS filing a report under another kind (2026-10-19): a bug that is really a feature request, say.
     public static function reclassifiedBugReport(string $title, string $fromNoun, string $asPhrase): string
     {

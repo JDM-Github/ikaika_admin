@@ -136,7 +136,8 @@ class PortalBugReportsTest extends TestCase
         $engineering = $this->headersFor($this->memberOf('Engineering'));
 
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'versionLevel', 'fixedIn', 'images'], array_keys($listed));
+        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'versionLevel', 'fixedIn', 'images', 'jira'], array_keys($listed));
+        $this->assertNull($listed['jira']);
         $this->assertSame('2026-10-12', $listed['reportedOn']);
         $this->assertStringContainsString('c_fill', (string) $listed['images'][0]['thumbUrl']);
         $this->withHeaders($engineering)->getJson(self::BASE.'bug-reports')->assertForbidden();

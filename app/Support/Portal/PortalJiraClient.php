@@ -156,6 +156,12 @@ final class PortalJiraClient
         return $types;
     }
 
+    // What the answers alone cannot tell: every issue asked about came back missing, so the account lost sight of them.
+    public function refuse(string $message): void
+    {
+        $this->remember(self::REFUSED, $message);
+    }
+
     // A 400 naming the issue type means the cached types are stale: a type was renamed or removed.
     public function forgetIssueTypes(): void
     {
