@@ -61,6 +61,18 @@ class PortalMailRelayTest extends TestCase
         $this->assertSame('250 relayed id=abc-123', PortalEmailMessages::acceptance($sent));
     }
 
+    public function test_the_app_default_sender_is_left_to_the_bridge_so_it_never_reaches_graph(): void
+    {
+        config(['mail.from.address' => 'noreply@ikaika.test']);
+        Http::fake([self::URL => Http::response(['ok' => true, 'id' => 'abc-124'])]);
+
+        Mail::mailer('wprelay')
+            ->to('alpha@supplier.test')
+            ->send(new PortalEmailMail('Hello', 'Hi', fromName: 'IKAIKA Portal', fromAddress: 'NoReply@ikaika.test'));
+
+        Http::assertSent(fn (Request $request): bool => $request['from'] === null && $request['fromName'] === 'IKAIKA Portal');
+    }
+
     public function test_a_refusal_from_the_bridge_is_a_transport_failure_with_its_reason(): void
     {
         Http::fake([self::URL => Http::response(['ok' => false, 'error' => 'The hourly mail limit is reached.'], 429)]);
