@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
@@ -62,9 +63,10 @@ class PortalBugReportsTest extends TestCase
         // No Jira on this server, so nothing waits to go there.
         $this->assertNull($row->jira_state);
         $this->assertSame(now()->toDateString(), substr((string) $row->reported_on, 0, 10));
-        // Nothing in the table can hold who sent it, and no activity was logged for it.
+        // Saying nothing is anonymous (2026-10-20): no sender kept, and no activity was logged for it.
+        $this->assertNull($row->reporter_id);
         $this->assertSame(
-            ['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reported_on', 'updated_at',
+            ['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reporter_id', 'reported_on', 'updated_at',
                 'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at'],
             Schema::connection('portal')->getColumnListing('bug_reports'),
         );
@@ -91,6 +93,52 @@ class PortalBugReportsTest extends TestCase
         $departments = Employee::query()->whereIn('id', $notices->pluck('employee_id'))->pluck('department')
             ->map(fn (?string $department): string => strtolower(trim((string) $department)))->unique()->values()->all();
         $this->assertSame(['mis'], $departments);
+    }
+
+    // A PC with no Cloudinary keys (2026-10-20, user): the screenshot is refused by name, and nothing half-saved.
+    public function test_a_report_with_screenshots_is_refused_whole_where_cloudinary_is_not_set_up(): void
+    {
+        Http::preventStrayRequests();
+        config(['services.cloudinary.api_secret' => '']);
+        $headers = $this->headersFor($this->memberOf('Engineering'));
+        $before = DB::connection('portal')->table('bug_reports')->count();
+
+        $this->withHeaders($headers)->post(self::BASE.'bug-reports', [
+            'title' => 'In review',
+            'description' => 'With a screenshot.',
+            'images' => [UploadedFile::fake()->image('shot.png')],
+        ])->assertStatus(503)->assertJsonPath('message', 'Screenshots cannot be uploaded on this server yet: Cloudinary is not set up. Send it without them for now.');
+
+        $this->assertSame($before, DB::connection('portal')->table('bug_reports')->count());
+        Http::assertNothingSent();
+        $this->withHeaders($headers)->post(self::BASE.'bug-reports', ['title' => 'In review', 'description' => 'Without one.'])->assertCreated();
+    }
+
+    // Testers asked to be named (2026-10-20, user): anonymous is the sender's choice, and the page, the bell and Jira say who.
+    public function test_a_sender_who_chooses_to_be_named_is_and_one_who_does_not_stays_anonymous(): void
+    {
+        Http::fake();
+        $sender = $this->memberOf('Engineering');
+        $headers = $this->headersFor($sender);
+        $body = ['title' => 'Calendar skips Sunday', 'description' => 'Saturday jumps to Monday.'];
+
+        $named = $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'anonymous' => '0'])->assertCreated()->json('data.id');
+        $anonymous = $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'anonymous' => '1'])->assertCreated()->json('data.id');
+        $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'anonymous' => 'maybe'])
+            ->assertStatus(422)->assertJsonPath('message', 'Say whether to send it anonymously.');
+
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$named, $anonymous])->pluck('reporter_id', 'id');
+        $this->assertSame([(int) $sender->getKey(), null], [(int) $rows[(int) $named], $rows[(int) $anonymous]]);
+        $name = PortalSubmittedReportPresenter::memberName($sender->first_name, $sender->last_name);
+        $listed = collect($this->withHeaders($this->headersFor($this->memberOf('MIS')))->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->keyBy('id');
+        $this->assertSame(['id' => (string) $sender->getKey(), 'name' => $name], $listed[$named]['reporter']);
+        $this->assertNull($listed[$anonymous]['reporter']);
+
+        $notices = PortalNotification::query()->where('type', 'bug-reports.filed')->get()->groupBy(fn (PortalNotification $notice): string => (string) ($notice->payload['recordId'] ?? ''));
+        $this->assertTrue($notices[$named]->every(fn (PortalNotification $notice): bool => $notice->actor_id === (int) $sender->getKey()
+            && $notice->message === '"Calendar skips Sunday" was reported by '.$name.'.'));
+        $this->assertTrue($notices[$anonymous]->every(fn (PortalNotification $notice): bool => $notice->actor_id === null
+            && $notice->message === '"Calendar skips Sunday" was reported.'));
     }
 
     public function test_a_report_needs_a_title_and_a_description_and_three_screenshots_at_most(): void
@@ -138,7 +186,8 @@ class PortalBugReportsTest extends TestCase
         $engineering = $this->headersFor($this->memberOf('Engineering'));
 
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'versionLevel', 'fixedIn', 'images', 'jira'], array_keys($listed));
+        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'images', 'jira'], array_keys($listed));
+        $this->assertNull($listed['reporter']);
         $this->assertNull($listed['jira']);
         $this->assertSame('2026-10-12', $listed['reportedOn']);
         $this->assertStringContainsString('c_fill', (string) $listed['images'][0]['thumbUrl']);
@@ -159,7 +208,7 @@ class PortalBugReportsTest extends TestCase
 
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['note' => ''])->assertOk()->assertJsonPath('data.note', null);
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'closed'])
-            ->assertStatus(422)->assertJsonPath('message', "Choose New, In progress, Fixed or Won't fix.");
+            ->assertStatus(422)->assertJsonPath('message', "Choose New, In progress, In review, Fixed or Won't fix.");
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, [])
             ->assertStatus(422)->assertJsonPath('message', 'Change its kind, status, note, who handles it or its version.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/999999999', ['status' => 'fixed'])->assertNotFound();
@@ -262,11 +311,15 @@ class PortalBugReportsTest extends TestCase
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => ''])
             ->assertStatus(422)->assertJsonPath('message', 'Choose Bug, Feature request or Feedback.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])->assertOk();
+        // In review (2026-10-20, user): on staging, being tested.
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_review'])
+            ->assertOk()->assertJsonPath('data.status', 'in_review');
 
         $this->assertSame('feature', DB::connection('portal')->table('bug_reports')->where('id', $id)->value('kind'));
         $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->where('record_id', (string) $id)->pluck('message');
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'filed the feedback Dark mode for the calendar as a feature request')));
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the feature request Dark mode for the calendar In progress')));
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the feature request Dark mode for the calendar In review')));
     }
 
     // The Access page names the rule as the sidebar does, and an MIS member holds Send to Jira beneath it (2026-10-19).

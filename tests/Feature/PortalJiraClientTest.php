@@ -90,6 +90,32 @@ class PortalJiraClientTest extends TestCase
         $this->assertSame('unreachable', $client->connection()['state']);
     }
 
+    // A scoped token (2026-10-19, user): refused at the site, answered only through Atlassian's gateway for it.
+    public function test_a_cloud_id_sends_the_requests_through_the_gateway_and_keeps_the_links_on_the_site(): void
+    {
+        Http::preventStrayRequests();
+        $gateway = 'https://api.atlassian.com/ex/jira/0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b';
+        config(['services.jira.cloud_id' => '0F9A1C2E-3B4D-4E5F-8A6B-7C8D9E0F1A2B']);
+        Http::fake([$gateway.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot'])]);
+        $client = app(PortalJiraClient::class);
+
+        $client->myself();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === $gateway.'/rest/api/3/myself'
+            && $request->hasHeader('Authorization', 'Basic '.base64_encode('svc@ikaika.test:secret-token')));
+        $this->assertSame(self::SITE.'/browse/IKP-12', $client->browseUrl('IKP-12'));
+    }
+
+    public function test_a_cloud_id_that_is_not_one_counts_as_unset_and_sends_nothing(): void
+    {
+        Http::preventStrayRequests();
+        config(['services.jira.cloud_id' => 'ikaika-test.atlassian.net']);
+        $client = app(PortalJiraClient::class);
+
+        $this->assertSame(['JIRA_CLOUD_ID'], $client->missingSettings());
+        Http::assertNothingSent();
+    }
+
     public function test_nothing_is_sent_while_jira_is_not_configured(): void
     {
         Http::preventStrayRequests();
@@ -118,7 +144,7 @@ class PortalJiraClientTest extends TestCase
         $this->assertSame(['10042'], array_column($fetched['issues'], 'id'));
         $this->assertSame(['10043'], $fetched['missing']);
         Http::assertSent(fn (Request $request): bool => $request['issueIdsOrKeys'] === ['10042', '10043']
-            && $request['fields'] === ['status', 'resolution', 'fixVersions']);
+            && $request['fields'] === ['status', 'resolution', 'fixVersions', 'issuetype']);
     }
 
     public function test_an_issue_jira_no_longer_has_reads_as_none_and_the_connection_stays_ok(): void

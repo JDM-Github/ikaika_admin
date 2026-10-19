@@ -1419,7 +1419,7 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
     ('developer', 'manage.users.id_card', NULL, 0);
 
 -- Bug reports (2026-10-13): anyone reports a bug with up to three screenshots; MIS reads and tracks
--- them. Anonymous by design: no employee column and no time finer than the day.
+-- them. No time finer than the day, and no sender unless they chose to be named (reporter_id).
 -- Existing databases: create_portal_bug_reports.
 CREATE TABLE IF NOT EXISTS bug_reports (
     id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -1435,6 +1435,8 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     assignee_id   INT UNSIGNED NULL,
     version_level VARCHAR(10)  NULL,
     fixed_in      VARCHAR(20)  NULL,
+    -- Who sent it, only when they chose to be named (2026-10-20). Existing databases: add_portal_bug_report_reporter.
+    reporter_id   INT UNSIGNED NULL,
     reported_on DATE         NOT NULL,
     updated_at  TIMESTAMP    NULL,
     -- The Jira issue it became, and where sending it got to (2026-10-19): state is null (never sent),

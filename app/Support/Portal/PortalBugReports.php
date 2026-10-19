@@ -8,20 +8,23 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 
 /**
  * Bug reports (2026-10-13, user): anyone signed in sends one from the button in the portal's corner,
  * with up to three screenshots, and MIS reads them on Bug Reports and tracks each to fixed.
  *
- * A report is anonymous, and that is enforced here rather than left to the page: submit() is never
- * handed the person, writes no activity log, needs no location, and keeps only the day it came in.
+ * A report is anonymous unless its sender says otherwise (2026-10-20, user: testers asked to be named), and
+ * that is enforced here rather than left to the page: submit() is handed the person only to keep their id
+ * when they chose to be named -- a request that does not say stays anonymous, as every report before did --
+ * writes no activity log, needs no location, and keeps only the day it came in.
  * A screenshot goes up under a neutral name and is served through a Cloudinary transformation, which
  * drops what a photo carries about the phone that took it. The only trace of the sender is the rate
  * limiter's hour-long counter, which never meets the report it counted.
  *
- * MIS hears of a new report on the bell (2026-10-13, user). The notice is from no one: it names no
- * actor, and it goes to everyone who holds Bug Reports -- the sender too, when they do -- so nobody
- * can tell who sent it by who was left out.
+ * MIS hears of a new report on the bell (2026-10-13, user). An anonymous one's notice is from no one: it
+ * names no actor, and it goes to everyone who holds Bug Reports -- the sender too, when they do -- so
+ * nobody can tell who sent it by who was left out. A named one's says who.
  *
  * MIS's own changes -- status, internal note, who handles it, the semantic version level the fix needs
  * and the version it shipped in (2026-10-13) -- are theirs, and logged as anyone's are. Any MIS member
@@ -32,14 +35,17 @@ use Illuminate\Support\Facades\Queue;
  * for bugs, so a report has a kind the sender picks -- a bug when none is sent, as every report before
  * this was -- and MIS may file it under another. The page, notices and log name it by its kind.
  *
- * Each report becomes a Jira issue (PortalBugReportsJira). Once it is one, Jira owns its status, its
- * fix version and its kind, so those are refused here and read back from Jira instead.
+ * Each report becomes a Jira issue (PortalBugReportsJira). Once it is one, its kind and status are the
+ * issue's too: a change here changes Jira first, and Jira's are read back.
  */
 final class PortalBugReports
 {
     public const STATUS_NEW = 'new';
 
     public const STATUS_IN_PROGRESS = 'in_progress';
+
+    // On staging, being tested (2026-10-20, user): the board's In Review, between the work and the release.
+    public const STATUS_IN_REVIEW = 'in_review';
 
     public const STATUS_FIXED = 'fixed';
 
@@ -51,6 +57,7 @@ final class PortalBugReports
     public const STATUS_LABELS = [
         self::STATUS_NEW => 'New',
         self::STATUS_IN_PROGRESS => 'In progress',
+        self::STATUS_IN_REVIEW => 'In review',
         self::STATUS_FIXED => 'Fixed',
         self::STATUS_WONT_FIX => "Won't fix",
     ];
@@ -118,13 +125,18 @@ final class PortalBugReports
      *
      * @return array{section: string, resource: string, data: array{id: string}}
      */
-    public function submit(Request $request): array
+    public function submit(Request $request, Employee $sender): array
     {
+        $reporterId = $this->namedSender($request, $sender);
         $kind = $this->validatedKind($request->input('kind'), self::KIND_BUG);
         $title = $this->requiredText($request, 'title', self::MAX_TITLE, 'Give it a short title.', 'Keep the title under 160 characters.');
         $description = $this->requiredText($request, 'description', self::MAX_DESCRIPTION, 'Say what happened or what you need.', 'Keep the description under 5,000 characters.');
         $page = $this->optionalText($request, 'page', self::MAX_PAGE);
         $images = $this->validatedImages($request);
+        // Said for what it is (2026-10-20, user): the shared upload's own refusal speaks of receipts.
+        if ($images !== [] && ! $this->cloudinary->isConfigured()) {
+            abort(503, 'Screenshots cannot be uploaded on this server yet: Cloudinary is not set up. Send it without them for now.');
+        }
 
         // Uploaded before the row, so a failed upload adds nothing.
         $stored = [];
@@ -139,7 +151,7 @@ final class PortalBugReports
 
         // On its way to Jira as it comes in, unless MIS turned that off (2026-10-19).
         $toJira = $this->jira->shouldSendNew();
-        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored, $toJira): int {
+        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored, $toJira, $reporterId): int {
             $id = (int) DB::connection('portal')->table('bug_reports')->insertGetId([
                 'kind' => $kind,
                 'jira_state' => $toJira ? PortalBugReportsJira::STATE_PENDING : null,
@@ -148,6 +160,7 @@ final class PortalBugReports
                 'page' => $page,
                 'status' => self::STATUS_NEW,
                 'note' => null,
+                'reporter_id' => $reporterId,
                 // The day only: a time to the second could be lined up against what the sender did next.
                 'reported_on' => now()->toDateString(),
                 'updated_at' => null,
@@ -169,10 +182,13 @@ final class PortalBugReports
             $readers,
             PortalNotificationType::BUG_REPORTED,
             self::KINDS[$kind]['notice'],
-            '"'.$title.'" was '.self::KINDS[$kind]['verb'].($page === null ? '' : ' on '.$page).'.',
+            '"'.$title.'" was '.self::KINDS[$kind]['verb']
+                .($reporterId === null ? '' : ' by '.($this->namesOf([$reporterId])[$reporterId] ?? 'a member'))
+                .($page === null ? '' : ' on '.$page).'.',
             PortalShellPath::BUG_REPORTS,
             'Open Issues & Requests',
             ['recordId' => (string) $id],
+            $reporterId,
         );
         if ($toJira) {
             Queue::push(new SendBugReportToJira($id));
@@ -197,7 +213,7 @@ final class PortalBugReports
             ->orderBy('id')
             ->get()
             ->groupBy('bug_report_id');
-        $names = $this->namesOf($rows->pluck('assignee_id')->filter()->all());
+        $names = $this->namesOf([...$rows->pluck('assignee_id')->filter()->all(), ...$rows->pluck('reporter_id')->filter()->all()]);
 
         return [
             'section' => 'bug-reports',
@@ -221,19 +237,6 @@ final class PortalBugReports
             abort(404, 'That issue or request was not found.');
         }
 
-        if ($this->jira->owns($row)) {
-            $key = (string) $row->jira_issue_key;
-            if ($request->has('status')) {
-                abort(422, 'Its status is managed in Jira ('.$key.').');
-            }
-            if ($request->has('fixedIn')) {
-                abort(422, 'Its fixed-in version is managed in Jira ('.$key.').');
-            }
-            if ($request->has('kind')) {
-                abort(422, 'Its kind is set in Jira ('.$key.').');
-            }
-        }
-
         $changes = [];
         if ($request->has('kind')) {
             $changes['kind'] = $this->validatedKind($request->input('kind'), null);
@@ -241,7 +244,7 @@ final class PortalBugReports
         if ($request->has('status')) {
             $status = (string) $request->input('status');
             if (! array_key_exists($status, self::STATUS_LABELS)) {
-                abort(422, "Choose New, In progress, Fixed or Won't fix.");
+                abort(422, "Choose New, In progress, In review, Fixed or Won't fix.");
             }
             $changes['status'] = $status;
         }
@@ -272,6 +275,22 @@ final class PortalBugReports
         if ($handler === null && array_diff(array_keys($changes), ['assignee_id']) !== []) {
             abort(422, 'Assign someone to handle it before changing it.');
         }
+        // A linked report's kind and status are the issue's too (2026-10-20, user): Jira changes first, or nothing does.
+        $toJira = $this->jira->owns($row)
+            && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status));
+        if ($toJira) {
+            if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
+                abort(403, 'Its kind and status change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
+            }
+            if (! $this->jira->isConfigured()) {
+                abort(503, 'Jira is not connected yet.');
+            }
+            try {
+                $this->jira->changeInJira($row, $changes);
+            } catch (RuntimeException $error) {
+                abort(422, 'Jira did not take the change: '.$error->getMessage());
+            }
+        }
 
         $portal->table('bug_reports')->where('id', $id)->update([...$changes, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
 
@@ -283,7 +302,9 @@ final class PortalBugReports
     }
 
     /**
-     * MIS sends a report to Jira by hand, or tries a failed one again; the answer says where it got to.
+     * MIS sends a report to Jira by hand, tries a failed one again, or syncs one already there (2026-10-20,
+     * user): its missing screenshots go up and it is read back, and an issue Jira no longer has is made anew.
+     * The answer says where it got to; the log names only an issue this made.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
@@ -297,9 +318,6 @@ final class PortalBugReports
         if (! $this->jira->isConfigured()) {
             abort(503, 'Jira is not connected yet.');
         }
-        if ($this->jira->owns($row) && $this->jira->isFullySent($row)) {
-            abort(409, 'It is already in Jira as '.$row->jira_issue_key.'.');
-        }
         // By hand, a report starts its automatic tries over.
         $portal->table('bug_reports')->where('id', $id)->update(['jira_attempts' => 0]);
         if (! $this->jira->push($id)) {
@@ -307,7 +325,7 @@ final class PortalBugReports
         }
 
         $saved = $portal->table('bug_reports')->where('id', $id)->first();
-        if ($saved->jira_state === PortalBugReportsJira::STATE_SENT) {
+        if ($saved->jira_state === PortalBugReportsJira::STATE_SENT && $saved->jira_issue_id !== $row->jira_issue_id) {
             $this->audit->record(
                 $actor,
                 PortalLogAction::POST,
@@ -320,6 +338,50 @@ final class PortalBugReports
         }
 
         return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($saved)];
+    }
+
+    /**
+     * Refresh (2026-10-19, user): every linked report read back from Jira now, rather than at the next webhook
+     * or the quarter-hour run, then the list. Only reads Jira, so it is anyone's who sees the list; a Jira that
+     * refuses or does not answer still returns the list, and its connection says why.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>, assignees: list<array{id: string, name: string}>, jira: array<string, mixed>}
+     */
+    public function refreshFromJira(): array
+    {
+        if ($this->jira->isConfigured()) {
+            try {
+                $this->jira->reconcile();
+            } catch (RuntimeException) {
+                // The client has already recorded the connection the list reports.
+            }
+        }
+
+        return $this->list();
+    }
+
+    /**
+     * Every report not in Jira yet -- never sent, or failed -- put on its way there at once (2026-10-20, user:
+     * production had reports from before Jira). Queued rather than sent here, since each one is a create and
+     * its screenshots; the queue starts as this answers, and the list comes back with each one Queued.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>, assignees: list<array{id: string, name: string}>, jira: array<string, mixed>, queued: int}
+     */
+    public function sendAllToJira(Employee $actor, Request $request): array
+    {
+        if (! $this->jira->isConfigured()) {
+            abort(503, 'Jira is not connected yet.');
+        }
+        $ids = $this->jira->queueUnsent();
+        foreach ($ids as $id) {
+            Queue::push(new SendBugReportToJira($id));
+        }
+        if ($ids !== []) {
+            PortalQueueNow::afterResponse();
+            $this->audit->record($actor, PortalLogAction::POST, 'bug-reports', PortalActivityCopy::sentBugReportsToJira(count($ids)), null, $request, ['queued' => count($ids)]);
+        }
+
+        return [...$this->list(), 'queued' => count($ids)];
     }
 
     /**
@@ -348,7 +410,7 @@ final class PortalBugReports
     {
         $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->orderBy('id')->get()->all();
 
-        return $this->present($row, $images, $this->namesOf([$row->assignee_id]));
+        return $this->present($row, $images, $this->namesOf([$row->assignee_id, $row->reporter_id]));
     }
 
     /**
@@ -475,6 +537,7 @@ final class PortalBugReports
     private function present(object $row, array $images, array $names): array
     {
         $assigneeId = $row->assignee_id === null ? null : (int) $row->assignee_id;
+        $reporterId = $row->reporter_id === null ? null : (int) $row->reporter_id;
 
         return [
             'id' => (string) $row->id,
@@ -486,6 +549,8 @@ final class PortalBugReports
             'note' => $row->note,
             'reportedOn' => substr((string) $row->reported_on, 0, 10),
             'assignee' => $assigneeId === null ? null : ['id' => (string) $assigneeId, 'name' => $names[$assigneeId] ?? 'Member'],
+            // Who sent it, only when they chose to be named; null is anonymous.
+            'reporter' => $reporterId === null ? null : ['id' => (string) $reporterId, 'name' => $names[$reporterId] ?? 'Member'],
             'versionLevel' => $row->version_level,
             'fixedIn' => $row->fixed_in,
             'images' => array_map(fn (object $image): array => [
@@ -495,6 +560,20 @@ final class PortalBugReports
             ], $images),
             'jira' => $this->jira->present($row),
         ];
+    }
+
+    // The sender's id when they chose to be named; anonymous, or saying nothing, keeps none.
+    private function namedSender(Request $request, Employee $sender): ?int
+    {
+        if (! $request->has('anonymous')) {
+            return null;
+        }
+        $anonymous = filter_var($request->input('anonymous'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($anonymous === null) {
+            abort(422, 'Say whether to send it anonymously.');
+        }
+
+        return $anonymous ? null : (int) $sender->getKey();
     }
 
     /**

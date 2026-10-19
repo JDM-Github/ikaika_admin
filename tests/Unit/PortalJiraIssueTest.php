@@ -26,8 +26,13 @@ class PortalJiraIssueTest extends TestCase
 
         $this->assertSame(['key' => 'IKP'], $fields['project']);
         $this->assertSame(['id' => '10002'], $fields['issuetype']);
-        $this->assertSame('Export the map', $fields['summary']);
-        $this->assertSame(['ikaika-portal', 'ikaika-portal-42', 'portal-feature'], $fields['labels']);
+        // Named as the KAN board's cards are (2026-10-20, user).
+        $this->assertSame('IP-Export-the-Map', $fields['summary']);
+        // The portal's label alone (2026-10-20, user): the work type says the kind, the description the report.
+        $this->assertSame(['ikaika-portal'], $fields['labels']);
+        $this->assertTrue(PortalJiraIssue::isForReport($fields, 42));
+        $this->assertFalse(PortalJiraIssue::isForReport($fields, 4));
+        $this->assertFalse(PortalJiraIssue::isForReport([], 42));
         $this->assertSame([
             ['type' => 'paragraph', 'content' => [
                 ['type' => 'text', 'text' => 'A PDF of the team map.'],
@@ -42,6 +47,37 @@ class PortalJiraIssueTest extends TestCase
             ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Sent anonymously from the IKAIKA portal (report #42).']]],
         ], $fields['description']['content']);
         $this->assertStringNotContainsString('Jamie', (string) json_encode($fields));
+
+        // A sender who chose to be named is, and the report's mark still closes the line (2026-10-20, user).
+        $named = PortalJiraIssue::fields($row, 'IKP', '10002', 'ikaika-portal', 'Jolas Mendez');
+        $this->assertSame(
+            ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Sent from the IKAIKA portal by Jolas Mendez (report #42).']]],
+            array_slice($named['description']['content'], -1)[0],
+        );
+        $this->assertTrue(PortalJiraIssue::isForReport($named, 42));
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function summaries(): array
+    {
+        return [
+            'as typed, small words kept small' => ['scripting and realtime clash detection', 'IP-Scripting-and-Realtime-Clash-Detection'],
+            'capitals kept' => ['CLASH MANAGE V2', 'IP-CLASH-MANAGE-V2'],
+            'a small word leading' => ['the map is blank', 'IP-The-Map-Is-Blank'],
+            'punctuation dropped, versions kept' => ["Save doesn't work on 1.4.2!", 'IP-Save-Doesnt-Work-on-1.4.2'],
+            'slashes and dashes are breaks' => ['Finance / Transactions - export', 'IP-Finance-Transactions-Export'],
+            'its own prefix not doubled' => ['IP-Level viewpoint', 'IP-Level-Viewpoint'],
+            'letters beyond ASCII' => ['año nuevo', 'IP-Año-Nuevo'],
+            'nothing left' => ['?!', 'IP-Untitled'],
+        ];
+    }
+
+    #[DataProvider('summaries')]
+    public function test_a_summary_is_named_as_the_kan_boards_cards_are(string $title, string $expected): void
+    {
+        $this->assertSame($expected, PortalJiraIssue::summary($title));
     }
 
     /**
@@ -65,7 +101,7 @@ class PortalJiraIssueTest extends TestCase
 
         return [
             'to do' => [['status' => ['statusCategory' => ['key' => 'new']]], 'new'],
-            'in review' => [['status' => ['statusCategory' => ['key' => 'indeterminate']]], 'in_progress'],
+            'in progress, unnamed' => [['status' => ['statusCategory' => ['key' => 'indeterminate']]], 'in_progress'],
             'done, unresolved' => [$done(null), 'fixed'],
             'done' => [$done('Done'), 'fixed'],
             "won't do" => [$done("Won't Do"), 'wont_fix'],
@@ -74,6 +110,14 @@ class PortalJiraIssueTest extends TestCase
             'duplicate' => [$done('Duplicate'), 'wont_fix'],
             'cannot reproduce' => [$done('Cannot Reproduce'), 'wont_fix'],
             'no category' => [['status' => ['name' => 'Odd']], 'in_progress'],
+            // IPS's own board (2026-10-19, user): the column's name wins over the category its owner left it in.
+            'done, filed in progress' => [['status' => ['name' => 'Done', 'statusCategory' => ['key' => 'indeterminate']]], 'fixed'],
+            'cancelled, filed done' => [['status' => ['name' => 'Cancelled', 'statusCategory' => ['key' => 'done']]], 'wont_fix'],
+            'in review, by name' => [['status' => ['name' => 'In Review', 'statusCategory' => ['key' => 'indeterminate']]], 'in_review'],
+            'testing on staging' => [['status' => ['name' => 'On Staging', 'statusCategory' => ['key' => 'done']]], 'in_review'],
+            'in progress, by name' => [['status' => ['name' => 'In Progress', 'statusCategory' => ['key' => 'done']]], 'in_progress'],
+            'to do, by name' => [['status' => ['name' => ' to do ', 'statusCategory' => ['key' => 'indeterminate']]], 'new'],
+            'a name not listed keeps its category' => [['status' => ['name' => 'Waiting on QA', 'statusCategory' => ['key' => 'done']]], 'fixed'],
         ];
     }
 

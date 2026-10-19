@@ -54,6 +54,9 @@ return [
     // (a sandbox on staging); with any of base URL, email, token or project unset, nothing goes to Jira.
     'jira' => [
         'base_url' => env('JIRA_BASE_URL'),
+        // A scoped API token is refused at the site and answered only through Atlassian's gateway for it, which
+        // names the site by this id; a classic token needs none (portal:jira-check prints it on a 401).
+        'cloud_id' => env('JIRA_CLOUD_ID'),
         'email' => env('JIRA_EMAIL'),
         'token' => env('JIRA_API_TOKEN'),
         'project' => env('JIRA_PROJECT_KEY'),

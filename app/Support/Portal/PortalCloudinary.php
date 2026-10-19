@@ -27,6 +27,12 @@ final class PortalCloudinary
     /**
      * @return array{fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}
      */
+    // A cloud name, key and secret: without all three nothing can go up.
+    public function isConfigured(): bool
+    {
+        return $this->cloudName() !== null && $this->apiKey() !== null && $this->apiSecret() !== null;
+    }
+
     public function uploadReceipt(UploadedFile $file, string $folder = self::FOLDER, ?string $asName = null): array
     {
         $cloud = $this->cloudName();

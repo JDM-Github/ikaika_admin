@@ -133,10 +133,14 @@ class PortalJiraSyncTest extends TestCase
     public function test_the_check_fails_on_a_refused_account_without_showing_its_token(): void
     {
         Http::preventStrayRequests();
-        Http::fake([self::SITE.'/rest/api/3/myself' => Http::response(['errorMessages' => ['Client must be authenticated to access this resource.']], 401)]);
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['errorMessages' => ['Client must be authenticated to access this resource.']], 401),
+            self::SITE.'/_edge/tenant_info' => Http::response(['cloudId' => '0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b']),
+        ]);
 
         $this->artisan('portal:jira-check')
             ->expectsOutputToContain('Jira HTTP 401: Client must be authenticated to access this resource.')
+            ->expectsOutputToContain('set JIRA_CLOUD_ID=0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b, or use a classic token')
             ->doesntExpectOutputToContain('secret-token')
             ->assertExitCode(1);
     }

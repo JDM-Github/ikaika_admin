@@ -14,13 +14,17 @@ use Throwable;
 
 /**
  * The one door to Jira Cloud for Issues & Requests (2026-10-19): a service account's email and API token,
- * one project. The credentials go only to the configured site, and an error carries Jira's status and its
- * own message, never the request -- so never the token or the email.
+ * one project. The credentials go only to the configured site -- or, with JIRA_CLOUD_ID set for a scoped
+ * token, to Atlassian's gateway for that site -- and an error carries Jira's status and its own message,
+ * never the request -- so never the token or the email. A link a person opens is always the site's.
  *
  * Reads are retried on a dropped connection, a 429 or a 5xx; creating an issue and attaching a file are
  * not, because Jira takes no idempotency key and a retry could file the same report twice. A failed
- * create waits for the next try, which first looks for the issue by the report's own label -- the first
- * try may have made it before the answer was lost.
+ * create waits for the next try, which first looks for the issue by the report's number in its
+ * description -- the first try may have made it before the answer was lost.
+ *
+ * MIS changing a linked report's kind or status changes the issue too (2026-10-20, user): its work type is
+ * edited, or it is moved along the transition that lands in the matching column. Both are writes, sent once.
  *
  * Every answer updates the connection the page shows: a 2xx is ok, a refused account or an unknown
  * project is refused, no answer is unreachable. A 400 is about the request, not the connection.
@@ -39,10 +43,12 @@ final class PortalJiraClient
 
     private const CONNECTION_KEY = 'portal:jira:connection';
 
+    private const GATEWAY = 'https://api.atlassian.com/ex/jira/';
+
     private const ISSUE_TYPES_KEY = 'portal:jira:issue-types:';
 
     // The fields a sync reads; nothing else of an issue is ever fetched.
-    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions'];
+    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype'];
 
     // The env keys behind config('services.jira'), for saying which one is missing.
     private const SETTINGS = [
@@ -58,7 +64,7 @@ final class PortalJiraClient
     }
 
     /**
-     * The env keys still blank, or a base URL that is not https.
+     * The env keys still blank, a base URL that is not https, or a cloud id that is not one.
      *
      * @return list<string>
      */
@@ -73,6 +79,10 @@ final class PortalJiraClient
         $base = $this->setting('base_url');
         if ($base !== null && ! str_starts_with($base, 'https://') && ! in_array('JIRA_BASE_URL', $missing, true)) {
             $missing[] = 'JIRA_BASE_URL';
+        }
+        $cloud = $this->setting('cloud_id');
+        if ($cloud !== null && preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $cloud) !== 1) {
+            $missing[] = 'JIRA_CLOUD_ID';
         }
 
         return $missing;
@@ -182,6 +192,43 @@ final class PortalJiraClient
         return ['id' => (string) $body['id'], 'key' => (string) $body['key']];
     }
 
+    /**
+     * The moves the issue can make from where it stands, each with the status it lands in.
+     *
+     * @return list<array{id: string, to: array<string, mixed>}>
+     */
+    public function transitions(string $issueId): array
+    {
+        $body = $this->read('GET', '/rest/api/3/issue/'.rawurlencode($issueId).'/transitions')->json();
+        $moves = [];
+        foreach (is_array($body['transitions'] ?? null) ? $body['transitions'] : [] as $move) {
+            if (is_array($move) && isset($move['id']) && is_array($move['to'] ?? null)) {
+                $moves[] = ['id' => (string) $move['id'], 'to' => $move['to']];
+            }
+        }
+
+        return $moves;
+    }
+
+    public function transition(string $issueId, string $transitionId): void
+    {
+        $this->write(fn (PendingRequest $request): Response => $request->post(
+            $this->url('/rest/api/3/issue/'.rawurlencode($issueId).'/transitions'),
+            ['transition' => ['id' => $transitionId]],
+        ));
+    }
+
+    /**
+     * @param  array<string, mixed>  $fields
+     */
+    public function editIssue(string $issueId, array $fields): void
+    {
+        $this->write(fn (PendingRequest $request): Response => $request->put(
+            $this->url('/rest/api/3/issue/'.rawurlencode($issueId)),
+            ['fields' => $fields],
+        ));
+    }
+
     public function attach(string $issueId, string $fileName, string $contents, string $mimeType): void
     {
         $this->write(fn (PendingRequest $request): Response => $request
@@ -204,17 +251,25 @@ final class PortalJiraClient
     }
 
     /**
-     * The project's issue carrying a label, or null: how a retry finds what an unanswered create made.
+     * The portal's issues whose description holds these words, oldest first, with the description to check
+     * them by: how a retry finds what an unanswered create made. Jira matches words, not the exact text.
      *
-     * @return array{id: string, key: string, fields: array<string, mixed>}|null
+     * @return list<array{id: string, key: string, fields: array<string, mixed>}>
      */
-    public function issueLabelled(string $label): ?array
+    public function issuesDescribing(string $words, string $label): array
     {
-        $jql = 'project = "'.$this->projectKey().'" AND labels = "'.$label.'" ORDER BY created ASC';
-        $body = $this->read('GET', '/rest/api/3/search/jql?'.http_build_query(['jql' => $jql, 'fields' => implode(',', self::SYNC_FIELDS), 'maxResults' => 1]))->json();
-        $first = is_array($body['issues'] ?? null) ? ($body['issues'][0] ?? null) : null;
+        $jql = 'project = "'.$this->projectKey().'" AND labels = "'.$label.'" AND description ~ "\\"'.$words.'\\"" ORDER BY created ASC';
+        $fields = implode(',', [...self::SYNC_FIELDS, 'description']);
+        $body = $this->read('GET', '/rest/api/3/search/jql?'.http_build_query(['jql' => $jql, 'fields' => $fields, 'maxResults' => 10]))->json();
+        $issues = [];
+        foreach (is_array($body['issues'] ?? null) ? $body['issues'] : [] as $issue) {
+            $parsed = $this->issueFrom($issue);
+            if ($parsed !== null) {
+                $issues[] = $parsed;
+            }
+        }
 
-        return is_array($first) ? $this->issueFrom($first) : null;
+        return $issues;
     }
 
     /**
@@ -363,8 +418,8 @@ final class PortalJiraClient
     // Every request stays on the configured site, so the credentials never leave it.
     private function url(string $path): string
     {
-        $url = $this->base().$path;
-        if (! str_starts_with($url, $this->base().'/')) {
+        $url = $this->apiBase().$path;
+        if (! str_starts_with($url, $this->apiBase().'/')) {
             throw new RuntimeException('That address is outside the Jira site.');
         }
 
@@ -376,6 +431,31 @@ final class PortalJiraClient
         $base = $this->setting('base_url');
 
         return $base === null ? null : rtrim($base, '/');
+    }
+
+    // Where the requests go: the site itself, or the gateway for it when a cloud id is set.
+    private function apiBase(): ?string
+    {
+        $cloud = $this->setting('cloud_id');
+
+        return $cloud === null ? $this->base() : self::GATEWAY.strtolower($cloud);
+    }
+
+    // The id Atlassian's gateway names this site by, which the site gives anyone who asks; null without an answer.
+    public function siteCloudId(): ?string
+    {
+        $base = $this->base();
+        if ($base === null) {
+            return null;
+        }
+        try {
+            $id = Http::withOptions(['verify' => CaBundle::getSystemCaRootBundlePath()])->timeout(10)
+                ->get($base.'/_edge/tenant_info')->json('cloudId');
+        } catch (Throwable) {
+            return null;
+        }
+
+        return is_string($id) && $id !== '' ? $id : null;
     }
 
     private function setting(string $key): ?string

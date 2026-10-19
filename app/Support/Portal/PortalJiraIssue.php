@@ -7,17 +7,39 @@ namespace App\Support\Portal;
  * (2026-10-19). Pure: no request, no database, so each rule is tested on its own.
  *
  * The issue says only what the report says -- its title, what happened, its kind, the page and the day
- * -- and that it came anonymously from the portal. Never a person: not the sender, who is unknown, and
- * not MIS's note or who handles it, which stay in the portal.
+ * -- and that it came from the portal: anonymously, or from the sender who chose to be named (2026-10-20,
+ * user). Never MIS's note or who handles it, which stay in the portal. Its summary is named as the KAN
+ * board's cards are (2026-10-20, user): IP- and the title's words joined by hyphens, each capitalised but
+ * the small ones -- "save does nothing" is IP-Save-Does-Nothing. One label, the portal's own, which the admin
+ * webhook filters on (2026-10-20, user): the work type already says the kind, and the report's number is
+ * in the description, where a retry finds it again.
  *
- * Back from Jira: To Do is New, anything in progress is In progress, and Done is Fixed -- or Won't fix
- * when it was resolved as not to be done. The fix version is the highest X.Y.Z among the issue's fix
- * versions, "v" or not.
+ * Back from Jira, by the board's column first (2026-10-19, user): To Do is New, In Progress is In progress,
+ * In Review -- or a testing or staging column -- is In review (2026-10-20, user), Done is Fixed -- or Won't fix when it was resolved as not to be done -- and Cancelled is
+ * Won't fix. The name leads because a team-managed project's categories are whatever its owner left them:
+ * IPS files Done under "in progress" and Cancelled under "done". A name not listed falls back to the
+ * category. The fix version is the highest X.Y.Z among the issue's fix versions, "v" or not.
  */
 final class PortalJiraIssue
 {
     // Labels hold no spaces; a resolution is matched lowercased, with a curly apostrophe made straight.
     private const NOT_DONE = ["won't do", "won't fix", 'declined', 'duplicate', 'cannot reproduce', "can't reproduce"];
+
+    // A status by its name, lowercased, a curly apostrophe made straight; 'done' still asks the resolution.
+    private const BY_NAME = [
+        'to do' => 'new', 'open' => 'new', 'backlog' => 'new', 'selected for development' => 'new',
+        'in progress' => 'indeterminate',
+        'in review' => 'review', 'review' => 'review', 'in testing' => 'review', 'testing' => 'review',
+        'in qa' => 'review', 'qa' => 'review', 'on staging' => 'review', 'staging' => 'review',
+        'done' => 'done', 'closed' => 'done', 'resolved' => 'done', 'fixed' => 'done',
+        'cancelled' => 'not_done', 'canceled' => 'not_done', "won't do" => 'not_done', "won't fix" => 'not_done',
+        'declined' => 'not_done', 'rejected' => 'not_done', 'duplicate' => 'not_done',
+    ];
+
+    private const SUMMARY_PREFIX = 'IP';
+
+    // Words a title keeps small, as "IE-Scripting-and-Realtime-Clash-Detection" does, unless they lead it.
+    private const SMALL_WORDS = ['a', 'an', 'and', 'as', 'at', 'by', 'for', 'from', 'in', 'into', 'of', 'on', 'or', 'plus', 'the', 'to', 'vs', 'with'];
 
     private const EXTENSIONS = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', 'image/gif' => 'gif'];
 
@@ -26,7 +48,7 @@ final class PortalJiraIssue
      *
      * @return array<string, mixed>
      */
-    public static function fields(object $row, string $projectKey, string $issueTypeId, string $label): array
+    public static function fields(object $row, string $projectKey, string $issueTypeId, string $label, ?string $senderName = null): array
     {
         $kind = (string) ($row->kind ?? PortalBugReports::KIND_BUG);
         $kindLabel = PortalBugReports::KINDS[$kind]['label'] ?? PortalBugReports::KINDS[PortalBugReports::KIND_BUG]['label'];
@@ -34,36 +56,65 @@ final class PortalJiraIssue
         return [
             'project' => ['key' => $projectKey],
             'issuetype' => ['id' => $issueTypeId],
-            'summary' => self::oneLine((string) $row->title),
-            'labels' => [$label, self::reportLabel($label, (int) $row->id), 'portal-'.$kind],
+            'summary' => self::summary((string) $row->title),
+            'labels' => [$label],
             'description' => self::description((string) $row->description, [
                 'Kind: '.$kindLabel,
                 ...($row->page === null || trim((string) $row->page) === '' ? [] : ['Page: '.trim((string) $row->page)]),
                 'Reported on: '.substr((string) $row->reported_on, 0, 10),
-                'Sent anonymously from the IKAIKA portal (report #'.$row->id.').',
+                $senderName === null
+                    ? 'Sent anonymously from the IKAIKA portal '.self::reportMark((int) $row->id).'.'
+                    : 'Sent from the IKAIKA portal by '.$senderName.' '.self::reportMark((int) $row->id).'.',
             ]),
         ];
     }
 
-    // The report's own label, which finds the issue again when the answer to its create was lost.
-    public static function reportLabel(string $label, int $reportId): string
+    // The report's number as its issue's description says it, which finds the issue again when the answer to
+    // its create was lost.
+    public static function reportMark(int $reportId): string
     {
-        return $label.'-'.$reportId;
+        return '(report #'.$reportId.')';
     }
 
     /**
-     * The portal status an issue's fields stand for, or the current one when the category says nothing.
+     * Whether an issue's description says it is this report's. Jira's search matches words, stemmed, not the
+     * exact text, so each issue it finds is read for the whole mark before it is taken.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    public static function isForReport(array $fields, int $reportId): bool
+    {
+        $description = $fields['description'] ?? null;
+        if (! is_array($description)) {
+            return false;
+        }
+        $text = '';
+        array_walk_recursive($description, function ($value, $key) use (&$text): void {
+            if ($key === 'text' && is_string($value)) {
+                $text .= $value.' ';
+            }
+        });
+
+        return str_contains($text, self::reportMark($reportId));
+    }
+
+    /**
+     * The portal status an issue's fields stand for, or the current one when neither name nor category says.
      *
      * @param  array<string, mixed>  $fields
      */
     public static function portalStatus(array $fields, string $current): string
     {
-        $category = $fields['status']['statusCategory']['key'] ?? null;
+        $name = $fields['status']['name'] ?? null;
+        $category = (is_string($name) ? self::BY_NAME[self::normalised($name)] ?? null : null)
+            ?? $fields['status']['statusCategory']['key'] ?? null;
 
         return match ($category) {
             'new' => PortalBugReports::STATUS_NEW,
             'indeterminate' => PortalBugReports::STATUS_IN_PROGRESS,
             'done' => self::isNotDone($fields) ? PortalBugReports::STATUS_WONT_FIX : PortalBugReports::STATUS_FIXED,
+            'review' => PortalBugReports::STATUS_IN_REVIEW,
+            'not_done' => PortalBugReports::STATUS_WONT_FIX,
             default => $current,
         };
     }
@@ -115,7 +166,29 @@ final class PortalJiraIssue
             return false;
         }
 
-        return in_array(str_replace("\u{2019}", "'", mb_strtolower(trim($resolution))), self::NOT_DONE, true);
+        return in_array(self::normalised($resolution), self::NOT_DONE, true);
+    }
+
+    private static function normalised(string $name): string
+    {
+        return str_replace("\u{2019}", "'", mb_strtolower(trim($name)));
+    }
+
+    // IP-Save-Does-Nothing: the title's words, without their punctuation, each capitalised but the small ones.
+    public static function summary(string $title): string
+    {
+        $words = [];
+        foreach (preg_split('/[\s_\/-]+/u', self::oneLine($title)) ?: [] as $word) {
+            $word = trim((string) preg_replace('/[^\p{L}\p{N}.]+/u', '', $word), '.');
+            if ($word === '' || ($words === [] && strcasecmp($word, self::SUMMARY_PREFIX) === 0)) {
+                continue;
+            }
+            $words[] = $words !== [] && in_array(mb_strtolower($word), self::SMALL_WORDS, true)
+                ? mb_strtolower($word)
+                : mb_strtoupper(mb_substr($word, 0, 1)).mb_substr($word, 1);
+        }
+
+        return mb_substr(self::SUMMARY_PREFIX.'-'.($words === [] ? 'Untitled' : implode('-', $words)), 0, 255);
     }
 
     private static function oneLine(string $text): string
