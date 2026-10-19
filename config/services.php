@@ -49,6 +49,26 @@ return [
         'base_url' => 'https://api.bitbucket.org/2.0',
     ],
 
+    // Jira Cloud for Issues & Requests (2026-10-19): a service account's API token creates an issue per report
+    // in one project and reads its progress back. Production and the Test Server each name their own project
+    // (a sandbox on staging); with any of base URL, email, token or project unset, nothing goes to Jira.
+    'jira' => [
+        'base_url' => env('JIRA_BASE_URL'),
+        'email' => env('JIRA_EMAIL'),
+        'token' => env('JIRA_API_TOKEN'),
+        'project' => env('JIRA_PROJECT_KEY'),
+        // Signs each webhook delivery (POST /api/<channel>/jira/webhook); unset, every delivery is refused.
+        'webhook_secret' => env('JIRA_WEBHOOK_SECRET'),
+        // Every issue the portal makes carries it, and the admin webhook's JQL filters on it.
+        'label' => 'ikaika-portal',
+        // The issue type each kind is filed as, by name; a project without one falls back to Task.
+        'issue_types' => [
+            'bug' => env('JIRA_ISSUE_TYPE_BUG', 'Bug'),
+            'feature' => env('JIRA_ISSUE_TYPE_FEATURE', 'Story'),
+            'feedback' => env('JIRA_ISSUE_TYPE_FEEDBACK', 'Task'),
+        ],
+    ],
+
     // ID-number sign-in on a deployed portal: only MIS knows it; unset, ID sign-in stays refused there.
     'portal_id_login' => [
         'password' => env('PORTAL_ID_LOGIN_PASSWORD'),
