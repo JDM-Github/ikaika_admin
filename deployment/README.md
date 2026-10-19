@@ -153,9 +153,9 @@ The preview shows one day's commits and saves nothing; the sync prints `<reposit
 
 ## Jira (Issues & Requests)
 
-Every issue or request people send from the portal's corner button becomes a Jira issue: as it comes in (MIS can turn that off on the Issues & Requests page), or sent by hand. Jira then owns its status, fix version and kind, and the portal reads them back by webhook and every fifteen minutes. Production files into the real project; the Test Server into a sandbox project, so trying things out never lands in the real board.
+Every issue or request people send from the portal's corner button becomes a Jira issue: as it comes in (MIS can turn that off on the Issues & Requests page), sent by hand, or with every report not in Jira yet at once (**Send to Jira** in the page's header). Its status and kind then go both ways: a change on the Jira board comes back by webhook, every fifteen minutes or on **Refresh**, and MIS changing them in the portal moves the card or changes its work type first. Fixed in stays the portal's unless the issue has a fix version. Production files into the real project; the Test Server into a sandbox project, so trying things out never lands in the real board.
 
-**1. A service account and its token.** In Atlassian, a dedicated user (not a Jira admin) with an API token (id.atlassian.com → Security → API tokens). On each project it needs **Browse projects**, **Create issues** and **Create attachments**. Every issue the portal makes is reported by this account, so nobody's name is on an anonymous report.
+**1. A service account and its token.** In Atlassian, a dedicated user (not a Jira admin) with an API token (id.atlassian.com → Security → API tokens). On each project it needs **Browse projects**, **Create issues**, **Create attachments**, **Edit issues** (a kind changed in the portal changes the work type) and **Transition issues** (a status changed in the portal moves the card). Every issue the portal makes is reported by this account, so nobody's name is on an anonymous report.
 
 **2. The settings.** In your local `.env` (the Test Server's, with the sandbox project):
 

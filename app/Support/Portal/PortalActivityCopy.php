@@ -281,6 +281,12 @@ final class PortalActivityCopy
         return self::YOU.' sent the '.$noun.' '.$title.' to Jira as '.$issueKey;
     }
 
+    // Every report not in Jira yet, sent at once (2026-10-20, user).
+    public static function sentBugReportsToJira(int $count): string
+    {
+        return self::YOU.' sent '.$count.' '.($count === 1 ? 'issue or request' : 'issues and requests').' to Jira';
+    }
+
     // The switch that sends new issues and requests to Jira on their own (2026-10-19).
     public static function switchedJiraAutoSend(bool $on): string
     {

@@ -23,6 +23,9 @@ use Throwable;
  * create waits for the next try, which first looks for the issue by the report's number in its
  * description -- the first try may have made it before the answer was lost.
  *
+ * MIS changing a linked report's kind or status changes the issue too (2026-10-20, user): its work type is
+ * edited, or it is moved along the transition that lands in the matching column. Both are writes, sent once.
+ *
  * Every answer updates the connection the page shows: a 2xx is ok, a refused account or an unknown
  * project is refused, no answer is unreachable. A 400 is about the request, not the connection.
  */
@@ -45,7 +48,7 @@ final class PortalJiraClient
     private const ISSUE_TYPES_KEY = 'portal:jira:issue-types:';
 
     // The fields a sync reads; nothing else of an issue is ever fetched.
-    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions'];
+    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype'];
 
     // The env keys behind config('services.jira'), for saying which one is missing.
     private const SETTINGS = [
@@ -187,6 +190,43 @@ final class PortalJiraClient
         }
 
         return ['id' => (string) $body['id'], 'key' => (string) $body['key']];
+    }
+
+    /**
+     * The moves the issue can make from where it stands, each with the status it lands in.
+     *
+     * @return list<array{id: string, to: array<string, mixed>}>
+     */
+    public function transitions(string $issueId): array
+    {
+        $body = $this->read('GET', '/rest/api/3/issue/'.rawurlencode($issueId).'/transitions')->json();
+        $moves = [];
+        foreach (is_array($body['transitions'] ?? null) ? $body['transitions'] : [] as $move) {
+            if (is_array($move) && isset($move['id']) && is_array($move['to'] ?? null)) {
+                $moves[] = ['id' => (string) $move['id'], 'to' => $move['to']];
+            }
+        }
+
+        return $moves;
+    }
+
+    public function transition(string $issueId, string $transitionId): void
+    {
+        $this->write(fn (PendingRequest $request): Response => $request->post(
+            $this->url('/rest/api/3/issue/'.rawurlencode($issueId).'/transitions'),
+            ['transition' => ['id' => $transitionId]],
+        ));
+    }
+
+    /**
+     * @param  array<string, mixed>  $fields
+     */
+    public function editIssue(string $issueId, array $fields): void
+    {
+        $this->write(fn (PendingRequest $request): Response => $request->put(
+            $this->url('/rest/api/3/issue/'.rawurlencode($issueId)),
+            ['fields' => $fields],
+        ));
     }
 
     public function attach(string $issueId, string $fileName, string $contents, string $mimeType): void

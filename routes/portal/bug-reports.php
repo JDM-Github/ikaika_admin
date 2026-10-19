@@ -23,4 +23,7 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         ->whereNumber('id');
     Route::middleware(['portal.rule:bug-reports.jira', 'throttle:portal-bug-report-write'])
         ->patch('bug-reports/jira', [BugReportsController::class, 'updateJira']);
+    // Every report not in Jira yet, at once (2026-10-20): production had reports from before Jira.
+    Route::middleware(['portal.rule:bug-reports.jira', 'throttle:portal-bug-report-write'])
+        ->post('bug-reports/jira/send-all', [BugReportsController::class, 'sendAllToJira']);
 });

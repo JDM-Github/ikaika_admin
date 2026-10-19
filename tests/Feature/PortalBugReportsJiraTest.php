@@ -187,24 +187,144 @@ class PortalBugReportsJiraTest extends TestCase
             ->where('message', 'like', '%turned sending new issues and requests to Jira off')->exists());
     }
 
-    public function test_jira_owns_a_linked_reports_status_fixed_in_and_kind_until_it_deletes_the_issue(): void
+    // Both ways (2026-10-20, user): MIS changing a linked report's kind or status changes the issue first.
+    public function test_mis_changes_a_linked_reports_kind_and_status_in_jira_first(): void
     {
+        $this->connectJira();
         $analyst = $this->memberOf('MIS');
         $headers = $this->headersFor($analyst);
         $id = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [
+                ['id' => '10001', 'name' => 'Bug'], ['id' => '10002', 'name' => 'Story'], ['id' => '10003', 'name' => 'Task'],
+            ]]),
+            self::SITE.'/rest/api/3/issue/10042/transitions' => Http::response(['transitions' => $this->boardMoves()]),
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-7', 'fields' => [
+                'status' => ['name' => 'Done', 'statusCategory' => ['key' => 'indeterminate']],
+                'issuetype' => ['name' => 'Story'],
+            ]]),
+        ]);
 
-        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed'])
-            ->assertStatus(422)->assertJsonPath('message', 'Its status is managed in Jira (IKP-7).');
-        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['fixedIn' => '1.4.2'])
-            ->assertStatus(422)->assertJsonPath('message', 'Its fixed-in version is managed in Jira (IKP-7).');
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed', 'kind' => 'feature'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'fixed')
+            ->assertJsonPath('data.kind', 'feature')
+            ->assertJsonPath('data.jira.status', 'Done');
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT' && $request['fields'] === ['issuetype' => ['id' => '10002']]);
+        // IPS's own board: Done sits under "in progress", and its name still picks it.
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && $request['transition'] === ['id' => '41']);
+        // Fixed in has no field on IPS's screens, so it stays the portal's and nothing goes to Jira for it.
+        $sent = count(Http::recorded());
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['fixedIn' => '1.4.2', 'note' => 'Shipped.'])
+            ->assertOk()->assertJsonPath('data.fixedIn', '1.4.2');
+        $this->assertCount($sent, Http::recorded());
+    }
+
+    public function test_a_change_jira_refuses_leaves_the_report_as_it_was_and_needs_send_to_jira(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $id = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issue/10042/transitions' => Http::response(['transitions' => [$this->boardMoves()[0]]]),
+            self::SITE.'/rest/api/3/issue/10042' => Http::response(['errors' => ['issuetype' => 'The issue type selected is invalid.']], 400),
+        ]);
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_review'])
+            ->assertStatus(422)->assertJsonPath('message', 'Jira did not take the change: Jira has no way to move IKP-7 to In review from where it is.');
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => 'feedback'])
-            ->assertStatus(422)->assertJsonPath('message', 'Its kind is set in Jira (IKP-7).');
+            ->assertStatus(422)->assertJsonPath('message', 'Jira did not take the change: Jira HTTP 400: issuetype: The issue type selected is invalid.');
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $this->assertSame(['new', 'bug'], [$row->status, $row->kind]);
+
+        // Without Send to Jira the issue is not theirs to change; the portal's own fields still are.
+        $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
+        $before = count(Http::recorded());
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed'])
+            ->assertForbidden()->assertJsonPath('message', 'Its kind and status change IKP-7 in Jira too, which needs Send to Jira.');
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['note' => 'Waiting on Jira.', 'versionLevel' => 'patch'])
             ->assertOk()->assertJsonPath('data.note', 'Waiting on Jira.');
+        $this->assertCount($before, Http::recorded());
 
+        // An issue Jira no longer has leaves the report the portal's alone again.
         DB::connection('portal')->table('bug_reports')->where('id', $id)->update(['jira_state' => 'deleted']);
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed'])
             ->assertOk()->assertJsonPath('data.status', 'fixed')->assertJsonPath('data.jira.state', 'deleted');
+    }
+
+    // Read back (2026-10-20, user): a work type changed in Jira changes the kind, and Fixed in stays without a fix version.
+    public function test_jiras_work_type_comes_back_as_the_kind_and_the_portals_fixed_in_stays(): void
+    {
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $feedback = $this->report(['kind' => 'feedback', 'fixed_in' => '1.4.2', 'jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent']);
+        // No Story in the project, so the feature request went as Task; Task alone does not make it feedback.
+        $feature = $this->report(['kind' => 'feature', 'jira_issue_id' => '10051', 'jira_issue_key' => 'IKP-21', 'jira_state' => 'sent']);
+        $done = ['name' => 'Done', 'statusCategory' => ['key' => 'done']];
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+                ['id' => '10050', 'key' => 'IKP-20', 'fields' => ['status' => $done, 'issuetype' => ['name' => 'Bug']]],
+                ['id' => '10051', 'key' => 'IKP-21', 'fields' => ['status' => $done, 'issuetype' => ['name' => 'Task']]],
+            ], 'issueErrors' => []]),
+        ]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$feedback, $feature])->get()->keyBy('id');
+        $this->assertSame(['bug', 'fixed', '1.4.2'], [$rows[$feedback]->kind, $rows[$feedback]->status, $rows[$feedback]->fixed_in]);
+        $this->assertSame('feature', $rows[$feature]->kind);
+    }
+
+    // Production had reports from before Jira (2026-10-20, user): every one not there yet goes at once.
+    public function test_mis_sends_every_report_not_in_jira_yet_at_once(): void
+    {
+        Queue::fake();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/send-all')->assertStatus(503);
+        $this->connectJira();
+        // Only this test's reports: the database may hold others from a copied server.
+        DB::connection('portal')->table('bug_reports')->update(['jira_state' => 'sent']);
+        $never = $this->report();
+        $failed = $this->report(['jira_state' => 'failed', 'jira_attempts' => 5, 'jira_error' => 'Jira HTTP 401']);
+        $kept = [
+            $this->report(['jira_state' => 'sent', 'jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20']),
+            $this->report(['jira_state' => 'deleted', 'jira_issue_id' => '10051', 'jira_issue_key' => 'IKP-21']),
+        ];
+
+        $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->postJson(self::BASE.'bug-reports/jira/send-all')->assertForbidden();
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/send-all')
+            ->assertOk()->assertJsonPath('queued', 2)->assertJsonPath('jira.projectKey', 'IKP');
+
+        Queue::assertPushed(SendBugReportToJira::class, 2);
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$never, $failed, ...$kept])->get()->keyBy('id');
+        $this->assertSame(['pending', 'pending', 'sent', 'deleted'], [$rows[$never]->jira_state, $rows[$failed]->jira_state, $rows[$kept[0]]->jira_state, $rows[$kept[1]]->jira_state]);
+        $this->assertSame([0, null], [(int) $rows[$failed]->jira_attempts, $rows[$failed]->jira_error]);
+        $this->assertTrue(PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->pluck('message')
+            ->contains(fn (string $message): bool => str_ends_with($message, 'sent 2 issues and requests to Jira')));
+    }
+
+    /**
+     * IPS's moves: anywhere from anywhere, its Done filed under "in progress" and Cancelled under "done".
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function boardMoves(): array
+    {
+        return [
+            ['id' => '11', 'name' => 'To Do', 'to' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]],
+            ['id' => '21', 'name' => 'In Progress', 'to' => ['name' => 'In Progress', 'statusCategory' => ['key' => 'indeterminate']]],
+            ['id' => '31', 'name' => 'In Review', 'to' => ['name' => 'In Review', 'statusCategory' => ['key' => 'indeterminate']]],
+            ['id' => '41', 'name' => 'Done', 'to' => ['name' => 'Done', 'statusCategory' => ['key' => 'indeterminate']]],
+            ['id' => '51', 'name' => 'Cancelled', 'to' => ['name' => 'Cancelled', 'statusCategory' => ['key' => 'done']]],
+        ];
     }
 
     // The reported ask (2026-10-19): every new one goes to Jira as it comes in, and submitting never waits on Jira.

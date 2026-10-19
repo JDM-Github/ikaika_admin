@@ -230,19 +230,6 @@ final class PortalBugReports
             abort(404, 'That issue or request was not found.');
         }
 
-        if ($this->jira->owns($row)) {
-            $key = (string) $row->jira_issue_key;
-            if ($request->has('status')) {
-                abort(422, 'Its status is managed in Jira ('.$key.').');
-            }
-            if ($request->has('fixedIn')) {
-                abort(422, 'Its fixed-in version is managed in Jira ('.$key.').');
-            }
-            if ($request->has('kind')) {
-                abort(422, 'Its kind is set in Jira ('.$key.').');
-            }
-        }
-
         $changes = [];
         if ($request->has('kind')) {
             $changes['kind'] = $this->validatedKind($request->input('kind'), null);
@@ -280,6 +267,22 @@ final class PortalBugReports
         $handler = array_key_exists('assignee_id', $changes) ? $changes['assignee_id'] : $row->assignee_id;
         if ($handler === null && array_diff(array_keys($changes), ['assignee_id']) !== []) {
             abort(422, 'Assign someone to handle it before changing it.');
+        }
+        // A linked report's kind and status are the issue's too (2026-10-20, user): Jira changes first, or nothing does.
+        $toJira = $this->jira->owns($row)
+            && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status));
+        if ($toJira) {
+            if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
+                abort(403, 'Its kind and status change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
+            }
+            if (! $this->jira->isConfigured()) {
+                abort(503, 'Jira is not connected yet.');
+            }
+            try {
+                $this->jira->changeInJira($row, $changes);
+            } catch (RuntimeException $error) {
+                abort(422, 'Jira did not take the change: '.$error->getMessage());
+            }
         }
 
         $portal->table('bug_reports')->where('id', $id)->update([...$changes, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
@@ -349,6 +352,30 @@ final class PortalBugReports
         }
 
         return $this->list();
+    }
+
+    /**
+     * Every report not in Jira yet -- never sent, or failed -- put on its way there at once (2026-10-20, user:
+     * production had reports from before Jira). Queued rather than sent here, since each one is a create and
+     * its screenshots; the queue starts as this answers, and the list comes back with each one Queued.
+     *
+     * @return array{section: string, resource: string, data: list<array<string, mixed>>, assignees: list<array{id: string, name: string}>, jira: array<string, mixed>, queued: int}
+     */
+    public function sendAllToJira(Employee $actor, Request $request): array
+    {
+        if (! $this->jira->isConfigured()) {
+            abort(503, 'Jira is not connected yet.');
+        }
+        $ids = $this->jira->queueUnsent();
+        foreach ($ids as $id) {
+            Queue::push(new SendBugReportToJira($id));
+        }
+        if ($ids !== []) {
+            PortalQueueNow::afterResponse();
+            $this->audit->record($actor, PortalLogAction::POST, 'bug-reports', PortalActivityCopy::sentBugReportsToJira(count($ids)), null, $request, ['queued' => count($ids)]);
+        }
+
+        return [...$this->list(), 'queued' => count($ids)];
     }
 
     /**

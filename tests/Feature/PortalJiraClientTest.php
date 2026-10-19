@@ -144,7 +144,7 @@ class PortalJiraClientTest extends TestCase
         $this->assertSame(['10042'], array_column($fetched['issues'], 'id'));
         $this->assertSame(['10043'], $fetched['missing']);
         Http::assertSent(fn (Request $request): bool => $request['issueIdsOrKeys'] === ['10042', '10043']
-            && $request['fields'] === ['status', 'resolution', 'fixVersions']);
+            && $request['fields'] === ['status', 'resolution', 'fixVersions', 'issuetype']);
     }
 
     public function test_an_issue_jira_no_longer_has_reads_as_none_and_the_connection_stays_ok(): void
