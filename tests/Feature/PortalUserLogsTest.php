@@ -431,7 +431,8 @@ class PortalUserLogsTest extends TestCase
         $this->assertStringContainsString('"payload":{}', $secondRead->getContent());
     }
 
-    public function test_the_real_coordinate_surfaces_on_both_the_list_row_and_the_detail(): void
+    // Logs stopped storing coordinates on 2026-10-19 (IP only); a row written before then still shows its pin.
+    public function test_an_older_rows_coordinate_surfaces_on_both_the_list_row_and_the_detail(): void
     {
         $actor = $this->activeMember();
         $token = $this->loginToken($actor);
@@ -457,6 +458,7 @@ class PortalUserLogsTest extends TestCase
                 ],
             ),
         );
+        PortalLog::query()->whereKey($logId)->update(['location_lat' => 14.2117, 'location_lng' => 121.1642]);
 
         $listed = $this->withToken($token)
             ->getJson('/api/development/portal/user/logs?per_page=100')

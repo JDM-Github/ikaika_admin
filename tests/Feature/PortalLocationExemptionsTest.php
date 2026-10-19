@@ -14,9 +14,9 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
 /**
- * location_exemptions (2026-10-19, user): an exempt person writes without a location, every record
- * their act writes says Unknown with no coordinates (the IP stays), they are never asked for a home
- * pin, and nobody places them from their address.
+ * location_exemptions (2026-10-19, user): every record an exempt person's act writes says Unknown, not even
+ * the network's place (the IP stays), they are never asked for a home pin, and nobody places them from
+ * their address. Nobody needs a location to write any more.
  */
 class PortalLocationExemptionsTest extends TestCase
 {
@@ -49,16 +49,13 @@ class PortalLocationExemptionsTest extends TestCase
         DB::connection('portal')->table('location_exemptions')->insert(['employee_id' => $this->exempt->getKey(), 'reason' => 'test']);
     }
 
-    public function test_an_exempt_person_writes_without_a_location_and_others_still_cannot(): void
+    // No write needs a location any more (2026-10-19, supervisor): with none sent, the write reaches its own checks.
+    public function test_anyone_writes_without_a_location(): void
     {
         $this->flushHeaders();
-        $exemptToken = $this->token($this->exempt);
-        $otherToken = $this->token($this->other);
 
-        $this->assertNotSame(428, $this->withToken($exemptToken)->postJson(self::BASE.'/calendar/events', [])->status());
-        $this->withToken($otherToken)->postJson(self::BASE.'/calendar/events', [])->assertStatus(428);
-        // A token that does not parse is never exempt.
-        $this->withToken('not-a-token')->postJson(self::BASE.'/calendar/events', [])->assertStatus(428);
+        $this->assertNotSame(428, $this->withToken($this->token($this->exempt))->postJson(self::BASE.'/calendar/events', [])->status());
+        $this->assertNotSame(428, $this->withToken($this->token($this->other))->postJson(self::BASE.'/calendar/events', [])->status());
     }
 
     public function test_the_session_says_who_is_exempt(): void

@@ -213,17 +213,27 @@ class PortalAuditTest extends TestCase
         );
     }
 
-    public function test_records_device_location_before_using_ip_geolocation(): void
+    // Logs carry the network's place only (2026-10-19, supervisor): a device place and its coordinate are dropped.
+    public function test_a_device_place_is_never_stored_only_the_network_guess(): void
     {
         $employee = Employee::query()->orderBy('id')->first();
         $this->assertNotNull($employee);
+        Cache::forget('portal:location:ip:'.hash('sha256', '203.0.113.9'));
+        Http::fake([
+            'https://ipwho.is/203.0.113.9' => Http::response([
+                'success' => true,
+                'city' => 'Calamba City',
+                'region' => 'Laguna',
+                'country' => 'Philippines',
+            ]),
+        ]);
 
         $id = app(PortalAudit::class)->record(
             $employee,
             'PATCH',
             'requests.leave',
             'Updated a leave request',
-            'location-device',
+            'location-device-dropped',
             Request::create(
                 '/api/development/portal/requests/leave/41',
                 'PATCH',
@@ -231,40 +241,9 @@ class PortalAuditTest extends TestCase
                 [],
                 [],
                 [
-                    'REMOTE_ADDR' => '8.8.8.8',
+                    'REMOTE_ADDR' => '203.0.113.9',
                     'HTTP_X_PORTAL_LOCATION' => 'Parian, Calamba City',
-                ],
-            ),
-        );
-
-        $row = PortalLog::query()->find($id);
-        $this->assertNotNull($row);
-        $this->assertSame('Parian, Calamba City', $row->location_label);
-        $this->assertSame('device', $row->location_source);
-        $this->assertNull($row->location_lat);
-        $this->assertNull($row->location_lng);
-    }
-
-    public function test_records_the_real_coordinate_that_produced_the_device_label(): void
-    {
-        $employee = Employee::query()->orderBy('id')->first();
-        $this->assertNotNull($employee);
-
-        $id = app(PortalAudit::class)->record(
-            $employee,
-            'PATCH',
-            'requests.leave',
-            'Updated a leave request',
-            'location-coordinate',
-            Request::create(
-                '/api/development/portal/requests/leave/41',
-                'PATCH',
-                [],
-                [],
-                [],
-                [
-                    'REMOTE_ADDR' => '8.8.8.8',
-                    'HTTP_X_PORTAL_LOCATION' => 'Parian, Calamba City',
+                    'HTTP_X_PORTAL_LOCATION_SOURCE' => 'device',
                     'HTTP_X_PORTAL_LOCATION_LAT' => '14.2117000',
                     'HTTP_X_PORTAL_LOCATION_LNG' => '121.1642000',
                 ],
@@ -273,21 +252,25 @@ class PortalAuditTest extends TestCase
 
         $row = PortalLog::query()->find($id);
         $this->assertNotNull($row);
-        $this->assertSame(14.2117, $row->location_lat);
-        $this->assertSame(121.1642, $row->location_lng);
+        $this->assertSame('Calamba City, Laguna, Philippines', $row->location_label);
+        $this->assertSame('ip', $row->location_source);
+        $this->assertNull($row->location_lat);
+        $this->assertNull($row->location_lng);
     }
 
-    public function test_refuses_a_coordinate_that_is_not_a_real_number_or_out_of_range(): void
+    // The portal's own IP lookup is the network's place, so it is kept as sent -- still without a coordinate.
+    public function test_the_portal_network_place_is_kept_without_a_coordinate(): void
     {
         $employee = Employee::query()->orderBy('id')->first();
         $this->assertNotNull($employee);
+        Http::fake();
 
         $id = app(PortalAudit::class)->record(
             $employee,
             'PATCH',
             'requests.leave',
             'Updated a leave request',
-            'location-garbage',
+            'location-network',
             Request::create(
                 '/api/development/portal/requests/leave/41',
                 'PATCH',
@@ -296,18 +279,19 @@ class PortalAuditTest extends TestCase
                 [],
                 [
                     'REMOTE_ADDR' => '8.8.8.8',
-                    'HTTP_X_PORTAL_LOCATION' => 'Parian, Calamba City',
-                    'HTTP_X_PORTAL_LOCATION_LAT' => 'not-a-number',
-                    'HTTP_X_PORTAL_LOCATION_LNG' => '999',
+                    'HTTP_X_PORTAL_LOCATION' => 'Calamba, Laguna, Philippines',
+                    'HTTP_X_PORTAL_LOCATION_SOURCE' => 'ip',
+                    'HTTP_X_PORTAL_LOCATION_LAT' => '14.2117000',
                 ],
             ),
         );
 
         $row = PortalLog::query()->find($id);
         $this->assertNotNull($row);
-        $this->assertSame('Parian, Calamba City', $row->location_label);
+        $this->assertSame('Calamba, Laguna, Philippines', $row->location_label);
+        $this->assertSame('ip', $row->location_source);
         $this->assertNull($row->location_lat);
-        $this->assertNull($row->location_lng);
+        Http::assertNothingSent();
     }
 
     public function test_never_attaches_a_coordinate_to_the_server_side_ip_fallback(): void

@@ -7,9 +7,9 @@ use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
- * Who is never located (location_exemptions, 2026-10-19, user): their writes need no X-Portal-Location,
- * their records store the place as Unknown with no coordinates, they set no home pin, and Manage / Map
- * never shows them. Their IP is still kept, for security.
+ * Who is never located (location_exemptions, 2026-10-19, user): their records store the place as Unknown,
+ * not even the network's guess, they set no home pin, and Manage / Map never shows them. Their IP is still
+ * kept, for security.
  */
 final class PortalLocationExemptions
 {

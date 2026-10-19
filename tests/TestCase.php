@@ -12,11 +12,11 @@ abstract class TestCase extends BaseTestCase
 {
     use ChecksAirtableLive;
 
-    // Every portal write must carry a location (RequirePortalLocation); a test of that refusal flushes it.
+    // The portal's own network place on every request, so no test sends the server's IP lookup out to the internet.
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withHeader('X-Portal-Location', 'Calamba City, Laguna, Philippines');
+        $this->withHeaders(['X-Portal-Location' => 'Calamba City, Laguna, Philippines', 'X-Portal-Location-Source' => 'ip']);
         $this->markAirtableLedger();
     }
 

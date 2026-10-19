@@ -5,7 +5,7 @@ use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
-    // Anyone signed in reports a bug, anonymously; RequirePortalLocation exempts this one write.
+    // Anyone signed in reports a bug, anonymously; the portal sends no location with it.
     Route::middleware('throttle:portal-bug-report')
         ->post('bug-reports', [BugReportsController::class, 'store']);
     // MIS reads and tracks them.
