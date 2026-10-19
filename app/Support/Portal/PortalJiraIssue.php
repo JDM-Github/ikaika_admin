@@ -7,8 +7,10 @@ namespace App\Support\Portal;
  * (2026-10-19). Pure: no request, no database, so each rule is tested on its own.
  *
  * The issue says only what the report says -- its title, what happened, its kind, the page and the day
- * -- and that it came anonymously from the portal. Never a person: not the sender, who is unknown, and
- * not MIS's note or who handles it, which stay in the portal. One label, the portal's own, which the admin
+ * -- and that it came from the portal: anonymously, or from the sender who chose to be named (2026-10-20,
+ * user). Never MIS's note or who handles it, which stay in the portal. Its summary is named as the KAN
+ * board's cards are (2026-10-20, user): IP- and the title's words joined by hyphens, each capitalised but
+ * the small ones -- "save does nothing" is IP-Save-Does-Nothing. One label, the portal's own, which the admin
  * webhook filters on (2026-10-20, user): the work type already says the kind, and the report's number is
  * in the description, where a retry finds it again.
  *
@@ -34,6 +36,11 @@ final class PortalJiraIssue
         'declined' => 'not_done', 'rejected' => 'not_done', 'duplicate' => 'not_done',
     ];
 
+    private const SUMMARY_PREFIX = 'IP';
+
+    // Words a title keeps small, as "IE-Scripting-and-Realtime-Clash-Detection" does, unless they lead it.
+    private const SMALL_WORDS = ['a', 'an', 'and', 'as', 'at', 'by', 'for', 'from', 'in', 'into', 'of', 'on', 'or', 'plus', 'the', 'to', 'vs', 'with'];
+
     private const EXTENSIONS = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', 'image/gif' => 'gif'];
 
     /**
@@ -41,7 +48,7 @@ final class PortalJiraIssue
      *
      * @return array<string, mixed>
      */
-    public static function fields(object $row, string $projectKey, string $issueTypeId, string $label): array
+    public static function fields(object $row, string $projectKey, string $issueTypeId, string $label, ?string $senderName = null): array
     {
         $kind = (string) ($row->kind ?? PortalBugReports::KIND_BUG);
         $kindLabel = PortalBugReports::KINDS[$kind]['label'] ?? PortalBugReports::KINDS[PortalBugReports::KIND_BUG]['label'];
@@ -49,13 +56,15 @@ final class PortalJiraIssue
         return [
             'project' => ['key' => $projectKey],
             'issuetype' => ['id' => $issueTypeId],
-            'summary' => self::oneLine((string) $row->title),
+            'summary' => self::summary((string) $row->title),
             'labels' => [$label],
             'description' => self::description((string) $row->description, [
                 'Kind: '.$kindLabel,
                 ...($row->page === null || trim((string) $row->page) === '' ? [] : ['Page: '.trim((string) $row->page)]),
                 'Reported on: '.substr((string) $row->reported_on, 0, 10),
-                'Sent anonymously from the IKAIKA portal '.self::reportMark((int) $row->id).'.',
+                $senderName === null
+                    ? 'Sent anonymously from the IKAIKA portal '.self::reportMark((int) $row->id).'.'
+                    : 'Sent from the IKAIKA portal by '.$senderName.' '.self::reportMark((int) $row->id).'.',
             ]),
         ];
     }
@@ -163,6 +172,23 @@ final class PortalJiraIssue
     private static function normalised(string $name): string
     {
         return str_replace("\u{2019}", "'", mb_strtolower(trim($name)));
+    }
+
+    // IP-Save-Does-Nothing: the title's words, without their punctuation, each capitalised but the small ones.
+    public static function summary(string $title): string
+    {
+        $words = [];
+        foreach (preg_split('/[\s_\/-]+/u', self::oneLine($title)) ?: [] as $word) {
+            $word = trim((string) preg_replace('/[^\p{L}\p{N}.]+/u', '', $word), '.');
+            if ($word === '' || ($words === [] && strcasecmp($word, self::SUMMARY_PREFIX) === 0)) {
+                continue;
+            }
+            $words[] = $words !== [] && in_array(mb_strtolower($word), self::SMALL_WORDS, true)
+                ? mb_strtolower($word)
+                : mb_strtoupper(mb_substr($word, 0, 1)).mb_substr($word, 1);
+        }
+
+        return mb_substr(self::SUMMARY_PREFIX.'-'.($words === [] ? 'Untitled' : implode('-', $words)), 0, 255);
     }
 
     private static function oneLine(string $text): string

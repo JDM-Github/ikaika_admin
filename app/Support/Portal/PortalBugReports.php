@@ -14,15 +14,17 @@ use RuntimeException;
  * Bug reports (2026-10-13, user): anyone signed in sends one from the button in the portal's corner,
  * with up to three screenshots, and MIS reads them on Bug Reports and tracks each to fixed.
  *
- * A report is anonymous, and that is enforced here rather than left to the page: submit() is never
- * handed the person, writes no activity log, needs no location, and keeps only the day it came in.
+ * A report is anonymous unless its sender says otherwise (2026-10-20, user: testers asked to be named), and
+ * that is enforced here rather than left to the page: submit() is handed the person only to keep their id
+ * when they chose to be named -- a request that does not say stays anonymous, as every report before did --
+ * writes no activity log, needs no location, and keeps only the day it came in.
  * A screenshot goes up under a neutral name and is served through a Cloudinary transformation, which
  * drops what a photo carries about the phone that took it. The only trace of the sender is the rate
  * limiter's hour-long counter, which never meets the report it counted.
  *
- * MIS hears of a new report on the bell (2026-10-13, user). The notice is from no one: it names no
- * actor, and it goes to everyone who holds Bug Reports -- the sender too, when they do -- so nobody
- * can tell who sent it by who was left out.
+ * MIS hears of a new report on the bell (2026-10-13, user). An anonymous one's notice is from no one: it
+ * names no actor, and it goes to everyone who holds Bug Reports -- the sender too, when they do -- so
+ * nobody can tell who sent it by who was left out. A named one's says who.
  *
  * MIS's own changes -- status, internal note, who handles it, the semantic version level the fix needs
  * and the version it shipped in (2026-10-13) -- are theirs, and logged as anyone's are. Any MIS member
@@ -33,8 +35,8 @@ use RuntimeException;
  * for bugs, so a report has a kind the sender picks -- a bug when none is sent, as every report before
  * this was -- and MIS may file it under another. The page, notices and log name it by its kind.
  *
- * Each report becomes a Jira issue (PortalBugReportsJira). Once it is one, Jira owns its status, its
- * fix version and its kind, so those are refused here and read back from Jira instead.
+ * Each report becomes a Jira issue (PortalBugReportsJira). Once it is one, its kind and status are the
+ * issue's too: a change here changes Jira first, and Jira's are read back.
  */
 final class PortalBugReports
 {
@@ -123,8 +125,9 @@ final class PortalBugReports
      *
      * @return array{section: string, resource: string, data: array{id: string}}
      */
-    public function submit(Request $request): array
+    public function submit(Request $request, Employee $sender): array
     {
+        $reporterId = $this->namedSender($request, $sender);
         $kind = $this->validatedKind($request->input('kind'), self::KIND_BUG);
         $title = $this->requiredText($request, 'title', self::MAX_TITLE, 'Give it a short title.', 'Keep the title under 160 characters.');
         $description = $this->requiredText($request, 'description', self::MAX_DESCRIPTION, 'Say what happened or what you need.', 'Keep the description under 5,000 characters.');
@@ -148,7 +151,7 @@ final class PortalBugReports
 
         // On its way to Jira as it comes in, unless MIS turned that off (2026-10-19).
         $toJira = $this->jira->shouldSendNew();
-        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored, $toJira): int {
+        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored, $toJira, $reporterId): int {
             $id = (int) DB::connection('portal')->table('bug_reports')->insertGetId([
                 'kind' => $kind,
                 'jira_state' => $toJira ? PortalBugReportsJira::STATE_PENDING : null,
@@ -157,6 +160,7 @@ final class PortalBugReports
                 'page' => $page,
                 'status' => self::STATUS_NEW,
                 'note' => null,
+                'reporter_id' => $reporterId,
                 // The day only: a time to the second could be lined up against what the sender did next.
                 'reported_on' => now()->toDateString(),
                 'updated_at' => null,
@@ -178,10 +182,13 @@ final class PortalBugReports
             $readers,
             PortalNotificationType::BUG_REPORTED,
             self::KINDS[$kind]['notice'],
-            '"'.$title.'" was '.self::KINDS[$kind]['verb'].($page === null ? '' : ' on '.$page).'.',
+            '"'.$title.'" was '.self::KINDS[$kind]['verb']
+                .($reporterId === null ? '' : ' by '.($this->namesOf([$reporterId])[$reporterId] ?? 'a member'))
+                .($page === null ? '' : ' on '.$page).'.',
             PortalShellPath::BUG_REPORTS,
             'Open Issues & Requests',
             ['recordId' => (string) $id],
+            $reporterId,
         );
         if ($toJira) {
             Queue::push(new SendBugReportToJira($id));
@@ -206,7 +213,7 @@ final class PortalBugReports
             ->orderBy('id')
             ->get()
             ->groupBy('bug_report_id');
-        $names = $this->namesOf($rows->pluck('assignee_id')->filter()->all());
+        $names = $this->namesOf([...$rows->pluck('assignee_id')->filter()->all(), ...$rows->pluck('reporter_id')->filter()->all()]);
 
         return [
             'section' => 'bug-reports',
@@ -403,7 +410,7 @@ final class PortalBugReports
     {
         $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->orderBy('id')->get()->all();
 
-        return $this->present($row, $images, $this->namesOf([$row->assignee_id]));
+        return $this->present($row, $images, $this->namesOf([$row->assignee_id, $row->reporter_id]));
     }
 
     /**
@@ -530,6 +537,7 @@ final class PortalBugReports
     private function present(object $row, array $images, array $names): array
     {
         $assigneeId = $row->assignee_id === null ? null : (int) $row->assignee_id;
+        $reporterId = $row->reporter_id === null ? null : (int) $row->reporter_id;
 
         return [
             'id' => (string) $row->id,
@@ -541,6 +549,8 @@ final class PortalBugReports
             'note' => $row->note,
             'reportedOn' => substr((string) $row->reported_on, 0, 10),
             'assignee' => $assigneeId === null ? null : ['id' => (string) $assigneeId, 'name' => $names[$assigneeId] ?? 'Member'],
+            // Who sent it, only when they chose to be named; null is anonymous.
+            'reporter' => $reporterId === null ? null : ['id' => (string) $reporterId, 'name' => $names[$reporterId] ?? 'Member'],
             'versionLevel' => $row->version_level,
             'fixedIn' => $row->fixed_in,
             'images' => array_map(fn (object $image): array => [
@@ -550,6 +560,20 @@ final class PortalBugReports
             ], $images),
             'jira' => $this->jira->present($row),
         ];
+    }
+
+    // The sender's id when they chose to be named; anonymous, or saying nothing, keeps none.
+    private function namedSender(Request $request, Employee $sender): ?int
+    {
+        if (! $request->has('anonymous')) {
+            return null;
+        }
+        $anonymous = filter_var($request->input('anonymous'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($anonymous === null) {
+            abort(422, 'Say whether to send it anonymously.');
+        }
+
+        return $anonymous ? null : (int) $sender->getKey();
     }
 
     /**

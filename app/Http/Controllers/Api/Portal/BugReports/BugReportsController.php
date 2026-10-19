@@ -9,7 +9,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Issues & Requests. `store` is anyone's, and anonymous: it never reads who is signed in. `index` and
+ * Issues & Requests. `store` is anyone's, and anonymous unless the sender chose to be named: only then is
+ * who is signed in kept (2026-10-20, user). `index` and
  * `update` are MIS's, behind the bug-reports rule, as is `refreshFromJira`, which only reads Jira;
  * `sendToJira`, `sendAllToJira` and `updateJira` are behind bug-reports.jira.
  */
@@ -19,7 +20,7 @@ class BugReportsController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        return response()->json($this->reports->submit($request), 201);
+        return response()->json($this->reports->submit($request, $this->actor($request)), 201);
     }
 
     public function index(): JsonResponse

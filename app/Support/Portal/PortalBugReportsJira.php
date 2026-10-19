@@ -2,6 +2,7 @@
 
 namespace App\Support\Portal;
 
+use App\Modules\Portal\Models\Employee;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -365,7 +366,7 @@ final class PortalBugReportsJira
         }
         if ($issue === null) {
             $kind = array_key_exists((string) $row->kind, PortalBugReports::KINDS) ? (string) $row->kind : PortalBugReports::KIND_BUG;
-            $issue = $this->jira->createIssue(PortalJiraIssue::fields($row, (string) $this->jira->projectKey(), $this->issueTypeId($kind), $label));
+            $issue = $this->jira->createIssue(PortalJiraIssue::fields($row, (string) $this->jira->projectKey(), $this->issueTypeId($kind), $label, $this->senderName($row)));
         }
         DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update([
             'jira_issue_id' => $issue['id'],
@@ -462,6 +463,14 @@ final class PortalBugReportsJira
         }
 
         return $current;
+    }
+
+    // The name of a sender who chose to be named, for the issue's description; null for an anonymous one.
+    private function senderName(object $row): ?string
+    {
+        $employee = ($row->reporter_id ?? null) === null ? null : Employee::query()->find((int) $row->reporter_id, ['id', 'first_name', 'last_name']);
+
+        return $employee === null ? null : PortalSubmittedReportPresenter::memberName($employee->first_name, $employee->last_name);
     }
 
     private function markDeleted(int $id): void

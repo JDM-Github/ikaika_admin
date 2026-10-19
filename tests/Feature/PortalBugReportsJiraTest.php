@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Jobs\SendBugReportToJira;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
+use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
@@ -80,6 +81,29 @@ class PortalBugReportsJiraTest extends TestCase
         $this->assertSame(2, (int) $row->jira_attached);
         $this->assertTrue(PortalLog::query()->where('employee_id', $analyst->getKey())->where('record_id', (string) $id)
             ->where('message', 'like', '%sent the feature request Export the map to Jira as IKP-12')->exists());
+    }
+
+    // Named by choice (2026-10-20, user): the issue says who sent it, under a summary named as the KAN board's are.
+    public function test_a_named_senders_issue_says_who_sent_it(): void
+    {
+        $this->connectJira();
+        $sender = $this->memberOf('Engineering');
+        $id = $this->report(['title' => 'calendar skips sunday', 'reporter_id' => $sender->getKey()]);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug']]]),
+            self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10042', 'key' => 'IKP-12'], 201),
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-12', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]]),
+        ]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/'.$id.'/jira')->assertOk();
+
+        $created = Http::recorded(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue')->first()[0];
+        $this->assertSame('IP-Calendar-Skips-Sunday', $created['fields']['summary']);
+        $this->assertStringContainsString(
+            'Sent from the IKAIKA portal by '.PortalSubmittedReportPresenter::memberName($sender->first_name, $sender->last_name).' (report #'.$id.').',
+            $created->body(),
+        );
     }
 
     public function test_a_screenshot_jira_refused_is_sent_again_without_making_the_issue_twice(): void

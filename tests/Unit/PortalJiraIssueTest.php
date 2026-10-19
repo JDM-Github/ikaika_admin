@@ -26,7 +26,8 @@ class PortalJiraIssueTest extends TestCase
 
         $this->assertSame(['key' => 'IKP'], $fields['project']);
         $this->assertSame(['id' => '10002'], $fields['issuetype']);
-        $this->assertSame('Export the map', $fields['summary']);
+        // Named as the KAN board's cards are (2026-10-20, user).
+        $this->assertSame('IP-Export-the-Map', $fields['summary']);
         // The portal's label alone (2026-10-20, user): the work type says the kind, the description the report.
         $this->assertSame(['ikaika-portal'], $fields['labels']);
         $this->assertTrue(PortalJiraIssue::isForReport($fields, 42));
@@ -46,6 +47,37 @@ class PortalJiraIssueTest extends TestCase
             ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Sent anonymously from the IKAIKA portal (report #42).']]],
         ], $fields['description']['content']);
         $this->assertStringNotContainsString('Jamie', (string) json_encode($fields));
+
+        // A sender who chose to be named is, and the report's mark still closes the line (2026-10-20, user).
+        $named = PortalJiraIssue::fields($row, 'IKP', '10002', 'ikaika-portal', 'Jolas Mendez');
+        $this->assertSame(
+            ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Sent from the IKAIKA portal by Jolas Mendez (report #42).']]],
+            array_slice($named['description']['content'], -1)[0],
+        );
+        $this->assertTrue(PortalJiraIssue::isForReport($named, 42));
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function summaries(): array
+    {
+        return [
+            'as typed, small words kept small' => ['scripting and realtime clash detection', 'IP-Scripting-and-Realtime-Clash-Detection'],
+            'capitals kept' => ['CLASH MANAGE V2', 'IP-CLASH-MANAGE-V2'],
+            'a small word leading' => ['the map is blank', 'IP-The-Map-Is-Blank'],
+            'punctuation dropped, versions kept' => ["Save doesn't work on 1.4.2!", 'IP-Save-Doesnt-Work-on-1.4.2'],
+            'slashes and dashes are breaks' => ['Finance / Transactions - export', 'IP-Finance-Transactions-Export'],
+            'its own prefix not doubled' => ['IP-Level viewpoint', 'IP-Level-Viewpoint'],
+            'letters beyond ASCII' => ['año nuevo', 'IP-Año-Nuevo'],
+            'nothing left' => ['?!', 'IP-Untitled'],
+        ];
+    }
+
+    #[DataProvider('summaries')]
+    public function test_a_summary_is_named_as_the_kan_boards_cards_are(string $title, string $expected): void
+    {
+        $this->assertSame($expected, PortalJiraIssue::summary($title));
     }
 
     /**
