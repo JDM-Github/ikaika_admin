@@ -131,24 +131,50 @@ class PortalBugReportsJiraTest extends TestCase
         $this->withHeaders($headers)->getJson(self::BASE.'bug-reports')->assertOk()->assertJsonPath('jira.connection', 'refused');
     }
 
-    public function test_sending_needs_jira_connected_and_is_refused_while_it_is_already_there_or_on_its_way(): void
+    public function test_sending_needs_jira_connected_and_is_refused_while_it_is_on_its_way(): void
     {
         $headers = $this->headersFor($this->memberOf('MIS'));
         $id = $this->report();
-        $sent = $this->report(['jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent']);
         Http::preventStrayRequests();
 
         $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$id.'/jira')
             ->assertStatus(503)->assertJsonPath('message', 'Jira is not connected yet.');
         $this->connectJira();
-        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$sent.'/jira')
-            ->assertConflict()->assertJsonPath('message', 'It is already in Jira as IKP-20.');
         Cache::lock('portal-jira-push:'.$id, 120)->get();
         $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$id.'/jira')
             ->assertConflict()->assertJsonPath('message', 'It is being sent right now.');
         $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/999999999/jira')->assertNotFound();
 
         Http::assertNothingSent();
+    }
+
+    // Sync (2026-10-20, user): one already in Jira is read back, and one whose issue was deleted is made anew.
+    public function test_syncing_a_report_in_jira_reads_it_back_or_makes_its_deleted_issue_again(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $there = $this->report(['jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent', 'jira_status' => 'To Do']);
+        $gone = $this->report(['jira_issue_id' => '10051', 'jira_issue_key' => 'IKP-21', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug']]]),
+            self::SITE.'/rest/api/3/issue/10050*' => Http::response(['id' => '10050', 'key' => 'IKP-20', 'fields' => ['status' => ['name' => 'In Review', 'statusCategory' => ['key' => 'indeterminate']]]]),
+            self::SITE.'/rest/api/3/issue/10051*' => Http::response(['errorMessages' => ['Issue does not exist or you do not have permission to see it.']], 404),
+            self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10090', 'key' => 'IKP-30'], 201),
+            self::SITE.'/rest/api/3/issue/10090*' => Http::response(['id' => '10090', 'key' => 'IKP-30', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]]),
+        ]);
+
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$there.'/jira')
+            ->assertOk()->assertJsonPath('data.jira.key', 'IKP-20')->assertJsonPath('data.status', 'in_review')->assertJsonPath('data.jira.status', 'In Review');
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$gone.'/jira')
+            ->assertOk()->assertJsonPath('data.jira.state', 'sent')->assertJsonPath('data.jira.key', 'IKP-30');
+
+        $this->assertCount(1, Http::recorded(fn (Request $request): bool => $request->method() === 'POST' && $request->url() === self::SITE.'/rest/api/3/issue'));
+        // The log names the issue the sync made, not the one it only read back.
+        $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->pluck('message');
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'to Jira as IKP-30')));
+        $this->assertFalse($messages->contains(fn (string $message): bool => str_ends_with($message, 'to Jira as IKP-20')));
     }
 
     public function test_only_who_holds_send_to_jira_sends_one_or_turns_the_switch_403(): void

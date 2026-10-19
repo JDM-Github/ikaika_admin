@@ -16,8 +16,8 @@ use RuntimeException;
  * version -- IPS's screens carry none. The note, who handles it and the version level stay the portal's.
  *
  * Sending is one report at a time, behind a lock, in steps a retry can carry on from: find or create the
- * issue (its id is kept the moment Jira gives it), attach each screenshot not yet there, then read the
- * issue back. A failed step leaves the report failed with Jira's words; the scheduler tries again up to
+ * issue (its id is kept the moment Jira gives it; one deleted in Jira since is made anew), attach each
+ * screenshot not yet there, then read the issue back -- which, for a report already there, is its sync. A failed step leaves the report failed with Jira's words; the scheduler tries again up to
  * five times while the switch is on, and a refused account does not count against the report.
  *
  * A report Jira no longer has is marked deleted -- unless every issue asked about at once came back
@@ -127,13 +127,6 @@ final class PortalBugReportsJira
             'error' => $row->jira_error,
             'syncedAt' => $row->jira_synced_at === null ? null : str_replace(' ', 'T', substr((string) $row->jira_synced_at, 0, 19)).'Z',
         ];
-    }
-
-    // Every screenshot is in Jira and the issue is there: nothing left to send.
-    public function isFullySent(object $row): bool
-    {
-        return $row->jira_state === self::STATE_SENT
-            && (int) $row->jira_attached >= DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->count();
     }
 
     /**
@@ -308,6 +301,11 @@ final class PortalBugReportsJira
     {
         $id = (int) $row->id;
         try {
+            // An issue made before and deleted in Jira since is made anew rather than attached to in vain.
+            if ($row->jira_issue_id !== null && $row->jira_state !== self::STATE_DELETED && $this->jira->issue((string) $row->jira_issue_id) === null) {
+                $this->markDeleted($id);
+                $row = $this->row($id) ?? $row;
+            }
             if ($row->jira_issue_id === null || $row->jira_state === self::STATE_DELETED) {
                 $row = $this->linkIssue($row);
             }

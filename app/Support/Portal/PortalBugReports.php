@@ -295,7 +295,9 @@ final class PortalBugReports
     }
 
     /**
-     * MIS sends a report to Jira by hand, or tries a failed one again; the answer says where it got to.
+     * MIS sends a report to Jira by hand, tries a failed one again, or syncs one already there (2026-10-20,
+     * user): its missing screenshots go up and it is read back, and an issue Jira no longer has is made anew.
+     * The answer says where it got to; the log names only an issue this made.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
@@ -309,9 +311,6 @@ final class PortalBugReports
         if (! $this->jira->isConfigured()) {
             abort(503, 'Jira is not connected yet.');
         }
-        if ($this->jira->owns($row) && $this->jira->isFullySent($row)) {
-            abort(409, 'It is already in Jira as '.$row->jira_issue_key.'.');
-        }
         // By hand, a report starts its automatic tries over.
         $portal->table('bug_reports')->where('id', $id)->update(['jira_attempts' => 0]);
         if (! $this->jira->push($id)) {
@@ -319,7 +318,7 @@ final class PortalBugReports
         }
 
         $saved = $portal->table('bug_reports')->where('id', $id)->first();
-        if ($saved->jira_state === PortalBugReportsJira::STATE_SENT) {
+        if ($saved->jira_state === PortalBugReportsJira::STATE_SENT && $saved->jira_issue_id !== $row->jira_issue_id) {
             $this->audit->record(
                 $actor,
                 PortalLogAction::POST,
