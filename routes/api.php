@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Bitbucket\BitbucketWebhookController;
 use App\Http\Controllers\Api\CatalogController;
+use App\Http\Controllers\Api\Jira\JiraWebhookController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ResourceController;
 use App\Http\Controllers\Api\WorkspaceGridController;
@@ -21,6 +22,9 @@ Route::prefix($channel)->group(function (): void {
 
     // Bitbucket calls this on a push, not a signed-in person; its HMAC signature is the only way in.
     Route::middleware('throttle:bitbucket-webhook')->post('bitbucket/webhook', BitbucketWebhookController::class);
+
+    // Jira's admin webhook for Issues & Requests (2026-10-19); likewise signed, and only that.
+    Route::middleware('throttle:jira-webhook')->post('jira/webhook', JiraWebhookController::class);
 
     // Before the {product}/{resource} catch-all below, which would otherwise swallow
     // _schema and _grid and report them as unknown resources.

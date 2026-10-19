@@ -122,6 +122,11 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(60)->by('bitbucket-webhook:'.$request->ip());
         });
 
+        // A busy Jira board sends a delivery per change; more than this from one address is not Jira.
+        RateLimiter::for('jira-webhook', function (Request $request) {
+            return Limit::perMinute(120)->by('jira-webhook:'.$request->ip());
+        });
+
         RateLimiter::for('portal-projects', function (Request $request) {
             return Limit::perMinute(60)->by('projects:'.$this->portalLimiterKey($request));
         });
