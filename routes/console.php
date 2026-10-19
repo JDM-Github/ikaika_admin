@@ -16,9 +16,11 @@ use App\Support\Portal\PortalJiraClient;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
 use App\Support\Portal\PortalPlaces;
+use App\Support\Portal\PortalReportReminders;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schedule;
 
@@ -296,6 +298,45 @@ Artisan::command('portal:geocode-homes', function (PortalHomeLocations $homes): 
     return 0;
 })->purpose('Turn every address into a point for Manage / Map');
 
+// Weekdays at 17:00 Manila (schedule below): replaces the WordPress cron that read Airtable.
+Artisan::command('portal:remind-missing-reports
+    {--dry-run : List who would be reminded and for which days; sends nothing}
+    {--to= : Send one sample reminder to this address only, outside the outbox}', function (PortalReportReminders $reminders): int {
+    $plan = $reminders->missing(now());
+    foreach ($plan as $row) {
+        $this->line($row['name'].' <'.$row['email'].'>: '.implode(', ', $row['days']));
+    }
+    $this->info(count($plan).' '.(count($plan) === 1 ? 'person is' : 'people are').' missing a report.');
+
+    $to = trim((string) $this->option('to'));
+    if ($this->option('dry-run')) {
+        return 0;
+    }
+    if ($to !== '') {
+        if (filter_var($to, FILTER_VALIDATE_EMAIL) === false) {
+            $this->error('That is not an email address.');
+
+            return 1;
+        }
+        if ($plan === []) {
+            $this->warn('Nobody is missing a report, so there is nothing to sample.');
+
+            return 0;
+        }
+        $reminders->sample($to, $plan[0]['days']);
+        $this->info('Sample sent to '.$to.' with '.$plan[0]['name']."'s days.");
+    } else {
+        foreach ($plan as $row) {
+            $reminders->remind($row['employee'], $row['days']);
+        }
+        Log::info('portal.report-reminders.sent', ['count' => count($plan)]);
+    }
+    // A console run has no response to send the mail after, so the queue is worked here.
+    Artisan::call('queue:work', ['--stop-when-empty' => true, '--max-time' => 50, '--tries' => 3]);
+
+    return 0;
+})->purpose('Email everyone missing a report in the last five work days');
+
 Artisan::command('portal:jira-sync', function (PortalBugReportsJira $jira, PortalJiraClient $client): int {
     if (! $jira->isConfigured()) {
         $this->info('Jira is not configured here; nothing to send or read.');
@@ -364,6 +405,7 @@ Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
 // Jira's backstop: what failed or waits is sent again, and every linked issue is read back, if a delivery was lost.
 Schedule::command('portal:jira-sync')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();
+Schedule::command('portal:remind-missing-reports')->weekdays()->at('17:00')->timezone('Asia/Manila')->withoutOverlapping();
 
 // The mail queue's worker. The server runs no daemon, so the minute cron starts one that leaves when the queue is
 // empty or after 55 s, before the next one starts; two that do meet cannot take the same job.

@@ -1,0 +1,144 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Mail\PortalEmailMail;
+use App\Modules\Portal\Models\EmailMessage;
+use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalReportReminders;
+use Illuminate\Console\Scheduling\Event;
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use Tests\TestCase;
+
+/**
+ * The scheduled missing-report reminder: the last five work days up to yesterday, minus filed days,
+ * leave, and days outside someone's employment, one outbox email each; a developer's sample goes
+ * straight to one address and a dry run sends nothing.
+ */
+class PortalReportRemindersTest extends TestCase
+{
+    use DatabaseTransactions;
+
+    /**
+     * @var list<string>
+     */
+    protected array $connectionsToTransact = ['portal', 'core'];
+
+    // Real reports start in 2025, so a 2020 Monday has a window nobody filed in: Mar 9 to 13.
+    private const TODAY = '2020-03-16 17:00:00';
+
+    private Employee $member;
+
+    private Employee $starter;
+
+    private Employee $leaver;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::flush();
+
+        [$this->member, $this->starter, $this->leaver] = Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereRaw("LOWER(COALESCE(role, '')) = 'user'")
+            ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
+            ->orderBy('id')
+            ->limit(3)
+            ->get()
+            ->all();
+        $this->member->forceFill(['email' => 'member@ikaika.test', 'start_date' => null, 'end_date' => null])->save();
+        $this->starter->forceFill(['email' => 'starter@ikaika.test', 'start_date' => '2020-03-12', 'end_date' => null])->save();
+        $this->leaver->forceFill(['email' => 'leaver@ikaika.test', 'start_date' => null, 'end_date' => '2020-03-09'])->save();
+    }
+
+    public function test_the_window_skips_filed_days_leave_and_days_outside_employment(): void
+    {
+        $this->insertLine($this->member, '2020-03-10');
+        DB::connection('portal')->table('requests')->insert([
+            'name' => trim($this->member->first_name.' '.$this->member->last_name),
+            'type' => 'Leave',
+            'status' => 'Approved',
+            'request_date' => '2020-03-11',
+        ]);
+
+        $plan = collect($this->reminders()->missing(Carbon::parse(self::TODAY, PortalReportReminders::ZONE)))->keyBy('email');
+
+        $this->assertSame(['2020-03-09', '2020-03-12', '2020-03-13'], $plan['member@ikaika.test']['days']);
+        $this->assertSame(['2020-03-12', '2020-03-13'], $plan['starter@ikaika.test']['days']);
+        $this->assertSame(['2020-03-09'], $plan['leaver@ikaika.test']['days']);
+        $executive = $this->rosterExecutive();
+        $this->assertFalse($plan->contains(fn (array $row): bool => $row['employee']->is($executive)));
+    }
+
+    public function test_a_reminder_lands_in_the_outbox_for_that_person_only(): void
+    {
+        Mail::fake();
+
+        $this->reminders()->remind($this->member, ['2020-03-09', '2020-03-12']);
+
+        Mail::assertSent(PortalEmailMail::class, 1);
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('member@ikaika.test'));
+        $row = EmailMessage::query()->latest('id')->firstOrFail();
+        $this->assertSame('Reminder: 2 reports not yet filed', $row->subject);
+        $this->assertStringContainsString('- Monday, March 9, 2020', (string) $row->body);
+    }
+
+    public function test_a_sample_goes_straight_to_the_address_and_skips_the_outbox(): void
+    {
+        Mail::fake();
+        $before = (int) EmailMessage::query()->max('id');
+
+        $this->reminders()->sample('dev@ikaika.test', ['2020-03-09']);
+
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo('dev@ikaika.test'));
+        $this->assertSame($before, (int) EmailMessage::query()->max('id'));
+    }
+
+    public function test_the_command_dry_run_sends_nothing_and_a_bad_address_is_refused(): void
+    {
+        Mail::fake();
+        Carbon::setTestNow(Carbon::parse(self::TODAY, PortalReportReminders::ZONE));
+
+        $this->artisan('portal:remind-missing-reports', ['--dry-run' => true])
+            ->expectsOutputToContain('member@ikaika.test')
+            ->assertExitCode(0);
+        $this->artisan('portal:remind-missing-reports', ['--to' => 'not-an-address'])->assertExitCode(1);
+
+        Mail::assertNothingSent();
+        Carbon::setTestNow();
+    }
+
+    public function test_it_is_scheduled_on_weekdays_at_five_manila(): void
+    {
+        $event = collect(app(Schedule::class)->events())
+            ->first(fn (Event $event): bool => str_contains((string) $event->command, 'portal:remind-missing-reports'));
+
+        $this->assertNotNull($event);
+        $this->assertSame('0 17 * * 1-5', $event->expression);
+        $this->assertSame('Asia/Manila', $event->timezone);
+    }
+
+    private function reminders(): PortalReportReminders
+    {
+        return app(PortalReportReminders::class);
+    }
+
+    private function insertLine(Employee $employee, string $day): void
+    {
+        $id = (int) DB::connection('portal')->table('user_reports')->insertGetId([
+            'report_date' => $day,
+            'hours_rendered' => 8,
+            'change_in_elements' => 0,
+            'approval' => 'Approved',
+        ]);
+        DB::connection('portal')->table('employees_user_reports')->insert([
+            'employee_id' => $employee->getKey(),
+            'user_report_id' => $id,
+        ]);
+    }
+}
