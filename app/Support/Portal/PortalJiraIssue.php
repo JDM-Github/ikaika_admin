@@ -8,7 +8,9 @@ namespace App\Support\Portal;
  *
  * The issue says only what the report says -- its title, what happened, its kind, the page and the day
  * -- and that it came anonymously from the portal. Never a person: not the sender, who is unknown, and
- * not MIS's note or who handles it, which stay in the portal.
+ * not MIS's note or who handles it, which stay in the portal. One label, the portal's own, which the admin
+ * webhook filters on (2026-10-20, user): the work type already says the kind, and the report's number is
+ * in the description, where a retry finds it again.
  *
  * Back from Jira, by the board's column first (2026-10-19, user): To Do is New, In Progress is In progress,
  * In Review -- or a testing or staging column -- is In review (2026-10-20, user), Done is Fixed -- or Won't fix when it was resolved as not to be done -- and Cancelled is
@@ -48,20 +50,43 @@ final class PortalJiraIssue
             'project' => ['key' => $projectKey],
             'issuetype' => ['id' => $issueTypeId],
             'summary' => self::oneLine((string) $row->title),
-            'labels' => [$label, self::reportLabel($label, (int) $row->id), 'portal-'.$kind],
+            'labels' => [$label],
             'description' => self::description((string) $row->description, [
                 'Kind: '.$kindLabel,
                 ...($row->page === null || trim((string) $row->page) === '' ? [] : ['Page: '.trim((string) $row->page)]),
                 'Reported on: '.substr((string) $row->reported_on, 0, 10),
-                'Sent anonymously from the IKAIKA portal (report #'.$row->id.').',
+                'Sent anonymously from the IKAIKA portal '.self::reportMark((int) $row->id).'.',
             ]),
         ];
     }
 
-    // The report's own label, which finds the issue again when the answer to its create was lost.
-    public static function reportLabel(string $label, int $reportId): string
+    // The report's number as its issue's description says it, which finds the issue again when the answer to
+    // its create was lost.
+    public static function reportMark(int $reportId): string
     {
-        return $label.'-'.$reportId;
+        return '(report #'.$reportId.')';
+    }
+
+    /**
+     * Whether an issue's description says it is this report's. Jira's search matches words, stemmed, not the
+     * exact text, so each issue it finds is read for the whole mark before it is taken.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    public static function isForReport(array $fields, int $reportId): bool
+    {
+        $description = $fields['description'] ?? null;
+        if (! is_array($description)) {
+            return false;
+        }
+        $text = '';
+        array_walk_recursive($description, function ($value, $key) use (&$text): void {
+            if ($key === 'text' && is_string($value)) {
+                $text .= $value.' ';
+            }
+        });
+
+        return str_contains($text, self::reportMark($reportId));
     }
 
     /**

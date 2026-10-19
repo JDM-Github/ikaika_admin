@@ -66,7 +66,7 @@ class PortalBugReportsJiraTest extends TestCase
         // A feature request goes as Story when the project has one, and as Task when it does not.
         $created = Http::recorded(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue')->first()[0];
         $this->assertSame('10003', $created['fields']['issuetype']['id']);
-        $this->assertSame(['ikaika-portal', 'ikaika-portal-'.$id, 'portal-feature'], $created['fields']['labels']);
+        $this->assertSame(['ikaika-portal'], $created['fields']['labels']);
         $this->assertStringNotContainsString('Jamie', $created->body());
         $this->assertStringNotContainsString((string) $analyst->first_name, $created->body());
         $attached = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/attachments'))->map(fn (array $pair): Request => $pair[0])->values();
@@ -291,6 +291,32 @@ class PortalBugReportsJiraTest extends TestCase
             ->assertJsonPath('jira.connection', 'refused')
             ->assertJsonPath('jira.connectionMessage', 'Jira HTTP 401: Client must be authenticated to access this resource.');
         $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->postJson(self::BASE.'bug-reports/jira/sync')->assertForbidden();
+    }
+
+    // One label now (2026-10-20, user): a try whose create went unanswered finds its issue by the description.
+    public function test_a_retry_finds_the_issue_an_unanswered_create_made_by_the_report_number_it_carries(): void
+    {
+        $this->connectJira();
+        $id = $this->report(['jira_state' => 'failed', 'jira_attempts' => 1]);
+        $said = fn (string $mark): array => ['type' => 'doc', 'version' => 1, 'content' => [
+            ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Sent anonymously from the IKAIKA portal '.$mark.'.']]],
+        ]];
+        Http::preventStrayRequests();
+        Http::fake([
+            // Jira matches words, so another report's issue can come back too; only the exact mark is taken.
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => [
+                ['id' => '10060', 'key' => 'IKP-21', 'fields' => ['description' => $said('(report #'.$id.'0)')]],
+                ['id' => '10061', 'key' => 'IKP-22', 'fields' => ['description' => $said('(report #'.$id.')')]],
+            ]]),
+            self::SITE.'/rest/api/3/issue/10061*' => Http::response(['id' => '10061', 'key' => 'IKP-22', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]]),
+        ]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/'.$id.'/jira')
+            ->assertOk()->assertJsonPath('data.jira.key', 'IKP-22');
+
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST' && str_ends_with($request->url(), '/rest/api/3/issue'));
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), 'description ~ "\"report '.$id.'\""')
+            && str_contains(urldecode($request->url()), 'labels = "ikaika-portal"'));
     }
 
     private function connectJira(): void

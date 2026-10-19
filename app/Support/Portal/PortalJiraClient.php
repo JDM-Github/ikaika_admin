@@ -20,8 +20,8 @@ use Throwable;
  *
  * Reads are retried on a dropped connection, a 429 or a 5xx; creating an issue and attaching a file are
  * not, because Jira takes no idempotency key and a retry could file the same report twice. A failed
- * create waits for the next try, which first looks for the issue by the report's own label -- the first
- * try may have made it before the answer was lost.
+ * create waits for the next try, which first looks for the issue by the report's number in its
+ * description -- the first try may have made it before the answer was lost.
  *
  * Every answer updates the connection the page shows: a 2xx is ok, a refused account or an unknown
  * project is refused, no answer is unreachable. A 400 is about the request, not the connection.
@@ -211,17 +211,25 @@ final class PortalJiraClient
     }
 
     /**
-     * The project's issue carrying a label, or null: how a retry finds what an unanswered create made.
+     * The portal's issues whose description holds these words, oldest first, with the description to check
+     * them by: how a retry finds what an unanswered create made. Jira matches words, not the exact text.
      *
-     * @return array{id: string, key: string, fields: array<string, mixed>}|null
+     * @return list<array{id: string, key: string, fields: array<string, mixed>}>
      */
-    public function issueLabelled(string $label): ?array
+    public function issuesDescribing(string $words, string $label): array
     {
-        $jql = 'project = "'.$this->projectKey().'" AND labels = "'.$label.'" ORDER BY created ASC';
-        $body = $this->read('GET', '/rest/api/3/search/jql?'.http_build_query(['jql' => $jql, 'fields' => implode(',', self::SYNC_FIELDS), 'maxResults' => 1]))->json();
-        $first = is_array($body['issues'] ?? null) ? ($body['issues'][0] ?? null) : null;
+        $jql = 'project = "'.$this->projectKey().'" AND labels = "'.$label.'" AND description ~ "\\"'.$words.'\\"" ORDER BY created ASC';
+        $fields = implode(',', [...self::SYNC_FIELDS, 'description']);
+        $body = $this->read('GET', '/rest/api/3/search/jql?'.http_build_query(['jql' => $jql, 'fields' => $fields, 'maxResults' => 10]))->json();
+        $issues = [];
+        foreach (is_array($body['issues'] ?? null) ? $body['issues'] : [] as $issue) {
+            $parsed = $this->issueFrom($issue);
+            if ($parsed !== null) {
+                $issues[] = $parsed;
+            }
+        }
 
-        return is_array($first) ? $this->issueFrom($first) : null;
+        return $issues;
     }
 
     /**

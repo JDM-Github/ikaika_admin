@@ -294,9 +294,15 @@ final class PortalBugReportsJira
     private function linkIssue(object $row): object
     {
         $label = (string) config('services.jira.label', 'ikaika-portal');
-        $issue = $row->jira_state === null || $row->jira_state === self::STATE_DELETED
-            ? null
-            : $this->jira->issueLabelled(PortalJiraIssue::reportLabel($label, (int) $row->id));
+        $issue = null;
+        if ($row->jira_state !== null && $row->jira_state !== self::STATE_DELETED) {
+            foreach ($this->jira->issuesDescribing('report '.$row->id, $label) as $found) {
+                if (PortalJiraIssue::isForReport($found['fields'], (int) $row->id)) {
+                    $issue = $found;
+                    break;
+                }
+            }
+        }
         if ($issue === null) {
             $kind = array_key_exists((string) $row->kind, PortalBugReports::KINDS) ? (string) $row->kind : PortalBugReports::KIND_BUG;
             $issue = $this->jira->createIssue(PortalJiraIssue::fields($row, (string) $this->jira->projectKey(), $this->issueTypeId($kind), $label));

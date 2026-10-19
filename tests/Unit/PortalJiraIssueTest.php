@@ -27,7 +27,11 @@ class PortalJiraIssueTest extends TestCase
         $this->assertSame(['key' => 'IKP'], $fields['project']);
         $this->assertSame(['id' => '10002'], $fields['issuetype']);
         $this->assertSame('Export the map', $fields['summary']);
-        $this->assertSame(['ikaika-portal', 'ikaika-portal-42', 'portal-feature'], $fields['labels']);
+        // The portal's label alone (2026-10-20, user): the work type says the kind, the description the report.
+        $this->assertSame(['ikaika-portal'], $fields['labels']);
+        $this->assertTrue(PortalJiraIssue::isForReport($fields, 42));
+        $this->assertFalse(PortalJiraIssue::isForReport($fields, 4));
+        $this->assertFalse(PortalJiraIssue::isForReport([], 42));
         $this->assertSame([
             ['type' => 'paragraph', 'content' => [
                 ['type' => 'text', 'text' => 'A PDF of the team map.'],
