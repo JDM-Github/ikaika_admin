@@ -255,24 +255,30 @@ final class PortalActivityCopy
         return self::YOU.' cancelled a pending transfer of '.$amount;
     }
 
-    // MIS moving a bug report along; the reporter is anonymous, so only the report is named.
-    public static function updatedBugReport(string $title, ?string $statusLabel): string
+    // MIS moving an issue or request along; the sender is anonymous, so only the report is named, by its kind.
+    public static function updatedBugReport(string $title, ?string $statusLabel, string $noun = 'bug report'): string
     {
         return $statusLabel === null
-            ? self::YOU.' updated the bug report '.$title
-            : self::YOU.' marked the bug report '.$title.' '.$statusLabel;
+            ? self::YOU.' updated the '.$noun.' '.$title
+            : self::YOU.' marked the '.$noun.' '.$title.' '.$statusLabel;
     }
 
-    // Who handles a bug report: taken by the person themselves, given to someone, or let go.
-    public static function assignedBugReport(string $title, ?string $assigneeName, bool $isTaken): string
+    // Who handles an issue or request: taken by the person themselves, given to someone, or let go.
+    public static function assignedBugReport(string $title, ?string $assigneeName, bool $isTaken, string $noun = 'bug report'): string
     {
         if ($isTaken) {
-            return self::YOU.' took the bug report '.$title;
+            return self::YOU.' took the '.$noun.' '.$title;
         }
 
         return $assigneeName === null
-            ? self::YOU.' unassigned the bug report '.$title
-            : self::YOU.' assigned the bug report '.$title.' to '.$assigneeName;
+            ? self::YOU.' unassigned the '.$noun.' '.$title
+            : self::YOU.' assigned the '.$noun.' '.$title.' to '.$assigneeName;
+    }
+
+    // MIS filing a report under another kind (2026-10-19): a bug that is really a feature request, say.
+    public static function reclassifiedBugReport(string $title, string $fromNoun, string $asPhrase): string
+    {
+        return self::YOU.' filed the '.$fromNoun.' '.$title.' as '.$asPhrase;
     }
 
     // An amount changed reads from what it was to what it is (2026-10-13).

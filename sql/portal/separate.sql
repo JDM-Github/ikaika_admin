@@ -1410,6 +1410,8 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
 -- Existing databases: create_portal_bug_reports.
 CREATE TABLE IF NOT EXISTS bug_reports (
     id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    -- Issues & Requests (2026-10-19): bug, feature or feedback. Existing databases: add_portal_bug_report_kind.
+    kind        VARCHAR(20)  NOT NULL DEFAULT 'bug',
     title       VARCHAR(160) NOT NULL,
     description TEXT         NOT NULL,
     page        VARCHAR(200) NULL,
@@ -1434,12 +1436,13 @@ CREATE TABLE IF NOT EXISTS bug_report_images (
     FOREIGN KEY (bug_report_id) REFERENCES bug_reports(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- The Bug Reports page: every MIS member and admin (only_department), and developers.
+-- The Issues & Requests page (named Bug Reports until 2026-10-19; the key kept): every MIS member and
+-- admin (only_department), and developers. Existing databases: add_portal_bug_report_kind renames it.
 INSERT INTO access_permissions
     (permission_key, parent_key, label, description, supports_reach, can_toggle, only_department, sort_order)
 VALUES
-    ('bug-reports', NULL, 'Bug Reports',
-     'Read the bugs people report, never who sent them, and track each one to fixed.',
+    ('bug-reports', NULL, 'Issues & Requests',
+     'Read the bugs, feature requests and feedback people send, never who sent them, and track each one to done.',
      0, 1, 'MIS', 990);
 INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
     ('member', 'bug-reports', NULL, 0),

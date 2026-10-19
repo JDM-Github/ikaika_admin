@@ -510,6 +510,8 @@ Descriptions (what the Access page shows on each row) live in the SQL.
   - `workspace.private` Private columns — AED
   - `workspace.edit` Edit cells — AED
   - `workspace.views` Shared views — AED
+- `bug-reports` Issues & Requests — MAD (MIS only, by only_department; the bugs, feature requests and feedback
+  people send from the corner button, anonymously; named Bug Reports until 2026-10-19, key kept)
 - `developer` Developer — D (Developer mode only, never given)
   - `developer.rules` Rule catalog — D
   - `developer.flag` Developer flag — D

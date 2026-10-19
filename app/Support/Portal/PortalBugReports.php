@@ -25,6 +25,10 @@ use Illuminate\Support\Facades\DB;
  * and the version it shipped in (2026-10-13) -- are theirs, and logged as anyone's are. Any MIS member
  * may be assigned, by anyone who holds the page or by taking it themselves. Nothing else about a report
  * changes while nobody handles it (2026-10-13, user): it is assigned first, or in the same save.
+ *
+ * Issues & Requests (2026-10-19, user): the button is used for feature requests and feedback as much as
+ * for bugs, so a report has a kind the sender picks -- a bug when none is sent, as every report before
+ * this was -- and MIS may file it under another. The page, notices and log name it by its kind.
  */
 final class PortalBugReports
 {
@@ -46,6 +50,24 @@ final class PortalBugReports
         self::STATUS_WONT_FIX => "Won't fix",
     ];
 
+    public const KIND_BUG = 'bug';
+
+    public const KIND_FEATURE = 'feature';
+
+    public const KIND_FEEDBACK = 'feedback';
+
+    /**
+     * Each kind as the page labels it, as a sentence names one, as something is filed as it, the bell's
+     * title for a new one, and what the bell says was done with it.
+     *
+     * @var array<string, array{label: string, noun: string, as: string, notice: string, verb: string}>
+     */
+    public const KINDS = [
+        self::KIND_BUG => ['label' => 'Bug', 'noun' => 'bug report', 'as' => 'a bug report', 'notice' => 'New bug report', 'verb' => 'reported'],
+        self::KIND_FEATURE => ['label' => 'Feature request', 'noun' => 'feature request', 'as' => 'a feature request', 'notice' => 'New feature request', 'verb' => 'requested'],
+        self::KIND_FEEDBACK => ['label' => 'Feedback', 'noun' => 'feedback', 'as' => 'feedback', 'notice' => 'New feedback', 'verb' => 'shared'],
+    ];
+
     /**
      * @var array<string, string>
      */
@@ -58,7 +80,7 @@ final class PortalBugReports
     // Who may be assigned: the department that reads the reports.
     private const TEAM = 'mis';
 
-    // The rule that opens Bug Reports, and so who hears of a new one.
+    // The rule that opens Issues & Requests, and so who hears of a new one.
     private const RULE = 'bug-reports';
 
     private const SEMVER = '/^\d+\.\d+\.\d+$/';
@@ -92,8 +114,9 @@ final class PortalBugReports
      */
     public function submit(Request $request): array
     {
-        $title = $this->requiredText($request, 'title', self::MAX_TITLE, 'Give the bug a short title.', 'Keep the title under 160 characters.');
-        $description = $this->requiredText($request, 'description', self::MAX_DESCRIPTION, 'Say what went wrong.', 'Keep the description under 5,000 characters.');
+        $kind = $this->validatedKind($request->input('kind'), self::KIND_BUG);
+        $title = $this->requiredText($request, 'title', self::MAX_TITLE, 'Give it a short title.', 'Keep the title under 160 characters.');
+        $description = $this->requiredText($request, 'description', self::MAX_DESCRIPTION, 'Say what happened or what you need.', 'Keep the description under 5,000 characters.');
         $page = $this->optionalText($request, 'page', self::MAX_PAGE);
         $images = $this->validatedImages($request);
 
@@ -108,8 +131,9 @@ final class PortalBugReports
             ];
         }
 
-        $id = DB::connection('portal')->transaction(function () use ($title, $description, $page, $stored): int {
+        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored): int {
             $id = (int) DB::connection('portal')->table('bug_reports')->insertGetId([
+                'kind' => $kind,
                 'title' => $title,
                 'description' => $description,
                 'page' => $page,
@@ -135,10 +159,10 @@ final class PortalBugReports
         $this->audit->notifyEach(
             $readers,
             PortalNotificationType::BUG_REPORTED,
-            'New bug report',
-            '"'.$title.'" was reported'.($page === null ? '' : ' on '.$page).'.',
+            self::KINDS[$kind]['notice'],
+            '"'.$title.'" was '.self::KINDS[$kind]['verb'].($page === null ? '' : ' on '.$page).'.',
             PortalShellPath::BUG_REPORTS,
-            'Open bug reports',
+            'Open Issues & Requests',
             ['recordId' => (string) $id],
         );
 
@@ -171,7 +195,7 @@ final class PortalBugReports
     }
 
     /**
-     * MIS moves a report along: its status, its internal note, or both. Only the fields sent change.
+     * MIS moves a report along: its kind, status, note, who handles it or its version. Only the fields sent change.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
@@ -180,10 +204,13 @@ final class PortalBugReports
         $portal = DB::connection('portal');
         $row = $portal->table('bug_reports')->where('id', $id)->first();
         if ($row === null) {
-            abort(404, 'That bug report was not found.');
+            abort(404, 'That issue or request was not found.');
         }
 
         $changes = [];
+        if ($request->has('kind')) {
+            $changes['kind'] = $this->validatedKind($request->input('kind'), null);
+        }
         if ($request->has('status')) {
             $status = (string) $request->input('status');
             if (! array_key_exists($status, self::STATUS_LABELS)) {
@@ -212,7 +239,7 @@ final class PortalBugReports
             $changes['fixed_in'] = $version === '' ? null : $version;
         }
         if ($changes === []) {
-            abort(422, 'Change the status, the note, who handles it or its version.');
+            abort(422, 'Change its kind, status, note, who handles it or its version.');
         }
         $handler = array_key_exists('assignee_id', $changes) ? $changes['assignee_id'] : $row->assignee_id;
         if ($handler === null && array_diff(array_keys($changes), ['assignee_id']) !== []) {
@@ -235,7 +262,7 @@ final class PortalBugReports
     }
 
     /**
-     * What the log says, by the change that matters most: a new status, then who handles it.
+     * What the log says, by the change that matters most: a new status, then who handles it, then its kind.
      *
      * @param  array<string, mixed>  $changes
      * @param  array<int, string>  $names
@@ -243,8 +270,10 @@ final class PortalBugReports
     private function logMessage(Employee $actor, object $row, array $changes, array $names): string
     {
         $title = (string) $row->title;
+        $was = $this->kindOf($row);
+        $noun = self::KINDS[$changes['kind'] ?? $was]['noun'];
         if (isset($changes['status']) && $changes['status'] !== $row->status) {
-            return PortalActivityCopy::updatedBugReport($title, self::STATUS_LABELS[$changes['status']]);
+            return PortalActivityCopy::updatedBugReport($title, self::STATUS_LABELS[$changes['status']], $noun);
         }
         $before = $row->assignee_id === null ? null : (int) $row->assignee_id;
         if (array_key_exists('assignee_id', $changes) && $changes['assignee_id'] !== $before) {
@@ -254,10 +283,36 @@ final class PortalBugReports
                 $title,
                 $assignee === null ? null : ($names[$assignee] ?? null),
                 $assignee === (int) $actor->getKey(),
+                $noun,
             );
         }
+        if (isset($changes['kind']) && $changes['kind'] !== $was) {
+            return PortalActivityCopy::reclassifiedBugReport($title, self::KINDS[$was]['noun'], self::KINDS[$changes['kind']]['as']);
+        }
 
-        return PortalActivityCopy::updatedBugReport($title, null);
+        return PortalActivityCopy::updatedBugReport($title, null, $noun);
+    }
+
+    // A kind the page knows, or the default when none is sent -- or, with no default, refused when blank.
+    private function validatedKind(mixed $value, ?string $default): string
+    {
+        $kind = strtolower(trim((string) $value));
+        if ($kind === '' && $default !== null) {
+            return $default;
+        }
+        if (! array_key_exists($kind, self::KINDS)) {
+            abort(422, 'Choose Bug, Feature request or Feedback.');
+        }
+
+        return $kind;
+    }
+
+    // A row's kind; an unknown value reads as a bug, as every report before kinds was.
+    private function kindOf(object $row): string
+    {
+        $kind = (string) ($row->kind ?? self::KIND_BUG);
+
+        return array_key_exists($kind, self::KINDS) ? $kind : self::KIND_BUG;
     }
 
     // An active MIS member by id, or null to unassign; anyone else is refused.
@@ -333,6 +388,7 @@ final class PortalBugReports
 
         return [
             'id' => (string) $row->id,
+            'kind' => $this->kindOf($row),
             'title' => (string) $row->title,
             'description' => (string) $row->description,
             'page' => $row->page,
