@@ -52,7 +52,8 @@ grep -q '^PORTAL_IP_LOOKUP_PRIVATE=' "$TARGET" || set_key PORTAL_IP_LOOKUP_PRIVA
 
 echo "== Still empty or missing (fill in with nano if you need them)"
 for key in APP_KEY PORTAL_JWT_SECRET CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET \
-           AIRTABLE_TOKEN AIRTABLE_BASE_ID MAIL_RELAY_URL MAIL_RELAY_KEY; do
+           AIRTABLE_TOKEN AIRTABLE_BASE_ID MAIL_RELAY_URL MAIL_RELAY_KEY \
+           JIRA_BASE_URL JIRA_EMAIL JIRA_API_TOKEN JIRA_PROJECT_KEY JIRA_WEBHOOK_SECRET; do
     grep -q "^$key=." "$TARGET" || echo "   $key"
 done
 echo "(Database lines come from $ROOT/db.env and need nothing here.)"
