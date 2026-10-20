@@ -8,6 +8,8 @@ Target: the **Test Server** WordPress site on Bluehost. The API and the portal l
 | Health check | `https://test.ikaikabim.com/central-api/api/staging/portal/health` |
 | Portal (deployed from `ikaika-portal`) | `https://test.ikaikabim.com/portal` |
 
+Turning on the Airtable sync in production, and what it does when something fails: [AIRTABLE-SYNC.md](AIRTABLE-SYNC.md).
+
 ## Day to day
 
 From `C:\IKAIKA\ikaika_admin` in PowerShell:
