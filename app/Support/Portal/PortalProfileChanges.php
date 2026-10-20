@@ -27,6 +27,9 @@ final class PortalProfileChanges
 {
     public const RULE = 'manage.users.information.approve';
 
+    // Edit profile (2026-10-20, user): whether someone may change their own information at all.
+    public const EDIT_RULE = 'user.profile';
+
     public const PENDING = 'Pending';
 
     public const APPROVED = 'Approved';
@@ -49,7 +52,7 @@ final class PortalProfileChanges
     /** Each address's line on the record, and the prefix its parts are sent under, as the registration's. */
     private const ADDRESSES = ['address' => 'address', 'emergencyContactAddress' => 'emergencyContact'];
 
-    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street'];
+    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street', 'zip'];
 
     public function __construct(
         private readonly PortalManageUsers $users,
@@ -60,6 +63,15 @@ final class PortalProfileChanges
         private readonly PortalRegistrationInput $input,
         private readonly PortalHomeLocations $homes,
     ) {}
+
+    /**
+     * Edit profile sits under User, which executives never hold and nobody can switch for them, so the
+     * switch governs only whoever holds User; anyone else edits as they always could.
+     */
+    private static function mayEdit(Employee $employee, Request $request): bool
+    {
+        return PortalRules::holds($employee, $request, self::EDIT_RULE) || ! PortalRules::holds($employee, $request, 'user');
+    }
 
     /**
      * Their own employee information and documents, the change waiting on them, and how the last one went.
@@ -80,6 +92,8 @@ final class PortalProfileChanges
             'information' => $information,
             // Whoever approves profile changes saves their own straight onto their record (2026-10-19, user).
             'approvesOwn' => PortalRules::holds($employee, $request, self::RULE),
+            // A head admin may switch Edit profile off for them (2026-10-20, user).
+            'canEdit' => self::mayEdit($employee, $request),
             // Where each address line places them in the Philippines, for the pickers to open on.
             'addressPlaces' => array_map(fn (string $line): ?array => $this->placeOf($information[$line] ?? null), array_combine(array_keys(self::ADDRESSES), array_keys(self::ADDRESSES))),
             'documents' => $documents,
@@ -110,6 +124,9 @@ final class PortalProfileChanges
     public function submit(Employee $employee, Request $request): array
     {
         $employee = $this->whole($employee);
+        if (! self::mayEdit($employee, $request)) {
+            abort(403, 'Editing your profile is switched off for you. Ask a head admin to switch it back on.');
+        }
         if ($this->rowsOf($employee)->where('status', self::PENDING)->exists()) {
             abort(422, 'Your earlier changes are still waiting for approval. Withdraw them to change something else.');
         }
@@ -405,7 +422,7 @@ final class PortalProfileChanges
      * The province, city and barangay an address line names, for the pickers to open on; null when it
      * names none. The street stays typed, since a line does not say where the street ends.
      *
-     * @return array{provinceCode: string, cityCode: ?string, barangayCode: ?string}|null
+     * @return array{provinceCode: ?string, cityCode: ?string, barangayCode: ?string, zip: ?string}|null
      */
     private function placeOf(?string $line): ?array
     {
@@ -413,12 +430,25 @@ final class PortalProfileChanges
             return null;
         }
         $place = $this->resolver->identify($line, null);
+        $zip = self::zipOf($line);
 
-        return $place['provinceCode'] === null ? null : [
+        return $place['provinceCode'] === null && $zip === null ? null : [
             'provinceCode' => $place['provinceCode'],
             'cityCode' => $place['cityCode'],
             'barangayCode' => $place['barangayCode'],
+            'zip' => $zip,
         ];
+    }
+
+    /**
+     * The zip code a line ends with, four digits in its last two parts ("Laguna 4027, Philippines"), so
+     * a house number at its start is never taken for one (2026-10-20, user).
+     */
+    private static function zipOf(string $line): ?string
+    {
+        $tail = implode(' ', array_slice(array_map('trim', explode(',', $line)), -2));
+
+        return preg_match_all('/\b(\d{4})\b/', $tail, $found) > 0 ? (string) end($found[1]) : null;
     }
 
     /**

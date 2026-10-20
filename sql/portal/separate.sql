@@ -750,8 +750,9 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.requests.reimbursement', 'manage.requests', 'Reimbursement Requests', 'See reimbursement claims and their receipts.', 1, 1, 817),
 ('manage.requests.reimbursement.decide', 'manage.requests.reimbursement', 'Approve or reject', 'Approve or reject each claim line, with remarks.', 0, 1, 818),
 ('manage.requests.reimbursement.payout', 'manage.requests.reimbursement', 'Attach payout receipts', 'Attach the proof of payment to an approved claim.', 0, 1, 819),
-('manage.requests.flagged', 'manage.requests', 'Flag Reports', 'See reports filed while their author was on a warning.', 1, 1, 820),
+('manage.requests.flagged', 'manage.requests', 'Daily Reports', 'See the daily reports filed while their author was flagged.', 1, 1, 820),
 ('manage.requests.flagged.decide', 'manage.requests.flagged', 'Approve or reject', 'Approve or reject a flagged report, with remarks.', 0, 1, 821),
+('manage.requests.flagged.flag', 'manage.requests.flagged', 'Flag users', 'Put someone in {UserName|Your} reach on report review, or take them off it. Every daily report they file then waits here.', 0, 1, 821),
 ('manage.requests.late', 'manage.requests', 'Late Reports', 'See reports filed after their day, and whether each was excused.', 1, 1, 822),
 ('manage.requests.late.decide', 'manage.requests.late', 'Approve or reject', 'Approve or reject a late report, with remarks.', 0, 1, 823),
 ('manage.requests.notified', 'manage.requests', 'Request alerts', 'Get an inbox alert when someone in {UserName|Your} reach files or changes a request.', 0, 1, 824),
@@ -1612,3 +1613,16 @@ SELECT id, 'manage.users.information.approve', NULL FROM employees WHERE id_no I
     '220202-0002', -- Nathaniel Tanglao
     '220302-0003'  -- Steven Gaurano
 );
+
+-- Edit profile (2026-10-20, user): changing one's own details on Profile, held by everyone with User by preset.
+-- Existing databases: add_portal_edit_profile_power.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('user.profile', 'user', 'Edit profile',
+     'Change {UserName|your} own details, bank information and documents on Profile, for a head admin to approve.',
+     0, 1, NULL, 505);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('member', 'user.profile', NULL, 0),
+    ('admin', 'user.profile', NULL, 0),
+    ('developer', 'user.profile', NULL, 0);

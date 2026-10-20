@@ -452,6 +452,26 @@ class PortalSharedPagesTest extends TestCase
     }
 
     // The reported ask (2026-10-14, user): Users can lend Show employee information, so a boss's share opens private details.
+    // The reported ask (2026-10-20): a guest on a shared Finance page may export what they see there, and only there.
+    public function test_a_guest_exports_the_finance_pages_shared_with_them(): void
+    {
+        $token = $this->developerToken();
+        $rulesOf = function (array $share): array {
+            $guest = (string) $this->postJson('/api/development/portal/share/'.$share['share']['code'].'/access', ['password' => $share['password']])->assertOk()->json('data.token');
+            $me = $this->withToken($guest)->getJson('/api/development/portal/auth/me')->assertOk()->json();
+
+            return array_keys((array) ($me['employee']['rules'] ?? []));
+        };
+
+        $finance = $rulesOf($this->createShare($token, ['rules' => ['finance.overview', 'finance.envelopes']])->json('data'));
+        $this->assertContains('finance.transactions.export', $finance);
+        $this->assertContains('finance.envelopes.export', $finance);
+
+        $projects = $rulesOf($this->createShare($token, ['label' => 'Projects only', 'rules' => ['projects.view']])->json('data'));
+        $this->assertContains('projects.view', $projects);
+        $this->assertNotContains('finance.transactions.export', $projects);
+    }
+
     public function test_users_can_lend_employee_information_to_a_guest(): void
     {
         $token = $this->developerToken();

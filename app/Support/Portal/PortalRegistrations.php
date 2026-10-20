@@ -81,6 +81,7 @@ final class PortalRegistrations
         'addressBarangay' => 'max:120',
         'addressBarangayCode' => 'max:9',
         'addressStreet' => 'max:200',
+        'addressZip' => 'max:10',
         'emergencyContactCountry' => 'max:60',
         'emergencyContactProvince' => 'max:120',
         'emergencyContactProvinceCode' => 'max:9',
@@ -89,12 +90,13 @@ final class PortalRegistrations
         'emergencyContactBarangay' => 'max:120',
         'emergencyContactBarangayCode' => 'max:9',
         'emergencyContactStreet' => 'max:200',
+        'emergencyContactZip' => 'max:10',
     ];
 
     /** Each address's whole line, and the prefix its parts are sent under. */
     private const ADDRESSES = ['address' => 'address', 'emergencyContactAddress' => 'emergencyContact'];
 
-    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street'];
+    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street', 'zip'];
 
     /** What a submit must have, the old form's required set. */
     private const REQUIRED_DETAILS = [

@@ -228,7 +228,7 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // Manage / Map: where each person last saved something; an administrator's power.
     Route::middleware(['portal.rule:'.PortalTeamMap::RULE, 'throttle:portal-manage-requests'])
         ->get('manage/map', [TeamMapController::class, 'index']);
-    // Flagged users: whoever may approve or reject flagged reports puts people on review and takes them off.
+    // Flagged users: whoever holds Flag users on Daily Reports puts people on review and takes them off.
     Route::middleware(['portal.rule:'.PortalFlaggedMembers::RULE, 'throttle:portal-manage-requests'])
         ->get('manage/flagged-members', [FlaggedMembersController::class, 'index']);
     Route::middleware(['portal.rule:'.PortalFlaggedMembers::RULE, 'throttle:portal-manage-requests-write'])->group(function (): void {

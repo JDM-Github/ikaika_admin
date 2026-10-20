@@ -268,6 +268,47 @@ class PortalAccessControlTest extends TestCase
         $this->assertNotNull($this->power($this->fellow, 'manage.requests'));
     }
 
+    // The reported ask (2026-10-20): a department's head switches Daily Reports, Flag users and Edit profile
+    // for a fellow admin there, without Manage other admins, and nothing else about them.
+    public function test_a_department_head_switches_daily_reports_flag_users_and_edit_profile_for_their_admins_only(): void
+    {
+        $this->admin->forceFill(['department' => 'Engineering'])->save();
+        $this->fellow->forceFill(['department' => 'Engineering'])->save();
+        DB::connection('portal')->table('company_departments')->where('name', 'Engineering')->update(['head_employee_id' => $this->admin->id]);
+        Cache::flush();
+
+        $this->assertTrue($this->editable($this->admin)[$this->fellow->id]);
+        $this->assertFalse($this->editable($this->admin)[$this->third->id] ?? false);
+        $keys = collect($this->as($this->admin)->getJson("/api/development/portal/manage/access/{$this->fellow->id}")->assertOk()->json('data'))->pluck('key')->all();
+        $this->assertEqualsCanonicalizing(['manage.requests.flagged', 'manage.requests.flagged.decide', 'manage.requests.flagged.flag', 'user.profile'], $keys);
+
+        $this->change($this->admin, $this->fellow, ['key' => 'manage.requests', 'action' => 'off'])
+            ->assertForbidden()->assertJsonPath('message', 'For a fellow administrator a department head changes only Daily Reports, Flag users and Edit profile.');
+
+        // Flag users alone: they still decide Daily Reports, but put nobody on review.
+        $this->change($this->admin, $this->fellow, ['key' => 'manage.requests.flagged.flag', 'action' => 'off'])->assertOk();
+        $this->assertNull($this->power($this->fellow, 'manage.requests.flagged.flag'));
+        $this->assertNotNull($this->power($this->fellow, 'manage.requests.flagged.decide'));
+        $this->as($this->fellow)->postJson('/api/development/portal/manage/flagged-members', ['employeeId' => $this->third->id, 'reason' => 'Late twice'])->assertForbidden();
+        $this->as($this->fellow)->getJson('/api/development/portal/manage/flagged-members')->assertForbidden();
+
+        $this->change($this->admin, $this->fellow, ['key' => 'manage.requests.flagged', 'action' => 'off'])->assertOk();
+        $this->change($this->admin, $this->fellow, ['key' => 'user.profile', 'action' => 'off'])->assertOk();
+        $this->assertNull($this->power($this->fellow, 'manage.requests.flagged'));
+        $this->assertNull($this->power($this->fellow, 'manage.requests.flagged.decide'));
+        $this->assertNull($this->power($this->fellow, 'user.profile'));
+        $this->assertNotNull($this->power($this->fellow, 'manage.requests'));
+        $this->as($this->fellow)->post('/api/development/portal/user/information/changes', ['bloodType' => 'AB+'], ['Accept' => 'application/json'])
+            ->assertForbidden()->assertJsonPath('message', 'Editing your profile is switched off for you. Ask a head admin to switch it back on.');
+        $this->assertFalse($this->as($this->fellow)->getJson('/api/development/portal/user/information')->assertOk()->json('data.canEdit'));
+
+        // No longer the head, the limits stop counting.
+        DB::connection('portal')->table('company_departments')->where('name', 'Engineering')->update(['head_employee_id' => null]);
+        Cache::flush();
+        $this->assertNotNull($this->power($this->fellow, 'manage.requests.flagged'));
+        $this->assertNotNull($this->power($this->fellow, 'user.profile'));
+    }
+
     public function test_manage_other_admins_is_for_administrators_only(): void
     {
         $this->change($this->developer, $this->admin, ['key' => 'manage.users.access.peers', 'action' => 'on'])->assertOk();
