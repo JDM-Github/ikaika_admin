@@ -10,25 +10,30 @@ Target: the **Test Server** WordPress site on Bluehost. The API and the portal l
 
 ## Day to day
 
-From `C:\IKAIKA\ikaika_admin` in PowerShell:
+From the repo root in PowerShell. Each is a toolkit command (`.\script.ps1 <command> -Help` says what it does) over the script in this folder, which still runs on its own as `deployment\<script>.ps1`:
 
 | Task | Command |
 | --- | --- |
-| **Deploy everything** (settings, admin, then portal) | `powershell -ExecutionPolicy Bypass -File deployment\deploy-all.ps1` |
-| Deploy the admin | `powershell -ExecutionPolicy Bypass -File deployment\deploy.ps1` |
-| Send your local secret settings to the server | `powershell -ExecutionPolicy Bypass -File deployment\push-env.ps1` |
-| Copy your local databases to the Test Server (**replaces its data**) | `powershell -ExecutionPolicy Bypass -File deployment\copy-databases.ps1` |
-| Copy just one database | `... copy-databases.ps1 -Only portal` (or `core`, `tracker`, `estimator`) |
-| **Reset the Test Server databases, then deploy everything** (wipes every table, loads your local databases, backs up the old data on the server) | `powershell -ExecutionPolicy Bypass -File deployment\deploy-all.ps1 -ResetDatabases` (also `-ResetSql`; `-Yes` skips the question) |
+| **Deploy everything** (settings, admin, then portal) | `.\script.ps1 deploy/test-server` |
+| Deploy the admin | `.\script.ps1 deploy/admin` |
+| Send your local secret settings to the server | `.\script.ps1 deploy/push-env` (`-Only JIRA_API_TOKEN` for one key) |
+| Copy your local databases to the Test Server (**replaces its data**) | `.\script.ps1 deploy/copy-databases` |
+| Copy just one database | `.\script.ps1 deploy/copy-databases -Only portal` (or `core`, `tracker`, `estimator`) |
+| **Reset the Test Server databases, then deploy everything** (wipes every table, loads your local databases, backs up the old data on the server) | `.\script.ps1 deploy/test-server -ResetDatabases` (asks for RESET; `-Yes` skips the question) |
+| Check a server's migrations and health | `.\script.ps1 deploy/check-health` (`-Target production`) |
+| Type the SSH passphrase once for the session | `.\script.ps1 deploy/ssh-key` |
+| Pull Airtable into SQL, check it, adopt it, reset local | `.\script.ps1 airtable/migrate-all`, `airtable/verify`, `airtable/copy-to-sql`, `airtable/reset-local` |
 | Change a server setting | see [Changing a setting](#changing-a-setting) |
 
-Each command asks for the SSH key passphrase twice, once for the upload and once for the server step. To type it once per session, see [Optional: passphrase once](#optional-passphrase-once).
+Without `deploy/ssh-key` each command asks for the SSH key passphrase twice, once for the upload and once for the server step; see also [Optional: passphrase once](#optional-passphrase-once).
 
-**Or use the window:** double-click `devtools\Ikaika Console.bat` (repo root). It runs these and the `migrations/` actions one at a time with live output and exit codes — including "Reset server + load local (clean)", which is `copy-databases.ps1 -Wipe`, and "Deploy all + DB reset", which is `deploy-all.ps1 -ResetDatabases`.
+**Running unattended** (a hook, CI, an agent): set `IP_SCRIPTS_NO_GUI=1`, `IP_SCRIPTS_NO_PROMPT=1` and `IP_SCRIPTS_NO_UPDATE=1`. Nothing then waits on a question: a command that would ask - a database reset, anything on production - needs `-Yes` or stops with exit 1 saying so, SSH must already answer without a passphrase (`deploy/ssh-key` first, or it stops), the Airtable commands need `migrations\.token.private.txt` or `IP_AIRTABLE_TOKEN`, and `devtools/console`, a window, refuses. On GitHub, **Maintenance** (`.github/workflows/maintenance.yml`) runs a health check or pushes the settings this way.
+
+**Or use the window:** `.\script.ps1 devtools/console`, or double-click `devtools\Ikaika Console.bat` (repo root). It runs these and the `migrations/` actions one at a time with live output and exit codes — including "Reset server + load local (clean)", which is `copy-databases.ps1 -Wipe`, and "Deploy all + DB reset", which is `deploy-all.ps1 -ResetDatabases`.
 
 A **Production** section (type `PROD` to confirm) adds "Load Airtable export -> prod DBs" (`import-airtable-to-prod.ps1 -Yes`) and "Deploy all prod" (`deploy-all-prod.ps1 -Force`). Production is served at **portal.ikaikabim.com/v2** (the API at `.../central-api`). Note the DB action loads the **Airtable export** in `migrations/outputs/` and **drops + recreates** the production databases — it does not push your local databases (that is Test Server only).
 
-**Deploy order:** admin first, then the portal (`ikaika-portal\deployment\deploy.ps1`), because the portal calls the admin. `deploy-all.ps1` does exactly that, after sending the settings (`-SkipSettings` leaves them out, `-SkipBuild` reuses the last builds). It expects the portal repo next to this one (`C:\IKAIKA\ikaika-portal`); `-PortalRepo` points it elsewhere.
+**Deploy order:** admin first, then the portal (`ikaika-portal\deployment\deploy.ps1`), because the portal calls the admin. `deploy-all.ps1` does exactly that, after sending the settings (`-SkipSettings` leaves them out, `-SkipBuild` reuses the last builds). It expects the portal repo next to this one (`ikaika-portal`, or `ikaika_portal_frontend_rewrite`); `-PortalRepo` points the script elsewhere.
 
 **Reset (`-ResetDatabases`)**: for when the Test Server's schema has drifted from what works locally -- a table, column or permission rule that only ever existed as hand-run SQL. It asks you to type RESET, then runs `copy-databases.ps1 -Wipe`: each server database is backed up to `backups/databases-import-<stamp>/` (the newest two kept), every table and view is dropped, and your local dump is loaded, migrations table included, so the deploy's `migrate` then only runs what is newer than your local database. Test Server only: these scripts never reach production.
 
@@ -87,6 +92,20 @@ Databases: `eoxvhumy_ts_core`, `eoxvhumy_ts_portal`, `eoxvhumy_ts_tracker`, `eox
 | `server/env.test-server.example` | (reference) | every `.env` key the server needs |
 
 `out/` is gitignored.
+
+## The shared folder (Dropbox)
+
+One Dropbox folder, shared by link, holds what a new PC or a workflow needs and the repo must not: the link is the `SHARED_FILES_URL` GitHub secret and `share.folder` in `ikaika_scripts.env`. Both portal repos use the same folder and the same `SHARED_FILES_PASSWORD`.
+
+| Upload | Made by | Holds |
+| --- | --- | --- |
+| `portal-backend.7z` | `.\script.ps1 secrets -Seal` here | `.env`, `debug.env`, `release.env`, the Bluehost SSH key and `production-settings.env`, AES-256 with the file names hidden |
+| `portal-frontend.7z` | `.\script.ps1 secrets -Seal` in the portal | the portal's `.env`, deploy configs, SSH key, Android keystore and Windows certificate with their passwords |
+| `android-release.keystore`, `android-debug.keystore`, `windows-release.pfx`, `windows-debug.pfx`, `linux-*.asc(.rev)` | `.\script.ps1 certificates -Collect` in the portal, into its `share-upload/` | each checked on arrival against the `.sha256` committed beside its path; useless without its password, which is only in the archive |
+
+**Never in it:** database dumps (`deployment/out/db`) and Airtable exports (`migrations/outputs`, `export_*`), which hold real people's data; this PC's state (`.servers.json`, `.sql-applied.json`, `sql/status.txt`, `.ikaika-install`); a server's own `.env` or `db.env`; `.local.actions-secret.env`; and any loose private key - the archive carries the SSH key.
+
+After changing what is sealed (`.ikaika_scripts_configs/secrets.json`), run `secrets -Seal` again and replace the archive in the folder.
 
 ---
 
