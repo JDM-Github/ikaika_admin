@@ -68,6 +68,9 @@ final class AirtableSyncMap
         'data_approval' => 'Data Approval',
     ];
 
+    // The candidate's own picks the base may not offer, left out with a note on both the portal's and the grid's path.
+    private const NEW_EMPLOYEE_LENIENT = ['Job Title', 'Department', 'Bank Name', 'Role', 'Status', 'Data Approval'];
+
     private const T1_FIELDS = [
         'wbs_code' => 'WBS Code', 'process_index' => 'Process Index', 'level' => 'Level', 'type' => 'Type', 'name' => 'Name',
         'process_wbs' => 'Process WBS', 'sop_reference' => 'SOP Reference', 'time_trackable' => 'Time Trackable',
@@ -294,6 +297,9 @@ final class AirtableSyncMap
             'sql_table' => 'requests',
             'airtable_table' => 'Request',
             'changed_only' => ['fields', 'changes'],
+            // A grid edit to Cancelled, or to a leave kind the base lacks, acts as the portal's own path does (2026-10-20).
+            'discard_when' => self::WITHDRAWN,
+            'lenient' => ['Category'],
             'fields' => [
                 ...self::REQUEST_FIELDS,
                 'category' => 'Category',
@@ -307,6 +313,7 @@ final class AirtableSyncMap
             'sql_table' => 'reimbursements',
             'airtable_table' => 'Reimbursements',
             'changed_only' => ['fields', 'changes'],
+            'discard_when' => self::WITHDRAWN,
             'aliases' => ['Status' => ['Approved' => 'Completed']],
             // Teams come from References; a new office is left out with a note, never blocking the claim (2026-10-20).
             'lenient' => ['Team'],
@@ -488,7 +495,7 @@ final class AirtableSyncMap
         'onboarding.employee_data' => [
             'sql_table' => 'new_employee_data',
             'airtable_table' => 'New Employee Data',
-            'lenient' => ['Job Title', 'Department', 'Bank Name', 'Role', 'Status', 'Data Approval'],
+            'lenient' => self::NEW_EMPLOYEE_LENIENT,
             'fields' => self::NEW_EMPLOYEE_FIELDS,
         ],
         // Every Trail history row the portal writes (2026-10-14, user), linked to its project. Only ever created.
@@ -502,7 +509,7 @@ final class AirtableSyncMap
         'clients' => [...self::GRID, 'sql_table' => 'clients', 'airtable_table' => 'Clients', 'fields' => self::CLIENT_FIELDS],
         'activity_codes' => [...self::GRID, 'sql_table' => 'activity_codes', 'airtable_table' => 'Activity Code/s', 'fields' => self::ACTIVITY_CODE_FIELDS],
         'job_type_allowed_activities' => [...self::GRID, 'sql_table' => 'job_type_allowed_activities', 'airtable_table' => 'Job Type Allowed Activities', 'bracketed' => ['job_type' => 'department'], 'fields' => self::ALLOWED_FIELDS],
-        'new_employee_data' => [...self::GRID, 'sql_table' => 'new_employee_data', 'airtable_table' => 'New Employee Data', 'fields' => self::NEW_EMPLOYEE_FIELDS],
+        'new_employee_data' => [...self::GRID, 'sql_table' => 'new_employee_data', 'airtable_table' => 'New Employee Data', 'lenient' => self::NEW_EMPLOYEE_LENIENT, 'fields' => self::NEW_EMPLOYEE_FIELDS],
         'project_action_history' => [...self::GRID, 'sql_table' => 'project_action_history', 'airtable_table' => 'Project Action History', 'fields' => self::TRAIL_FIELDS],
         'project_scope_t1_processes' => [...self::GRID, 'sql_table' => 'project_scope_t1_processes', 'airtable_table' => 'Project Scope Source - T1 Processes', 'fields' => self::T1_FIELDS],
         'project_scope_t2_procedures' => [...self::GRID, 'sql_table' => 'project_scope_t2_procedures', 'airtable_table' => 'Project Scope Source - T2 Procedures', 'fields' => self::T2_FIELDS],

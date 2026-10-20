@@ -406,15 +406,17 @@ class PortalAirtableSyncTest extends TestCase
         $this->fakeAirtable();
         $requestId = $this->leaveRow('Pending', 'Vacation Leave', 'recGRID000000001');
         $gridEdit = app(CoreLedger::class)->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.requests', ['fields' => ['reason' => 'Fixed typo']], 'requests', (string) $requestId);
-        DB::connection('portal')->table('requests')->where('id', $requestId)->update(['reason' => 'Fixed typo', 'status' => 'Cancelled']);
-        // A later cancel on the same row must not be swallowed by the one-column grid push.
-        $cancel = $this->ledgerAdd($requestId, 'edit');
+        DB::connection('portal')->table('requests')->where('id', $requestId)->update(['reason' => 'Fixed typo']);
 
-        $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
-
-        $grid = $items->firstWhere('actionId', $gridEdit);
+        $grid = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $gridEdit);
         $this->assertIsArray($grid);
         $this->assertSame(['Reason' => 'Fixed typo'], $grid['fields']);
+
+        // Cancelled before it was sent: the grid edit and the cancel both take the record out of Airtable (2026-10-20).
+        DB::connection('portal')->table('requests')->where('id', $requestId)->update(['status' => 'Cancelled']);
+        $cancel = $this->ledgerAdd($requestId, 'edit');
+        $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
+        $this->assertSame('discard', $items->firstWhere('actionId', $gridEdit)['outcome'] ?? null);
         $this->assertSame('discard', $items->firstWhere('actionId', $cancel)['outcome'] ?? null);
     }
 
@@ -693,6 +695,25 @@ class PortalAirtableSyncTest extends TestCase
 
         $this->assertSame('update', $item['outcome']);
         $this->assertSame(['Bank Account Number' => '0012345678'], $item['fields']);
+    }
+
+    // The grid follows the portal's own path (2026-10-20): Cancelled leaves Airtable, an unoffered leave kind is left out.
+    public function test_a_grid_cancel_discards_and_an_unoffered_category_is_left_out(): void
+    {
+        $this->fakeAirtable();
+        $ledger = app(CoreLedger::class);
+        $cancelled = $this->leaveRow('Cancelled', 'Vacation Leave', 'recGRIDCANCEL0001');
+        $cancel = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.requests', ['table' => 'requests', 'key' => 'id', 'columns' => ['status'], 'fields' => ['status' => 'Cancelled']], 'requests', (string) $cancelled);
+        $emergency = $this->leaveRow('Pending', '03 Emergency Leave', 'recGRIDLEAVE00001');
+        $category = $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.requests', ['table' => 'requests', 'key' => 'id', 'columns' => ['category'], 'fields' => ['category' => '03 Emergency Leave']], 'requests', (string) $emergency);
+
+        $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
+
+        $this->assertSame('discard', $items->firstWhere('actionId', $cancel)['outcome']);
+        $kept = $items->firstWhere('actionId', $category);
+        $this->assertSame('update', $kept['outcome']);
+        $this->assertSame([], $kept['fields']);
+        $this->assertStringContainsString('"Category" left out', implode(' ', $kept['problems']));
     }
 
     // A department References adds, which the base does not offer, is left out instead of holding the project back.
