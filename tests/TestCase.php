@@ -2,6 +2,7 @@
 
 namespace Tests;
 
+use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalJwt;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
@@ -121,5 +122,31 @@ abstract class TestCase extends BaseTestCase
         }
 
         return [$adminPeople, $memberPeople];
+    }
+
+    /**
+     * What the ledger said changed on an employee after a given action (2026-10-20): the columns and
+     * document slots the Airtable sync will send.
+     *
+     * @return array{columns: list<string>, slots: list<string>}
+     */
+    protected function ledgeredEmployeeChange(int $employeeId, int $afterActionId): array
+    {
+        $columns = [];
+        $slots = [];
+        $actions = Action::query()->where('id', '>', $afterActionId)->where('resource', 'employees')->where('record_id', (string) $employeeId)->get();
+        foreach ($actions as $action) {
+            $parameters = $action->parameters['parameters'] ?? [];
+            $columns = [...$columns, ...($parameters['columns'] ?? [])];
+            foreach ($parameters as $key => $value) {
+                if (str_starts_with((string) $key, 'doc_') && $value === true) {
+                    $slots[] = substr((string) $key, 4);
+                }
+            }
+        }
+        sort($columns);
+        sort($slots);
+
+        return ['columns' => array_values(array_unique($columns)), 'slots' => array_values(array_unique($slots))];
     }
 }

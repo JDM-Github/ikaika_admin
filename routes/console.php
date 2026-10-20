@@ -32,7 +32,8 @@ Artisan::command('inspire', function () {
 Artisan::command('portal:airtable-sync
     {--send : Write to Airtable; without it nothing is written anywhere}
     {--check : Test every mapping against one real row each; writes nothing}
-    {--retry-creates : Send again the creates whose answer was lost, once you have checked Airtable holds none of them}', function (PortalAirtableSync $sync) {
+    {--retry-creates : Send again the creates whose answer was lost, once you have checked Airtable holds none of them}
+    {--backoff : Leave an action that keeps failing until its next turn (1, 3, 7 ... minutes, then six-hourly); the schedule passes it}', function (PortalAirtableSync $sync) {
     $send = (bool) $this->option('send');
     $check = (bool) $this->option('check');
     // Two sends at once could land an older state over a newer one, so a send runs alone (2026-10-14).
@@ -59,7 +60,7 @@ Artisan::command('portal:airtable-sync
         // An action younger than ten seconds waits a run: its portal row may still be committing.
         $report = $check
             ? ['items' => $sync->check(), 'counts' => null]
-            : $sync->run($send, 10, (bool) $this->option('retry-creates'));
+            : $sync->run($send, 10, (bool) $this->option('retry-creates'), backoff: (bool) $this->option('backoff'));
     } catch (Throwable $error) {
         // Unreachable or misconfigured Airtable: a readable reason, never a stack trace or the token.
         $this->error('Airtable sync stopped: '.$error->getMessage().' Anything already sent is recorded; run it again to continue.');
@@ -433,6 +434,9 @@ Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
 Schedule::command('portal:jira-sync')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();
 Schedule::command('portal:remind-missing-reports')->weekdays()->at('18:00')->timezone('Asia/Manila')->withoutOverlapping();
+// The Airtable sync, off until AIRTABLE_SYNC_SCHEDULED=true (2026-10-20). Every tick, so it follows the cron's cadence.
+Schedule::command('portal:airtable-sync --send --backoff')->everyMinute()->withoutOverlapping()->runInBackground()
+    ->when(fn (): bool => (bool) config('services.airtable.scheduled'));
 
 // The mail queue's worker. The server runs no daemon, so the minute cron starts one that leaves when the queue is
 // empty or after 55 s, before the next one starts; two that do meet cannot take the same job.

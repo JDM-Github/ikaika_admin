@@ -49,7 +49,7 @@ final class PortalAirtableSync
      *     items: list<array{actionId: int, resource: ?string, actionType: string, recordId: ?string, outcome: string, table: ?string, airtableId: ?string, fields: array<string, mixed>, problems: list<string>}>
      * }
      */
-    public function run(bool $send, int $settleSeconds = 0, bool $retryCreates = false, ?int $afterId = null): array
+    public function run(bool $send, int $settleSeconds = 0, bool $retryCreates = false, ?int $afterId = null, bool $backoff = false): array
     {
         $this->retryCreates = $retryCreates;
         $schema = $this->airtable->tables();
@@ -66,7 +66,8 @@ final class PortalAirtableSync
             // Only what came after a given action: a test scenario judges its own writes alone.
             ->when($afterId !== null, fn ($query) => $query->where('id', '>', $afterId))
             ->orderBy('id')
-            ->get();
+            ->get()
+            ->when($backoff, fn ($actions) => $actions->filter(fn (Action $action): bool => self::due($action)));
 
         foreach ($actions as $action) {
             $units = [];
@@ -90,6 +91,19 @@ final class PortalAirtableSync
         }
 
         return ['sent' => $send, 'counts' => $counts, 'items' => $items];
+    }
+
+    /**
+     * A failed action waits longer each time (2026-10-20): its attempt n comes 2^n - 1 minutes after it
+     * was written (1, 3, 7 ... 255), then every six hours. A blip clears in minutes; a value Airtable
+     * refuses stops costing a call a minute, yet lands on its own once someone fixes the base.
+     */
+    private static function due(Action $action): bool
+    {
+        $attempts = (int) $action->attempts;
+        $wait = $attempts < 9 ? (2 ** $attempts) - 1 : 511 + ($attempts - 9) * 360;
+
+        return $action->created_at === null || Carbon::parse($action->created_at)->addMinutes($wait)->lte(Carbon::now());
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -59,6 +60,7 @@ final class PortalProfileChanges
         private readonly PortalAddressResolver $resolver,
         private readonly PortalRegistrationInput $input,
         private readonly PortalHomeLocations $homes,
+        private readonly CoreLedger $ledger,
     ) {}
 
     /**
@@ -156,11 +158,11 @@ final class PortalProfileChanges
 
         // A head admin's own changes are approved by them as they are sent, and reach their record now.
         if (PortalRules::holds($employee, $request, self::RULE)) {
-            $id = DB::connection('portal')->transaction(function () use ($row, $employee): int {
+            $id = $this->ledger->within(DB::connection('portal'), function () use ($row, $employee): int {
                 $id = (int) DB::connection('portal')->table(self::TABLE)->insertGetId(
                     ['status' => self::APPROVED, 'decided_at' => now(), 'decided_by' => (int) $employee->getKey()] + $row,
                 );
-                $this->apply($employee, self::fieldsOf((object) $row), self::documentsOf((object) $row));
+                $this->apply($employee, $employee, self::fieldsOf((object) $row), self::documentsOf((object) $row));
 
                 return $id;
             });
@@ -265,7 +267,8 @@ final class PortalProfileChanges
         $isApproved = $data['decision'] === 'approve';
         $remarks = self::text($data['remarks'] ?? null);
 
-        $outcome = DB::connection('portal')->transaction(function () use ($reviewer, $id, $request, $isApproved, $remarks): array {
+        // The approved details and their ledger entry land together, so the Airtable sync sends them (2026-10-20).
+        $outcome = $this->ledger->within(DB::connection('portal'), function () use ($reviewer, $id, $request, $isApproved, $remarks): array {
             $row = DB::connection('portal')->table(self::TABLE)->where('id', $id)->lockForUpdate()->first();
             if ($row === null) {
                 abort(404, 'Those profile changes were not found.');
@@ -280,7 +283,7 @@ final class PortalProfileChanges
             $documents = self::documentsOf($row);
             $fields = self::fieldsOf($row);
             if ($isApproved) {
-                $this->apply($employee, $fields, $documents);
+                $this->apply($reviewer, $employee, $fields, $documents);
             }
             DB::connection('portal')->table(self::TABLE)->where('id', $id)->update([
                 'status' => $isApproved ? self::APPROVED : self::REJECTED,
@@ -457,18 +460,21 @@ final class PortalProfileChanges
      * @param  array<string, string|null>  $fields
      * @param  array{add: list<array{field: string, fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}>, remove: list<int>}  $documents
      */
-    private function apply(Employee $employee, array $fields, array $documents): void
+    private function apply(Employee $actor, Employee $employee, array $fields, array $documents): void
     {
+        $slots = [];
         foreach ($documents['remove'] as $documentId) {
             if ($this->documents->fieldOf($employee, $documentId) !== null) {
-                $this->documents->remove($employee, $documentId);
+                $slots[] = $this->documents->remove($employee, $documentId);
             }
         }
         $this->documents->assertRoom($employee, array_column($documents['add'], 'field'), []);
         foreach ($documents['add'] as $stored) {
             $this->documents->attach($employee, $stored);
+            $slots[] = $stored['field'];
         }
-        $this->users->applyInformation($employee, $fields);
+        $this->documents->ledgerChange($actor, $employee, $slots);
+        $this->users->applyInformation($employee, $fields, $actor);
         $this->users->bumpCache();
     }
 

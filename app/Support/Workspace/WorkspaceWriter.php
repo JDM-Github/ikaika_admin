@@ -128,7 +128,8 @@ final class WorkspaceWriter
             return $this->ledger->recordEdit(
                 $product,
                 $product.'.'.$table,
-                ['table' => $table, 'key' => $key, 'fields' => $updates, 'changes' => $changed],
+                // `columns` names them as a list too: the ledger strips bank and government keys from `fields`.
+                ['table' => $table, 'key' => $key, 'columns' => array_keys($updates), 'fields' => $updates, 'changes' => $changed],
                 $table,
                 (string) $id,
                 null,

@@ -360,7 +360,7 @@ final class PortalRegistrations
             });
         }
         // Their files go to Cloudinary as their documents, the photo becoming their profile photo (2026-10-12, user).
-        $this->employeeDocuments->copyFromRegistration($employee, $id);
+        $this->employeeDocuments->copyFromRegistration($employee, $id, $actor);
         $this->audit->record($actor, PortalLogAction::INSERT, 'manage.onboarding', '{UserName|You} promoted '.trim((string) $row->candidate_name).' to employee '.$idNo, (string) $id, $request, ['idNo' => $idNo, 'department' => $department]);
 
         return ['employee' => [

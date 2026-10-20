@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalNotificationType;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -124,7 +125,13 @@ class PortalProfileChangesTest extends TestCase
         $waiting = collect($this->withToken($headSession)->getJson(self::CHANGES)->assertOk()->json('data.items'))->firstWhere('id', $asked['id']);
         $this->assertSame((string) $member->getKey(), $waiting['employee']['id']);
 
+        $mark = (int) Action::query()->max('id');
         $this->withToken($headSession)->patchJson(self::CHANGES.'/'.$asked['id'], ['decision' => 'approve'])->assertOk();
+        // The approval is ledgered, so the Airtable sync sends the details and both slots (2026-10-20).
+        $this->assertSame(
+            ['columns' => ['blood_type', 'phone_number'], 'slots' => ['ss_id', 'tax_identification']],
+            $this->ledgeredEmployeeChange((int) $member->getKey(), $mark),
+        );
         $after = $this->record($member);
         $this->assertSame('AB+', $after['blood_type']);
         $this->assertSame('09171234567', $after['phone_number']);
@@ -307,6 +314,7 @@ class PortalProfileChangesTest extends TestCase
         DB::connection('portal')->table('employee_change_requests')->where('employee_id', (int) $nathaniel->getKey())->where('status', 'Pending')->update(['status' => 'Withdrawn']);
         $session = $this->token($nathaniel);
         $this->assertTrue($this->withToken($session)->getJson(self::MINE)->assertOk()->json('data.approvesOwn'));
+        $mark = (int) Action::query()->max('id');
 
         $mine = $this->withToken($session)->post(self::MINE.'/changes', [
             'bloodType' => 'AB+',
@@ -317,6 +325,7 @@ class PortalProfileChangesTest extends TestCase
         $this->assertNull($mine['pending']);
         $this->assertSame('Approved', $mine['lastDecision']['status']);
         $this->assertSame('AB+', $this->record($nathaniel)['blood_type']);
+        $this->assertSame(['columns' => ['blood_type'], 'slots' => ['ss_id', 'tax_identification']], $this->ledgeredEmployeeChange((int) $nathaniel->getKey(), $mark));
         $this->assertSame(1, $this->files($nathaniel, 'ss_id'));
         $this->assertFalse(DB::connection('portal')->table('attachments')->where('id', $kept)->exists());
         $row = DB::connection('portal')->table('employee_change_requests')->where('employee_id', (int) $nathaniel->getKey())->orderByDesc('id')->first();

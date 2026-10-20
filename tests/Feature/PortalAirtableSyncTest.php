@@ -6,6 +6,7 @@ use App\Modules\Core\Models\Action;
 use App\Support\Airtable\AirtableSyncMap;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Core\CoreLedger;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
@@ -655,6 +656,89 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertSame([['url' => 'https://res.cloudinary.com/demo/me.jpg', 'filename' => 'me.jpg']], $fields['Photo']);
         $this->assertSame([], $fields['Tax Identification']);
         $this->assertSame([], $items->firstWhere('actionId', $removed)['fields']['Tax Identification']);
+    }
+
+    // The base's Employees has a National ID field, and the portal a national_id slot (2026-10-20).
+    public function test_a_national_id_upload_is_sent(): void
+    {
+        $schema = $this->schema();
+        $schema['tables'][2]['fields'][] = ['name' => 'National ID', 'type' => 'multipleAttachments'];
+        $this->fakeAirtable($schema);
+        $portal = DB::connection('portal');
+        $employeeId = (int) $portal->table('employees')->insertGetId(['airtable_record_id' => 'recEMPL0000000062', 'id_no' => '900000-0062', 'first_name' => 'Card', 'last_name' => 'Holder']);
+        $portal->table('attachments')->insert(['table_name' => 'employees', 'record_id' => $employeeId, 'field_name' => 'national_id', 'file_url' => 'https://res.cloudinary.com/demo/id.jpg', 'file_name' => 'id.jpg']);
+        $actionId = app(CoreLedger::class)->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['id' => (string) $employeeId, 'columns' => [], 'doc_national_id' => true], 'employees', (string) $employeeId, null, 1, null);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertSame([['url' => 'https://res.cloudinary.com/demo/id.jpg', 'filename' => 'id.jpg']], $item['fields']['National ID']);
+    }
+
+    // The ledger strips bank and government keys from `fields`; the grid's `columns` list still names them (2026-10-20).
+    public function test_a_grid_edit_of_a_private_column_is_sent(): void
+    {
+        $schema = $this->schema();
+        $schema['tables'][] = ['name' => 'New Employee Data', 'fields' => [['name' => 'Bank Account Number', 'type' => 'singleLineText']]];
+        $this->fakeAirtable($schema);
+        $rowId = (int) DB::connection('portal')->table('new_employee_data')->insertGetId(['airtable_record_id' => 'recNEWE0000000071', 'first_name' => 'Grid', 'last_name' => 'Edit', 'bank_account_number' => '0012345678']);
+        $actionId = app(CoreLedger::class)->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            'portal.new_employee_data',
+            ['table' => 'new_employee_data', 'key' => 'id', 'columns' => ['bank_account_number'], 'fields' => ['bank_account_number' => '0012345678'], 'changes' => ['bank_account_number' => ['from' => null, 'to' => '0012345678']]],
+            'new_employee_data',
+            (string) $rowId,
+        );
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertSame('update', $item['outcome']);
+        $this->assertSame(['Bank Account Number' => '0012345678'], $item['fields']);
+    }
+
+    // A department References adds, which the base does not offer, is left out instead of holding the project back.
+    public function test_a_project_department_the_base_lacks_is_left_out_not_blocking(): void
+    {
+        $this->fakeAirtable();
+        $projectId = $this->projectRow(['airtable_record_id' => 'recPROJ0000000091', 'department' => 'Research']);
+        $actionId = app(CoreLedger::class)->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.projects', ['fields' => ['department' => 'Research', 'project_name' => '900001 Sync Test']], 'projects', (string) $projectId);
+
+        $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertSame('update', $item['outcome']);
+        $this->assertSame(['Project Name' => '900001 Sync Test'], $item['fields']);
+        $this->assertStringContainsString('"Department" left out', implode(' ', $item['problems']));
+    }
+
+    // A failing action waits 2^n - 1 minutes after it was written before its next try, but only on a scheduled run.
+    public function test_the_schedule_backs_off_an_action_that_keeps_failing(): void
+    {
+        $this->fakeAirtable();
+        $actionId = $this->ledgerAdd($this->leaveRow('Pending', 'Vacation Leave'));
+        $planned = fn (bool $backoff): bool => collect(app(PortalAirtableSync::class)->run(false, 0, false, null, $backoff)['items'])->contains('actionId', $actionId);
+
+        // Three failures: the fourth try comes 7 minutes after the action was written.
+        Action::query()->whereKey($actionId)->update(['attempts' => 3, 'created_at' => now()->subMinutes(6)]);
+        $this->assertFalse($planned(true));
+        $this->assertTrue($planned(false));
+        Action::query()->whereKey($actionId)->update(['created_at' => now()->subMinutes(8)]);
+        $this->assertTrue($planned(true));
+        // Past nine failures it is every six hours.
+        Action::query()->whereKey($actionId)->update(['attempts' => 10, 'created_at' => now()->subMinutes(511 + 359)]);
+        $this->assertFalse($planned(true));
+        Action::query()->whereKey($actionId)->update(['created_at' => now()->subMinutes(511 + 361)]);
+        $this->assertTrue($planned(true));
+    }
+
+    // Off until AIRTABLE_SYNC_SCHEDULED is set, so setting the keys alone never starts a send.
+    public function test_the_scheduled_send_waits_for_its_switch(): void
+    {
+        $event = collect(app(Schedule::class)->events())->first(fn ($event): bool => str_contains((string) $event->command, 'portal:airtable-sync --send --backoff'));
+        $this->assertNotNull($event);
+
+        config(['services.airtable.scheduled' => false]);
+        $this->assertFalse($event->filtersPass($this->app));
+        config(['services.airtable.scheduled' => true]);
+        $this->assertTrue($event->filtersPass($this->app));
     }
 
     public function test_an_unmapped_resource_is_left_for_later_and_a_failure_is_recorded(): void
