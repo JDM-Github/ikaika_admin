@@ -33,7 +33,10 @@ $scriptDir   = $PSScriptRoot
 $repoRoot    = Split-Path -Parent $scriptDir
 $migrations  = Join-Path $repoRoot 'migrations'
 $deploy      = Join-Path $repoRoot 'deployment'
-$portalRepo  = 'C:\IKAIKA\ikaika-portal'
+# The portal frontend's checkout beside this one, under its old name or the one it has now (2026-10-20).
+$portalRepo  = @('ikaika-portal', 'ikaika_portal_frontend_rewrite') | ForEach-Object { Join-Path (Split-Path -Parent $repoRoot) $_ } |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $portalRepo) { $portalRepo = Join-Path (Split-Path -Parent $repoRoot) 'ikaika_portal_frontend_rewrite' }
 $pwshPath    = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
 if (-not $pwshPath) { $pwshPath = Join-Path $PSHOME 'pwsh.exe' }
 

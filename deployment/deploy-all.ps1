@@ -13,6 +13,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# The portal frontend's checkout beside this one, under its old name or the one it has now (2026-10-20).
+if (-not $PSBoundParameters.ContainsKey('PortalRepo') -and -not (Test-Path $PortalRepo)) {
+    $PortalRepo = Join-Path (Split-Path $PortalRepo -Parent) 'ikaika_portal_frontend_rewrite'
+}
 $portalDeploy = Join-Path $PortalRepo 'deployment/deploy.ps1'
 if (-not (Test-Path $portalDeploy)) { throw "Portal deploy script not found at $portalDeploy; pass -PortalRepo" }
 
