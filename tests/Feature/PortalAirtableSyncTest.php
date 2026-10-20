@@ -1247,6 +1247,32 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertArrayNotHasKey('Reimbursement Receipt', $alone['fields']);
     }
 
+    // Production pointed at the test base would clear every airtable_record_id and re-create the rows there.
+    public function test_a_send_refuses_a_base_that_holds_none_of_the_databases_records(): void
+    {
+        $this->fakeGone(false);
+        $requestId = $this->leaveRow('Pending', 'Vacation Leave', 'recELSEWHERE00001');
+        $actionId = $this->ledgerAdd($requestId, 'edit');
+
+        $this->artisan('portal:airtable-sync', ['--send' => true])
+            ->expectsOutputToContain('AIRTABLE_BASE_ID names another base')
+            ->assertExitCode(1);
+
+        Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET');
+        $this->assertNull(Action::query()->findOrFail($actionId)->synced_at);
+        $this->assertSame('recELSEWHERE00001', DB::connection('portal')->table('requests')->where('id', $requestId)->value('airtable_record_id'));
+    }
+
+    public function test_a_send_goes_ahead_on_the_base_that_holds_them(): void
+    {
+        $this->fakeGone(true);
+        $this->leaveRow('Pending', 'Vacation Leave', 'recSTILL00000001');
+
+        $this->artisan('portal:airtable-sync', ['--send' => true])
+            ->doesntExpectOutputToContain('names another base')
+            ->assertExitCode(0);
+    }
+
     public function test_a_second_send_waits_for_the_first(): void
     {
         $this->fakeAirtable();
@@ -1265,7 +1291,8 @@ class PortalAirtableSyncTest extends TestCase
     {
         Http::fake([
             'api.airtable.com/v0/meta/*' => Http::response($schema ?? $this->schema()),
-            'api.airtable.com/v0/*' => Http::response(['id' => 'recNEW0000000001', 'fields' => []]),
+            // `records` answers the base check's RECORD_ID() lookup: this base holds the database's rows.
+            'api.airtable.com/v0/*' => Http::response(['id' => 'recNEW0000000001', 'fields' => [], 'records' => [['id' => 'recSTILL00000001']]]),
         ]);
     }
 

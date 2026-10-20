@@ -93,6 +93,41 @@ final class PortalAirtableSync
     }
 
     /**
+     * Names a base that holds none of the records this database points at (2026-10-20): sent to
+     * another base -- the test base on production -- every update would read as a deleted record,
+     * clear its airtable_record_id and create a copy there. The newest id of up to five tables is
+     * asked; one found is enough, since a right base answers for nearly every row.
+     */
+    public function wrongBase(): ?string
+    {
+        $tables = [];
+        foreach (AirtableSyncMap::resources() as $resource) {
+            $map = AirtableSyncMap::for($resource);
+            if ($map !== null) {
+                $tables[$map['sql_table']] ??= $map['airtable_table'];
+            }
+        }
+
+        $asked = 0;
+        foreach ($tables as $sqlTable => $airtableTable) {
+            $recordId = DB::connection('portal')->table($sqlTable)->whereNotNull('airtable_record_id')->orderByDesc('id')->value('airtable_record_id');
+            if (! is_string($recordId) || $recordId === '') {
+                continue;
+            }
+            if ($this->airtable->exists($airtableTable, $recordId)) {
+                return null;
+            }
+            if (++$asked === 5) {
+                break;
+            }
+        }
+
+        return $asked === 0
+            ? null
+            : 'The Airtable base holds none of the '.$asked.' records this database points at, so AIRTABLE_BASE_ID names another base. Nothing was sent.';
+    }
+
+    /**
      * Plans the newest real row of every mapped resource against the live base, writing nothing,
      * so a mapping is proven before any member has produced an action for it.
      *

@@ -103,7 +103,7 @@ final class AirtableClient
      * Airtable answers a missing record and a missing permission with the same 403, so whether a
      * record is really gone is asked with a read, which the token can make either way.
      */
-    private function exists(string $table, string $recordId): bool
+    public function exists(string $table, string $recordId): bool
     {
         // Only a well-formed id goes into the formula; anything else is never declared gone.
         if (preg_match('/^rec[A-Za-z0-9]{14}$/', $recordId) !== 1) {

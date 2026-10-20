@@ -49,6 +49,13 @@ Artisan::command('portal:airtable-sync
     });
 
     try {
+        // The wrong base would take every update as a deleted record and re-create it there (2026-10-20).
+        $wrongBase = $send || $check ? $sync->wrongBase() : null;
+        if ($wrongBase !== null) {
+            $this->error($wrongBase);
+
+            return 1;
+        }
         // An action younger than ten seconds waits a run: its portal row may still be committing.
         $report = $check
             ? ['items' => $sync->check(), 'counts' => null]
