@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS actions (
     parameters        JSON         NOT NULL,
     synced_at         TIMESTAMP    NULL,
     attempts          SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    attempted_at      TIMESTAMP    NULL,
     last_error        TEXT         NULL,
     created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_actions_product_created (product, created_at),

@@ -6,6 +6,8 @@ use App\Modules\Core\Models\Action;
 use App\Support\Airtable\AirtableSyncMap;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Core\CoreLedger;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Psr7\Request as Psr7Request;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\ConnectionException;
@@ -13,6 +15,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class PortalAirtableSyncTest extends TestCase
@@ -412,11 +415,11 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertIsArray($grid);
         $this->assertSame(['Reason' => 'Fixed typo'], $grid['fields']);
 
-        // Cancelled before it was sent: the grid edit and the cancel both take the record out of Airtable (2026-10-20).
+        // A typo fix never deletes a record (2026-10-20): only the edit that cancelled the request takes it out of Airtable.
         DB::connection('portal')->table('requests')->where('id', $requestId)->update(['status' => 'Cancelled']);
         $cancel = $this->ledgerAdd($requestId, 'edit');
         $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
-        $this->assertSame('discard', $items->firstWhere('actionId', $gridEdit)['outcome'] ?? null);
+        $this->assertSame(['Reason' => 'Fixed typo'], $items->firstWhere('actionId', $gridEdit)['fields']);
         $this->assertSame('discard', $items->firstWhere('actionId', $cancel)['outcome'] ?? null);
     }
 
@@ -710,9 +713,9 @@ class PortalAirtableSyncTest extends TestCase
         $items = collect(app(PortalAirtableSync::class)->run(false)['items']);
 
         $this->assertSame('discard', $items->firstWhere('actionId', $cancel)['outcome']);
+        // Nothing else changed, so there is no update to send: an empty one would be refused.
         $kept = $items->firstWhere('actionId', $category);
-        $this->assertSame('update', $kept['outcome']);
-        $this->assertSame([], $kept['fields']);
+        $this->assertSame('nothing', $kept['outcome']);
         $this->assertStringContainsString('"Category" left out', implode(' ', $kept['problems']));
     }
 
@@ -730,24 +733,70 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertStringContainsString('"Department" left out', implode(' ', $item['problems']));
     }
 
-    // A failing action waits 2^n - 1 minutes after it was written before its next try, but only on a scheduled run.
-    public function test_the_schedule_backs_off_an_action_that_keeps_failing(): void
+    // A try that did not land waits 2^(n-1) minutes from that try, up to six hours, but only on a scheduled run.
+    public function test_the_schedule_backs_off_from_the_last_try(): void
     {
         $this->fakeAirtable();
         $actionId = $this->ledgerAdd($this->leaveRow('Pending', 'Vacation Leave'));
         $planned = fn (bool $backoff): bool => collect(app(PortalAirtableSync::class)->run(false, 0, false, null, $backoff)['items'])->contains('actionId', $actionId);
 
-        // Three failures: the fourth try comes 7 minutes after the action was written.
-        Action::query()->whereKey($actionId)->update(['attempts' => 3, 'created_at' => now()->subMinutes(6)]);
+        // Three tries: the fourth comes 4 minutes after the third, however old the action is.
+        Action::query()->whereKey($actionId)->update(['attempts' => 3, 'created_at' => now()->subDays(30), 'attempted_at' => now()->subMinutes(3)]);
         $this->assertFalse($planned(true));
         $this->assertTrue($planned(false));
-        Action::query()->whereKey($actionId)->update(['created_at' => now()->subMinutes(8)]);
+        Action::query()->whereKey($actionId)->update(['attempted_at' => now()->subMinutes(5)]);
         $this->assertTrue($planned(true));
-        // Past nine failures it is every six hours.
-        Action::query()->whereKey($actionId)->update(['attempts' => 10, 'created_at' => now()->subMinutes(511 + 359)]);
+        // Past nine tries it is every six hours.
+        Action::query()->whereKey($actionId)->update(['attempts' => 12, 'attempted_at' => now()->subMinutes(359)]);
         $this->assertFalse($planned(true));
-        Action::query()->whereKey($actionId)->update(['created_at' => now()->subMinutes(511 + 361)]);
+        Action::query()->whereKey($actionId)->update(['attempted_at' => now()->subMinutes(361)]);
         $this->assertTrue($planned(true));
+        // A row written before attempted_at existed waits from when it was written.
+        Action::query()->whereKey($actionId)->update(['attempts' => 1, 'attempted_at' => null, 'created_at' => now()->subSeconds(30)]);
+        $this->assertFalse($planned(true));
+    }
+
+    // An idle scheduled minute asks Airtable nothing at all (2026-10-20): plans that count calls are not spent.
+    public function test_an_idle_scheduled_run_makes_no_airtable_call(): void
+    {
+        $this->fakeAirtable();
+
+        $this->artisan('portal:airtable-sync', ['--send' => true, '--backoff' => true])
+            ->expectsOutputToContain('Nothing due.')
+            ->assertExitCode(0);
+
+        Http::assertNothingSent();
+    }
+
+    // What was ledgered before an import names renumbered rows, so it is settled unsent on request.
+    public function test_skip_through_settles_older_actions_without_sending(): void
+    {
+        $this->fakeAirtable();
+        $older = $this->ledgerAdd($this->leaveRow('Pending', 'Vacation Leave'));
+        $newer = $this->ledgerAdd($this->leaveRow('Pending', 'Sick Leave'));
+
+        $this->artisan('portal:airtable-sync', ['--skip-through' => (string) $older])
+            ->expectsOutputToContain('1 unsynced actions up to #'.$older.' settled without sending')
+            ->assertExitCode(0);
+        $this->artisan('portal:airtable-sync', ['--skip-through' => 'yesterday'])->assertExitCode(1);
+
+        Http::assertNothingSent();
+        $this->assertNotNull(Action::query()->findOrFail($older)->synced_at);
+        $this->assertStringContainsString('Not sent', (string) Action::query()->findOrFail($older)->last_error);
+        $this->assertNull(Action::query()->findOrFail($newer)->synced_at);
+    }
+
+    // A run past its budget takes no new action; what it did not reach goes next run.
+    public function test_a_run_past_its_budget_stops_taking_actions(): void
+    {
+        $this->fakeAirtable();
+        $actionId = $this->ledgerAdd($this->leaveRow('Pending', 'Vacation Leave'));
+
+        $report = app(PortalAirtableSync::class)->run(true, 0, false, null, false, 0);
+
+        $this->assertTrue($report['stopped']);
+        $this->assertSame([], $report['items']);
+        $this->assertNull(Action::query()->findOrFail($actionId)->synced_at);
     }
 
     // Off until AIRTABLE_SYNC_SCHEDULED is set, so setting the keys alone never starts a send.
@@ -1134,9 +1183,9 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertStringContainsString('which Airtable does not have yet', implode(' ', $item['problems']));
     }
 
-    // The portal soft-deletes a project into the recycle bin, so its delete never reaches Airtable: the
-    // record is Airtable's to keep, and the action stays quietly unsynced rather than failing forever.
-    public function test_a_project_delete_is_left_unsynced(): void
+    // The portal soft-deletes a project into the recycle bin, so its delete never reaches Airtable: the record is
+    // Airtable's to keep, and the action settles (2026-10-20) rather than coming back every scheduled minute.
+    public function test_a_project_delete_settles_without_touching_airtable(): void
     {
         $this->fakeAirtable();
         $projectId = $this->projectRow(['airtable_record_id' => 'recPROJ000000003']);
@@ -1154,8 +1203,8 @@ class PortalAirtableSyncTest extends TestCase
         $item = collect(app(PortalAirtableSync::class)->run(false)['items'])->firstWhere('actionId', $written['action_id']);
 
         $this->assertIsArray($item);
-        $this->assertSame('skipped', $item['outcome']);
-        $this->assertStringContainsString('predates Airtable ids', implode(' ', $item['problems']));
+        $this->assertSame('nothing', $item['outcome']);
+        $this->assertStringContainsString('Airtable keeps its record', implode(' ', $item['problems']));
     }
 
     /**
@@ -1250,8 +1299,8 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertNotNull(Action::query()->findOrFail($actionId)->synced_at);
     }
 
-    // A blocker is kept on the action, so it shows outside a dry run, but counts no attempt.
-    public function test_a_blocked_action_keeps_its_reason_without_an_attempt(): void
+    // A blocker is kept on the action, so it shows outside a dry run, and counts a try so the schedule backs off.
+    public function test_a_blocked_action_keeps_its_reason_and_counts_a_try(): void
     {
         $this->fakeAirtable();
         $requestId = $this->leaveRow('Rescheduled', 'Vacation Leave');
@@ -1261,7 +1310,8 @@ class PortalAirtableSyncTest extends TestCase
 
         $action = Action::query()->findOrFail($actionId);
         $this->assertNull($action->synced_at);
-        $this->assertSame(0, (int) $action->attempts);
+        $this->assertSame(1, (int) $action->attempts);
+        $this->assertNotNull($action->attempted_at);
         $this->assertStringContainsString('has no option "Rescheduled"', (string) $action->last_error);
     }
 
@@ -1293,6 +1343,137 @@ class PortalAirtableSyncTest extends TestCase
         $retried = collect(app(PortalAirtableSync::class)->run(true, 0, true)['items'])->firstWhere('actionId', $actionId);
         $this->assertSame('synced', $retried['outcome']);
         $this->assertSame(2, $posts);
+    }
+
+    // A held create holds its row (2026-10-20): another action on that row must not create a second record beside it.
+    public function test_a_held_create_holds_every_other_action_on_its_row(): void
+    {
+        $posts = 0;
+        Http::fake(function (Request $request) use (&$posts) {
+            if ($request->method() === 'POST') {
+                $posts++;
+
+                return Http::response(['id' => 'recNEW0000000078']);
+            }
+
+            return Http::response($this->schema());
+        });
+        $requestId = $this->leaveRow('Pending', 'Vacation Leave');
+        $held = $this->ledgerAdd($requestId);
+        Action::query()->whereKey($held)->update(['last_error' => PortalAirtableSync::UNCERTAIN_CREATE, 'attempts' => 1, 'attempted_at' => now()]);
+        $later = $this->ledgerAdd($requestId, 'edit');
+
+        // The held one sits out its backoff window, so the later one comes alone: it must not create.
+        $items = collect(app(PortalAirtableSync::class)->run(true, 0, false, null, true)['items']);
+
+        $this->assertNull($items->firstWhere('actionId', $held));
+        $this->assertSame('failed', $items->firstWhere('actionId', $later)['outcome']);
+        $this->assertSame(0, $posts);
+        $this->assertStringStartsWith(PortalAirtableSync::UNCERTAIN_CREATE, (string) Action::query()->findOrFail($later)->last_error);
+
+        // Once someone has looked in Airtable, --retry-creates sends one record for the row, never two.
+        app(PortalAirtableSync::class)->run(true, 0, true);
+        $this->assertSame(1, $posts);
+        $this->assertNotNull(Action::query()->findOrFail($held)->synced_at);
+        $this->assertNotNull(Action::query()->findOrFail($later)->synced_at);
+    }
+
+    // The hold is written before the create goes out, so a run killed mid-call cannot create the row twice.
+    public function test_a_create_is_marked_held_before_it_is_sent(): void
+    {
+        $requestId = $this->leaveRow('Pending', 'Vacation Leave');
+        $actionId = $this->ledgerAdd($requestId);
+        $markedWhileSending = null;
+        Http::fake(function (Request $request) use ($actionId, &$markedWhileSending) {
+            if ($request->method() !== 'POST') {
+                return Http::response($this->schema());
+            }
+            $markedWhileSending = Action::query()->findOrFail($actionId)->last_error;
+
+            return Http::response(['id' => 'recNEW0000000079']);
+        });
+
+        app(PortalAirtableSync::class)->run(true);
+
+        $this->assertSame(PortalAirtableSync::UNCERTAIN_CREATE, $markedWhileSending);
+        $action = Action::query()->findOrFail($actionId);
+        $this->assertNotNull($action->synced_at);
+        $this->assertNull($action->last_error);
+    }
+
+    // A host that could not be found or reached never got the request, so it is a plain failure, not a held create.
+    public function test_a_create_that_never_left_is_retried_not_held(): void
+    {
+        Http::fake(function (Request $request) {
+            if ($request->method() === 'POST') {
+                throw new ConnectionException('cURL error 6: Could not resolve host', 0, new ConnectException('Could not resolve host', new Psr7Request('POST', 'https://api.airtable.com'), null, ['errno' => 6]));
+            }
+
+            return Http::response($this->schema());
+        });
+        $actionId = $this->ledgerAdd($this->leaveRow('Pending', 'Vacation Leave'));
+
+        $item = collect(app(PortalAirtableSync::class)->run(true)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertSame('failed', $item['outcome']);
+        $this->assertStringNotContainsString(PortalAirtableSync::UNCERTAIN_CREATE, (string) Action::query()->findOrFail($actionId)->last_error);
+    }
+
+    // A gateway that gave up on a create may have let it land, so that create is held like a lost answer.
+    public function test_a_gateway_timeout_on_a_create_holds_it(): void
+    {
+        Http::fake(fn (Request $request) => $request->method() === 'POST'
+            ? Http::response('<html>Gateway Timeout</html>', 504)
+            : Http::response($this->schema()));
+        $actionId = $this->ledgerAdd($this->leaveRow('Pending', 'Vacation Leave'));
+
+        app(PortalAirtableSync::class)->run(true);
+
+        $this->assertStringStartsWith(PortalAirtableSync::UNCERTAIN_CREATE, (string) Action::query()->findOrFail($actionId)->last_error);
+    }
+
+    // A held action whose line an edit replaced is never quietly superseded: its create may have landed.
+    public function test_a_held_action_whose_line_is_gone_stays_held(): void
+    {
+        $this->fakeAirtable();
+        $actionId = $this->reportAction(['lineIds' => [99999996]]);
+        Action::query()->whereKey($actionId)->update(['created_at' => now()->subMinutes(20), 'last_error' => PortalAirtableSync::UNCERTAIN_CREATE]);
+
+        $units = collect(app(PortalAirtableSync::class)->run(true)['items'])->where('actionId', $actionId);
+
+        $this->assertSame(['failed'], $units->pluck('outcome')->all());
+        $this->assertNull(Action::query()->findOrFail($actionId)->synced_at);
+        $superseded = collect(app(PortalAirtableSync::class)->run(true, 0, true)['items'])->where('actionId', $actionId);
+        $this->assertSame(['superseded'], $superseded->pluck('outcome')->all());
+    }
+
+    // A record deleted in Airtable on a changed-only table counts as a failed try, so the schedule backs off from it.
+    public function test_a_record_deleted_in_airtable_on_a_changed_only_table_backs_off(): void
+    {
+        $this->fakeGone(exists: false);
+        $employeeId = (int) DB::connection('portal')->table('employees')->whereNotNull('airtable_record_id')->orderBy('id')->value('id');
+        $actionId = app(CoreLedger::class)->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['fields' => ['role' => 'Admin']], 'employees', (string) $employeeId);
+
+        $item = collect(app(PortalAirtableSync::class)->run(true)['items'])->firstWhere('actionId', $actionId);
+
+        $this->assertSame('failed', $item['outcome']);
+        $this->assertStringContainsString('cannot be rebuilt', implode(' ', $item['problems']));
+        $this->assertSame(1, (int) Action::query()->findOrFail($actionId)->attempts);
+    }
+
+    // The schedule's output goes nowhere, so a send that did not land everything says so in the log.
+    public function test_a_send_that_did_not_land_everything_is_logged(): void
+    {
+        Http::fake(fn (Request $request) => $request->method() === 'POST'
+            ? Http::response(['error' => ['type' => 'INVALID_REQUEST', 'message' => 'Nope']], 422)
+            : Http::response(str_contains($request->url(), '/meta/') ? $this->schema() : ['records' => [['id' => 'recSTILL00000001']]]));
+        $actionId = $this->ledgerAdd($this->leaveRow('Pending', 'Vacation Leave'));
+        Action::query()->whereKey($actionId)->update(['created_at' => now()->subMinute()]);
+        Log::spy();
+
+        $this->artisan('portal:airtable-sync', ['--send' => true])->assertExitCode(1);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $counts): bool => $message === 'portal.airtable_sync.not_landed' && $counts['failed'] === 1);
     }
 
     // "2 Day" is not "1 Day": a plain number is part of the label, while a leading index is not.

@@ -23,6 +23,7 @@ class Action extends ProductModel
             'actor_id' => 'integer',
             'as_developer' => 'boolean',
             'synced_at' => 'datetime',
+            'attempted_at' => 'datetime',
             'created_at' => 'datetime',
         ];
     }
