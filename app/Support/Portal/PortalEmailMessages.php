@@ -57,6 +57,8 @@ final class PortalEmailMessages
     // The composer's From: the portal (the default), the administrator ("me"), or the company.
     private const SENDER_COMPANY = 'company';
 
+    private const SENDER_DEPARTMENT = 'department';
+
     /**
      * Table column key => SQL columns. Unknown keys fall back to newest first.
      *
@@ -605,6 +607,15 @@ final class PortalEmailMessages
         // As the company: its own name on the portal's address, with no one person to reply to.
         if ($request->input('sender') === self::SENDER_COMPANY) {
             return [PortalEmailMarkup::COMPANY_SENDER, null, null];
+        }
+        // As the sender's own department mailbox, with replies to it: only an administrator of MIS or Engineering.
+        if ($request->input('sender') === self::SENDER_DEPARTMENT) {
+            $mailbox = PortalDepartmentMailboxes::for($actor);
+            if ($mailbox === null) {
+                abort(422, 'Only an administrator of MIS or Engineering can send from their department address.');
+            }
+
+            return [$mailbox['name'], $mailbox['address'], $mailbox['address']];
         }
         if (! $request->boolean('asSender') && $request->input('sender') !== 'me') {
             return [null, null, null];

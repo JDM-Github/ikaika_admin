@@ -6,6 +6,8 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 
 ## Unreleased
 
+## 1.0.0+2 - 2026-10-19
+
 ### Added
 
 - Staging and production are checked before a build - check-targets says what either lacks and -Fix fills in what the deploy config and the server tell it; build-release offers that fix and -FixTarget applies it first

@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Mockery;
 use RuntimeException;
+use Tests\Concerns\NamesDepartmentHeads;
 use Tests\TestCase;
 
 /**
@@ -28,6 +29,7 @@ use Tests\TestCase;
 class PortalNotificationEmailsTest extends TestCase
 {
     use DatabaseTransactions;
+    use NamesDepartmentHeads;
 
     /**
      * @var list<string>
@@ -60,10 +62,11 @@ class PortalNotificationEmailsTest extends TestCase
             ->delete();
     }
 
-    public function test_filing_a_leave_request_emails_the_department_admins(): void
+    // As overtime and offset (2026-10-19, user): only the department head is emailed; approvers keep their inbox notice.
+    public function test_filing_a_leave_request_emails_only_the_department_head(): void
     {
         $member = $this->member('MIS');
-        $admin = $this->admin('MIS');
+        [$head, $admin] = $this->nameDepartmentHead($member);
         $date = $this->freeWeekday();
 
         $this->withToken($this->token($member))->postJson(self::LEAVE_ENDPOINT, [
@@ -73,12 +76,12 @@ class PortalNotificationEmailsTest extends TestCase
             'reason' => 'Family event',
         ])->assertCreated();
 
-        Mail::assertSent(PortalEmailMail::class, function (PortalEmailMail $mail) use ($admin, $member): bool {
+        Mail::assertSent(PortalEmailMail::class, function (PortalEmailMail $mail) use ($head, $member): bool {
             $html = $mail->render();
 
             [$footerBody] = PortalNotificationEmails::companyFooter();
 
-            return $mail->hasTo((string) $admin->email)
+            return $mail->hasTo((string) $head->email)
                 && $mail->subjectLine === 'New leave request'
                 // The system letter: letter design, the Company footer, greeted by first name, signed off.
                 && $mail->bodyFormat === PortalEmailMarkup::FORMAT_LETTER
@@ -87,13 +90,14 @@ class PortalNotificationEmailsTest extends TestCase
                 && str_contains($mail->body, '::button[Open queue](')
                 && $mail->footerBody === $footerBody
                 && $mail->fromName === PortalNotificationEmails::FROM_NAME
-                && str_starts_with($mail->body, 'Hi '.trim((string) $admin->first_name).',')
+                && str_starts_with($mail->body, 'Hi '.trim((string) $head->first_name).',')
                 && ! str_contains($mail->body, 'Best Regards')
                 && str_contains($html, $this->memberName($member))
                 // One day reads "for" the day.
                 && str_contains($html, 'filed a leave request for ')
                 && str_contains($html, '/manage/manage-requests');
         });
+        Mail::assertNotSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo((string) $admin->email));
 
         $this->assertTrue(DB::connection('portal')->table('notifications')
             ->where('employee_id', $admin->getKey())
@@ -255,7 +259,7 @@ class PortalNotificationEmailsTest extends TestCase
         config(['products.catalog.portal.notification_emails' => false]);
         $this->storeNotificationEmails(true);
         $member = $this->member('MIS');
-        $admin = $this->admin('MIS');
+        [$head] = $this->nameDepartmentHead($member);
         $date = $this->freeWeekday();
 
         $this->withToken($this->token($member))->postJson(self::LEAVE_ENDPOINT, [
@@ -265,7 +269,7 @@ class PortalNotificationEmailsTest extends TestCase
             'reason' => 'Family event',
         ])->assertCreated();
 
-        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo((string) $admin->email));
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->hasTo((string) $head->email));
     }
 
     public function test_a_mail_failure_never_fails_the_write(): void

@@ -1,10 +1,10 @@
 {
-  "generated": "2026-10-19T09:26:31+08:00",
-  "current": "",
-  "releases": [],
-  "upcoming": [
+  "generated": "2026-10-19T20:10:26+08:00",
+  "current": "1.0.0+2",
+  "releases": [
     {
-      "version": "Unreleased",
+      "version": "1.0.0+2",
+      "date": "2026-10-19",
       "added": [
         "Staging and production are checked before a build - check-targets says what either lacks and -Fix fills in what the deploy config and the server tell it; build-release offers that fix and -FixTarget applies it first",
         "Issues & Requests - each report is a bug or a feature request or feedback and becomes a Jira issue as it comes in (MIS can switch that off or send one by hand) and Jira's progress comes back by webhook and every fifteen minutes"
@@ -17,6 +17,15 @@
         "build-release -Gui opens the project estimator's Build release dialog.",
         "Releases and the build dialog name the backend IkaIka Portal Backend - as the estimator names its own"
       ]
+    }
+  ],
+  "upcoming": [
+    {
+      "version": "Unreleased",
+      "added": [],
+      "changed": [],
+      "fixed": [],
+      "other": []
     }
   ]
 }

@@ -14,8 +14,8 @@ return new class extends Migration
 {
     public const NAME = 'IKAIKA BIM footer';
 
-    // John Dave Pega, who made the built-ins; matched on id_no like is_developer.
-    private const CREATOR_ID_NO = '260701-0020';
+    // John Dave Pega, who made the built-ins; matched on id_no like is_developer: the test data's, then production's.
+    private const CREATOR_ID_NOS = ['260701-0020', '260720-0020'];
 
     public static function body(): string
     {
@@ -29,7 +29,7 @@ return new class extends Migration
         }
 
         $portal = DB::connection('portal');
-        $creator = $portal->table('employees')->where('id_no', self::CREATOR_ID_NO)->value('id');
+        $creator = $portal->table('employees')->whereIn('id_no', self::CREATOR_ID_NOS)->orderBy('id')->value('id');
         if ($creator === null || $portal->table('email_blocks')->where('kind', 'footer')->where('name', self::NAME)->exists()) {
             return;
         }

@@ -117,9 +117,14 @@ class PortalReportRemindersTest extends TestCase
             ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
             ->orderBy('id')
             ->firstOrFail();
-        $head->forceFill(['email' => 'head@ikaika.test', 'department' => 'QA Test', 'role_level' => 'Management'])->save();
+        $head->forceFill(['email' => 'head@ikaika.test', 'department' => 'QA Test'])->save();
         $executive = $this->rosterExecutive();
-        $executive->forceFill(['email' => 'boss@ikaika.test', 'department' => 'QA Test'])->save();
+        $executive->forceFill(['email' => 'boss@ikaika.test', 'department' => 'Exec Test'])->save();
+        // Heads are named in company_departments; an executive seated there still gets no summary.
+        DB::connection('portal')->table('company_departments')->insert([
+            ['name' => 'QA Test', 'head_employee_id' => $head->getKey()],
+            ['name' => 'Exec Test', 'head_employee_id' => $executive->getKey()],
+        ]);
         $row = fn (Employee $person, string $department): array => ['employee' => $person, 'name' => (string) $person->first_name, 'email' => 'x@ikaika.test', 'department' => $department, 'days' => ['2020-03-09']];
 
         $summaries = $this->reminders()->summaries([
@@ -127,6 +132,7 @@ class PortalReportRemindersTest extends TestCase
             $row($this->starter, 'qa test'),
             $row($this->leaver, 'Other'),
             $row($head, 'QA Test'),
+            $row($this->member, 'Exec Test'),
         ]);
 
         $ours = collect($summaries)->filter(fn (array $summary): bool => $summary['head']->is($head))->values();

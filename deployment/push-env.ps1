@@ -10,6 +10,7 @@ param(
         'BITBUCKET_TOKEN', 'BITBUCKET_WEBHOOK_SECRET',
         'JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_PROJECT_KEY', 'JIRA_WEBHOOK_SECRET',
         'MAIL_RELAY_URL', 'MAIL_RELAY_KEY',
+        'OLLAMA_API_KEY',
         'PORTAL_ID_LOGIN_PASSWORD'
     ),
     [string]$SshHost = 'bluehost',
