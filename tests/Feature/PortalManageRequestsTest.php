@@ -450,7 +450,7 @@ class PortalManageRequestsTest extends TestCase
             'qty' => 1,
             'purpose' => 'Site visit',
             'employee_name_input' => $this->memberName($member),
-            'team' => 'Angeles Pampanga Office',
+            'team' => '01 Angeles Pampanga Office',
             'status' => 'Approved',
             'date_created' => $date.' 09:00:00',
         ]);
@@ -539,7 +539,7 @@ class PortalManageRequestsTest extends TestCase
             'qty' => 1,
             'purpose' => 'Plans',
             'employee_name_input' => $this->memberName($member),
-            'team' => 'Cebu Office',
+            'team' => '02 Cebu Office',
             'status' => 'Approved',
             'date_created' => $date.' 09:00:00',
         ]);
@@ -572,7 +572,7 @@ class PortalManageRequestsTest extends TestCase
             'qty' => 1,
             'purpose' => 'Site visit',
             'employee_name_input' => $this->memberName($member),
-            'team' => 'Angeles Pampanga Office',
+            'team' => '01 Angeles Pampanga Office',
             'status' => 'Pending',
             'date_created' => $date.' 09:00:00',
         ]);
@@ -611,7 +611,7 @@ class PortalManageRequestsTest extends TestCase
             'qty' => 1,
             'purpose' => 'Site visit',
             'employee_name_input' => $this->memberName($member),
-            'team' => 'Angeles Pampanga Office',
+            'team' => '01 Angeles Pampanga Office',
             'status' => 'Approved',
             'date_created' => $date.' 09:00:00',
         ]);
@@ -639,7 +639,7 @@ class PortalManageRequestsTest extends TestCase
             'qty' => 1,
             'purpose' => 'Site visit',
             'employee_name_input' => $this->memberName($member),
-            'team' => 'Angeles Pampanga Office',
+            'team' => '01 Angeles Pampanga Office',
             'status' => 'Pending',
             'date_created' => $date.' 09:00:00',
         ]);
@@ -687,7 +687,7 @@ class PortalManageRequestsTest extends TestCase
             'qty' => 1,
             'purpose' => 'Site visit',
             'employee_name_input' => $this->memberName($member),
-            'team' => 'Angeles Pampanga Office',
+            'team' => '01 Angeles Pampanga Office',
             'status' => 'Pending',
             'date_created' => $date.' 09:00:00',
         ]);
@@ -1280,7 +1280,7 @@ class PortalManageRequestsTest extends TestCase
             'qty' => 1,
             'purpose' => 'Site visit',
             'employee_name_input' => $this->memberName($member),
-            'team' => 'Angeles Pampanga Office',
+            'team' => '01 Angeles Pampanga Office',
             'status' => 'Approved',
             'date_created' => $date.' 09:00:00',
         ]);

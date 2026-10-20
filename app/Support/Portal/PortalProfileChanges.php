@@ -10,13 +10,18 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Profile changes (2026-10-14, user): anyone changes their own employee information and documents on
- * Settings, and nothing reaches their record until a head admin approves it. A request keeps the
+ * Profile, and nothing reaches their record until a head admin approves it. A request keeps the
  * details asked for -- cleaned by the same rules an administrator's edit follows -- the files put on
  * Cloudinary for it, and the files to take off. One waits at a time; withdrawing it lets them ask again.
  *
- * Whoever holds Approve profile changes is told when one comes in, and decides it on Manage / Users,
- * though never their own; the one who asked is told how it went. Logs and notices name the details
- * and the slots, never their values.
+ * Whoever holds Approve profile changes is told when one comes in, and decides it on Manage / Users;
+ * the one who asked is told how it went. Their own changes need no one else (2026-10-19, user): a head
+ * admin's reach their record as they are sent, and one sent before that they may approve themselves.
+ * Logs and notices name the details and the slots, never their values.
+ *
+ * Both addresses are edited in parts as the registration asks for them (2026-10-19, user): the record
+ * keeps one line, so its place is read back into the pickers, and the parts sent are joined into the
+ * line by the same rules the registration's are.
  */
 final class PortalProfileChanges
 {
@@ -35,10 +40,25 @@ final class PortalProfileChanges
     // Every slot once, and the five bank certificates.
     private const MOST_FILES = 12;
 
+    // The details a registration asks for and will not go without: all but the personal email.
+    private const REQUIRED_FIELDS = [
+        'dateOfBirth', 'bloodType', 'address', 'phoneNumber', 'taxIdentificationNo', 'sssNo', 'philhealthNo', 'hdmfNo',
+        'bankName', 'bankAccountNumber', 'bankSwiftCode', 'emergencyContactName', 'emergencyContactNumber', 'emergencyContactAddress',
+    ];
+
+    /** Each address's line on the record, and the prefix its parts are sent under, as the registration's. */
+    private const ADDRESSES = ['address' => 'address', 'emergencyContactAddress' => 'emergencyContact'];
+
+    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street'];
+
     public function __construct(
         private readonly PortalManageUsers $users,
         private readonly PortalEmployeeDocuments $documents,
         private readonly PortalAudit $audit,
+        private readonly PortalPlaces $places,
+        private readonly PortalAddressResolver $resolver,
+        private readonly PortalRegistrationInput $input,
+        private readonly PortalHomeLocations $homes,
     ) {}
 
     /**
@@ -46,15 +66,31 @@ final class PortalProfileChanges
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function mine(Employee $employee): array
+    public function mine(Employee $employee, Request $request): array
     {
         $employee = $this->whole($employee);
         $pending = $this->rowsOf($employee)->where('status', self::PENDING)->orderByDesc('id')->first();
         $decided = $this->rowsOf($employee)->whereIn('status', [self::APPROVED, self::REJECTED])->orderByDesc('id')->first();
 
+        $information = $this->users->informationOf($employee);
+        $documents = $this->documents->listFor($employee);
+        $held = array_column($documents, 'field');
+
         return ['section' => 'user', 'resource' => 'information', 'data' => [
-            'information' => $this->users->informationOf($employee),
-            'documents' => $this->documents->listFor($employee),
+            'information' => $information,
+            // Whoever approves profile changes saves their own straight onto their record (2026-10-19, user).
+            'approvesOwn' => PortalRules::holds($employee, $request, self::RULE),
+            // Where each address line places them in the Philippines, for the pickers to open on.
+            'addressPlaces' => array_map(fn (string $line): ?array => $this->placeOf($information[$line] ?? null), array_combine(array_keys(self::ADDRESSES), array_keys(self::ADDRESSES))),
+            'documents' => $documents,
+            // What a registration would not go without, still not on their record (2026-10-19, user).
+            'missing' => [
+                'fields' => array_values(array_filter(self::REQUIRED_FIELDS, static fn (string $key): bool => ($information[$key] ?? null) === null)),
+                'documents' => array_values(array_filter(
+                    array_map(static fn (string $kind): string => PortalEmployeeDocuments::FIELD_FOR_KIND[$kind], PortalRegistrationDocuments::REQUIRED),
+                    static fn (string $field): bool => ! in_array($field, $held, true),
+                )),
+            ],
             'pending' => $pending === null ? null : $this->presented($pending, $employee, false),
             // Only what came after their last request, so an old rejection does not linger over a new one.
             'lastDecision' => $decided === null || ($pending !== null && (int) $pending->id > (int) $decided->id) ? null : [
@@ -77,6 +113,7 @@ final class PortalProfileChanges
         if ($this->rowsOf($employee)->where('status', self::PENDING)->exists()) {
             abort(422, 'Your earlier changes are still waiting for approval. Withdraw them to change something else.');
         }
+        $this->joinAddresses($request);
         $fields = $this->users->cleanedInformation($employee, $request) ?? [];
         /** @var array{removeDocumentIds?: list<int>} $removal */
         $removal = $request->validate(['removeDocumentIds' => ['sometimes', 'array', 'max:20'], 'removeDocumentIds.*' => ['integer', 'min:1']]);
@@ -109,13 +146,41 @@ final class PortalProfileChanges
 
         // On Cloudinary first, so a file that fails leaves nothing waiting.
         $stored = array_map(fn (array $file): array => $this->documents->stored($file[0], $file[1]), $files);
-        $id = (int) DB::connection('portal')->table(self::TABLE)->insertGetId([
+        $row = [
             'employee_id' => (int) $employee->getKey(),
             'status' => self::PENDING,
             'fields' => json_encode((object) $fields, JSON_THROW_ON_ERROR),
             'documents' => json_encode(['add' => $stored, 'remove' => $removedIds], JSON_THROW_ON_ERROR),
             'submitted_at' => now(),
-        ]);
+        ];
+
+        // A head admin's own changes are approved by them as they are sent, and reach their record now.
+        if (PortalRules::holds($employee, $request, self::RULE)) {
+            $id = DB::connection('portal')->transaction(function () use ($row, $employee): int {
+                $id = (int) DB::connection('portal')->table(self::TABLE)->insertGetId(
+                    ['status' => self::APPROVED, 'decided_at' => now(), 'decided_by' => (int) $employee->getKey()] + $row,
+                );
+                $this->apply($employee, self::fieldsOf((object) $row), self::documentsOf((object) $row));
+
+                return $id;
+            });
+            if (array_key_exists('address', $fields)) {
+                $this->homes->followAddress((int) $employee->getKey());
+            }
+            $this->audit->record(
+                $employee,
+                PortalLogAction::PATCH,
+                self::RULE,
+                '{UserName|You} changed {UserName|your} own employee information',
+                (string) $id,
+                $request,
+                ['fields' => array_keys($fields), 'documents' => array_values(array_unique($addedFields)), 'removed' => count($removedIds)],
+            );
+
+            return $this->mine($employee, $request);
+        }
+
+        $id = (int) DB::connection('portal')->table(self::TABLE)->insertGetId($row);
 
         $name = PortalAccessGraph::name($employee);
         $this->audit->record(
@@ -144,7 +209,7 @@ final class PortalProfileChanges
             (int) $employee->getKey(),
         );
 
-        return $this->mine($employee);
+        return $this->mine($employee, $request);
     }
 
     /**
@@ -162,7 +227,7 @@ final class PortalProfileChanges
             ->update(['status' => self::WITHDRAWN, 'decided_at' => now()]);
         $this->audit->record($employee, PortalLogAction::PATCH, self::RULE, '{UserName|You} withdrew profile changes', (string) $pending->id, $request);
 
-        return $this->mine($employee);
+        return $this->mine($employee, $request);
     }
 
     /**
@@ -212,24 +277,10 @@ final class PortalProfileChanges
             if (! $employee instanceof Employee || ! $this->users->seesPrivate($reviewer, $employee, $request)) {
                 abort(404, 'Those profile changes were not found.');
             }
-            if ((int) $employee->getKey() === (int) $reviewer->getKey()) {
-                abort(403, 'Someone else approves changes to your own information.');
-            }
-
             $documents = self::documentsOf($row);
             $fields = self::fieldsOf($row);
             if ($isApproved) {
-                foreach ($documents['remove'] as $documentId) {
-                    if ($this->documents->fieldOf($employee, $documentId) !== null) {
-                        $this->documents->remove($employee, $documentId);
-                    }
-                }
-                $this->documents->assertRoom($employee, array_column($documents['add'], 'field'), []);
-                foreach ($documents['add'] as $stored) {
-                    $this->documents->attach($employee, $stored);
-                }
-                $this->users->applyInformation($employee, $fields);
-                $this->users->bumpCache();
+                $this->apply($employee, $fields, $documents);
             }
             DB::connection('portal')->table(self::TABLE)->where('id', $id)->update([
                 'status' => $isApproved ? self::APPROVED : self::REJECTED,
@@ -243,6 +294,8 @@ final class PortalProfileChanges
 
         /** @var Employee $employee */
         $employee = $outcome['employee'];
+        // A new address approved moves their home on the map with it (2026-10-19, user), once it is on record.
+        $homeMoved = $isApproved && in_array('address', $outcome['fields'], true) && $this->homes->followAddress((int) $employee->getKey());
         $name = PortalAccessGraph::name($employee);
         $this->audit->record(
             $reviewer,
@@ -258,9 +311,11 @@ final class PortalProfileChanges
             $reviewer,
             $isApproved ? PortalNotificationType::PROFILE_CHANGES_APPROVED : PortalNotificationType::PROFILE_CHANGES_REJECTED,
             $isApproved ? 'Profile changes approved' : 'Profile changes rejected',
-            $isApproved ? 'Your changes to your employee information are now on your record.' : 'Your changes to your employee information were not approved: '.$remarks,
-            PortalShellPath::SETTINGS,
-            'Open settings',
+            $isApproved
+                ? 'Your changes to your employee information are now on your record.'.($homeMoved ? ' Your home on the map moved to your new address.' : '')
+                : 'Your changes to your employee information were not approved: '.$remarks,
+            PortalShellPath::PROFILE,
+            'Open profile',
             ['recordId' => (string) $id],
         );
 
@@ -268,7 +323,7 @@ final class PortalProfileChanges
     }
 
     /**
-     * A request as Settings and the reviewers see it: each detail from what is on record to what is
+     * A request as Profile and the reviewers see it: each detail from what is on record to what is
      * asked, the files asked for, and the files to take off that are still there.
      *
      * @return array<string, mixed>
@@ -344,6 +399,77 @@ final class PortalProfileChanges
         $remove = array_values(array_map('intval', is_array($documents['remove'] ?? null) ? $documents['remove'] : []));
 
         return ['add' => $add, 'remove' => $remove];
+    }
+
+    /**
+     * The province, city and barangay an address line names, for the pickers to open on; null when it
+     * names none. The street stays typed, since a line does not say where the street ends.
+     *
+     * @return array{provinceCode: string, cityCode: ?string, barangayCode: ?string}|null
+     */
+    private function placeOf(?string $line): ?array
+    {
+        if ($line === null || trim($line) === '') {
+            return null;
+        }
+        $place = $this->resolver->identify($line, null);
+
+        return $place['provinceCode'] === null ? null : [
+            'provinceCode' => $place['provinceCode'],
+            'cityCode' => $place['cityCode'],
+            'barangayCode' => $place['barangayCode'],
+        ];
+    }
+
+    /**
+     * An address sent in parts becomes its line, as the registration's does: in the Philippines each
+     * picked code must sit in the one above it, and every part the line needs must be there.
+     */
+    private function joinAddresses(Request $request): void
+    {
+        foreach (self::ADDRESSES as $line => $prefix) {
+            $keys = array_map(static fn (string $part): string => $prefix.ucfirst($part), self::ADDRESS_PARTS);
+            if (array_intersect($keys, array_keys($request->all())) === []) {
+                continue;
+            }
+            /** @var array<string, string|null> $sent */
+            $sent = $request->validate(array_fill_keys($keys, ['sometimes', 'nullable', 'string', 'max:200']));
+            $clean = $this->input->cleaned($sent);
+            $parts = [];
+            foreach (self::ADDRESS_PARTS as $part) {
+                $value = $clean[$prefix.ucfirst($part)] ?? null;
+                $parts[$part] = is_string($value) && trim($value) !== '' ? trim($value) : null;
+            }
+            $joined = $this->places->resolve($parts)['line'];
+            if ($joined === null) {
+                abort(422, $line === 'address'
+                    ? 'Finish your address: every part down to the house number and street.'
+                    : 'Finish your contact person\'s address: every part down to the house number and street.');
+            }
+            $request->merge([$line => $joined]);
+        }
+    }
+
+    /**
+     * Approved changes put on their record: the files to take off that are still theirs, the files
+     * asked for, and the details.
+     *
+     * @param  array<string, string|null>  $fields
+     * @param  array{add: list<array{field: string, fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}>, remove: list<int>}  $documents
+     */
+    private function apply(Employee $employee, array $fields, array $documents): void
+    {
+        foreach ($documents['remove'] as $documentId) {
+            if ($this->documents->fieldOf($employee, $documentId) !== null) {
+                $this->documents->remove($employee, $documentId);
+            }
+        }
+        $this->documents->assertRoom($employee, array_column($documents['add'], 'field'), []);
+        foreach ($documents['add'] as $stored) {
+            $this->documents->attach($employee, $stored);
+        }
+        $this->users->applyInformation($employee, $fields);
+        $this->users->bumpCache();
     }
 
     // The signed-in employee comes with their session's columns only; their details are read from the whole row.

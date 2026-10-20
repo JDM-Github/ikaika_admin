@@ -760,10 +760,10 @@ final class PortalReimbursementRequests
     private function offices(): array
     {
         $offices = [];
-        foreach ($this->connection()->table('teams')->orderBy('name')->pluck('name') as $name) {
-            $trimmed = trim((string) $name);
-            if ($trimmed !== '') {
-                $offices[] = $trimmed;
+        foreach ($this->connection()->table('teams')->orderBy('code')->get(['code', 'name']) as $row) {
+            $name = trim((string) $row->name);
+            if ($name !== '') {
+                $offices[] = trim((string) $row->code).' '.$name;
             }
         }
 

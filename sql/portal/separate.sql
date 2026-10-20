@@ -257,7 +257,7 @@ SELECT 'footer', 'Company footer', NULL, NULL, '<table role="presentation" width
     </td>
   </tr>
 </table>', 'html', id
-FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+FROM employees WHERE id_no IN ('260701-0020', '260720-0020') LIMIT 1; -- John Dave Pega (test data, production data)
 -- A signature footer (database/seeders/email/company-signature.html): the $SIGNATURE token is replaced with the person's own details when it is used
 -- as an email signature (Manage / Signatures, and each employee's Settings). The plain Company footer
 -- above has no token, so it is usable in email but cannot be a signature.
@@ -303,7 +303,7 @@ SELECT 'footer', 'Company signature', NULL, NULL, '<table role="presentation" wi
     </td>
   </tr>
 </table>', 'html', id
-FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+FROM employees WHERE id_no IN ('260701-0020', '260720-0020') LIMIT 1; -- John Dave Pega (test data, production data)
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
 SELECT 'template', 'Portal email test', 'notice', 'Portal email test', '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;border-collapse:collapse;font-family:Inter,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;">
   <tr>
@@ -337,7 +337,7 @@ SELECT 'template', 'Portal email test', 'notice', 'Portal email test', '<table r
     </td>
   </tr>
 </table>', 'html', id
-FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+FROM employees WHERE id_no IN ('260701-0020', '260720-0020') LIMIT 1; -- John Dave Pega (test data, production data)
 
 -- The IKAIKA BIM footer: the company writing as itself (From: IKAIKA BIM), without the portal's lines.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
@@ -387,7 +387,7 @@ SELECT 'footer', 'IKAIKA BIM footer', NULL, NULL, '<table role="presentation" wi
     </td>
   </tr>
 </table>', 'html', id
-FROM employees WHERE id_no = '260701-0020'; -- John Dave Pega
+FROM employees WHERE id_no IN ('260701-0020', '260720-0020') LIMIT 1; -- John Dave Pega (test data, production data)
 
 
 -- ============================================================================
@@ -430,6 +430,7 @@ UPDATE employees
 SET is_developer = 1
 WHERE id_no IN (
     '260701-0020', -- John Dave Pega
+    '260720-0020', -- John Dave Pega, as production's Airtable records him
     '260701-0019', -- Jhon Noriel Malabanan
     '260701-0018', -- Jolas Mendez
     '250407-0009', -- Jolas Mendez
@@ -1027,17 +1028,20 @@ WHERE description IS NULL OR TRIM(description) = '';
 
 CREATE TABLE IF NOT EXISTS leave_types (
     id          INT AUTO_INCREMENT PRIMARY KEY,
+    code        VARCHAR(10)  NOT NULL,
     name        VARCHAR(100) NOT NULL,
+    description VARCHAR(255) NULL,
     created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY leave_types_code (code),
     UNIQUE KEY leave_types_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT IGNORE INTO leave_types (name) VALUES
-    ('01 Vacation Leave'),
-    ('02 Sick Leave'),
-    ('03 Emergency Leave'),
-    ('04 Bereavement Leave'),
-    ('05 Maternity or Paternity Leave');
+INSERT IGNORE INTO leave_types (code, name) VALUES
+    ('01', 'Vacation Leave'),
+    ('02', 'Sick Leave'),
+    ('03', 'Emergency Leave'),
+    ('04', 'Bereavement Leave'),
+    ('05', 'Maternity or Paternity Leave');
 
 -- ============================================================================
 -- TEAMS - Manage / References
@@ -1048,14 +1052,17 @@ INSERT IGNORE INTO leave_types (name) VALUES
 
 CREATE TABLE IF NOT EXISTS teams (
     id          INT AUTO_INCREMENT PRIMARY KEY,
+    code        VARCHAR(10)  NOT NULL,
     name        VARCHAR(100) NOT NULL,
+    description VARCHAR(255) NULL,
     created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY teams_code (code),
     UNIQUE KEY teams_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT IGNORE INTO teams (name) VALUES
-    ('Angeles Pampanga Office'),
-    ('Cebu Office');
+INSERT IGNORE INTO teams (code, name) VALUES
+    ('01', 'Angeles Pampanga Office'),
+    ('02', 'Cebu Office');
 
 -- ============================================================================
 -- EMPLOYEE SIGNATURES - Manage / Users, the portal's own editable copy
@@ -1341,14 +1348,20 @@ CREATE TABLE IF NOT EXISTS projects_scope_progress (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Manage / Map's points: each person's address turned into coordinates once (portal:geocode-homes).
--- Existing databases: create_portal_employee_home_locations.
+-- `latitude`/`longitude` are the point the map shows -- their own home once they set one, else the
+-- address on record. `suggested_*` keep the address on record's own point, which survives them setting
+-- a home, so Use default always returns to their data, never the pin they placed (2026-10-17, user).
+-- Existing databases: create_portal_employee_home_locations + add_suggested_to_portal_employee_home_locations.
 CREATE TABLE IF NOT EXISTS employee_home_locations (
-    employee_id INT          NOT NULL PRIMARY KEY,
-    query       VARCHAR(500) NOT NULL,
-    source      VARCHAR(16)  NOT NULL,
-    latitude    DECIMAL(10,7) NOT NULL,
-    longitude   DECIMAL(10,7) NOT NULL,
-    geocoded_at TIMESTAMP    NULL,
+    employee_id         INT           NOT NULL PRIMARY KEY,
+    query               VARCHAR(500)  NOT NULL,
+    source              VARCHAR(16)   NOT NULL,
+    latitude            DECIMAL(10,7) NOT NULL,
+    longitude           DECIMAL(10,7) NOT NULL,
+    geocoded_at         TIMESTAMP     NULL,
+    suggested_query     VARCHAR(500)  NULL,
+    suggested_latitude  DECIMAL(10,7) NULL,
+    suggested_longitude DECIMAL(10,7) NULL,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

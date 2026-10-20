@@ -9,6 +9,7 @@ use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
 use App\Support\Portal\PortalActivityCopy;
+use App\Support\Portal\PortalDepartmentMailboxes;
 use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalEmailMessages;
 use App\Support\Portal\PortalMailDiagnostics;
@@ -1202,6 +1203,38 @@ class PortalEmailTest extends TestCase
 
         $this->assertSame('ada@ikaikabim.com', EmailMessage::query()->whereKey($sent['id'])->value('from_address'));
         Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->envelope()->from?->address === 'ada@ikaikabim.com');
+    }
+
+    // A department's own From (2026-10-19, user): an MIS administrator sends as dev@, an Engineering one as
+    // engineering@, read from their own department; anyone else is refused rather than sent from noreply.
+    public function test_an_administrator_sends_from_their_department_address_and_others_cannot(): void
+    {
+        Mail::fake();
+        config(['mail.from.address' => 'noreply@ikaikabim.com']);
+        $admin = $this->administrator();
+        $draft = [
+            'category' => 'notice', 'subject' => 'From the team', 'body' => 'x',
+            'audience' => 'custom', 'emails' => ['alpha@supplier.test'], 'sender' => 'department',
+        ];
+
+        foreach (['MIS' => ['IKAIKA MIS', 'dev@ikaikabim.com'], 'Engineering' => ['IKAIKA Engineering', 'engineering@ikaikabim.com']] as $department => [$name, $address]) {
+            $admin->forceFill(['department' => $department, 'role' => 'Admin'])->save();
+            $sent = $this->postJson(self::BASE.'/administration/emails', $draft, $this->headersFor($admin))->assertCreated()->json('data');
+
+            Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->envelope()->from?->address === $address
+                && $mail->envelope()->from->name === $name);
+            $this->assertSame($address, EmailMessage::query()->whereKey($sent['id'])->value('from_address'));
+        }
+
+        // The session tells the composer which mailbox to offer.
+        $this->assertSame(['name' => 'IKAIKA Engineering', 'address' => 'engineering@ikaikabim.com'],
+            $this->postJson(self::BASE.'/auth/login', ['id_no' => $admin->id_no])->json('employee.department_sender'));
+
+        // A department without a mailbox, and a non-administrator, are refused.
+        $admin->forceFill(['department' => 'Finance'])->save();
+        $this->postJson(self::BASE.'/administration/emails', $draft, $this->headersFor($admin))->assertStatus(422);
+        $this->assertNull($this->postJson(self::BASE.'/auth/login', ['id_no' => $admin->id_no])->json('employee.department_sender'));
+        $this->assertNull(PortalDepartmentMailboxes::for(new Employee(['department' => 'MIS', 'role' => 'User'])));
     }
 
     // The composer rebuilds its preview every time writing pauses, so it must not share the ordinary

@@ -11,8 +11,8 @@ use Illuminate\Support\Facades\Schema;
  */
 return new class extends Migration
 {
-    // John Dave Pega, who made them; matched on id_no like is_developer.
-    private const CREATOR_ID_NO = '260701-0020';
+    // John Dave Pega, who made them; matched on id_no like is_developer: the test data's, then production's.
+    private const CREATOR_ID_NOS = ['260701-0020', '260720-0020'];
 
     /**
      * @return list<array{kind: string, name: string, category: ?string, subject: ?string, file: string}>
@@ -37,7 +37,7 @@ return new class extends Migration
         }
 
         $portal = DB::connection('portal');
-        $creator = $portal->table('employees')->where('id_no', self::CREATOR_ID_NO)->value('id');
+        $creator = $portal->table('employees')->whereIn('id_no', self::CREATOR_ID_NOS)->orderBy('id')->value('id');
         if ($creator === null) {
             return;
         }

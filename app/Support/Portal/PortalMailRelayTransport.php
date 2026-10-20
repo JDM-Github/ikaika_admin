@@ -56,8 +56,8 @@ final class PortalMailRelayTransport extends AbstractTransport
             'html' => self::body($email->getHtmlBody()),
             'text' => self::body($email->getTextBody()),
             'fromName' => $from?->getName() ?? '',
-            // The bridge sends from its own address unless the address is one on the domain it sends for.
-            'from' => $from?->getAddress(),
+            // Only a person's own address is passed on: the bridge sends that through Graph, and noreply has no mailbox there.
+            'from' => $from === null || strcasecmp($from->getAddress(), (string) config('mail.from.address')) === 0 ? null : $from->getAddress(),
             'replyTo' => $replyTo?->getAddress(),
         ];
         if ($files !== []) {

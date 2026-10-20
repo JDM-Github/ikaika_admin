@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Middleware\RequirePortalLocation;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -20,8 +19,8 @@ use Illuminate\Support\Facades\Route;
  *   routes/portal/bug-reports.php     Bug Reports (anyone reports, MIS reads)
  */
 
-// Every write is located (company policy, 2026-10-01); RequirePortalLocation lists the exemptions.
-Route::prefix('portal')->middleware(RequirePortalLocation::class)->group(function (): void {
+// No write needs a location since 2026-10-19 (supervisor): logs keep the network's place only, see PortalLocationResolver.
+Route::prefix('portal')->group(function (): void {
     require __DIR__.'/auth.php';
     require __DIR__.'/user.php';
     require __DIR__.'/home.php';

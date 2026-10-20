@@ -27,12 +27,17 @@ final class PortalShellPath
 
     public const LATE_REPORT = '/reports/late-report';
 
+    public const MISSING_REPORTS = '/administration/missing-reports';
+
     // A top-level page, so it has no group in front of it.
     public const EVENT_CALENDAR = '/event-calendar';
 
     public const BUG_REPORTS = '/bug-reports';
 
     public const SETTINGS = '/settings';
+
+    // The person's own details and documents, a sidebar row of its own.
+    public const PROFILE = '/profile';
 
     /**
      * Where an email's inbox notice may open: pages every member can reach, so a notice never links

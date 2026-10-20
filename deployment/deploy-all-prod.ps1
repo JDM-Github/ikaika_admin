@@ -20,18 +20,19 @@ $portalScript = Join-Path $PortalRepo 'script.ps1'
 if (-not (Test-Path $portalScript)) { throw "Portal toolkit entry not found at $portalScript; pass -PortalRepo" }
 
 # The toolkit's entry point in a repo, forwarded verbatim; -Debug is left off, so it is production.
-function Invoke-Toolkit([string]$RepoRoot, [string]$Command, [switch]$NoConfirm) {
+function Invoke-Toolkit([string]$RepoRoot, [string]$Command, [string[]]$Extra = @(), [switch]$NoConfirm) {
     Write-Host "== $Command  ($RepoRoot)"
-    $toolkitArgs = @('-NoProfile', '-File', (Join-Path $RepoRoot 'script.ps1'), $Command)
+    $toolkitArgs = @('-NoProfile', '-File', (Join-Path $RepoRoot 'script.ps1'), $Command) + $Extra
     if ($NoConfirm) { $toolkitArgs += '-Force' }
     & pwsh @toolkitArgs
     if ($LASTEXITCODE -ne 0) { throw "$Command failed in $RepoRoot" }
 }
 
-if (-not $SkipBuild) { Invoke-Toolkit $adminRoot 'build-release' }
+# A bare build-release opens its Build release dialog; any named option (each its own default here) builds straight away.
+if (-not $SkipBuild) { Invoke-Toolkit $adminRoot 'build-release' -Extra @('-Keep', '10') }
 Invoke-Toolkit $adminRoot 'deploy-release' -NoConfirm:$Force
 
-if (-not $SkipBuild) { Invoke-Toolkit $PortalRepo 'build-release' }
+if (-not $SkipBuild) { Invoke-Toolkit $PortalRepo 'build-release' -Extra @('-Platform', 'web') }
 Invoke-Toolkit $PortalRepo 'deploy-release' -NoConfirm:$Force
 
 Write-Host 'Deployed: admin API and portal to production (portal.ikaikabim.com/v2).'

@@ -166,6 +166,20 @@ final class PortalLeaveRequests
                 'reason' => $reason,
             ],
         );
+        // Approvers keep the inbox notice; only the department head is emailed, as overtime and offset are (2026-10-19, user).
+        $this->audit->emailDepartmentHeads(
+            $actor,
+            PortalNotificationType::REQUEST_FILED_LEAVE,
+            'New leave request',
+            PortalActivityCopy::notifyFiled(
+                PortalActivityCopy::actorName($actor, $request, true),
+                'leave request',
+                $dates[0] ?? '',
+                $dates[array_key_last($dates)] ?? '',
+            ),
+            PortalShellPath::MANAGE_REQUESTS,
+            'Open queue',
+        );
         $this->audit->notifyManagers(
             $actor,
             'manage.requests.leave',
@@ -751,10 +765,10 @@ final class PortalLeaveRequests
     private function leaveTypes(): array
     {
         $types = [];
-        foreach ($this->connection()->table('leave_types')->orderBy('name')->pluck('name') as $name) {
-            $trimmed = trim((string) $name);
-            if ($trimmed !== '') {
-                $types[] = $trimmed;
+        foreach ($this->connection()->table('leave_types')->orderBy('code')->get(['code', 'name']) as $row) {
+            $name = trim((string) $row->name);
+            if ($name !== '') {
+                $types[] = trim((string) $row->code).' '.$name;
             }
         }
 

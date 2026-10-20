@@ -213,7 +213,7 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertNotNull($employee);
         $itemId = (int) $portal->table('reimbursements')->insertGetId([
             'reimb_date' => '2026-10-05', 'item' => 'Water Refill', 'cost' => '40.00', 'qty' => 4,
-            'purpose' => 'Office water', 'team' => 'Cebu Office', 'status' => 'Approved',
+            'purpose' => 'Office water', 'team' => '02 Cebu Office', 'status' => 'Approved',
         ]);
         $portal->table('employees_reimbursements')->insert(['employee_id' => $employee->id, 'reimbursement_id' => $itemId]);
         $portal->table('attachments')->insert([

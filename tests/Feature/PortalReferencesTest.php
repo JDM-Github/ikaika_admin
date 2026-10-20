@@ -223,16 +223,19 @@ class PortalReferencesTest extends TestCase
         $page = $this->withToken($token)->getJson(self::BASE)->assertOk();
         $this->assertNotEmpty($page->json('data.leaveTypes'));
 
-        $added = $this->withToken($token)->postJson(self::BASE.'/leave-types', ['name' => 'Test Leave 9901'])->assertOk();
+        $added = $this->withToken($token)->postJson(self::BASE.'/leave-types', ['name' => 'Test Leave 9901', 'description' => 'A test leave type'])->assertOk();
         $row = collect($added->json('data.leaveTypes'))->firstWhere('name', 'Test Leave 9901');
         $this->assertNotNull($row);
+        $this->assertMatchesRegularExpression('/^\d{2,}$/', (string) $row['code']);
+        $this->assertSame('A test leave type', $row['description']);
+        $this->assertSame(0, $row['usages']);
 
         $this->withToken($token)->postJson(self::BASE.'/leave-types', ['name' => 'test leave 9901'])->assertStatus(422);
         $this->withToken($token)->postJson(self::BASE.'/leave-types', ['name' => '   '])->assertStatus(422);
 
-        $this->withToken($token)->patchJson(self::BASE.'/leave-types/'.$row['id'], ['name' => 'Test Leave 9902'])
+        $this->withToken($token)->patchJson(self::BASE.'/leave-types/'.$row['id'], ['name' => 'Test Leave 9902', 'description' => 'Edited'])
             ->assertOk()
-            ->assertJsonPath('data.leaveTypes', fn (array $types): bool => collect($types)->contains(fn (array $type): bool => $type['id'] === $row['id'] && $type['name'] === 'Test Leave 9902'));
+            ->assertJsonPath('data.leaveTypes', fn (array $types): bool => collect($types)->contains(fn (array $type): bool => $type['id'] === $row['id'] && $type['name'] === 'Test Leave 9902' && $type['code'] === $row['code'] && $type['description'] === 'Edited'));
         $this->withToken($token)->patchJson(self::BASE.'/leave-types/99999999', ['name' => 'Gone'])->assertNotFound();
 
         $this->withToken($token)->deleteJson(self::BASE.'/leave-types/'.$row['id'])
@@ -249,16 +252,19 @@ class PortalReferencesTest extends TestCase
         $page = $this->withToken($token)->getJson(self::BASE)->assertOk();
         $this->assertNotEmpty($page->json('data.teams'));
 
-        $added = $this->withToken($token)->postJson(self::BASE.'/teams', ['name' => 'Test Office 9901'])->assertOk();
+        $added = $this->withToken($token)->postJson(self::BASE.'/teams', ['name' => 'Test Office 9901', 'description' => 'A test office'])->assertOk();
         $row = collect($added->json('data.teams'))->firstWhere('name', 'Test Office 9901');
         $this->assertNotNull($row);
+        $this->assertMatchesRegularExpression('/^\d{2,}$/', (string) $row['code']);
+        $this->assertSame('A test office', $row['description']);
+        $this->assertSame(0, $row['usages']);
 
         $this->withToken($token)->postJson(self::BASE.'/teams', ['name' => 'test office 9901'])->assertStatus(422);
         $this->withToken($token)->postJson(self::BASE.'/teams', ['name' => '   '])->assertStatus(422);
 
-        $this->withToken($token)->patchJson(self::BASE.'/teams/'.$row['id'], ['name' => 'Test Office 9902'])
+        $this->withToken($token)->patchJson(self::BASE.'/teams/'.$row['id'], ['name' => 'Test Office 9902', 'description' => 'Edited'])
             ->assertOk()
-            ->assertJsonPath('data.teams', fn (array $teams): bool => collect($teams)->contains(fn (array $team): bool => $team['id'] === $row['id'] && $team['name'] === 'Test Office 9902'));
+            ->assertJsonPath('data.teams', fn (array $teams): bool => collect($teams)->contains(fn (array $team): bool => $team['id'] === $row['id'] && $team['name'] === 'Test Office 9902' && $team['code'] === $row['code'] && $team['description'] === 'Edited'));
         $this->withToken($token)->patchJson(self::BASE.'/teams/99999999', ['name' => 'Gone'])->assertNotFound();
 
         $this->withToken($token)->deleteJson(self::BASE.'/teams/'.$row['id'])
