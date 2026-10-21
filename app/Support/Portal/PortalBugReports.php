@@ -36,7 +36,8 @@ use RuntimeException;
  * this was -- and MIS may file it under another. The page, notices and log name it by its kind.
  *
  * Each report becomes a Jira issue (PortalBugReportsJira). Once it is one, its kind and status are the
- * issue's too: a change here changes Jira first, and Jira's are read back.
+ * issue's too: a change here changes Jira first, and Jira's are read back. A report records the server it was
+ * sent on (2026-10-21, user: production and staging share one project), and only that server touches its issue.
  */
 final class PortalBugReports
 {
@@ -151,7 +152,8 @@ final class PortalBugReports
 
         // On its way to Jira as it comes in, unless MIS turned that off (2026-10-19).
         $toJira = $this->jira->shouldSendNew();
-        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored, $toJira, $reporterId): int {
+        $channel = $this->jira->channel();
+        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored, $toJira, $reporterId, $channel): int {
             $id = (int) DB::connection('portal')->table('bug_reports')->insertGetId([
                 'kind' => $kind,
                 'jira_state' => $toJira ? PortalBugReportsJira::STATE_PENDING : null,
@@ -161,6 +163,8 @@ final class PortalBugReports
                 'status' => self::STATUS_NEW,
                 'note' => null,
                 'reporter_id' => $reporterId,
+                // The server it was sent on: production and staging share one Jira project (2026-10-21, user).
+                'channel' => $channel,
                 // The day only: a time to the second could be lined up against what the sender did next.
                 'reported_on' => now()->toDateString(),
                 'updated_at' => null,
@@ -317,6 +321,11 @@ final class PortalBugReports
         }
         if (! $this->jira->isConfigured()) {
             abort(503, 'Jira is not connected yet.');
+        }
+        // Another server's report, or a link into another project, is that server's to send (2026-10-21, user).
+        $elsewhere = $this->jira->whyNotHandled($row);
+        if ($elsewhere !== null) {
+            abort(409, $elsewhere);
         }
         // By hand, a report starts its automatic tries over.
         $portal->table('bug_reports')->where('id', $id)->update(['jira_attempts' => 0]);
@@ -559,6 +568,8 @@ final class PortalBugReports
                 'thumbUrl' => $this->cloudinary->thumbUrl((string) $image->file_url, (string) $image->mime_type),
             ], $images),
             'jira' => $this->jira->present($row),
+            // Whether this server follows its Jira side; false for another server's report (2026-10-21, user).
+            'jiraHere' => $this->jira->handles($row),
         ];
     }
 

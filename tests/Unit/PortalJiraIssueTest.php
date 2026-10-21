@@ -57,6 +57,26 @@ class PortalJiraIssueTest extends TestCase
         $this->assertTrue(PortalJiraIssue::isForReport($named, 42));
     }
 
+    // One project for production and staging (2026-10-21, user): staging labels its issues and names itself in the mark.
+    public function test_another_server_than_production_labels_its_issues_and_names_itself_in_the_mark(): void
+    {
+        $row = (object) ['id' => 42, 'kind' => 'bug', 'title' => 'Save does nothing', 'description' => 'It broke.', 'page' => null, 'reported_on' => '2026-10-21'];
+
+        $staging = PortalJiraIssue::fields($row, 'IPS', '10001', 'ikaika-portal', null, 'staging');
+        $production = PortalJiraIssue::fields($row, 'IPS', '10001', 'ikaika-portal');
+
+        $this->assertSame(['ikaika-portal', 'staging'], $staging['labels']);
+        $this->assertSame(
+            'Sent anonymously from the IKAIKA portal (staging report #42).',
+            array_slice($staging['description']['content'], -1)[0]['content'][0]['text'],
+        );
+        // Each server takes only its own issue for the same report number.
+        $this->assertTrue(PortalJiraIssue::isForReport($staging, 42, 'staging'));
+        $this->assertFalse(PortalJiraIssue::isForReport($staging, 42));
+        $this->assertTrue(PortalJiraIssue::isForReport($production, 42));
+        $this->assertFalse(PortalJiraIssue::isForReport($production, 42, 'staging'));
+    }
+
     /**
      * @return array<string, array{string, string}>
      */

@@ -1437,6 +1437,9 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     fixed_in      VARCHAR(20)  NULL,
     -- Who sent it, only when they chose to be named (2026-10-20). Existing databases: add_portal_bug_report_reporter.
     reporter_id   INT UNSIGNED NULL,
+    -- The server it was sent on, its API channel (2026-10-21): production and staging share one Jira project, and
+    -- each follows only its own. Null counts as production's. Existing databases: add_portal_bug_report_channel.
+    channel       VARCHAR(32)  NULL,
     reported_on DATE         NOT NULL,
     updated_at  TIMESTAMP    NULL,
     -- The Jira issue it became, and where sending it got to (2026-10-19): state is null (never sent),
@@ -1450,6 +1453,9 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     jira_attached  TINYINT UNSIGNED NOT NULL DEFAULT 0,
     jira_attempts  TINYINT UNSIGNED NOT NULL DEFAULT 0,
     jira_synced_at TIMESTAMP        NULL,
+    -- When this server last asked Jira to make the issue, until it is in step (2026-10-21): what a retry's search
+    -- and a read-back go by. Existing databases: add_portal_bug_report_channel.
+    jira_create_started_at TIMESTAMP NULL,
     INDEX bug_reports_status_reported_on_index (status, reported_on),
     UNIQUE KEY bug_reports_jira_issue_id_unique (jira_issue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

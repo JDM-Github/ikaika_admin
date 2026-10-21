@@ -252,13 +252,15 @@ final class PortalJiraClient
 
     /**
      * The portal's issues whose description holds these words, oldest first, with the description to check
-     * them by: how a retry finds what an unanswered create made. Jira matches words, not the exact text.
+     * them by: how a retry finds what an unanswered create made. Jira matches words, not the exact text. The
+     * labels say whose issues they may be, and a create's day keeps out any older issue (2026-10-21).
      *
      * @return list<array{id: string, key: string, fields: array<string, mixed>}>
      */
-    public function issuesDescribing(string $words, string $label): array
+    public function issuesDescribing(string $words, string $labelsJql, ?string $createdSince = null): array
     {
-        $jql = 'project = "'.$this->projectKey().'" AND labels = "'.$label.'" AND description ~ "\\"'.$words.'\\"" ORDER BY created ASC';
+        $since = $createdSince === null ? '' : ' AND created >= "'.$createdSince.'"';
+        $jql = 'project = "'.$this->projectKey().'" AND '.$labelsJql.$since.' AND description ~ "\\"'.$words.'\\"" ORDER BY created ASC';
         $fields = implode(',', [...self::SYNC_FIELDS, 'description']);
         $body = $this->read('GET', '/rest/api/3/search/jql?'.http_build_query(['jql' => $jql, 'fields' => $fields, 'maxResults' => 10]))->json();
         $issues = [];

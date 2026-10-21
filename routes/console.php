@@ -13,6 +13,8 @@ use App\Support\Portal\PortalEmailMessages;
 use App\Support\Portal\PortalEmployeeDocuments;
 use App\Support\Portal\PortalHomeLocations;
 use App\Support\Portal\PortalJiraClient;
+use App\Support\Portal\PortalJiraEnvironment;
+use App\Support\Portal\PortalJiraIssue;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
 use App\Support\Portal\PortalPlaces;
@@ -377,7 +379,7 @@ Artisan::command('portal:jira-sync', function (PortalBugReportsJira $jira, Porta
     return 0;
 })->purpose('Send the issues and requests waiting for Jira, and read every linked one back');
 
-Artisan::command('portal:jira-check', function (PortalJiraClient $client, PortalBugReportsJira $jira): int {
+Artisan::command('portal:jira-check', function (PortalJiraClient $client, PortalBugReportsJira $jira, PortalJiraEnvironment $environment): int {
     $missing = $client->missingSettings();
     if ($missing !== []) {
         $this->error('Jira is not configured: set '.implode(', ', $missing).' (JIRA_BASE_URL as https://<site>.atlassian.net).');
@@ -390,6 +392,8 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         $this->info('Account: '.$account['displayName'].' ('.$account['accountId'].')');
         $project = $client->project();
         $this->info('Project: '.$project['key'].' - '.$project['name']);
+        // One project for production and staging (2026-10-21, user): how this server's issues are told apart.
+        $this->info('Files as: '.$environment->channel().' - labels '.implode(', ', $environment->labels()).'; marked '.str_replace('#0', '#N', PortalJiraIssue::reportMark(0, $environment->label())));
         foreach (PortalBugReports::KINDS as $kind => $words) {
             $type = $jira->issueTypeFor($kind);
             if ($type['id'] === null) {
@@ -415,7 +419,7 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
     $this->line('A Jira admin registers the webhook in Jira settings > System > WebHooks:');
     $this->line('  URL:    '.url(ApiPath::join((string) config('products.channel'), 'jira', 'webhook')));
     $this->line('  Events: Issue updated, Issue deleted');
-    $this->line('  JQL:    project = '.$client->projectKey().' AND labels = '.config('services.jira.label'));
+    $this->line('  JQL:    '.$environment->webhookJql($client->projectKey()));
     $this->line('  Secret: the value of JIRA_WEBHOOK_SECRET');
 
     return $failed ? 1 : 0;

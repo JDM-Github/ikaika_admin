@@ -37,6 +37,9 @@ class PortalBugReportsJiraTest extends TestCase
         parent::setUp();
         Cache::flush();
         DB::connection('core')->table('settings')->where('product', 'portal')->where('setting_key', 'jira.auto_send')->delete();
+        // As production, which files as it always has and follows the reports from before a channel was kept
+        // (2026-10-21, user); the staging tests below say so. The routes stay under the test's own channel.
+        config(['products.channel' => 'production']);
     }
 
     public function test_mis_sends_a_feature_request_and_jira_gets_what_it_says_and_no_names(): void
@@ -467,7 +470,8 @@ class PortalBugReportsJiraTest extends TestCase
     public function test_a_retry_finds_the_issue_an_unanswered_create_made_by_the_report_number_it_carries(): void
     {
         $this->connectJira();
-        $id = $this->report(['jira_state' => 'failed', 'jira_attempts' => 1]);
+        // A create was started (2026-10-21): only then can an earlier try have made an issue to find.
+        $id = $this->report(['jira_state' => 'failed', 'jira_attempts' => 1, 'jira_create_started_at' => '2026-10-19 09:00:00']);
         $said = fn (string $mark): array => ['type' => 'doc', 'version' => 1, 'content' => [
             ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Sent anonymously from the IKAIKA portal '.$mark.'.']]],
         ]];
@@ -486,7 +490,133 @@ class PortalBugReportsJiraTest extends TestCase
 
         Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST' && str_ends_with($request->url(), '/rest/api/3/issue'));
         Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), 'description ~ "\"report '.$id.'\""')
-            && str_contains(urldecode($request->url()), 'labels = "ikaika-portal"'));
+            && str_contains(urldecode($request->url()), 'labels = "ikaika-portal"')
+            && str_contains(urldecode($request->url()), 'created >= "2026-10-18"'));
+        $this->assertNull(DB::connection('portal')->table('bug_reports')->where('id', $id)->value('jira_create_started_at'));
+    }
+
+    // One project for production and staging (2026-10-21, user): staging labels what it files and names itself in the mark.
+    public function test_staging_files_with_its_own_label_and_mark(): void
+    {
+        config(['products.channel' => 'staging']);
+        $this->connectJira();
+        $id = $this->report(['channel' => 'staging']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug']]]),
+            self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10042', 'key' => 'IKP-12'], 201),
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-12', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]]),
+        ]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/'.$id.'/jira')
+            ->assertOk()->assertJsonPath('data.jira.key', 'IKP-12')->assertJsonPath('data.jiraHere', true);
+
+        $created = Http::recorded(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue')->first()[0];
+        $this->assertSame(['ikaika-portal', 'staging'], $created['fields']['labels']);
+        $this->assertStringContainsString('(staging report #'.$id.')', $created->body());
+        // No create was started before this one, so nothing was searched for first.
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/search/jql'));
+    }
+
+    // Each server's retry takes only its own issue, even when Jira's word search finds the other's.
+    public function test_a_retry_takes_only_the_issue_its_own_server_made(): void
+    {
+        $this->connectJira();
+        config(['products.channel' => 'staging']);
+        $id = $this->report(['channel' => 'staging', 'jira_state' => 'failed', 'jira_create_started_at' => '2026-10-21 02:00:00']);
+        $said = fn (string $mark): array => ['type' => 'doc', 'version' => 1, 'content' => [
+            ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Sent anonymously from the IKAIKA portal '.$mark.'.']]],
+        ]];
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => [
+                ['id' => '10070', 'key' => 'IKP-40', 'fields' => ['description' => $said('(report #'.$id.')')]],
+                ['id' => '10071', 'key' => 'IKP-41', 'fields' => ['description' => $said('(staging report #'.$id.')')]],
+            ]]),
+            self::SITE.'/rest/api/3/issue/10071*' => Http::response(['id' => '10071', 'key' => 'IKP-41', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]]),
+        ]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/'.$id.'/jira')
+            ->assertOk()->assertJsonPath('data.jira.key', 'IKP-41');
+
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), 'labels = "ikaika-portal" AND labels = "staging"'));
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST' && str_ends_with($request->url(), '/rest/api/3/issue'));
+    }
+
+    // The Test Server carries copies of production's reports: there they stay production's to send and to change.
+    public function test_another_servers_report_is_left_to_that_server(): void
+    {
+        Queue::fake();
+        $this->connectJira();
+        config(['products.channel' => 'staging']);
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        DB::connection('portal')->table('bug_reports')->update(['jira_state' => 'sent']);
+        $copied = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        $unsent = $this->report();
+        $sandbox = $this->report(['channel' => 'staging', 'jira_issue_id' => '10043', 'jira_issue_key' => 'SBX-3', 'jira_state' => 'failed']);
+        Http::preventStrayRequests();
+
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$copied.'/jira')
+            ->assertStatus(409)->assertJsonPath('message', "It came here with another server's data, so that server sends it to Jira and follows its issue.");
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$sandbox.'/jira')
+            ->assertStatus(409)->assertJsonPath('message', 'SBX-3 is in another Jira project than IKP, so this server leaves it as it is.');
+        // Its status changes in the portal only: the issue is the other server's.
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$copied, ['status' => 'fixed'])
+            ->assertOk()->assertJsonPath('data.status', 'fixed')->assertJsonPath('data.jiraHere', false);
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/send-all')->assertOk()->assertJsonPath('queued', 0);
+
+        Http::assertNothingSent();
+        Queue::assertNothingPushed();
+        $this->assertNull(DB::connection('portal')->table('bug_reports')->where('id', $unsent)->value('jira_state'));
+    }
+
+    // A report moved on before it reached Jira (2026-10-21): its new issue goes to its column, not New.
+    public function test_a_report_closed_before_it_reached_jira_lands_in_its_column(): void
+    {
+        $this->connectJira();
+        $id = $this->report(['status' => 'fixed', 'jira_state' => 'pending']);
+        $moved = false;
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug']]]),
+            self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10080', 'key' => 'IKP-50'], 201),
+            self::SITE.'/rest/api/3/issue/10080/transitions' => function (Request $request) use (&$moved) {
+                if ($request->method() === 'POST') {
+                    $moved = true;
+
+                    return Http::response(null, 204);
+                }
+
+                return Http::response(['transitions' => $this->boardMoves()]);
+            },
+            self::SITE.'/rest/api/3/issue/10080*' => function () use (&$moved) {
+                $status = $moved ? ['name' => 'Done', 'statusCategory' => ['key' => 'indeterminate']] : ['name' => 'To Do', 'statusCategory' => ['key' => 'new']];
+
+                return Http::response(['id' => '10080', 'key' => 'IKP-50', 'fields' => ['status' => $status]]);
+            },
+        ]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/'.$id.'/jira')
+            ->assertOk()->assertJsonPath('data.status', 'fixed')->assertJsonPath('data.jira.status', 'Done');
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && str_ends_with($request->url(), '/transitions') && $request['transition'] === ['id' => '41']);
+    }
+
+    // Until a new issue is in step with its report, a read-back takes nothing from it.
+    public function test_a_read_back_while_a_create_is_under_way_takes_no_status(): void
+    {
+        $this->connectJira();
+        $id = $this->report(['status' => 'fixed', 'jira_state' => 'pending', 'jira_issue_id' => '10081', 'jira_issue_key' => 'IKP-51', 'jira_create_started_at' => '2026-10-21 02:00:00']);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+            ['id' => '10081', 'key' => 'IKP-51', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]],
+        ], 'issueErrors' => []])]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $this->assertSame(['fixed', 'To Do'], [$row->status, $row->jira_status]);
     }
 
     private function connectJira(): void

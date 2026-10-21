@@ -9,6 +9,7 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 ### Added
 
 - Every answer names the server version and channel that sent it.
+- Production and staging share one Jira project and each server follows only its own issues.
 
 ## 1.0.0+2 - 2026-10-19
 

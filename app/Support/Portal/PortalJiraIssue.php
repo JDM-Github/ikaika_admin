@@ -12,7 +12,8 @@ namespace App\Support\Portal;
  * board's cards are (2026-10-20, user): IP- and the title's words joined by hyphens, each capitalised but
  * the small ones -- "save does nothing" is IP-Save-Does-Nothing. One label, the portal's own, which the admin
  * webhook filters on (2026-10-20, user): the work type already says the kind, and the report's number is
- * in the description, where a retry finds it again.
+ * in the description, where a retry finds it again. A server other than production -- staging shares the
+ * project since 2026-10-21 -- adds its channel as a second label and in that mark, "(staging report #N)".
  *
  * Back from Jira, by the board's column first (2026-10-19, user): To Do is New, In Progress is In progress,
  * In Review -- or a testing or staging column -- is In review (2026-10-20, user), Done is Fixed -- or Won't fix when it was resolved as not to be done -- and Cancelled is
@@ -48,32 +49,33 @@ final class PortalJiraIssue
      *
      * @return array<string, mixed>
      */
-    public static function fields(object $row, string $projectKey, string $issueTypeId, string $label, ?string $senderName = null): array
+    public static function fields(object $row, string $projectKey, string $issueTypeId, string $label, ?string $senderName = null, ?string $environment = null): array
     {
         $kind = (string) ($row->kind ?? PortalBugReports::KIND_BUG);
         $kindLabel = PortalBugReports::KINDS[$kind]['label'] ?? PortalBugReports::KINDS[PortalBugReports::KIND_BUG]['label'];
+        $mark = self::reportMark((int) $row->id, $environment);
 
         return [
             'project' => ['key' => $projectKey],
             'issuetype' => ['id' => $issueTypeId],
             'summary' => self::summary((string) $row->title),
-            'labels' => [$label],
+            'labels' => [$label, ...($environment === null ? [] : [$environment])],
             'description' => self::description((string) $row->description, [
                 'Kind: '.$kindLabel,
                 ...($row->page === null || trim((string) $row->page) === '' ? [] : ['Page: '.trim((string) $row->page)]),
                 'Reported on: '.substr((string) $row->reported_on, 0, 10),
                 $senderName === null
-                    ? 'Sent anonymously from the IKAIKA portal '.self::reportMark((int) $row->id).'.'
-                    : 'Sent from the IKAIKA portal by '.$senderName.' '.self::reportMark((int) $row->id).'.',
+                    ? 'Sent anonymously from the IKAIKA portal '.$mark.'.'
+                    : 'Sent from the IKAIKA portal by '.$senderName.' '.$mark.'.',
             ]),
         ];
     }
 
     // The report's number as its issue's description says it, which finds the issue again when the answer to
-    // its create was lost.
-    public static function reportMark(int $reportId): string
+    // its create was lost; another server's than production names itself first, so each finds only its own.
+    public static function reportMark(int $reportId, ?string $environment = null): string
     {
-        return '(report #'.$reportId.')';
+        return '('.($environment === null ? '' : $environment.' ').'report #'.$reportId.')';
     }
 
     /**
@@ -82,7 +84,7 @@ final class PortalJiraIssue
      *
      * @param  array<string, mixed>  $fields
      */
-    public static function isForReport(array $fields, int $reportId): bool
+    public static function isForReport(array $fields, int $reportId, ?string $environment = null): bool
     {
         $description = $fields['description'] ?? null;
         if (! is_array($description)) {
@@ -95,7 +97,7 @@ final class PortalJiraIssue
             }
         });
 
-        return str_contains($text, self::reportMark($reportId));
+        return str_contains($text, self::reportMark($reportId, $environment));
     }
 
     /**

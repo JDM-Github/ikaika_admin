@@ -46,10 +46,23 @@ class PortalJiraWebhookTest extends TestCase
             'description' => 'The month view jumps from Saturday to Monday.',
             'status' => 'new',
             'reported_on' => '2026-10-19',
+            'channel' => 'development',
             'jira_issue_id' => '10042',
             'jira_issue_key' => 'IKP-12',
             'jira_state' => 'sent',
         ]);
+    }
+
+    // One project for production and staging (2026-10-21, user): a copied report's issue is the other server's.
+    public function test_a_delivery_about_another_servers_report_is_ignored(): void
+    {
+        $this->withoutDefer();
+        DB::connection('portal')->table('bug_reports')->where('id', $this->reportId)->update(['channel' => null]);
+        Http::preventStrayRequests();
+
+        $this->deliver('jira:issue_updated', '10042')->assertAccepted()->assertJsonPath('status', 'ignored');
+
+        Http::assertNothingSent();
     }
 
     public function test_a_signed_update_of_a_linked_issue_reads_it_fresh_and_moves_the_report(): void

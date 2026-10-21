@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -22,9 +23,13 @@ use RuntimeException;
  * five times while the switch is on, and a refused account does not count against the report.
  *
  * A report Jira no longer has is marked deleted -- unless every issue asked about at once came back
- * missing, which says the account lost sight of the project rather than that the issues went. Only issues
- * in the configured project are read back, so a copy of production's reports on the Test Server, which
- * names a sandbox project, is left alone.
+ * missing, which says the account lost sight of the project rather than that the issues went.
+ *
+ * Production and staging share one project (2026-10-21, user), so a server follows only the reports it was sent
+ * on, whose issue -- if one is live -- is in the configured project (handles()): the Test Server's copies of
+ * production's reports, and its old links into the sandbox it used before, are left as they are. A retry searches
+ * for an issue only after this server really started making one, and a new issue is first put in step with its
+ * report -- moved to its column, a duplicate labelled and linked -- before a read-back may take anything from it.
  */
 final class PortalBugReportsJira
 {
@@ -53,11 +58,39 @@ final class PortalBugReportsJira
     public function __construct(
         private readonly PortalJiraClient $jira,
         private readonly PortalCloudinary $cloudinary,
+        private readonly PortalJiraEnvironment $environment,
     ) {}
 
     public function isConfigured(): bool
     {
         return $this->jira->isConfigured();
+    }
+
+    // The channel a new report is recorded as sent on.
+    public function channel(): string
+    {
+        return $this->environment->channel();
+    }
+
+    // This server follows the report's Jira side: it was sent here, and any live issue is in this project.
+    public function handles(object $row): bool
+    {
+        return $this->whyNotHandled($row) === null;
+    }
+
+    // Why this server leaves a report's Jira side alone, or null when it does not.
+    public function whyNotHandled(object $row): ?string
+    {
+        if (! $this->environment->ownsRow($row)) {
+            return 'It came here with another server\'s data, so that server sends it to Jira and follows its issue.';
+        }
+        $key = $row->jira_issue_key ?? null;
+        $project = $this->jira->projectKey();
+        if ($key === null || $row->jira_state === self::STATE_DELETED || $project === null || str_starts_with(strtoupper((string) $key), $project.'-')) {
+            return null;
+        }
+
+        return $key.' is in another Jira project than '.$project.', so this server leaves it as it is.';
     }
 
     // Whether new reports go to Jira on their own; on until someone turns it off.
@@ -87,7 +120,7 @@ final class PortalBugReportsJira
     /**
      * What the page shows about Jira as a whole.
      *
-     * @return array{connection: string, connectionMessage: ?string, checkedAt: ?string, autoSend: bool, projectKey: ?string}
+     * @return array{connection: string, connectionMessage: ?string, checkedAt: ?string, autoSend: bool, projectKey: ?string, environment: ?string}
      */
     public function settings(): array
     {
@@ -99,13 +132,15 @@ final class PortalBugReportsJira
             'checkedAt' => $connection['checkedAt'],
             'autoSend' => $this->autoSend(),
             'projectKey' => $this->jira->projectKey(),
+            // The label this server adds in the shared project, or null on production.
+            'environment' => $this->environment->label(),
         ];
     }
 
-    // Jira owns the report: an issue it still has.
+    // Jira owns the report: an issue it still has, which this server follows.
     public function owns(object $row): bool
     {
-        return $row->jira_issue_id !== null && $row->jira_state !== self::STATE_DELETED;
+        return $row->jira_issue_id !== null && $row->jira_state !== self::STATE_DELETED && $this->handles($row);
     }
 
     /**
@@ -141,7 +176,7 @@ final class PortalBugReportsJira
         }
         try {
             $row = $this->row($id);
-            if ($row !== null) {
+            if ($row !== null && $this->handles($row)) {
                 $this->sendSteps($row);
             }
         } finally {
@@ -158,7 +193,7 @@ final class PortalBugReportsJira
      */
     public function queueUnsent(): array
     {
-        $ids = DB::connection('portal')->table('bug_reports')
+        $ids = $this->handled(DB::connection('portal')->table('bug_reports'))
             ->where(fn ($query) => $query->whereNull('jira_state')->orWhere('jira_state', self::STATE_FAILED))
             ->orderBy('id')
             ->pluck('id')
@@ -185,18 +220,7 @@ final class PortalBugReportsJira
             $this->jira->editIssue($issueId, ['issuetype' => ['id' => $this->issueTypeId((string) $changes['kind'])]]);
         }
         if (isset($changes['status']) && $changes['status'] !== $row->status) {
-            $wanted = (string) $changes['status'];
-            $move = null;
-            foreach ($this->jira->transitions($issueId) as $candidate) {
-                if (PortalJiraIssue::portalStatus(['status' => $candidate['to']], '') === $wanted) {
-                    $move = $candidate;
-                    break;
-                }
-            }
-            if ($move === null) {
-                throw new RuntimeException('Jira has no way to move '.$row->jira_issue_key.' to '.PortalBugReports::STATUS_LABELS[$wanted].' from where it is.', 409);
-            }
-            $this->jira->transition($issueId, $move['id']);
+            $this->jira->transition($issueId, $this->findMove($issueId, (string) $changes['status'], (string) $row->jira_issue_key)['id']);
         }
         $issue = $this->jira->issue($issueId);
         if ($issue !== null) {
@@ -208,10 +232,26 @@ final class PortalBugReportsJira
         }
     }
 
+    /**
+     * The move that lands the issue in the column a portal status stands for, from where it is now.
+     *
+     * @return array{id: string, to: array<string, mixed>}
+     */
+    private function findMove(string $issueId, string $wanted, string $issueKey): array
+    {
+        foreach ($this->jira->transitions($issueId) as $candidate) {
+            if (PortalJiraIssue::portalStatus(['status' => $candidate['to']], '') === $wanted) {
+                return $candidate;
+            }
+        }
+
+        throw new RuntimeException('Jira has no way to move '.$issueKey.' to '.PortalBugReports::STATUS_LABELS[$wanted].' from where it is.', 409);
+    }
+
     // Read one issue back, as a webhook delivery asks; a report Jira no longer has is marked deleted.
     public function syncIssue(string $issueId): void
     {
-        $row = DB::connection('portal')->table('bug_reports')->where('jira_issue_id', $issueId)->first();
+        $row = $this->environment->scope(DB::connection('portal')->table('bug_reports'))->where('jira_issue_id', $issueId)->first();
         if ($row === null || ! $this->owns($row)) {
             return;
         }
@@ -234,7 +274,7 @@ final class PortalBugReportsJira
         $synced = 0;
         $deleted = 0;
         $prefix = $this->jira->projectKey().'-';
-        DB::connection('portal')->table('bug_reports')
+        $this->environment->scope(DB::connection('portal')->table('bug_reports'))
             ->whereNotNull('jira_issue_id')
             ->where('jira_state', '!=', self::STATE_DELETED)
             ->where('jira_issue_key', 'like', str_replace(['%', '_'], ['\%', '\_'], $prefix).'%')
@@ -275,7 +315,7 @@ final class PortalBugReportsJira
         $sent = 0;
         $failed = 0;
         if ($this->autoSend()) {
-            $waiting = DB::connection('portal')->table('bug_reports')
+            $waiting = $this->handled(DB::connection('portal')->table('bug_reports'))
                 ->whereIn('jira_state', [self::STATE_PENDING, self::STATE_FAILED])
                 ->where('jira_attempts', '<', self::MAX_ATTEMPTS)
                 ->orderBy('id')
@@ -309,6 +349,11 @@ final class PortalBugReportsJira
             }
             if ($row->jira_issue_id === null || $row->jira_state === self::STATE_DELETED) {
                 $row = $this->linkIssue($row);
+            }
+            if ($row->jira_create_started_at !== null) {
+                $this->putInStep($row);
+                DB::connection('portal')->table('bug_reports')->where('id', $id)->update(['jira_create_started_at' => null]);
+                $row = $this->row($id) ?? $row;
             }
             $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $id)->orderBy('id')->get()->values();
             for ($index = (int) $row->jira_attached; $index < $images->count(); $index++) {
@@ -351,14 +396,17 @@ final class PortalBugReportsJira
         }
     }
 
-    // The issue the report becomes: one an earlier, unanswered try already made, or a new one.
+    // The issue the report becomes: one an earlier, unanswered try of this server's already made, or a new one.
     private function linkIssue(object $row): object
     {
-        $label = (string) config('services.jira.label', 'ikaika-portal');
+        $environment = $this->environment->label();
         $issue = null;
-        if ($row->jira_state !== null && $row->jira_state !== self::STATE_DELETED) {
-            foreach ($this->jira->issuesDescribing('report '.$row->id, $label) as $found) {
-                if (PortalJiraIssue::isForReport($found['fields'], (int) $row->id)) {
+        // Only a create this server really started can have made an issue, and only since the day before it.
+        $started = $row->jira_create_started_at ?? null;
+        if ($started !== null) {
+            $since = date('Y-m-d', strtotime(substr((string) $started, 0, 10).' -1 day') ?: time());
+            foreach ($this->jira->issuesDescribing('report '.$row->id, $this->environment->searchJql(), $since) as $found) {
+                if (PortalJiraIssue::isForReport($found['fields'], (int) $row->id, $environment)) {
                     $issue = $found;
                     break;
                 }
@@ -366,7 +414,14 @@ final class PortalBugReportsJira
         }
         if ($issue === null) {
             $kind = array_key_exists((string) $row->kind, PortalBugReports::KINDS) ? (string) $row->kind : PortalBugReports::KIND_BUG;
-            $issue = $this->jira->createIssue(PortalJiraIssue::fields($row, (string) $this->jira->projectKey(), $this->issueTypeId($kind), $label, $this->senderName($row)));
+            // The type first: a refused createmeta makes nothing, so there is nothing for a retry to look for.
+            $typeId = $this->issueTypeId($kind);
+            if ($started === null) {
+                DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update(['jira_create_started_at' => now('UTC')->format('Y-m-d H:i:s')]);
+            }
+            $issue = $this->jira->createIssue(PortalJiraIssue::fields(
+                $row, (string) $this->jira->projectKey(), $typeId, (string) config('services.jira.label', 'ikaika-portal'), $this->senderName($row), $environment,
+            ));
         }
         DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update([
             'jira_issue_id' => $issue['id'],
@@ -416,6 +471,16 @@ final class PortalBugReportsJira
      */
     private function apply(object $row, array $issue): void
     {
+        // A new issue not yet in step with its report says nothing about the report yet.
+        if (($row->jira_create_started_at ?? null) !== null) {
+            DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update([
+                'jira_issue_key' => $issue['key'],
+                'jira_status' => PortalJiraIssue::statusName($issue['fields']),
+                'jira_synced_at' => now('UTC')->format('Y-m-d H:i:s'),
+            ]);
+
+            return;
+        }
         $status = PortalJiraIssue::portalStatus($issue['fields'], (string) $row->status);
         // The portal's own Fixed in stands until the issue names a fix version.
         $fixedIn = PortalJiraIssue::fixedIn($issue['fields']) ?? $row->fixed_in;
@@ -471,6 +536,34 @@ final class PortalBugReportsJira
         $employee = ($row->reporter_id ?? null) === null ? null : Employee::query()->find((int) $row->reporter_id, ['id', 'first_name', 'last_name']);
 
         return $employee === null ? null : PortalSubmittedReportPresenter::memberName($employee->first_name, $employee->last_name);
+    }
+
+    /**
+     * A new issue starts where its report already is: a report moved on before it reached Jira -- a closed one
+     * send-all carries there, say -- lands in its own column rather than being reset to New by the read-back.
+     */
+    private function putInStep(object $row): void
+    {
+        if ((string) $row->status === PortalBugReports::STATUS_NEW) {
+            return;
+        }
+        $issueId = (string) $row->jira_issue_id;
+        $issue = $this->jira->issue($issueId);
+        if ($issue === null || PortalJiraIssue::portalStatus($issue['fields'], '') === (string) $row->status) {
+            return;
+        }
+        $this->jira->transition($issueId, $this->findMove($issueId, (string) $row->status, (string) $row->jira_issue_key)['id']);
+    }
+
+    // The reports whose Jira side this server follows, as handles() says, for the queries that send.
+    private function handled(Builder $query): Builder
+    {
+        $prefix = str_replace(['%', '_'], ['\%', '\_'], (string) $this->jira->projectKey()).'-%';
+
+        return $this->environment->scope($query)->where(fn ($inner) => $inner
+            ->whereNull('jira_issue_key')
+            ->orWhere('jira_state', self::STATE_DELETED)
+            ->orWhere('jira_issue_key', 'like', $prefix));
     }
 
     private function markDeleted(int $id): void

@@ -50,8 +50,9 @@ return [
     ],
 
     // Jira Cloud for Issues & Requests (2026-10-19): a service account's API token creates an issue per report
-    // in one project and reads its progress back. Production and the Test Server each name their own project
-    // (a sandbox on staging); with any of base URL, email, token or project unset, nothing goes to Jira.
+    // in one project and reads its progress back. Production and the Test Server share that project (2026-10-21,
+    // user): each follows only the issues it filed, and staging's carry a staging label (PortalJiraEnvironment).
+    // With any of base URL, email, token or project unset, nothing goes to Jira.
     'jira' => [
         'base_url' => env('JIRA_BASE_URL'),
         // A scoped API token is refused at the site and answered only through Atlassian's gateway for it, which
@@ -64,6 +65,8 @@ return [
         'webhook_secret' => env('JIRA_WEBHOOK_SECRET'),
         // Every issue the portal makes carries it, and the admin webhook's JQL filters on it.
         'label' => 'ikaika-portal',
+        // The API channel that files as it always has; any other adds its channel as a second label.
+        'production_channel' => 'production',
         // The issue type each kind is filed as, by name; a project without one falls back to Task.
         'issue_types' => [
             'bug' => env('JIRA_ISSUE_TYPE_BUG', 'Bug'),

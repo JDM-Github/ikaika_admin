@@ -89,8 +89,9 @@ class PortalJiraSyncTest extends TestCase
         $first = $this->report(['jira_state' => 'pending']);
         $second = $this->report(['jira_state' => 'pending']);
         Http::preventStrayRequests();
+        // Neither has started a create, so the first thing asked is the project's issue types (2026-10-21).
         Http::fake([
-            self::SITE.'/rest/api/3/search/jql*' => Http::response(['errorMessages' => ['Client must be authenticated to access this resource.']], 401),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['errorMessages' => ['Client must be authenticated to access this resource.']], 401),
         ]);
 
         $this->artisan('portal:jira-sync')->expectsOutputToContain('Jira: Jira HTTP 401')->assertExitCode(1);
@@ -125,9 +126,29 @@ class PortalJiraSyncTest extends TestCase
         $this->artisan('portal:jira-check')
             ->expectsOutputToContain('Account: IKAIKA Portal Bot')
             ->expectsOutputToContain('Feature request -> Task (no Story in the project)')
+            // One project for every server (2026-10-21, user): this one says how its issues are told apart.
+            ->expectsOutputToContain('Files as: development - labels ikaika-portal, development; marked (development report #N)')
             ->expectsOutputToContain('/api/development/jira/webhook')
-            ->expectsOutputToContain('JQL:    project = IKP AND labels = ikaika-portal')
+            ->expectsOutputToContain('JQL:    project = IKP AND labels = ikaika-portal AND labels = development')
             ->assertExitCode(0);
+    }
+
+    // The Test Server carries copies of production's reports (2026-10-21, user): in the shared project they stay production's.
+    public function test_another_servers_reports_are_never_sent_or_read_back(): void
+    {
+        $copied = $this->report(['channel' => null, 'jira_state' => 'sent', 'jira_issue_id' => '10005', 'jira_issue_key' => 'IKP-5']);
+        $waitingThere = $this->report(['channel' => 'production', 'jira_state' => 'pending']);
+        $own = $this->report(['jira_state' => 'sent', 'jira_issue_id' => '10003', 'jira_issue_key' => 'IKP-3']);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+            ['id' => '10003', 'key' => 'IKP-3', 'fields' => ['status' => ['name' => 'In Progress', 'statusCategory' => ['key' => 'indeterminate']]]],
+        ], 'issueErrors' => []])]);
+
+        $this->artisan('portal:jira-sync')->expectsOutputToContain('Sent 0, failed 0, read back 1, gone from Jira 0.')->assertExitCode(0);
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue/bulkfetch' && $request['issueIdsOrKeys'] === ['10003']);
+        Http::assertSentCount(1);
+        $this->assertSame(['sent', 'pending', 'in_progress'], [$this->state($copied), $this->state($waitingThere), $this->column($own, 'status')]);
     }
 
     public function test_the_check_fails_on_a_refused_account_without_showing_its_token(): void
@@ -172,6 +193,8 @@ class PortalJiraSyncTest extends TestCase
             'description' => 'The month view jumps from Saturday to Monday.',
             'status' => 'new',
             'reported_on' => '2026-10-19',
+            // Sent on this server, as a test's is unless it says otherwise.
+            'channel' => 'development',
             ...$columns,
         ]);
     }
