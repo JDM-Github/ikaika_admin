@@ -47,9 +47,19 @@
            act on any more. -->
       <StackPanel x:Name="OptionsPanel">
 
+        <!-- Build from: first, because a tag carries its own version, and so decides whether the
+             version choices below apply at all. A tag is rebuilt for staging only (2026-10-21). -->
+        <Border Style="{StaticResource CardPanel}" Margin="0,0,0,10">
+          <StackPanel>
+            <TextBlock Style="{StaticResource Body}" FontWeight="SemiBold" Text="Build from" Margin="0,0,0,8" />
+            <ComboBox x:Name="FromCombo" />
+            <TextBlock x:Name="FromNote" Style="{StaticResource Subtle}" Text="" TextWrapping="Wrap" Margin="0,6,0,0" />
+          </StackPanel>
+        </Border>
+
         <!-- Version. The numbers beside each choice come from the toolkit's shared
              Get-VersionChoices, so this repo bumps by the same rules as every other. -->
-        <Border Style="{StaticResource CardPanel}" Margin="0,0,0,10">
+        <Border x:Name="VersionCard" Style="{StaticResource CardPanel}" Margin="0,0,0,10">
           <StackPanel>
             <TextBlock Style="{StaticResource Body}" FontWeight="SemiBold" Text="Version" Margin="0,0,0,8" />
             <WrapPanel>
@@ -131,6 +141,10 @@
             </CheckBox>
           </StackPanel>
         </Border>
+
+        <!-- What Build runs, as it would be typed: anything picked here once can be typed next time. -->
+        <TextBlock x:Name="WillRunText" Style="{StaticResource Subtle}" FontFamily="{StaticResource MonoFont}"
+                   Text="" TextWrapping="Wrap" Margin="2,10,0,0" />
 
         <TextBlock x:Name="ErrorText" Style="{StaticResource Body}" Foreground="{StaticResource Danger}"
                    Text="" Margin="2,10,0,0" />

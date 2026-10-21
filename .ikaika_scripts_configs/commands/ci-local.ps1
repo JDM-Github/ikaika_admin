@@ -5,8 +5,11 @@
 # What is built is what Bitbucket has: an uncommitted change, or a branch that differs from Bitbucket's, stops the run before anything is built.
 # GitHub is best effort - the version commit and tag pushed there - since GitHub may be what is down; a failure there warns and changes nothing else.
 #
+# -BuildFrom is the form's build_from (2026-10-21, user): a tag rebuilt as it was, for staging, never bumped or tagged.
+#
 #     .\script.ps1 ci-local -Upload                                a staging upload of what Bitbucket has
 #     .\script.ps1 ci-local -Version patch -Upload                 bumped, tagged and installed on the Test Server
+#     .\script.ps1 ci-local -BuildFrom v1.0.0+3 -Upload            that tag rebuilt and installed on the Test Server
 #     .\script.ps1 ci-local -Upload -PlanOnly                      the plan and every phase it would run, nothing run
 
 [CmdletBinding()]
@@ -19,6 +22,9 @@ param(
     # same rebuilds as is, keep takes the next build number, patch/minor/major bump and tag; an explicit x.y.z is a custom version.
     [ArgumentCompletions('same', 'keep', 'patch', 'minor', 'major')]
     [string]$Version = 'same',
+    # Rebuild this tag as it was, for staging, as the form's build_from does. The version tags git has here are offered, newest
+    # version first; Update fetches the ones pushed since.
+    [string]$BuildFrom = '',
     # Upload to the server after packaging: composer, the swap, migrations, then the health check.
     [switch]$Upload,
     # Leave GitHub alone: no version commit or tag pushed there.
@@ -41,7 +47,7 @@ if ($Help) {
 
   Usage
     .\script.ps1 ci-local [-Target staging|production] [-ConfirmProduction]
-                          [-Version same|keep|patch|minor|major|x.y.z] [-Upload] [-NoGitHub] [-PlanOnly]
+                          [-Version same|keep|patch|minor|major|x.y.z | -BuildFrom <tag>] [-Upload] [-NoGitHub] [-PlanOnly]
 
   The same choices as the workflow's form, checked by the same ci-release-plan.ps1,
   then run here phase by phase: the deploy config from the sealed archive, the
@@ -62,6 +68,10 @@ if ($Help) {
     .\script.ps1 ci-local -Version patch -Upload
         Bumped, the changelog filed and the version tagged on Bitbucket,
         packaged, and installed on the Test Server.
+
+    .\script.ps1 ci-local -BuildFrom v1.0.0+3 -Upload
+        That tag's sources rebuilt as they were and installed on the Test
+        Server, to test the version it names. Nothing is bumped or tagged.
 
   Stops before building when this checkout has uncommitted changes or differs
   from Bitbucket's branch: what is built is what Bitbucket has.
@@ -159,7 +169,7 @@ try {
     $custom = $Version -match '^\d+\.\d+\.\d+$'
     $answers = [ordered]@{
         version = $(if ($custom) { 'custom' } else { $Version }); custom_version = $(if ($custom) { $Version } else { '' }); sync_bitbucket = $true
-        target = $Target; confirm_production = [bool]$ConfirmProduction; upload = [bool]$Upload
+        target = $Target; confirm_production = [bool]$ConfirmProduction; upload = [bool]$Upload; build_from = $BuildFrom
     }
     $planFile = Join-Path $work 'build-release.json'
     $planEnv = Join-Path $work 'plan-env'
@@ -257,7 +267,7 @@ try {
     }
 
     # ---------------------------------------------------------------- build, then the version, then the upload - the estimator's order
-    Write-Phase "Build the API for $Target with build-release$(if ($tagging) { ", bumping $env:VERSION_BUMP" })"
+    Write-Phase "Build the API for $Target with build-release$(if ($BuildFrom) { ", rebuilding $BuildFrom as it was" } elseif ($tagging) { ", bumping $env:VERSION_BUMP" })"
     $packaged = Invoke-Step 'package' @'
 $plan = $env:PACKAGE_JSON | ConvertFrom-Json -AsHashtable
 ./script.ps1 build-release @plan
@@ -307,11 +317,35 @@ exit $LASTEXITCODE
         $color = if ($outcomes[$key] -eq 'success') { 'Green' } else { 'Red' }
         Write-Host ("  {0,-34} {1}" -f $names[$key], $(if ($outcomes[$key] -eq 'success') { 'done' } else { 'failed' })) -ForegroundColor $color
     }
-    Write-Host ("  {0,-34} {1}" -f 'Version', "$(Get-AppVersion)$(if ($tag) { " ($tag)" } else { ' (unchanged)' })")
+    # A rebuild is the version its tag carries, not this checkout's.
+    $shown = if ($BuildFrom) { "$((Invoke-Git show "refs/tags/$($BuildFrom):VERSION").Lines | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1)".Trim() } else { Get-AppVersion }
+    Write-Host ("  {0,-34} {1}" -f 'Version', "$shown$(if ($BuildFrom) { " (rebuilt from $BuildFrom)" } elseif ($tag) { " ($tag)" } else { ' (unchanged)' })")
     Write-Host ''
     $failed = @('package', 'upload' | Where-Object { $outcomes[$_] -eq 'failure' })
     if ($deploy -and -not $outcomes.Contains('upload')) { $failed += 'upload (never ran)' }
     exit $(if ($failed.Count) { 1 } else { 0 })
 } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Read by the manifest generator and run alone, so it finds the repo from the working directory itself: build-release's FromTag list.
+function Get-DialogChoiceParameters { return , @('BuildFrom') }
+
+function Get-DialogChoices([string]$Parameter) {
+    if ($Parameter -ne 'BuildFrom') { return , @() }
+    $dir = (Get-Location).Path
+    while ($dir -and -not (Test-Path -LiteralPath (Join-Path $dir 'ikaika_scripts.env'))) { $dir = Split-Path $dir -Parent }
+    if (-not $dir) { return , @() }
+    . (Join-Path $dir '.ikaika_scripts_configs\lib\tag-checkout.ps1')
+    $tags = Get-VersionTags -Root $dir -Needs 'VERSION'
+    return , @($tags | Select-Object -First 30)
+}
+
+function Get-DialogRefresh([string]$Parameter, [switch]$Preview) {
+    if ($Parameter -ne 'BuildFrom' -or $Preview) { return '' }
+    $before = @(& git tag 2>$null).Count
+    & git fetch --tags --quiet 2>$null | Out-Null
+    $after = @(& git tag 2>$null).Count
+    if ($after -gt $before) { return "fetched, $($after - $before) new tag(s)" }
+    return "fetched, $after tag(s)"
 }

@@ -20,6 +20,13 @@ if (-not $manifest) { $manifest = 'VERSION' }
 $manifestPath = Join-Path $repoRoot $manifest
 $version = if ($manifest -like '*.json') { "$((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).version)" }
 else { "$(Get-Content -LiteralPath $manifestPath | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1)".Trim() }
+# A rebuild from a tag (2026-10-21, user) is the version the tag carries, not the checkout's.
+if ($env:BUILD_FROM) {
+    $shown = @(& git -C $repoRoot show "refs/tags/$($env:BUILD_FROM):$manifest" 2>$null)
+    $tagged = if ($manifest -like '*.json') { try { "$((($shown -join "`n") | ConvertFrom-Json).version)" } catch { '' } }
+    else { "$($shown | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } | Select-Object -First 1)".Trim() }
+    if ($tagged) { $version = $tagged }
+}
 $staging = $env:BUILD_DEBUG -eq 'true'
 # The plan's job variables, which GITHUB_ENV hands every later step; the step's own env wins where it names one.
 $deploys = if ($env:DEPLOYS) { $env:DEPLOYS } else { $env:UPLOADING }
@@ -31,7 +38,8 @@ $tag = if ($staging) { "v$version" } else { "v$version-released" }
 $state = @{ success = 'done'; failure = 'failed'; skipped = 'skipped'; cancelled = 'cancelled' }
 function Get-State([string]$Outcome) { if ($state.ContainsKey($Outcome)) { return $state[$Outcome] } return 'did not run' }
 
-$rows = @("| Version | $version$(if ($bump) { " (bump: $bump)" } else { ' (unchanged)' }) |")
+$rows = @("| Version | $version$(if ($env:BUILD_FROM) { ' (as its tag has it)' } elseif ($bump) { " (bump: $bump)" } else { ' (unchanged)' }) |")
+if ($env:BUILD_FROM) { $rows += "| Built from | $env:BUILD_FROM, rebuilt as it was |" }
 if ($env:WINDOWS_OUTCOME -and $env:WINDOWS_OUTCOME -ne 'skipped') { $rows += "| Windows, built first | $(Get-State $env:WINDOWS_OUTCOME) |" }
 if ($env:UBUNTU_OUTCOME -and $env:UBUNTU_OUTCOME -ne 'skipped') { $rows += "| Ubuntu's builds | $(Get-State $env:UBUNTU_OUTCOME) |" }
 $rows += "| Build | $(Get-State $env:BUILD_OUTCOME) |"

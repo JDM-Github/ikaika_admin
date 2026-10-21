@@ -1,10 +1,16 @@
 # Builds deployment/out/central-platform.zip for Bluehost; see deployment/README.md.
+# -Root packages another checkout's sources - a tag's worktree, for build-release -FromTag - into this one's out/. That checkout is
+# thrown away afterwards, so its Vite build is not put back for artisan serve. Anything added to the package below later must be
+# optional, as sql/transaction_tracker/patches is, or every older tag stops packaging.
 param(
-    [string]$AssetUrl = '/central-api'
+    [string]$AssetUrl = '/central-api',
+    [string]$Root = ''
 )
 
 $ErrorActionPreference = 'Stop'
-$root  = Split-Path $PSScriptRoot -Parent
+# $root below is $Root - PowerShell's names ignore case - so whether the sources are another checkout's is kept first.
+$isElsewhere = [bool]$Root
+$root  = if ($isElsewhere) { (Resolve-Path -LiteralPath $Root).Path } else { Split-Path $PSScriptRoot -Parent }
 $out   = Join-Path $PSScriptRoot 'out'
 $stage = Join-Path $out 'central-platform'
 $zip   = Join-Path $out 'central-platform.zip'
@@ -50,9 +56,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'zip failed' }
 }
 finally {
-    # Put the local build back to root-relative URLs for php artisan serve.
+    # Put the local build back to root-relative URLs for php artisan serve; another checkout's is thrown away.
     Remove-Item Env:ASSET_URL -ErrorAction SilentlyContinue
-    npm run build | Out-Null
+    if (-not $isElsewhere) { npm run build | Out-Null }
     Pop-Location
 }
 

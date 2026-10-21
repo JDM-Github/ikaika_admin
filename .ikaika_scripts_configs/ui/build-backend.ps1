@@ -17,14 +17,40 @@
 # $null from every Build click once already. State goes through $state, a hashtable,
 # which is captured by reference and works either way.
 #
+# Releases (2026-10-21, user): Build from lists this checkout, then the version tags; a tag is rebuilt as it was, so it takes
+# no version and goes to staging only. A production upload is a release, so it is tagged and never same. The rules are
+# build-release's (lib/release-policy.ps1); the form only keeps a refused set of choices from being picked.
+#
 # Contract with the markup - Test-UiAsset checks exactly this list, without rendering:
 function Get-BuildReleaseUiContract {
     return @('SubtitleText', 'OptionsPanel', 'ProductionRadio', 'StagingRadio', 'DeployCheck',
         'DeployHintText', 'DryRunCheck', 'CleanCheck', 'KeepBox', 'RunHereCheck', 'ErrorText',
+        'FromCombo', 'FromNote', 'VersionCard', 'WillRunText',
         'VerSameRadio', 'VerKeepRadio', 'VerPatchRadio', 'VerMinorRadio', 'VerMajorRadio', 'VerCustomRadio',
         'VerCustomBox', 'VersionHintText', 'TagCheck',
         'ConsolePanel', 'ConsoleStatusText', 'ConsoleOutput', 'ConsoleInput', 'SendButton',
         'CopyLogButton', 'CancelButton', 'BackButton', 'BuildButton')
+}
+
+# The run the picked options make: build-release's arguments by name, and the same as they would be typed, so the run-here
+# child, the caller and the Will run line can never be handed different ones. Pure, so release-tags.tests.ps1 checks it alone.
+function Get-BuildBackendArguments($Opts) {
+    $splat = [ordered]@{ Keep = [int]$Opts.Keep }
+    if ($Opts.Debug) { $splat.Debug = $true }
+    if ($Opts.FixTarget) { $splat.FixTarget = $true }
+    if ($Opts.FromTag) {
+        $splat.FromTag = "$($Opts.FromTag)"
+    } elseif ($Opts.BumpNeeded) {
+        $splat.Bump = "$($Opts.Version)"
+        if ($Opts.Tag) { $splat.Tag = $true }
+    }
+    if ($Opts.Deploy) {
+        $splat.Deploy = $true
+        if ($Opts.DryRun) { $splat.DryRun = $true }
+        if ($Opts.Clean) { $splat.Clean = $true }
+    }
+    $line = @(foreach ($name in $splat.Keys) { if ($splat[$name] -is [bool]) { "-$name" } else { "-$name $($splat[$name])" } }) -join ' '
+    return @{ Splat = $splat; Line = $line }
 }
 
 # The bump the radios currently describe - same, keep, patch, minor, major or an x.y.z - or $null if custom holds
@@ -61,7 +87,9 @@ function Show-BuildReleaseDialog {
         [string]$Version,
         [string]$RepoRoot,
         # This repo's build-release, which the run-here child is.
-        [string]$BuildRelease
+        [string]$BuildRelease,
+        # The version tags Build from offers after this checkout, newest version first.
+        [string[]]$Tags = @()
     )
 
     $ui = New-XamlWindow 'build-backend.xaml'
@@ -82,6 +110,12 @@ function Show-BuildReleaseDialog {
     }
 
     $el.SubtitleText.Text = "$ProjectName $Version"
+
+    # This checkout first, as it stands; then every version tag, which is rebuilt as it was.
+    [void]$el.FromCombo.Items.Add("This checkout ($Version)")
+    foreach ($tag in @($Tags)) { if ($tag) { [void]$el.FromCombo.Items.Add("$tag") } }
+    $el.FromCombo.SelectedIndex = 0
+    $pickedTag = { if ($el.FromCombo.SelectedIndex -gt 0) { "$($el.FromCombo.SelectedItem)" } else { '' } }
 
     # Shared arithmetic, not a second copy of it - lib/app-version.ps1; VERSION holds x.y.z+n.
     $choices = Get-VersionChoices ($Version -replace '\+.*$', '')
@@ -143,6 +177,70 @@ function Show-BuildReleaseDialog {
     [void]$el.StagingRadio.Add_Checked($syncTarget)
     & $syncTarget
     & $syncDeploy
+
+    # The options as Build would take them, for the Will run line too; a custom version that is not x.y.z reads as same here,
+    # and Build itself refuses it.
+    $currentOptions = {
+        $keep = 0
+        [void][int]::TryParse("$($el.KeepBox.Text)".Trim(), [ref]$keep)
+        $picked = Resolve-PickedVersion $el $choices
+        $tag = & $pickedTag
+        return @{
+            Debug      = [bool]$el.StagingRadio.IsChecked
+            Deploy     = [bool]$el.DeployCheck.IsChecked
+            DryRun     = [bool]$el.DryRunCheck.IsChecked
+            Clean      = [bool]$el.CleanCheck.IsChecked
+            Keep       = $(if ($keep -ge 1) { $keep } else { 10 })
+            RunHere    = [bool]$el.RunHereCheck.IsChecked
+            FromTag    = $tag
+            Version    = $(if ($null -eq $picked) { 'same' } else { $picked })
+            BumpNeeded = (-not $tag) -and $null -ne $picked -and $picked -ne 'same'
+            Tag        = (-not $tag) -and [bool]$el.TagCheck.IsChecked
+            FixTarget  = [bool](& $targetProblem)
+        }
+    }
+    # A tag takes no version and goes to staging only; a production upload is a release, tagged and never same. Each choice
+    # the run would refuse is made unpickable rather than left to fail.
+    $syncRelease = {
+        $tag = & $pickedTag
+        if ($tag) {
+            $el.VerSameRadio.IsChecked = $true
+            $el.StagingRadio.IsChecked = $true
+            $el.TagCheck.IsChecked = $false
+            $el.FromNote.Text = "Rebuilds $tag as it was, for staging: its sources in a worktree of their own, with the version it carries. Nothing is bumped or tagged."
+        } else {
+            $el.FromNote.Text = 'Builds this checkout as it stands.'
+        }
+        $el.VersionCard.IsEnabled = -not $tag
+        $el.ProductionRadio.IsEnabled = -not $tag
+        $releasing = $el.ProductionRadio.IsChecked -and $el.DeployCheck.IsChecked -and -not $el.DryRunCheck.IsChecked
+        $el.VerSameRadio.IsEnabled = -not $releasing
+        if ($releasing) {
+            if ($el.VerSameRadio.IsChecked) { $el.VerKeepRadio.IsChecked = $true }
+            $el.TagCheck.IsChecked = $true
+            $el.TagCheck.IsEnabled = $false
+            $picked = Resolve-PickedVersion $el $choices
+            if ($null -ne $picked) {
+                $el.VersionHintText.Text = "Will build and package as $(Get-PickedVersionName $picked $choices), tagged v<version>-released: a production upload is a release."
+            }
+        }
+        $el.WillRunText.Text = "Will run: .\script.ps1 build-release $((Get-BuildBackendArguments (& $currentOptions)).Line)"
+    }
+    $syncAll = {
+        & $syncVersion
+        & $syncRelease
+    }
+    foreach ($n in @('VerSameRadio', 'VerKeepRadio', 'VerPatchRadio', 'VerMinorRadio', 'VerMajorRadio', 'VerCustomRadio', 'ProductionRadio', 'StagingRadio')) {
+        [void]$el[$n].Add_Checked($syncAll)
+    }
+    foreach ($n in @('DeployCheck', 'DryRunCheck', 'CleanCheck', 'TagCheck')) {
+        [void]$el[$n].Add_Checked($syncAll)
+        [void]$el[$n].Add_Unchecked($syncAll)
+    }
+    [void]$el.FromCombo.Add_SelectionChanged($syncAll)
+    [void]$el.VerCustomBox.Add_TextChanged($syncAll)
+    [void]$el.KeepBox.Add_TextChanged($syncRelease)
+    & $syncAll
 
     # Verbatim: Read-ConsolePending hands over raw chunks, partial lines included, which
     # is what makes an unterminated "Continue? [y/N]: " prompt visible at all.
@@ -256,23 +354,11 @@ function Show-BuildReleaseDialog {
             $el.ErrorText.Text = 'Keep must be a whole number of 1 or more.'
             return
         }
-        $picked = Resolve-PickedVersion $el $choices
-        if ($null -eq $picked) {
+        if (-not (& $pickedTag) -and $null -eq (Resolve-PickedVersion $el $choices)) {
             $el.ErrorText.Text = 'Custom version must be x.y.z.'
             return
         }
-        $opts = @{
-            Debug      = [bool]$el.StagingRadio.IsChecked
-            Deploy     = [bool]$el.DeployCheck.IsChecked
-            DryRun     = [bool]$el.DryRunCheck.IsChecked
-            Clean      = [bool]$el.CleanCheck.IsChecked
-            Keep       = $keep
-            RunHere    = [bool]$el.RunHereCheck.IsChecked
-            Version    = $picked
-            BumpNeeded = ($picked -ne 'same')
-            Tag        = [bool]$el.TagCheck.IsChecked
-            FixTarget  = [bool](& $targetProblem)
-        }
+        $opts = & $currentOptions
         $state.Result = $opts
 
         if (-not $opts.RunHere) { $ui.Window.Close(); return }
@@ -283,11 +369,7 @@ function Show-BuildReleaseDialog {
         $q = '"'
         $state.Steps = @(
             @{ Label = 'build-release'; Exe = $exe
-               Args  = "-NoProfile -ExecutionPolicy Bypass -File $q$($state.Script)$q -Keep $($opts.Keep)" +
-                       $(if ($opts.Debug) { ' -Debug' } else { '' }) +
-                       $(if ($opts.FixTarget) { ' -FixTarget' } else { '' }) +
-                       $(if ($opts.BumpNeeded) { " -Bump $($opts.Version)" + $(if ($opts.Tag) { ' -Tag' } else { '' }) } else { '' }) +
-                       $(if ($opts.Deploy) { ' -Deploy' + $(if ($opts.DryRun) { ' -DryRun' } else { '' }) + $(if ($opts.Clean) { ' -Clean' } else { '' }) } else { '' }) }
+               Args  = "-NoProfile -ExecutionPolicy Bypass -File $q$($state.Script)$q $((Get-BuildBackendArguments $opts).Line)" }
         )
         $state.StepIndex = 0
 
