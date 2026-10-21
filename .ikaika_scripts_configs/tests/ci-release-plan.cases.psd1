@@ -16,8 +16,8 @@
         @{ Name = 'a custom version'; Answers = @{ version = 'custom'; custom_version = '1.2.0' }; Exit = 0; Plan = @{ Bump = '1.2.0' }; Outputs = @{ VERSION_BUMP = '1.2.0' } }
         @{ Name = 'a custom version that is not x.y.z is refused'; Answers = @{ version = 'custom'; custom_version = '1.2' }; Exit = 1; Says = 'custom_version must be x.y.z' }
         @{ Name = 'a bump from a tag is refused'; Answers = @{ version = 'patch' }; Ref = 'refs/tags/v1.0.0+1'; Exit = 1; Says = 'A version bump is committed to a branch' }
-        # There is no production yet; the plan says so rather than building for a folder nobody named.
-        @{ Name = 'production with no production set up is refused'; Answers = @{ target = 'production'; upload = $true; confirm_production = $true }; Exit = 1; Says = 'There is no production to build for yet' }
+        # Production has been set up since 2026-10-15 (release.assetUrl): with its box ticked it builds and uploads as staging does.
+        @{ Name = 'production with its box ticked is built and uploaded'; Answers = @{ target = 'production'; upload = $true; confirm_production = $true }; Exit = 0; Plan = @{ Debug = $false }; Outputs = @{ PURPOSES = 'deploy-production'; DEPLOY_PLAN = '{"Debug":false,"Force":true}' } }
         @{ Name = 'a target the form cannot send is refused'; Answers = @{ target = 'qa' }; Exit = 1; Says = "target is 'qa'" }
         # A bump is kept as a GitHub release, where it costs no Actions storage; anything else stays an artifact.
         @{ Name = 'a bump is kept as a GitHub release, its artifact a day'; Answers = @{ version = 'patch' }; Exit = 0; Outputs = @{ RELEASING = 'true'; RETENTION = '1' }; Says = '| Kept as | a GitHub release' }

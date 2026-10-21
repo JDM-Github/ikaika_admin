@@ -208,7 +208,7 @@ Write-Host "  Built $archive - $([Math]::Round((Get-Item -LiteralPath $archive).
 
 # The release copy, named as the estimator's are - <artifact.prefix>-<version>[-debug].zip with its .sha256 - in dist/,
 # which the GitHub release and the run's artifact take; server/deploy-release keeps the fixed name above. The newest -Keep stay.
-$prefix = "$(($config | Where-Object { $_ -match '^artifact\.prefix=' } | Select-Object -First 1) -replace '^[^=]*=', '')".Trim()
+$prefix = "$(Get-ProjectValue 'artifact.prefix' '')".Trim()
 if ($prefix -and $version) {
     $dist = Join-Path $repoRoot 'dist'
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
