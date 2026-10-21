@@ -68,7 +68,10 @@ class PortalClashFlowProjectsTest extends TestCase
 
         $lead = $this->tokenFor('cf-lead');
         $this->withToken($lead)->getJson(self::BASE.'/projects')->assertJsonPath('canCreateTeam', true);
-        $this->assertSame([$own], array_column($this->withToken($lead)->getJson(self::BASE.'/linkable?search=CF-TEST-01')->json('data'), 'id'));
+        $ownRows = $this->withToken($lead)->getJson(self::BASE.'/linkable?search=CF-TEST-01')->json('data');
+        $this->assertSame([$own], array_column($ownRows, 'id'));
+        // Like View Projects: my place on it and its reported hours (none yet).
+        $this->assertSame(['lead', 0], [$ownRows[0]['myRole'], $ownRows[0]['hours']]);
         $this->withToken($lead)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $theirs])->assertStatus(403);
         $this->withToken($lead)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $own])->assertCreated()->assertJsonPath('data.role', 'lead');
 

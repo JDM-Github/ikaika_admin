@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
@@ -44,8 +45,11 @@ final class PortalClashFlowProjects
 
         $portalIds = array_values(array_filter(array_map(static fn (array $row): ?int => $row['project']->portal_project_id === null ? null : (int) $row['project']->portal_project_id, $rows)));
         $teams = $this->teams($portalIds);
+        $hours = $this->hours(array_values(array_filter(array_map(static fn (array $row): ?object => $row['project']->portal_id === null ? null
+            : (object) ['id' => $row['project']->portal_id, 'department' => $row['project']->department, 'status' => $row['project']->status], $rows))));
 
-        return array_map(fn (array $row): array => $this->present($row['project'], $row['role'], $teams, $employee), $rows);
+        return array_map(fn (array $row): array => $this->present($row['project'], $row['role'], $teams, $employee)
+            + ['hours' => $row['project']->portal_id === null ? 0.0 : ($hours[(int) $row['project']->portal_id] ?? 0.0)], $rows);
     }
 
     // The person's role on a ClashFlow project, or null when they may not see it.
@@ -104,7 +108,9 @@ final class PortalClashFlowProjects
      * department ('' = all); a ProjectAdmin sees the ones they lead in their own department. Done and
      * Closed projects come last with canLink false.
      *
-     * @return list<array{id: int, number: string, name: string, department: string, status: string, canLink: bool}>
+     * Like the portal's View Projects, each row carries its reported hours and my place on it (lead or member).
+     *
+     * @return list<array{id: int, number: string, name: string, department: string, status: string, canLink: bool, hours: float, myRole: ?string}>
      */
     public function linkable(Employee $employee, string $search, string $department = ''): array
     {
@@ -129,20 +135,26 @@ final class PortalClashFlowProjects
             $query->where(fn ($match) => $match->where('project_number', 'like', $like)->orWhere('project_name', 'like', $like));
         }
 
-        return $query
+        $rows = $query
             ->orderByRaw("CASE WHEN LOWER(COALESCE(status, '')) IN ('done', 'closed') THEN 1 ELSE 0 END")
             ->orderByDesc('project_number')->limit(100)
-            ->get(['id', 'project_number', 'project_name', 'department', 'status'])
-            ->map(fn (object $row): array => [
-                'id' => (int) $row->id,
-                'number' => (string) ($row->project_number ?? ''),
-                'name' => trim((string) ($row->project_name ?? '')),
-                'department' => (string) ($row->department ?? ''),
-                'status' => (string) ($row->status ?? ''),
-                'canLink' => ! $this->isFinished($row->status),
-            ])
-            ->values()
+            ->get(['id', 'project_number', 'project_name', 'department', 'status', 'project_lead_email'])
             ->all();
+        $hours = $this->hours($rows);
+        $memberOf = $this->memberOf($employee);
+        $email = $this->email($employee);
+
+        return array_map(fn (object $row): array => [
+            'id' => (int) $row->id,
+            'number' => (string) ($row->project_number ?? ''),
+            'name' => trim((string) ($row->project_name ?? '')),
+            'department' => (string) ($row->department ?? ''),
+            'status' => (string) ($row->status ?? ''),
+            'canLink' => ! $this->isFinished($row->status),
+            'hours' => $hours[(int) $row->id] ?? 0.0,
+            'myRole' => $email !== '' && strtolower(trim((string) $row->project_lead_email)) === $email ? 'lead'
+                : ($memberOf->has((int) $row->id) ? 'member' : null),
+        ], $rows);
     }
 
     /**
@@ -208,8 +220,7 @@ final class PortalClashFlowProjects
         $isAdmin = $this->isAdmin($employee);
         // A ProjectAdmin views only their own department; an Admin views every department.
         $viewsDepartment = $this->portalRole($employee) === 'projectadmin' ? (string) $employee->department : null;
-        $memberOf = $this->connection()->table('employees_projects')->where('employee_id', $me)->pluck('project_id')
-            ->map(static fn (mixed $id): int => (int) $id)->flip();
+        $memberOf = $this->memberOf($employee);
 
         $projects = $this->connection()->table('clashflow_projects as cf')
             ->leftJoin('projects as p', function ($join): void {
@@ -321,6 +332,31 @@ final class PortalClashFlowProjects
             'role' => $role,
             'active' => strtolower(trim((string) $row->status)) === 'active',
         ];
+    }
+
+    /**
+     * Reported hours per portal project, the same total the portal's View Projects shows.
+     *
+     * @param  list<object>  $projects  rows with id, department and status
+     * @return array<int, float>
+     */
+    private function hours(array $projects): array
+    {
+        $hours = [];
+        foreach ((new PortalProjectWork)->byProject($projects, CarbonImmutable::today()) as $id => $work) {
+            $hours[(int) $id] = (float) $work['hoursTotal'];
+        }
+
+        return $hours;
+    }
+
+    /**
+     * @return Collection<int, int> portal project ids the person is a member or support member of (as keys)
+     */
+    private function memberOf(Employee $employee): Collection
+    {
+        return $this->connection()->table('employees_projects')->where('employee_id', (int) $employee->getKey())->pluck('project_id')
+            ->map(static fn (mixed $id): int => (int) $id)->flip();
     }
 
     private function isFinished(mixed $status): bool
