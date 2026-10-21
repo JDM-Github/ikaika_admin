@@ -76,6 +76,54 @@ class PortalClashFlowProjectsTest extends TestCase
         $this->assertIsInt($outsider);
     }
 
+    public function test_workflow_state_is_read_and_written_only_by_people_on_the_project(): void
+    {
+        $this->employee('cf-lead');
+        $member = $this->employee('cf-member');
+        $outsider = $this->employee('cf-outsider');
+        $project = DB::connection('portal')->table('projects')->insertGetId([
+            'project_number' => 'CF-TEST-010',
+            'project_name' => 'ClashFlow state tower',
+            'project_lead_email' => 'cf-lead@clashflow.test',
+        ]);
+        $other = DB::connection('portal')->table('projects')->insertGetId([
+            'project_number' => 'CF-TEST-011',
+            'project_name' => 'Outsider tower',
+        ]);
+        DB::connection('portal')->table('employees_projects')->insert([
+            ['employee_id' => $member, 'project_id' => $project, 'role_on_project' => 'member'],
+            ['employee_id' => $outsider, 'project_id' => $other, 'role_on_project' => 'member'],
+        ]);
+        $url = '/api/development/portal/clashflow/states';
+        $key = 'project-'.$project;
+        $member = $this->tokenFor('cf-member');
+        $lead = $this->tokenFor('cf-lead');
+        $outsider = $this->tokenFor('cf-outsider');
+
+        $this->withToken($member)->putJson("$url/$key", ['state' => '{"run":2}'])->assertNoContent();
+        $this->withToken($lead)->getJson($url)->assertOk()->assertJsonPath("data.$key", '{"run":2}');
+
+        // Not on the project: no read, no write.
+        $this->withToken($outsider)->putJson("$url/$key", ['state' => '{"run":9}'])->assertStatus(403);
+        $this->assertArrayNotHasKey($key, $this->withToken($outsider)->getJson($url)->json('data'));
+
+        // The library is shared by everyone signed in.
+        $this->withToken($outsider)->putJson("$url/library", ['state' => '{"versions":[]}'])->assertNoContent();
+        $this->withToken($member)->getJson($url)->assertJsonPath('data.library', '{"versions":[]}');
+        $this->withToken($outsider)->putJson("$url/project-$other", ['state' => '{"run":1}'])->assertNoContent();
+
+        $this->withToken($member)->putJson("$url/project-abc", ['state' => '{}'])->assertStatus(404);
+        $this->withToken($member)->putJson("$url/$key", ['state' => '{not json'])->assertStatus(422);
+        $this->withToken($member)->putJson("$url/$key", [])->assertStatus(422);
+
+        // Reset clears the person's projects and the library, never someone else's project.
+        $this->withToken($member)->deleteJson($url)->assertNoContent();
+        $left = DB::connection('portal')->table('clashflow_states')->whereIn('state_key', [$key, 'library', "project-$other"])->pluck('state_key')->all();
+        $this->assertSame(["project-$other"], $left);
+
+        $this->flushHeaders()->getJson($url)->assertStatus(401);
+    }
+
     private function employee(string $name): int
     {
         return DB::connection('portal')->table('employees')->insertGetId([
@@ -93,12 +141,17 @@ class PortalClashFlowProjectsTest extends TestCase
      */
     private function projectsFor(string $name): array
     {
-        $token = $this->postJson('/api/development/portal/auth/login', ['id_no' => 'CF-'.$name])->json('token');
-        $this->assertIsString($token);
-
-        return $this->withToken($token)
+        return $this->withToken($this->tokenFor($name))
             ->getJson('/api/development/portal/clashflow/projects')
             ->assertOk()
             ->json('data');
+    }
+
+    private function tokenFor(string $name): string
+    {
+        $token = $this->postJson('/api/development/portal/auth/login', ['id_no' => 'CF-'.$name])->json('token');
+        $this->assertIsString($token);
+
+        return $token;
     }
 }

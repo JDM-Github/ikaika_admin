@@ -5,6 +5,7 @@ namespace App\Support\Portal;
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder;
 
 /**
  * The projects ClashFlow (the desktop clash app) opens for a signed-in employee, with their role on each:
@@ -23,16 +24,8 @@ final class PortalClashFlowProjects
     public function forEmployee(Employee $employee): array
     {
         $email = strtolower(trim((string) $employee->email));
-        $id = (int) $employee->getKey();
 
-        $projects = $this->connection()->table('projects')
-            ->whereNull('deleted_at')
-            ->where(function ($query) use ($email, $id): void {
-                $query->whereIn('id', fn ($members) => $members->select('project_id')->from('employees_projects')->where('employee_id', $id));
-                if ($email !== '') {
-                    $query->orWhereRaw('LOWER(TRIM(COALESCE(project_lead_email, \'\'))) = ?', [$email]);
-                }
-            })
+        $projects = $this->mine($employee)
             ->orderByDesc('project_number')
             ->orderBy('id')
             ->get(['id', 'project_number', 'project_name', 'department', 'status', 'project_lead_email']);
@@ -85,6 +78,36 @@ final class PortalClashFlowProjects
         }
 
         return $rows;
+    }
+
+    // Whether the person leads or is on this project; the only way to read or write its ClashFlow state.
+    public function isOn(Employee $employee, int $projectId): bool
+    {
+        return $this->mine($employee)->where('id', $projectId)->exists();
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function projectIds(Employee $employee): array
+    {
+        return $this->mine($employee)->pluck('id')->map(static fn (mixed $id): int => (int) $id)->all();
+    }
+
+    // Live projects the person leads (by lead email) or is a member or support member of.
+    private function mine(Employee $employee): Builder
+    {
+        $email = strtolower(trim((string) $employee->email));
+        $id = (int) $employee->getKey();
+
+        return $this->connection()->table('projects')
+            ->whereNull('deleted_at')
+            ->where(function ($query) use ($email, $id): void {
+                $query->whereIn('id', fn ($members) => $members->select('project_id')->from('employees_projects')->where('employee_id', $id));
+                if ($email !== '') {
+                    $query->orWhereRaw('LOWER(TRIM(COALESCE(project_lead_email, \'\'))) = ?', [$email]);
+                }
+            });
     }
 
     /**

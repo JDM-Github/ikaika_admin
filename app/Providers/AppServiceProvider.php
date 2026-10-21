@@ -135,6 +135,11 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(20)->by('projects-write:'.$this->portalLimiterKey($request));
         });
 
+        // ClashFlow saves a changed project every two seconds while someone works, plus the library.
+        RateLimiter::for('clashflow', function (Request $request) {
+            return Limit::perMinute(120)->by('clashflow:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-manage-users', function (Request $request) {
             return Limit::perMinute(60)->by('manage-users:'.$this->portalLimiterKey($request));
         });

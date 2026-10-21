@@ -1614,3 +1614,21 @@ SELECT id, 'manage.users.information.approve', NULL FROM employees WHERE id_no I
     '220202-0002', -- Nathaniel Tanglao
     '220302-0003'  -- Steven Gaurano
 );
+
+-- ============================================================================
+-- CLASHFLOW WORKFLOW STATE (2026-10-21, user)
+-- ClashFlow, the desktop clash app, talks to the admin through the API only, so its mock workflow
+-- lives here: one JSON document per project (state_key "project-<projects.id>") plus the shared
+-- playbook library ("library"). Read and written through PortalClashFlowStates; a project's row only
+-- by its lead and members.
+-- Existing databases: create_portal_clashflow_states.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS clashflow_states (
+    state_key  VARCHAR(64) NOT NULL PRIMARY KEY,
+    project_id INT         NULL,
+    state      LONGTEXT    NOT NULL,
+    updated_by INT         NULL,
+    updated_at DATETIME    NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
