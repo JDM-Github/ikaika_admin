@@ -1,6 +1,9 @@
 # Everything to the Test Server in one go: the secret settings, then the admin, then the portal; see deployment/README.md.
 # -ResetDatabases (or -ResetSql) first replaces every Test Server database with your local ones, every table wiped, so the
 # server's schema is exactly the one that works locally; the replaced data is backed up on the server. Test Server only.
+# -Bump same, the default, installs both checkouts untagged, as it always has. keep, patch, minor or major release both first
+# (2026-10-21, user): each repo bumps, builds, tags v<version> on Bitbucket and installs through its deploy-release, so the Test
+# Server runs versions tags name - both checked before either builds, so one refused never leaves the other released alone.
 param(
     [switch]$SkipSettings,
     [switch]$SkipBuild,
@@ -8,6 +11,8 @@ param(
     [switch]$ResetDatabases,
     # Skips the question -ResetDatabases asks.
     [switch]$Yes,
+    [ArgumentCompletions('same', 'keep', 'patch', 'minor', 'major')]
+    [string]$Bump = 'same',
     [string]$SshHost = 'bluehost',
     [string]$PortalRepo = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'ikaika-portal')
 )
@@ -19,6 +24,17 @@ if (-not $PSBoundParameters.ContainsKey('PortalRepo') -and -not (Test-Path $Port
 }
 $portalDeploy = Join-Path $PortalRepo 'deployment/deploy.ps1'
 if (-not (Test-Path $portalDeploy)) { throw "Portal deploy script not found at $portalDeploy; pass -PortalRepo" }
+$releasing = $Bump -and $Bump -ne 'same'
+if ($releasing) {
+    if ($SkipBuild) { throw '-SkipBuild installs the last builds, so it takes no -Bump.' }
+    if ($Bump -notmatch '^(keep|patch|minor|major)$') { throw "-Bump takes same, keep, patch, minor or major; it is '$Bump'." }
+    $adminRoot = Split-Path $PSScriptRoot -Parent
+    foreach ($lib in 'tag-checkout.ps1', 'release-policy.ps1') { . (Join-Path $adminRoot ".ikaika_scripts_configs\lib\$lib") }
+    foreach ($root in $adminRoot, $PortalRepo) {
+        $problem = Test-ReleaseReady $root
+        if ($problem) { throw "$problem Nothing was deployed." }
+    }
+}
 
 # Each step connects several times; with Windows' ssh-agent running, the passphrase is typed once here.
 $agent = Get-Service ssh-agent -ErrorAction SilentlyContinue
@@ -45,9 +61,18 @@ if (-not $SkipSettings) {
 }
 
 Write-Host '== Admin'
-& (Join-Path $PSScriptRoot 'deploy.ps1') -SkipBuild:$SkipBuild -SshHost $SshHost
+& (Join-Path $PSScriptRoot 'deploy.ps1') -SkipBuild:$SkipBuild -SshHost $SshHost -Bump $Bump
 
 Write-Host '== Portal'
-& $portalDeploy -SkipBuild:$SkipBuild -SshHost $SshHost
+if ($releasing) {
+    # The portal's own toolkit, as a child: its build-release, then tag-version, then deploy-release, each once the one before is good.
+    $portalScript = Join-Path $PortalRepo 'script.ps1'
+    foreach ($step in @(@('build-release', '-Debug', '-Platform', 'web', '-Bump', $Bump), @('tag-version', '-Debug'), @('deploy-release', '-Debug', '-Force'))) {
+        & pwsh -NoProfile -File $portalScript @step
+        if ($LASTEXITCODE -ne 0) { throw "The portal's $($step[0]) failed; see the output above." }
+    }
+} else {
+    & $portalDeploy -SkipBuild:$SkipBuild -SshHost $SshHost
+}
 
-Write-Host "Deployed: $(if ($ResetDatabases) { 'databases reset from local, ' })settings, admin (migrations, tracker patches, scheduler cron) and portal."
+Write-Host "Deployed: $(if ($ResetDatabases) { 'databases reset from local, ' })settings, admin (migrations, tracker patches, scheduler cron) and portal$(if ($releasing) { ', each released and tagged' })."

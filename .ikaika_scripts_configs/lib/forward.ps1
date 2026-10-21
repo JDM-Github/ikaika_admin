@@ -11,6 +11,9 @@
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\..\decoupled-script\lib\shared-fetch.ps1')
+# What a release would make each repo's version, for the question production asks (2026-10-21, user): Get-ReleasePreview.
+foreach ($lib in 'app-version.ps1', 'toolkit-version.ps1') { . (Join-Path $PSScriptRoot "..\..\decoupled-script\lib\$lib") }
+foreach ($lib in 'tag-checkout.ps1', 'release-policy.ps1') { . (Join-Path $PSScriptRoot $lib) }
 
 $script:ForwardRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 
