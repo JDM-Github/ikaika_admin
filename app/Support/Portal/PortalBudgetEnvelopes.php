@@ -27,7 +27,7 @@ use Illuminate\Support\Collection;
  *
  * Each charge carries source_key portal:reimbursement-claim:{id}. The column is unique, so a claim
  * can never be charged twice -- not by two items of one claim in one save, and not by two approvers
- * saving at the same moment.
+ * saving at the same moment. The ledger shows a charge with the receipts kept on its claim.
  *
  * Each team's money is held in an account in one person's name, and the tracker says whose team it
  * is only through who holds it: an account's team is its holder's department, found by the
@@ -57,7 +57,10 @@ final class PortalBudgetEnvelopes
      */
     private ?array $accounts = null;
 
-    public function __construct(private readonly PortalCloudinary $cloudinary) {}
+    public function __construct(
+        private readonly PortalCloudinary $cloudinary,
+        private readonly PortalReimbursementRequests $reimbursements,
+    ) {}
 
     /** The tracker is switched on for this environment. Off, reimbursement approvals charge nothing. */
     public function isAvailable(): bool
@@ -179,6 +182,20 @@ final class PortalBudgetEnvelopes
             abort(503, 'Budget transactions are unavailable right now.');
         }
 
+        // A reimbursement's receipts are kept on its claim, so its charge shows them from there (2026-10-21, user).
+        $chargeCents = [];
+        foreach ($rows as $row) {
+            $chargedItem = $this->chargedItem($row->source_key ?? null);
+            if ($chargedItem !== null) {
+                $chargeCents[$chargedItem] = $this->cents($row->amount);
+            }
+        }
+        try {
+            $claimReceipts = $this->reimbursements->receiptsForCharges($chargeCents);
+        } catch (QueryException) {
+            $claimReceipts = [];
+        }
+
         $data = [];
         $received = [];
         $spent = [];
@@ -209,6 +226,7 @@ final class PortalBudgetEnvelopes
             $link = $links->get($row->id)?->first();
             $account = $link === null ? null : $accounts->get((int) $link->account_id);
             $date = substr((string) ($row->transaction_date ?? ''), 0, 10);
+            $chargedItem = $this->chargedItem($row->source_key ?? null);
             $data[] = [
                 'id' => (string) $row->id,
                 'name' => $isAllocation ? self::ALLOCATED_NAME : ($this->text($row->transaction_name) ?? (string) $row->type),
@@ -223,18 +241,21 @@ final class PortalBudgetEnvelopes
                 'accountName' => $account['name'] ?? null,
                 'team' => $account['team'] ?? null,
                 'recordedBy' => $this->text($row->created_by),
-                'receipts' => ($receipts->get($row->id) ?? collect())
-                    ->filter(fn (object $receipt): bool => $this->text($receipt->file_url) !== null)
-                    ->map(fn (object $receipt): array => [
-                        'fileName' => $this->text($receipt->file_name) ?? 'Receipt',
-                        'fileUrl' => (string) $receipt->file_url,
-                        'mimeType' => $this->text($receipt->mime_type),
-                        'thumbUrl' => $this->cloudinary->thumbUrl((string) $receipt->file_url, (string) ($receipt->mime_type ?? '')),
-                    ])
-                    ->values()
-                    ->all(),
+                'receipts' => [
+                    ...($receipts->get($row->id) ?? collect())
+                        ->filter(fn (object $receipt): bool => $this->text($receipt->file_url) !== null)
+                        ->map(fn (object $receipt): array => [
+                            'fileName' => $this->text($receipt->file_name) ?? 'Receipt',
+                            'fileUrl' => (string) $receipt->file_url,
+                            'mimeType' => $this->text($receipt->mime_type),
+                            'thumbUrl' => $this->cloudinary->thumbUrl((string) $receipt->file_url, (string) ($receipt->mime_type ?? '')),
+                        ])
+                        ->values()
+                        ->all(),
+                    ...($chargedItem === null ? [] : $claimReceipts[$chargedItem] ?? []),
+                ],
                 // Charged by an approval in the portal, rather than entered in the tracker itself.
-                'isPortalCharge' => str_starts_with((string) ($row->source_key ?? ''), self::SOURCE_PREFIX),
+                'isPortalCharge' => $chargedItem !== null,
                 // Half of an allocation: listed with its envelope, never as money in or out (2026-10-08).
                 'isAllocation' => $isAllocation,
                 // Entered by hand, so Edit transactions may change its details (2026-10-13).
@@ -581,6 +602,14 @@ final class PortalBudgetEnvelopes
         $this->connection()->table('transactions')->where('id', $charge['transactionId'])->delete();
 
         return $charge;
+    }
+
+    // The reimbursement item a charge's source key names; null for a line the portal did not charge.
+    private function chargedItem(mixed $sourceKey): ?int
+    {
+        $key = (string) ($sourceKey ?? '');
+
+        return str_starts_with($key, self::SOURCE_PREFIX) ? (int) substr($key, strlen(self::SOURCE_PREFIX)) : null;
     }
 
     /**

@@ -1128,6 +1128,72 @@ final class PortalReimbursementRequests
     }
 
     /**
+     * The receipts behind reimbursement charges on the tracker's ledger (2026-10-21, user), by the item id each
+     * charge's source key names. An item's own charge shows its own receipt. A charge made for a whole claim,
+     * before items were charged one by one, is larger than the item carrying it, so it shows the receipts of
+     * that claim's other approved items too, except those charged on their own.
+     *
+     * @param  array<int, int>  $chargeCents  each charge's amount in cents, by the item id it names
+     * @return array<int, list<array{fileName: string, fileUrl: string, mimeType: ?string, thumbUrl: ?string}>>
+     */
+    public function receiptsForCharges(array $chargeCents): array
+    {
+        if ($chargeCents === []) {
+            return [];
+        }
+        $carriers = $this->connection()
+            ->table('reimbursements')
+            ->leftJoin('employees_reimbursements', 'employees_reimbursements.reimbursement_id', '=', 'reimbursements.id')
+            ->whereIn('reimbursements.id', array_keys($chargeCents))
+            ->get(['reimbursements.id', 'reimbursements.cost', 'reimbursements.qty', 'reimbursements.date_created', 'employees_reimbursements.employee_id']);
+
+        $covered = [];
+        foreach ($carriers as $carrier) {
+            $carrierId = (int) $carrier->id;
+            $covered[$carrierId] = [$carrierId];
+            $ownCents = (int) round(((float) ($carrier->cost ?? 0)) * 100) * $this->quantity($carrier->qty ?? null);
+            if (($chargeCents[$carrierId] ?? 0) <= $ownCents || $carrier->employee_id === null || $carrier->date_created === null) {
+                continue;
+            }
+            $siblings = $this->connection()
+                ->table('reimbursements')
+                ->join('employees_reimbursements', 'employees_reimbursements.reimbursement_id', '=', 'reimbursements.id')
+                ->where('employees_reimbursements.employee_id', $carrier->employee_id)
+                ->where('reimbursements.date_created', $carrier->date_created)
+                ->where('reimbursements.id', '!=', $carrierId)
+                ->orderBy('reimbursements.id')
+                ->get(['reimbursements.id', 'reimbursements.status']);
+            foreach ($siblings as $sibling) {
+                $siblingId = (int) $sibling->id;
+                if (! isset($chargeCents[$siblingId]) && $this->claimStatus($sibling->status ?? null) === 'approved') {
+                    $covered[$carrierId][] = $siblingId;
+                }
+            }
+        }
+
+        $receipts = $this->attachmentsByRecordId(array_values(array_unique(array_merge(...array_values($covered)))), self::RECEIPT_FIELD);
+        $data = [];
+        foreach ($covered as $carrierId => $itemIds) {
+            foreach ($itemIds as $itemId) {
+                $receipt = $receipts[$itemId] ?? null;
+                $fileUrl = $receipt === null ? null : $this->text($receipt->file_url ?? null);
+                if ($fileUrl === null) {
+                    continue;
+                }
+                $mime = $this->text($receipt->mime_type ?? null);
+                $data[$carrierId][] = [
+                    'fileName' => $this->text($receipt->file_name ?? null) ?? 'Receipt',
+                    'fileUrl' => $fileUrl,
+                    'mimeType' => $mime,
+                    'thumbUrl' => $this->cloudinary->thumbUrl($fileUrl, $mime ?? ''),
+                ];
+            }
+        }
+
+        return $data;
+    }
+
+    /**
      * @param  array{fileName: string, fileUrl: string, sizeBytes: int, mimeType: string, cacheKey: ?string}|null  $receipt
      */
     private function writeReceipt(int $itemId, ?array $receipt): void

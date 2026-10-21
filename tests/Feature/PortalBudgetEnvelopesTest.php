@@ -609,6 +609,38 @@ class PortalBudgetEnvelopesTest extends TestCase
         $this->assertNull($data[1]['accountName']);
     }
 
+    // The reported ask (2026-10-21): a reimbursement's charge on the ledger shows the receipts kept on its claim.
+    public function test_the_ledger_shows_a_reimbursement_charge_with_the_receipts_of_its_claim(): void
+    {
+        $envelope = $this->envelope('Seeded Receipt Envelope', 2000.00);
+        [$cable, $adapter, $mouse] = $this->claim([['Cable', 300.00, 1], ['Adapter', 100.00, 1], ['Mouse', 50.00, 1]]);
+        foreach ([$cable => 'cable.jpg', $adapter => 'adapter.pdf', $mouse => 'mouse.png'] as $itemId => $file) {
+            DB::connection('portal')->table('attachments')->insert([
+                'table_name' => 'reimbursements',
+                'record_id' => $itemId,
+                'field_name' => 'receipts',
+                'file_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/reimbursements/'.$file,
+                'file_name' => $file,
+                'file_size_bytes' => 900,
+                'mime_type' => str_ends_with($file, '.pdf') ? 'application/pdf' : 'image/png',
+            ]);
+        }
+
+        // An item charged on its own shows its own receipt.
+        $this->decide([['id' => (string) $cable, 'kind' => 'reimbursement', 'status' => 'approved', 'envelopeId' => $envelope]])->assertOk();
+        // A whole-claim charge from before shows the claim's other approved items, never one charged on its own.
+        DB::connection('portal')->table('reimbursements')->whereIn('id', [$adapter, $mouse])->update(['status' => 'Approved']);
+        $legacy = $this->unbookedCharge($adapter, $envelope, 150.00);
+
+        $data = collect($this->getJson('/api/development/portal/manage/budget-transactions', $this->admin())->assertOk()->json('data'))->keyBy('id');
+
+        $own = $data[(string) $this->chargeOfItem($cable)->id];
+        $this->assertSame(['cable.jpg'], array_column($own['receipts'], 'fileName'));
+        $this->assertStringContainsString('/upload/c_fill,h_96,w_96', (string) $own['receipts'][0]['thumbUrl']);
+        $this->assertSame(['adapter.pdf', 'mouse.png'], array_column($data[(string) $legacy]['receipts'], 'fileName'));
+        $this->assertNull($data[(string) $legacy]['receipts'][0]['thumbUrl']);
+    }
+
     // A tracker row with no type is not a money movement: it never reaches the ledger, where the
     // portal's strict parser would refuse it and lose every other row with it.
     public function test_the_ledger_leaves_out_a_transaction_with_no_type(): void
