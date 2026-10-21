@@ -78,6 +78,53 @@ class PortalClashFlowProjectsTest extends TestCase
         $this->withToken($user)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $theirs])->assertStatus(403);
     }
 
+    public function test_done_and_closed_projects_are_listed_but_cannot_be_linked(): void
+    {
+        $this->employee('cf-admin', 'Admin');
+        $this->portalProject('CF-TEST-030', 'cf-nobody');
+        $done = $this->portalProject('CF-TEST-031', 'cf-nobody', status: 'Done');
+        $closed = $this->portalProject('CF-TEST-032', 'cf-nobody', status: 'Closed');
+
+        $admin = $this->tokenFor('cf-admin');
+        $rows = $this->withToken($admin)->getJson(self::BASE.'/linkable?department=CF-Engineering&search=CF-TEST-03')->json('data');
+        // Ongoing first; the finished ones follow, flagged.
+        $this->assertSame([true, false, false], array_column($rows, 'canLink'));
+        $this->assertSame(['Started', 'Closed', 'Done'], array_column($rows, 'status'));
+        $this->withToken($admin)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $done])->assertStatus(403);
+        $this->withToken($admin)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $closed])->assertStatus(403);
+    }
+
+    public function test_admins_pick_a_department_and_project_admins_stay_in_theirs(): void
+    {
+        $this->employee('cf-admin', 'Admin', 'CF-MIS');
+        $this->employee('cf-lead', 'ProjectAdmin', 'CF-Engineering');
+        $this->employee('cf-lead-elsewhere', 'ProjectAdmin', 'CF-Other');
+        $engineering = $this->portalProject('CF-TEST-040', 'cf-lead');
+        $mis = $this->portalProject('CF-TEST-041', 'cf-somebody', 'CF-MIS');
+        $foreign = $this->portalProject('CF-TEST-042', 'cf-lead', 'CF-Other');
+
+        $admin = $this->tokenFor('cf-admin');
+        $this->withToken($admin)->getJson(self::BASE.'/projects')
+            ->assertJsonPath('isAdmin', true)->assertJsonPath('department', 'CF-MIS');
+        $this->assertSame([$mis], array_column($this->withToken($admin)->getJson(self::BASE.'/linkable?department=CF-MIS&search=CF-TEST-04')->json('data'), 'id'));
+        $this->assertCount(3, $this->withToken($admin)->getJson(self::BASE.'/linkable?search=CF-TEST-04')->json('data'));
+
+        // A ProjectAdmin links only what they lead in their own department.
+        $lead = $this->tokenFor('cf-lead');
+        $this->withToken($lead)->getJson(self::BASE.'/projects')->assertJsonPath('isAdmin', false)->assertJsonPath('departments', []);
+        $this->assertSame([$engineering], array_column($this->withToken($lead)->getJson(self::BASE.'/linkable?search=CF-TEST-04')->json('data'), 'id'));
+        $this->withToken($lead)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $foreign])->assertStatus(403);
+
+        // Viewing: an Admin sees every department; a ProjectAdmin not on a project only their own department's.
+        $this->withToken($admin)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $engineering])->assertCreated();
+        $this->withToken($admin)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $mis])->assertCreated();
+        // The local database holds real ClashFlow projects too: look only at the two made here.
+        $ours = fn (string $name): array => array_values(array_filter($this->projectsFor($name),
+            static fn (array $row): bool => in_array($row['portalProjectId'], [$engineering, $mis], true)));
+        $this->assertSame(['viewer', 'viewer'], array_column($ours('cf-admin'), 'role'));
+        $this->assertSame([], $ours('cf-lead-elsewhere'));
+    }
+
     public function test_a_solo_project_belongs_to_its_creator_alone(): void
     {
         $this->employee('cf-user', 'User');
@@ -125,7 +172,7 @@ class PortalClashFlowProjectsTest extends TestCase
         $this->assertSame([], DB::connection('portal')->table('clashflow_states')->whereIn('state_key', [$key, 'library'])->pluck('state_key')->all());
     }
 
-    private function employee(string $name, string $role): int
+    private function employee(string $name, string $role, string $department = 'CF-Engineering'): int
     {
         return DB::connection('portal')->table('employees')->insertGetId([
             'id_no' => 'CF-'.$name,
@@ -134,15 +181,18 @@ class PortalClashFlowProjectsTest extends TestCase
             'email' => $name.'@clashflow.test',
             'status' => 'Active',
             'role' => $role,
+            'department' => $department,
         ]);
     }
 
-    private function portalProject(string $number, string $leadName): int
+    private function portalProject(string $number, string $leadName, string $department = 'CF-Engineering', string $status = 'Started'): int
     {
         return DB::connection('portal')->table('projects')->insertGetId([
             'project_number' => $number,
             'project_name' => 'ClashFlow test '.$number,
             'project_lead_email' => $leadName.'@clashflow.test',
+            'department' => $department,
+            'status' => $status,
         ]);
     }
 

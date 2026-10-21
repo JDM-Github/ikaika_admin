@@ -11,8 +11,10 @@ use Illuminate\Support\Collection;
  * ClashFlow (the desktop clash app) projects (2026-10-21, user). Nothing is created for every portal
  * project: someone creates a ClashFlow project, either
  * - team: linked to one portal project, so roles follow it: lead = the project's lead email,
- *   coordinator = a member or support member, viewer = an Admin or ProjectAdmin not on it; anyone else
- *   does not see it. Admins may link any portal project, ProjectAdmins only the ones they lead.
+ *   coordinator = a member or support member, viewer = an Admin not on it (any department) or a
+ *   ProjectAdmin not on it (their own department only); anyone else does not see it. Admins may link
+ *   any portal project, ProjectAdmins only the ones they lead in their department. A Done or Closed
+ *   portal project is listed but cannot be linked (2026-10-21, user).
  * - solo: not linked; bound to its creator's account, and only they see it (as its lead).
  */
 final class PortalClashFlowProjects
@@ -26,6 +28,9 @@ final class PortalClashFlowProjects
     public const MODE_TEAM = 'team';
 
     public const MODE_SOLO = 'solo';
+
+    // Portal statuses that end a project: still listed, never linked to a new ClashFlow project.
+    private const FINISHED = ['done', 'closed'];
 
     /**
      * @return list<array<string, mixed>>
@@ -77,12 +82,31 @@ final class PortalClashFlowProjects
         return in_array($this->portalRole($employee), ['admin', 'projectadmin'], true);
     }
 
+    public function isAdmin(Employee $employee): bool
+    {
+        return $this->portalRole($employee) === 'admin';
+    }
+
     /**
-     * Portal projects the person may turn into a team ClashFlow project, not linked yet.
+     * The departments an Admin can filter by (those that have projects).
      *
-     * @return list<array{id: int, number: string, name: string, department: string, leadEmail: string}>
+     * @return list<string>
      */
-    public function linkable(Employee $employee, string $search): array
+    public function departments(): array
+    {
+        return $this->connection()->table('projects')->whereNull('deleted_at')->whereNotNull('department')
+            ->where('department', '!=', '')->distinct()->orderBy('department')->pluck('department')
+            ->map(static fn (mixed $value): string => (string) $value)->all();
+    }
+
+    /**
+     * Portal projects the person may turn into a team ClashFlow project, not linked yet. An Admin picks the
+     * department ('' = all); a ProjectAdmin sees the ones they lead in their own department. Done and
+     * Closed projects come last with canLink false.
+     *
+     * @return list<array{id: int, number: string, name: string, department: string, status: string, canLink: bool}>
+     */
+    public function linkable(Employee $employee, string $search, string $department = ''): array
     {
         if (! $this->canCreateTeam($employee)) {
             return [];
@@ -91,8 +115,13 @@ final class PortalClashFlowProjects
         $query = $this->connection()->table('projects')
             ->whereNull('deleted_at')
             ->whereNotIn('id', fn ($linked) => $linked->select('portal_project_id')->from('clashflow_projects')->whereNotNull('portal_project_id'));
-        if ($this->portalRole($employee) !== 'admin') {
-            $query->whereRaw('LOWER(TRIM(COALESCE(project_lead_email, \'\'))) = ?', [$this->email($employee)]);
+        if ($this->isAdmin($employee)) {
+            if (trim($department) !== '') {
+                $query->where('department', trim($department));
+            }
+        } else {
+            $query->whereRaw('LOWER(TRIM(COALESCE(project_lead_email, \'\'))) = ?', [$this->email($employee)])
+                ->where('department', (string) $employee->department);
         }
         $search = trim($search);
         if ($search !== '') {
@@ -100,14 +129,17 @@ final class PortalClashFlowProjects
             $query->where(fn ($match) => $match->where('project_number', 'like', $like)->orWhere('project_name', 'like', $like));
         }
 
-        return $query->orderByDesc('project_number')->limit(50)
-            ->get(['id', 'project_number', 'project_name', 'department', 'project_lead_email'])
-            ->map(static fn (object $row): array => [
+        return $query
+            ->orderByRaw("CASE WHEN LOWER(COALESCE(status, '')) IN ('done', 'closed') THEN 1 ELSE 0 END")
+            ->orderByDesc('project_number')->limit(100)
+            ->get(['id', 'project_number', 'project_name', 'department', 'status'])
+            ->map(fn (object $row): array => [
                 'id' => (int) $row->id,
                 'number' => (string) ($row->project_number ?? ''),
                 'name' => trim((string) ($row->project_name ?? '')),
                 'department' => (string) ($row->department ?? ''),
-                'leadEmail' => strtolower(trim((string) $row->project_lead_email)),
+                'status' => (string) ($row->status ?? ''),
+                'canLink' => ! $this->isFinished($row->status),
             ])
             ->values()
             ->all();
@@ -152,13 +184,16 @@ final class PortalClashFlowProjects
         if ($portalId <= 0 || ! $this->canCreateTeam($employee)) {
             return false;
         }
-        $project = $this->connection()->table('projects')->whereNull('deleted_at')->where('id', $portalId)->first(['project_lead_email']);
-        if ($project === null || $this->connection()->table('clashflow_projects')->where('portal_project_id', $portalId)->exists()) {
+        $project = $this->connection()->table('projects')->whereNull('deleted_at')->where('id', $portalId)
+            ->first(['project_lead_email', 'department', 'status']);
+        if ($project === null || $this->isFinished($project->status)
+            || $this->connection()->table('clashflow_projects')->where('portal_project_id', $portalId)->exists()) {
             return false;
         }
 
-        return $this->portalRole($employee) === 'admin'
-            || strtolower(trim((string) $project->project_lead_email)) === $this->email($employee);
+        return $this->isAdmin($employee)
+            || (strtolower(trim((string) $project->project_lead_email)) === $this->email($employee)
+                && (string) $project->department === (string) $employee->department);
     }
 
     /**
@@ -170,7 +205,9 @@ final class PortalClashFlowProjects
     {
         $me = (int) $employee->getKey();
         $email = $this->email($employee);
-        $canView = $this->canCreateTeam($employee);
+        $isAdmin = $this->isAdmin($employee);
+        // A ProjectAdmin views only their own department; an Admin views every department.
+        $viewsDepartment = $this->portalRole($employee) === 'projectadmin' ? (string) $employee->department : null;
         $memberOf = $this->connection()->table('employees_projects')->where('employee_id', $me)->pluck('project_id')
             ->map(static fn (mixed $id): int => (int) $id)->flip();
 
@@ -196,7 +233,8 @@ final class PortalClashFlowProjects
             $role = match (true) {
                 $email !== '' && strtolower(trim((string) $project->project_lead_email)) === $email => self::ROLE_LEAD,
                 $memberOf->has((int) $project->portal_id) => self::ROLE_COORDINATOR,
-                $canView => self::ROLE_VIEWER,
+                $isAdmin => self::ROLE_VIEWER,
+                $viewsDepartment !== null && (string) $project->department === $viewsDepartment => self::ROLE_VIEWER,
                 default => null,
             };
             if ($role !== null) {
@@ -283,6 +321,11 @@ final class PortalClashFlowProjects
             'role' => $role,
             'active' => strtolower(trim((string) $row->status)) === 'active',
         ];
+    }
+
+    private function isFinished(mixed $status): bool
+    {
+        return in_array(strtolower(trim((string) $status)), self::FINISHED, true);
     }
 
     private function portalRole(Employee $employee): string

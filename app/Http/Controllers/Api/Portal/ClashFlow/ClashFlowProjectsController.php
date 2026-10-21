@@ -18,18 +18,31 @@ class ClashFlowProjectsController extends Controller
     {
         $actor = $this->actor($request);
 
+        // An Admin filters by department (default theirs); everyone else has no department filter.
+        $isAdmin = $this->projects->isAdmin($actor);
+
         return response()->json([
             'data' => $this->projects->forEmployee($actor),
             'canCreateTeam' => $this->projects->canCreateTeam($actor),
+            'isAdmin' => $isAdmin,
+            'department' => (string) ($actor->department ?? ''),
+            'departments' => $isAdmin ? $this->projects->departments() : [],
         ]);
     }
 
     // Portal projects I may link to a new team project (search by number or name).
     public function linkable(Request $request): JsonResponse
     {
-        $validated = $request->validate(['search' => ['nullable', 'string', 'max:100']]);
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'department' => ['nullable', 'string', 'max:100'],
+        ]);
 
-        return response()->json(['data' => $this->projects->linkable($this->actor($request), (string) ($validated['search'] ?? ''))]);
+        return response()->json(['data' => $this->projects->linkable(
+            $this->actor($request),
+            (string) ($validated['search'] ?? ''),
+            (string) ($validated['department'] ?? ''),
+        )]);
     }
 
     public function store(Request $request): JsonResponse
