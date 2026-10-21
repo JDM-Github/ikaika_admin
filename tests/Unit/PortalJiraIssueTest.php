@@ -57,6 +57,29 @@ class PortalJiraIssueTest extends TestCase
         $this->assertTrue(PortalJiraIssue::isForReport($named, 42));
     }
 
+    // Triage (2026-10-21, user): why Jira cancelled an issue, and the issue a duplicate's links name.
+    public function test_a_cancelled_issue_says_whether_it_is_a_duplicate_and_of_which(): void
+    {
+        $cancelled = ['name' => 'Cancelled', 'statusCategory' => ['key' => 'done']];
+        $this->assertSame('duplicate', PortalJiraIssue::cancelReason(['status' => $cancelled, 'resolution' => ['name' => 'Duplicate']], 'duplicate'));
+        $this->assertSame('duplicate', PortalJiraIssue::cancelReason(['status' => $cancelled, 'labels' => ['ikaika-portal', 'Duplicate']], 'duplicate'));
+        $this->assertSame('duplicate', PortalJiraIssue::cancelReason(['status' => ['name' => 'Duplicate']], 'duplicate'));
+        $this->assertSame('wont_fix', PortalJiraIssue::cancelReason(['status' => $cancelled, 'resolution' => ['name' => "Won't Do"], 'labels' => ['ikaika-portal']], 'duplicate'));
+
+        $fields = ['issuelinks' => [
+            ['id' => '30002', 'type' => ['name' => 'Blocks'], 'outwardIssue' => ['id' => '10007']],
+            ['id' => '30001', 'type' => ['name' => 'Duplicate'], 'outwardIssue' => ['id' => '10007']],
+            ['id' => '30003', 'type' => ['name' => 'duplicate'], 'inwardIssue' => ['id' => '10050']],
+        ]];
+        // Read from the duplicate's side, the issue it duplicates is the outward end.
+        $this->assertSame('10007', PortalJiraIssue::duplicatedIssueId($fields, 'Duplicate'));
+        $this->assertNull(PortalJiraIssue::duplicatedIssueId(['issuelinks' => [$fields['issuelinks'][2]]], 'Duplicate'));
+        // Whichever end the other issue is, a link of the type to it is the one to take away.
+        $this->assertSame(['30001'], PortalJiraIssue::duplicateLinkIds($fields, 'Duplicate', '10007'));
+        $this->assertSame(['30003'], PortalJiraIssue::duplicateLinkIds($fields, 'Duplicate', '10050'));
+        $this->assertSame([], PortalJiraIssue::duplicateLinkIds([], 'Duplicate', '10007'));
+    }
+
     // One project for production and staging (2026-10-21, user): staging labels its issues and names itself in the mark.
     public function test_another_server_than_production_labels_its_issues_and_names_itself_in_the_mark(): void
     {

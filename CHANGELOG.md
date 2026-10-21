@@ -10,6 +10,7 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 
 - Every answer names the server version and channel that sent it.
 - Production and staging share one Jira project and each server follows only its own issues.
+- Issues & Requests can cancel a report as won't fix or as a duplicate and a duplicate is labelled and linked to its original in Jira.
 
 ## 1.0.0+2 - 2026-10-19
 

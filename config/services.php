@@ -67,6 +67,9 @@ return [
         'label' => 'ikaika-portal',
         // The API channel that files as it always has; any other adds its channel as a second label.
         'production_channel' => 'production',
+        // Triage (2026-10-21, user): a duplicate is labelled so, and linked to its original's issue by this type.
+        'duplicate_label' => 'duplicate',
+        'duplicate_link_type' => 'Duplicate',
         // The issue type each kind is filed as, by name; a project without one falls back to Task.
         'issue_types' => [
             'bug' => env('JIRA_ISSUE_TYPE_BUG', 'Bug'),

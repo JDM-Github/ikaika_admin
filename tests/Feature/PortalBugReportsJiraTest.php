@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\Concerns\ActsAsPortalEmployee;
 use Tests\TestCase;
 
@@ -31,6 +32,10 @@ class PortalBugReportsJiraTest extends TestCase
     private const SITE = 'https://ikaika-test.atlassian.net';
 
     private const SHOT = 'https://res.cloudinary.com/test-cloud/image/upload/q_auto/v1/ikaika-portal/bug-reports/';
+
+    private const CANCELLED = ['name' => 'Cancelled', 'statusCategory' => ['key' => 'done']];
+
+    private const TO_DO = ['name' => 'To Do', 'statusCategory' => ['key' => 'new']];
 
     protected function setUp(): void
     {
@@ -617,6 +622,196 @@ class PortalBugReportsJiraTest extends TestCase
 
         $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
         $this->assertSame(['fixed', 'To Do'], [$row->status, $row->jira_status]);
+    }
+
+    // Triage (2026-10-21, user): a linked duplicate is labelled and linked to its original's issue, and cancelled last.
+    public function test_a_linked_duplicate_is_labelled_and_linked_to_its_originals_issue_before_it_is_cancelled(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $original = $this->report(['title' => 'Calendar skips Sunday', 'jira_issue_id' => '10007', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
+        $id = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::CANCELLED]]]);
+
+        $this->withHeaders($this->headersFor($analyst))
+            ->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])
+            ->assertOk()
+            ->assertJsonPath('data.cancelReason', 'duplicate')
+            ->assertJsonPath('data.duplicateOf', ['id' => (string) $original, 'title' => 'Calendar skips Sunday'])
+            ->assertJsonPath('data.jira.status', 'Cancelled');
+
+        // The move found first and made last, so a delivery racing the save already sees a duplicate.
+        $this->assertSame(['GET issue/10042/transitions', 'PUT issue/10042', 'POST issueLink', 'POST issue/10042/transitions', 'GET issue/10042'], $this->calls());
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT' && $request->data() === ['update' => ['labels' => [['add' => 'duplicate']]]]);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issueLink')
+            && $request->data() === ['type' => ['name' => 'Duplicate'], 'inwardIssue' => ['id' => '10042'], 'outwardIssue' => ['id' => '10007']]);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && ($request['transition'] ?? null) === ['id' => '51']);
+    }
+
+    // An original Jira lacks leaves nothing to link to; an app from before cancels as won't fix, with no label.
+    public function test_a_duplicate_of_one_not_in_jira_is_only_labelled_and_an_older_apps_cancel_only_moves(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $original = $this->report(['title' => 'Calendar skips Sunday']);
+        $duplicate = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        $wontFix = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10043', 'jira_issue_key' => 'IKP-8', 'jira_state' => 'sent']);
+        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::CANCELLED]], '10043' => ['IKP-8', ['status' => self::CANCELLED]]]);
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$duplicate, ['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])
+            ->assertOk()->assertJsonPath('data.duplicateOf.id', (string) $original);
+        $this->assertSame(['GET issue/10042/transitions', 'PUT issue/10042', 'POST issue/10042/transitions', 'GET issue/10042'], $this->calls());
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$wontFix, ['status' => 'wont_fix'])
+            ->assertOk()->assertJsonPath('data.cancelReason', 'wont_fix');
+        $this->assertSame(['GET issue/10043/transitions', 'POST issue/10043/transitions', 'GET issue/10043'], array_slice($this->calls(), 4));
+    }
+
+    // Pointed at another original, or moved on: the link it no longer stands for goes, and the label once it is no duplicate.
+    public function test_a_duplicate_pointed_elsewhere_or_reopened_takes_back_its_link_and_label(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $first = $this->report(['title' => 'Calendar skips Sunday', 'jira_issue_id' => '10007', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
+        $second = $this->report(['title' => 'Calendar skips weekends', 'jira_issue_id' => '10008', 'jira_issue_key' => 'IKP-4', 'jira_state' => 'sent']);
+        $id = $this->report([
+            'assignee_id' => $analyst->getKey(), 'status' => 'wont_fix', 'cancel_reason' => 'duplicate', 'duplicate_of' => $first,
+            'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent',
+        ]);
+        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::CANCELLED, 'labels' => ['ikaika-portal', 'duplicate'], 'issuelinks' => [
+            ['id' => '30001', 'type' => ['name' => 'Duplicate'], 'outwardIssue' => ['id' => '10007']],
+            ['id' => '30002', 'type' => ['name' => 'Duplicate'], 'outwardIssue' => ['id' => '10008']],
+        ]]]]);
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['duplicateOf' => (string) $second])
+            ->assertOk()->assertJsonPath('data.cancelReason', 'duplicate')->assertJsonPath('data.duplicateOf.id', (string) $second);
+        $this->assertSame(['GET issue/10042', 'DELETE issueLink/30001', 'POST issueLink', 'GET issue/10042'], $this->calls());
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && ($request['outwardIssue'] ?? null) === ['id' => '10008']);
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])
+            ->assertOk()->assertJsonPath('data.cancelReason', null)->assertJsonPath('data.duplicateOf', null);
+        $this->assertSame(
+            ['GET issue/10042/transitions', 'GET issue/10042', 'DELETE issueLink/30002', 'PUT issue/10042', 'POST issue/10042/transitions', 'GET issue/10042'],
+            array_slice($this->calls(), 4),
+        );
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT' && $request->data() === ['update' => ['labels' => [['remove' => 'duplicate']]]]);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && ($request['transition'] ?? null) === ['id' => '21']);
+    }
+
+    // Read back (2026-10-21, user): the portal's triage stands while Jira says Cancelled, Jira's own is worked out, a reopen clears it.
+    public function test_reading_back_keeps_the_portals_triage_works_out_jiras_own_and_clears_it_on_a_reopen(): void
+    {
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $original = $this->report(['title' => 'Calendar skips Sunday', 'jira_issue_id' => '10007', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
+        $other = $this->report(['title' => 'Calendar skips weekends']);
+        $kept = $this->report(['status' => 'wont_fix', 'cancel_reason' => 'duplicate', 'duplicate_of' => $other, 'jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent']);
+        $byResolution = $this->report(['status' => 'in_progress', 'jira_issue_id' => '10051', 'jira_issue_key' => 'IKP-21', 'jira_state' => 'sent']);
+        $byLabel = $this->report(['status' => 'in_review', 'jira_issue_id' => '10052', 'jira_issue_key' => 'IKP-22', 'jira_state' => 'sent']);
+        $wontFix = $this->report(['jira_issue_id' => '10053', 'jira_issue_key' => 'IKP-23', 'jira_state' => 'sent']);
+        $reopened = $this->report(['status' => 'wont_fix', 'cancel_reason' => 'duplicate', 'duplicate_of' => $original, 'jira_issue_id' => '10054', 'jira_issue_key' => 'IKP-24', 'jira_state' => 'sent']);
+        $toOriginal = ['id' => '30001', 'type' => ['name' => 'Duplicate'], 'outwardIssue' => ['id' => '10007']];
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+            ['id' => '10007', 'key' => 'IKP-3', 'fields' => ['status' => self::TO_DO]],
+            ['id' => '10050', 'key' => 'IKP-20', 'fields' => ['status' => self::CANCELLED, 'resolution' => ['name' => "Won't Do"]]],
+            ['id' => '10051', 'key' => 'IKP-21', 'fields' => ['status' => self::CANCELLED, 'resolution' => ['name' => 'Duplicate'], 'issuelinks' => [$toOriginal]]],
+            ['id' => '10052', 'key' => 'IKP-22', 'fields' => ['status' => self::CANCELLED, 'labels' => ['ikaika-portal', 'duplicate'], 'issuelinks' => [
+                ['id' => '30009', 'type' => ['name' => 'Duplicate'], 'outwardIssue' => ['id' => '19999']],
+            ]]],
+            ['id' => '10053', 'key' => 'IKP-23', 'fields' => ['status' => self::CANCELLED, 'resolution' => ['name' => "Won't Do"]]],
+            ['id' => '10054', 'key' => 'IKP-24', 'fields' => ['status' => self::TO_DO, 'labels' => ['ikaika-portal', 'duplicate'], 'issuelinks' => [$toOriginal]]],
+        ], 'issueErrors' => []])]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$kept, $byResolution, $byLabel, $wontFix, $reopened])->get()->keyBy('id');
+        $triage = fn (int $id): array => [$rows[$id]->status, $rows[$id]->cancel_reason, $rows[$id]->duplicate_of === null ? null : (int) $rows[$id]->duplicate_of];
+        // The portal said which, and Jira says only Cancelled.
+        $this->assertSame(['wont_fix', 'duplicate', $other], $triage($kept));
+        // Cancelled in Jira: a duplicate by its resolution or its label, of the report whose issue it links to when this server has one.
+        $this->assertSame(['wont_fix', 'duplicate', $original], $triage($byResolution));
+        $this->assertSame(['wont_fix', 'duplicate', null], $triage($byLabel));
+        $this->assertSame(['wont_fix', 'wont_fix', null], $triage($wontFix));
+        // Moved on in Jira: cancelled no longer, with the label and the link left there for whoever moved it.
+        $this->assertSame(['new', null, null], $triage($reopened));
+    }
+
+    // Cancelled as a duplicate before it reached Jira (2026-10-21): its new issue is labelled, linked and cancelled too.
+    public function test_a_duplicate_sent_to_jira_lands_cancelled_labelled_and_linked(): void
+    {
+        $this->connectJira();
+        $original = $this->report(['title' => 'Calendar skips Sunday', 'jira_issue_id' => '10007', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
+        $id = $this->report(['status' => 'wont_fix', 'cancel_reason' => 'duplicate', 'duplicate_of' => $original, 'jira_state' => 'pending']);
+        $moved = false;
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug']]]),
+            self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10080', 'key' => 'IKP-50'], 201),
+            self::SITE.'/rest/api/3/issueLink' => Http::response(null, 201),
+            self::SITE.'/rest/api/3/issue/10080/transitions' => function (Request $request) use (&$moved) {
+                if ($request->method() === 'POST') {
+                    $moved = true;
+
+                    return Http::response(null, 204);
+                }
+
+                return Http::response(['transitions' => $this->boardMoves()]);
+            },
+            self::SITE.'/rest/api/3/issue/10080*' => function (Request $request) use (&$moved) {
+                return $request->method() === 'PUT'
+                    ? Http::response(null, 204)
+                    : Http::response(['id' => '10080', 'key' => 'IKP-50', 'fields' => ['status' => $moved ? self::CANCELLED : self::TO_DO]]);
+            },
+        ]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/'.$id.'/jira')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'wont_fix')
+            ->assertJsonPath('data.cancelReason', 'duplicate')
+            ->assertJsonPath('data.duplicateOf.id', (string) $original)
+            ->assertJsonPath('data.jira.status', 'Cancelled');
+
+        $this->assertSame([
+            'GET issue/createmeta/IKP/issuetypes', 'POST issue', 'GET issue/10080', 'GET issue/10080/transitions',
+            'PUT issue/10080', 'POST issueLink', 'POST issue/10080/transitions', 'GET issue/10080',
+        ], $this->calls());
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issueLink')
+            && $request->data() === ['type' => ['name' => 'Duplicate'], 'inwardIssue' => ['id' => '10080'], 'outwardIssue' => ['id' => '10007']]);
+    }
+
+    /**
+     * Linked issues on IPS's board: every write taken, and each read back as the fields given.
+     *
+     * @param  array<string, array{0: string, 1: array<string, mixed>}>  $issues  key and fields, by issue id
+     */
+    private function fakeBoard(array $issues): void
+    {
+        $stubs = [
+            self::SITE.'/rest/api/3/issueLink' => Http::response(null, 201),
+            self::SITE.'/rest/api/3/issueLink/*' => Http::response(null, 204),
+        ];
+        foreach ($issues as $id => [$key, $fields]) {
+            $stubs[self::SITE.'/rest/api/3/issue/'.$id.'/transitions'] = Http::response(['transitions' => $this->boardMoves()]);
+            $stubs[self::SITE.'/rest/api/3/issue/'.$id.'*'] = Http::response(['id' => (string) $id, 'key' => $key, 'fields' => $fields]);
+        }
+        Http::preventStrayRequests();
+        Http::fake($stubs);
+    }
+
+    /**
+     * What has been asked of Jira so far, in order: each request's method and its path under the API.
+     *
+     * @return list<string>
+     */
+    private function calls(): array
+    {
+        return Http::recorded()
+            ->map(fn (array $pair): string => $pair[0]->method().' '.Str::before(Str::after($pair[0]->url(), '/rest/api/3/'), '?'))
+            ->values()
+            ->all();
     }
 
     private function connectJira(): void

@@ -174,9 +174,11 @@ The preview shows one day's commits and saves nothing; the sync prints `<reposit
 
 Every issue or request people send from the portal's corner button becomes a Jira issue: as it comes in (MIS can turn that off on the Issues & Requests page), sent by hand, or with every report not in Jira yet at once (**Send to Jira** in the page's header). Its status and kind then go both ways: a change on the Jira board comes back by webhook, every fifteen minutes or on **Refresh**, and MIS changing them in the portal moves the card or changes its work type first. Fixed in stays the portal's unless the issue has a fix version.
 
+A cancelled report says why (2026-10-21): won't fix, or a duplicate of another report. Either way its issue moves to Cancelled; a duplicate is also labelled `duplicate` and linked to its original's issue ("IPS-8 duplicates IPS-3"), when the original is in Jira too. Reopened in the portal, the link and the label come off again; reopened on the board, they stay there for whoever moved it.
+
 Production and the Test Server share one project (2026-10-21), because what production's people report is fixed on staging. Staging's issues carry a second label, `staging`, and say "(staging report #N)" where production's say "(report #N)"; each server follows only the reports sent on it.
 
-**1. A service account and its token.** In Atlassian, a dedicated user (not a Jira admin) with an API token (id.atlassian.com → Security → API tokens). On each project it needs **Browse projects**, **Create issues**, **Create attachments**, **Edit issues** (a kind changed in the portal changes the work type) and **Transition issues** (a status changed in the portal moves the card). Every issue the portal makes is reported by this account, so nobody's name is on an anonymous report.
+**1. A service account and its token.** In Atlassian, a dedicated user (not a Jira admin) with an API token (id.atlassian.com → Security → API tokens). On each project it needs **Browse projects**, **Create issues**, **Create attachments**, **Edit issues** (a kind changed in the portal changes the work type, and a duplicate is labelled), **Transition issues** (a status changed in the portal moves the card) and **Link issues** (a duplicate is linked to its original). The site needs issue linking on, with its standard **Duplicate** link type. Every issue the portal makes is reported by this account, so nobody's name is on an anonymous report.
 
 **2. The settings.** In your local `.env` (the Test Server's):
 
@@ -203,7 +205,7 @@ The Test Server runs on copies of production's database. Those copied reports st
 ssh bluehost "cd ~/apps/test-server/app && php artisan portal:jira-check"
 ```
 
-It names the account, the project and the issue type each kind becomes, and prints the webhook. A Jira admin adds it once per server in Jira settings → System → WebHooks:
+It names the account, the project, the issue type each kind becomes and the link type duplicates use, and prints the webhook. A Jira admin adds it once per server in Jira settings → System → WebHooks:
 
 | Field | Value |
 | --- | --- |
@@ -361,4 +363,6 @@ Run `deploy.ps1` here, then the portal's `deploy.ps1`.
 | `Jira HTTP 404: You cannot create issues in this project` on a report | Jira did not take the account at all and answered as for an anonymous visitor; `portal:jira-check` shows the `401` behind it |
 | `Jira HTTP 403` or `404` on the project | The service account lacks Browse projects / Create issues / Create attachments on it, or `JIRA_PROJECT_KEY` names another project |
 | `Jira HTTP 400` naming a field | The project requires a field the portal does not fill (a required custom field); make it optional for these issue types |
+| Cancelling a duplicate says `Jira HTTP 404` or `403` | The service account lacks **Link issues** on the project, or issue linking is off on the site; `portal:jira-check` says whether the Duplicate link type is there |
+| Cancelling a duplicate says `Jira HTTP 400` naming `labels` | The project's edit screen has no Labels field, so the issue cannot be labelled; add the field to the screen |
 | Jira webhook deliveries answer `401` | The webhook's secret and `JIRA_WEBHOOK_SECRET` differ, or the setting was not applied |

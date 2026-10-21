@@ -293,6 +293,14 @@ final class PortalActivityCopy
         return self::YOU.' turned sending new issues and requests to Jira '.($on ? 'on' : 'off');
     }
 
+    // Triage (2026-10-21, user): cancelled as won't fix, or marked a duplicate of the report it names.
+    public static function cancelledBugReport(string $title, string $noun, ?string $original = null): string
+    {
+        return $original === null
+            ? self::YOU.' cancelled the '.$noun.' '.$title." as won't fix"
+            : self::YOU.' marked the '.$noun.' '.$title.' a duplicate of '.$original;
+    }
+
     // MIS filing a report under another kind (2026-10-19): a bug that is really a feature request, say.
     public static function reclassifiedBugReport(string $title, string $fromNoun, string $asPhrase): string
     {

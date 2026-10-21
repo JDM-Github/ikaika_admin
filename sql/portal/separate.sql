@@ -1429,6 +1429,10 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     description TEXT         NOT NULL,
     page        VARCHAR(200) NULL,
     status      VARCHAR(20)  NOT NULL DEFAULT 'new',
+    -- Why a cancelled one (status wont_fix, shown as Cancelled) was closed, and the report a duplicate duplicates
+    -- (2026-10-21). Existing databases: add_portal_bug_report_triage.
+    cancel_reason VARCHAR(20)  NULL,
+    duplicate_of  INT UNSIGNED NULL,
     note        TEXT         NULL,
     -- Who in MIS handles it, the semantic version level its fix needs, and the version it shipped in.
     -- Existing databases: add_portal_bug_report_assignee_and_version.
@@ -1457,6 +1461,7 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     -- and a read-back go by. Existing databases: add_portal_bug_report_channel.
     jira_create_started_at TIMESTAMP NULL,
     INDEX bug_reports_status_reported_on_index (status, reported_on),
+    INDEX bug_reports_duplicate_of_index (duplicate_of),
     UNIQUE KEY bug_reports_jira_issue_id_unique (jira_issue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

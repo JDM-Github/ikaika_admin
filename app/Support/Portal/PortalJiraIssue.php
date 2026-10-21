@@ -20,6 +20,10 @@ namespace App\Support\Portal;
  * Won't fix. The name leads because a team-managed project's categories are whatever its owner left them:
  * IPS files Done under "in progress" and Cancelled under "done". A name not listed falls back to the
  * category. The fix version is the highest X.Y.Z among the issue's fix versions, "v" or not.
+ *
+ * Won't fix is shown as Cancelled since 2026-10-21 (the value stays wont_fix), and a cancelled one says why: a
+ * duplicate when Jira's resolution or status says so or the issue carries the duplicate label, else won't fix; a
+ * duplicate's own links name the issue it duplicates as their outward end.
  */
 final class PortalJiraIssue
 {
@@ -114,11 +118,87 @@ final class PortalJiraIssue
         return match ($category) {
             'new' => PortalBugReports::STATUS_NEW,
             'indeterminate' => PortalBugReports::STATUS_IN_PROGRESS,
-            'done' => self::isNotDone($fields) ? PortalBugReports::STATUS_WONT_FIX : PortalBugReports::STATUS_FIXED,
+            'done' => self::isNotDone($fields) ? PortalBugReports::STATUS_CANCELLED : PortalBugReports::STATUS_FIXED,
             'review' => PortalBugReports::STATUS_IN_REVIEW,
-            'not_done' => PortalBugReports::STATUS_WONT_FIX,
+            'not_done' => PortalBugReports::STATUS_CANCELLED,
             default => $current,
         };
+    }
+
+    /**
+     * Why Jira cancelled an issue on its own: a duplicate when its resolution or status says so, or when it
+     * carries the duplicate label; else won't fix.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    public static function cancelReason(array $fields, string $duplicateLabel): string
+    {
+        foreach ([$fields['resolution']['name'] ?? null, $fields['status']['name'] ?? null] as $name) {
+            if (is_string($name) && self::normalised($name) === 'duplicate') {
+                return PortalBugReports::CANCEL_DUPLICATE;
+            }
+        }
+        foreach (is_array($fields['labels'] ?? null) ? $fields['labels'] : [] as $label) {
+            if (is_string($label) && strcasecmp($label, $duplicateLabel) === 0) {
+                return PortalBugReports::CANCEL_DUPLICATE;
+            }
+        }
+
+        return PortalBugReports::CANCEL_WONT_FIX;
+    }
+
+    /**
+     * The id of the issue a duplicate duplicates, as its own links name it: the outward end of a link of the type.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    public static function duplicatedIssueId(array $fields, string $linkType): ?string
+    {
+        foreach (self::linksOfType($fields, $linkType) as $link) {
+            $id = $link['outwardIssue']['id'] ?? null;
+            if (is_scalar($id) && (string) $id !== '') {
+                return (string) $id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The links of the type between this issue and another, whichever end it is: what a duplicate pointed at
+     * another original takes away.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return list<string>
+     */
+    public static function duplicateLinkIds(array $fields, string $linkType, string $otherIssueId): array
+    {
+        $ids = [];
+        foreach (self::linksOfType($fields, $linkType) as $link) {
+            $other = $link['outwardIssue']['id'] ?? $link['inwardIssue']['id'] ?? null;
+            if (is_scalar($other) && (string) $other === $otherIssueId && is_scalar($link['id'] ?? null)) {
+                $ids[] = (string) $link['id'];
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  array<string, mixed>  $fields
+     * @return list<array<string, mixed>>
+     */
+    private static function linksOfType(array $fields, string $linkType): array
+    {
+        $links = [];
+        foreach (is_array($fields['issuelinks'] ?? null) ? $fields['issuelinks'] : [] as $link) {
+            $type = is_array($link) ? ($link['type']['name'] ?? null) : null;
+            if (is_string($type) && strcasecmp($type, $linkType) === 0) {
+                $links[] = $link;
+            }
+        }
+
+        return $links;
     }
 
     /**

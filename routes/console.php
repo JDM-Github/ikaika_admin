@@ -403,6 +403,15 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
                 $this->info($words['label'].' -> '.$type['name'].($type['name'] === $type['wanted'] ? '' : ' (no '.$type['wanted'].' in the project)'));
             }
         }
+        // Triage (2026-10-21, user): a duplicate is linked to its original's issue, by a link type the site must have.
+        $linkType = (string) config('services.jira.duplicate_link_type', 'Duplicate');
+        $linkTypes = $client->issueLinkTypes();
+        if (! in_array(strtolower($linkType), array_map('strtolower', $linkTypes), true)) {
+            $failed = true;
+            $this->error('No '.$linkType.' link type on the site, so a duplicate cannot be linked to its original. The site has: '.implode(', ', $linkTypes).'.');
+        } else {
+            $this->info('Duplicates are linked as: '.$linkType.' (the account needs Link issues)');
+        }
     } catch (RuntimeException $error) {
         $this->error($error->getMessage());
         if ($error->getCode() === 401 && trim((string) config('services.jira.cloud_id')) === '') {

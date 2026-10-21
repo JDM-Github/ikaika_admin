@@ -68,7 +68,7 @@ class PortalBugReportsTest extends TestCase
         // The server it was sent on (2026-10-21, user: production and staging share one Jira project).
         $this->assertSame('development', $row->channel);
         $this->assertSame(
-            ['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reporter_id', 'channel', 'reported_on', 'updated_at',
+            ['id', 'kind', 'title', 'description', 'page', 'status', 'cancel_reason', 'duplicate_of', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reporter_id', 'channel', 'reported_on', 'updated_at',
                 'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at', 'jira_create_started_at'],
             Schema::connection('portal')->getColumnListing('bug_reports'),
         );
@@ -188,7 +188,7 @@ class PortalBugReportsTest extends TestCase
         $engineering = $this->headersFor($this->memberOf('Engineering'));
 
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'images', 'jira', 'jiraHere'], array_keys($listed));
+        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'images', 'jira', 'jiraHere', 'cancelReason', 'duplicateOf'], array_keys($listed));
         $this->assertNull($listed['reporter']);
         $this->assertNull($listed['jira']);
         $this->assertSame('2026-10-12', $listed['reportedOn']);
@@ -210,7 +210,7 @@ class PortalBugReportsTest extends TestCase
 
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['note' => ''])->assertOk()->assertJsonPath('data.note', null);
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'closed'])
-            ->assertStatus(422)->assertJsonPath('message', "Choose New, In progress, In review, Fixed or Won't fix.");
+            ->assertStatus(422)->assertJsonPath('message', 'Choose New, In progress, In review, Fixed or Cancelled.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, [])
             ->assertStatus(422)->assertJsonPath('message', 'Change its kind, status, note, who handles it or its version.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/999999999', ['status' => 'fixed'])->assertNotFound();
@@ -324,6 +324,55 @@ class PortalBugReportsTest extends TestCase
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the feature request Dark mode for the calendar In review')));
     }
 
+    // Triage (2026-10-21, user): a cancelled one says why - won't fix, or a duplicate of the report it names.
+    public function test_mis_cancels_a_report_as_wont_fix_or_as_a_duplicate_and_the_log_says_which(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $original = $this->unlinked('Calendar skips Sunday');
+        $id = $this->unlinked('The month view jumps', ['assignee_id' => $analyst->getKey()]);
+
+        // An app from before sends only the status: it is cancelled as won't fix.
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'wont_fix'])
+            ->assertOk()->assertJsonPath('data.status', 'wont_fix')->assertJsonPath('data.cancelReason', 'wont_fix')->assertJsonPath('data.duplicateOf', null);
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])
+            ->assertOk()->assertJsonPath('data.cancelReason', 'duplicate')
+            ->assertJsonPath('data.duplicateOf', ['id' => (string) $original, 'title' => 'Calendar skips Sunday']);
+        $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
+        $this->assertSame(['id' => (string) $original, 'title' => 'Calendar skips Sunday'], $listed['duplicateOf']);
+        // Moved on, it is cancelled no longer and gives no reason.
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])
+            ->assertOk()->assertJsonPath('data.cancelReason', null)->assertJsonPath('data.duplicateOf', null);
+
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $this->assertSame([null, null], [$row->cancel_reason, $row->duplicate_of]);
+        $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->where('record_id', (string) $id)->pluck('message');
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, "cancelled the bug report The month view jumps as won't fix")));
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the bug report The month view jumps a duplicate of #'.$original.' Calendar skips Sunday')));
+    }
+
+    public function test_triage_that_does_not_add_up_is_refused_and_changes_nothing(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $original = $this->unlinked('Calendar skips Sunday');
+        $duplicate = $this->unlinked('Calendar skips Sunday again', ['status' => 'wont_fix', 'cancel_reason' => 'duplicate', 'duplicate_of' => $original]);
+        $id = $this->unlinked('The month view jumps', ['assignee_id' => $analyst->getKey()]);
+        $patch = fn (array $body) => $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, $body)->assertStatus(422);
+
+        $patch(['status' => 'wont_fix', 'cancelReason' => 'later'])->assertJsonPath('message', "Choose Won't fix or Duplicate.");
+        $patch(['cancelReason' => 'wont_fix'])->assertJsonPath('message', 'Only a cancelled one has a reason: set its status to Cancelled too.');
+        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate'])->assertJsonPath('message', 'Choose the issue or request it duplicates.');
+        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $id])->assertJsonPath('message', 'It cannot be a duplicate of itself.');
+        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => '999999999'])->assertJsonPath('message', 'There is no #999999999 to be a duplicate of.');
+        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $duplicate])
+            ->assertJsonPath('message', '#'.$duplicate.' is a duplicate itself: choose #'.$original.', the one it duplicates.');
+        $patch(['status' => 'wont_fix', 'cancelReason' => 'wont_fix', 'duplicateOf' => (string) $original])->assertJsonPath('message', 'Only a duplicate names the one it duplicates.');
+
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $this->assertSame(['new', null, null], [$row->status, $row->cancel_reason, $row->duplicate_of]);
+    }
+
     // The Access page names the rule as the sidebar does, and an MIS member holds Send to Jira beneath it (2026-10-19).
     public function test_the_access_page_names_the_rule_issues_and_requests_with_send_to_jira_beneath(): void
     {
@@ -334,6 +383,22 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame('Issues & Requests', $powers['bug-reports']['label']);
         $this->assertSame('Send to Jira', $powers['bug-reports.jira']['label']);
         $this->assertSame('bug-reports', $powers['bug-reports.jira']['parentKey']);
+    }
+
+    /**
+     * A report in no Jira, made here rather than sent.
+     *
+     * @param  array<string, mixed>  $columns
+     */
+    private function unlinked(string $title, array $columns = []): int
+    {
+        return (int) DB::connection('portal')->table('bug_reports')->insertGetId([
+            'title' => $title,
+            'description' => 'It happens every month.',
+            'status' => 'new',
+            'reported_on' => '2026-10-21',
+            ...$columns,
+        ]);
     }
 
     // An active ordinary member of the department.

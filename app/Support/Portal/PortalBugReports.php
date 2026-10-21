@@ -38,6 +38,11 @@ use RuntimeException;
  * Each report becomes a Jira issue (PortalBugReportsJira). Once it is one, its kind and status are the
  * issue's too: a change here changes Jira first, and Jira's are read back. A report records the server it was
  * sent on (2026-10-21, user: production and staging share one project), and only that server touches its issue.
+ *
+ * Triage (2026-10-21, user): Won't fix is shown as Cancelled -- the value stays wont_fix, which the apps from
+ * before read strictly -- and a cancelled report says why: nothing will change, or it duplicates another report,
+ * which it names. That one cannot be itself or a duplicate, so no chain or loop forms; any other status clears
+ * both. On a linked report the issue moves to Cancelled too, and a duplicate is labelled and linked there.
  */
 final class PortalBugReports
 {
@@ -50,7 +55,8 @@ final class PortalBugReports
 
     public const STATUS_FIXED = 'fixed';
 
-    public const STATUS_WONT_FIX = 'wont_fix';
+    // Closed without a change, shown as Cancelled (2026-10-21, user); the value stays wont_fix.
+    public const STATUS_CANCELLED = 'wont_fix';
 
     /**
      * @var array<string, string>
@@ -60,7 +66,21 @@ final class PortalBugReports
         self::STATUS_IN_PROGRESS => 'In progress',
         self::STATUS_IN_REVIEW => 'In review',
         self::STATUS_FIXED => 'Fixed',
-        self::STATUS_WONT_FIX => "Won't fix",
+        self::STATUS_CANCELLED => 'Cancelled',
+    ];
+
+    public const CANCEL_WONT_FIX = 'wont_fix';
+
+    public const CANCEL_DUPLICATE = 'duplicate';
+
+    /**
+     * Why a cancelled one was closed, as the page names it.
+     *
+     * @var array<string, string>
+     */
+    public const CANCEL_REASONS = [
+        self::CANCEL_WONT_FIX => "Won't fix",
+        self::CANCEL_DUPLICATE => 'Duplicate',
     ];
 
     public const KIND_BUG = 'bug';
@@ -218,11 +238,12 @@ final class PortalBugReports
             ->get()
             ->groupBy('bug_report_id');
         $names = $this->namesOf([...$rows->pluck('assignee_id')->filter()->all(), ...$rows->pluck('reporter_id')->filter()->all()]);
+        $titles = $rows->mapWithKeys(fn (object $row): array => [(int) $row->id => (string) $row->title])->all();
 
         return [
             'section' => 'bug-reports',
             'resource' => 'bug-reports',
-            'data' => $rows->map(fn (object $row): array => $this->present($row, $images->get($row->id, collect())->all(), $names))->values()->all(),
+            'data' => $rows->map(fn (object $row): array => $this->present($row, $images->get($row->id, collect())->all(), $names, $titles))->values()->all(),
             'assignees' => $this->assignees(),
             'jira' => $this->jira->settings(),
         ];
@@ -248,7 +269,7 @@ final class PortalBugReports
         if ($request->has('status')) {
             $status = (string) $request->input('status');
             if (! array_key_exists($status, self::STATUS_LABELS)) {
-                abort(422, "Choose New, In progress, In review, Fixed or Won't fix.");
+                abort(422, 'Choose New, In progress, In review, Fixed or Cancelled.');
             }
             $changes['status'] = $status;
         }
@@ -272,6 +293,19 @@ final class PortalBugReports
             }
             $changes['fixed_in'] = $version === '' ? null : $version;
         }
+        $triage = [];
+        if ($request->has('cancelReason')) {
+            $reason = trim((string) $request->input('cancelReason', ''));
+            if ($reason !== '' && ! array_key_exists($reason, self::CANCEL_REASONS)) {
+                abort(422, "Choose Won't fix or Duplicate.");
+            }
+            $triage['cancel_reason'] = $reason === '' ? null : $reason;
+        }
+        if ($request->has('duplicateOf')) {
+            $original = trim((string) $request->input('duplicateOf', ''));
+            $triage['duplicate_of'] = $original === '' ? null : $this->validatedOriginal($row, $original);
+        }
+        $changes = [...$changes, ...$this->withTriage($row, $changes, $triage)];
         if ($changes === []) {
             abort(422, 'Change its kind, status, note, who handles it or its version.');
         }
@@ -281,7 +315,8 @@ final class PortalBugReports
         }
         // A linked report's kind and status are the issue's too (2026-10-20, user): Jira changes first, or nothing does.
         $toJira = $this->jira->owns($row)
-            && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status));
+            && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status)
+                || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes));
         if ($toJira) {
             if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
                 abort(403, 'Its kind and status change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
@@ -418,8 +453,9 @@ final class PortalBugReports
     private function item(object $row): array
     {
         $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->orderBy('id')->get()->all();
+        $titles = $row->duplicate_of === null ? [] : [(int) $row->duplicate_of => DB::connection('portal')->table('bug_reports')->where('id', $row->duplicate_of)->value('title')];
 
-        return $this->present($row, $images, $this->namesOf([$row->assignee_id, $row->reporter_id]));
+        return $this->present($row, $images, $this->namesOf([$row->assignee_id, $row->reporter_id]), array_filter($titles, fn ($title): bool => $title !== null));
     }
 
     /**
@@ -433,6 +469,14 @@ final class PortalBugReports
         $title = (string) $row->title;
         $was = $this->kindOf($row);
         $noun = self::KINDS[$changes['kind'] ?? $was]['noun'];
+        // Cancelled now, or cancelled for another reason: why, and what it duplicates.
+        $triaged = (isset($changes['status']) && $changes['status'] !== $row->status) || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes);
+        if ($triaged && ($changes['status'] ?? $row->status) === self::STATUS_CANCELLED) {
+            $reason = array_key_exists('cancel_reason', $changes) ? $changes['cancel_reason'] : $row->cancel_reason;
+            $original = array_key_exists('duplicate_of', $changes) ? $changes['duplicate_of'] : $row->duplicate_of;
+
+            return PortalActivityCopy::cancelledBugReport($title, $noun, $reason === self::CANCEL_DUPLICATE && $original !== null ? $this->originalLabel((int) $original) : null);
+        }
         if (isset($changes['status']) && $changes['status'] !== $row->status) {
             return PortalActivityCopy::updatedBugReport($title, self::STATUS_LABELS[$changes['status']], $noun);
         }
@@ -541,9 +585,10 @@ final class PortalBugReports
     /**
      * @param  list<object>  $images
      * @param  array<int, string>  $names
+     * @param  array<int, string>  $titles
      * @return array<string, mixed>
      */
-    private function present(object $row, array $images, array $names): array
+    private function present(object $row, array $images, array $names, array $titles = []): array
     {
         $assigneeId = $row->assignee_id === null ? null : (int) $row->assignee_id;
         $reporterId = $row->reporter_id === null ? null : (int) $row->reporter_id;
@@ -570,7 +615,85 @@ final class PortalBugReports
             'jira' => $this->jira->present($row),
             // Whether this server follows its Jira side; false for another server's report (2026-10-21, user).
             'jiraHere' => $this->jira->handles($row),
+            // Why a cancelled one was closed, and the report a duplicate names (2026-10-21, user).
+            'cancelReason' => $row->status === self::STATUS_CANCELLED ? ($row->cancel_reason ?? self::CANCEL_WONT_FIX) : null,
+            'duplicateOf' => $row->duplicate_of === null ? null : ['id' => (string) $row->duplicate_of, 'title' => $titles[(int) $row->duplicate_of] ?? null],
         ];
+    }
+
+    /**
+     * What triage changes: a cancelled one's reason and, for a duplicate, the one it duplicates; any other status
+     * clears both. Only what differs from the row, so a save that touches neither changes neither -- and an older
+     * app that sends only a Cancelled status gets Won't fix.
+     *
+     * @param  array<string, mixed>  $changes
+     * @param  array{cancel_reason?: ?string, duplicate_of?: ?int}  $triage
+     * @return array<string, mixed>
+     */
+    private function withTriage(object $row, array $changes, array $triage): array
+    {
+        if (! isset($changes['status']) && $triage === []) {
+            return [];
+        }
+        $status = $changes['status'] ?? (string) $row->status;
+        $reason = null;
+        $original = null;
+        if ($status !== self::STATUS_CANCELLED) {
+            if (($triage['cancel_reason'] ?? null) !== null || ($triage['duplicate_of'] ?? null) !== null) {
+                abort(422, 'Only a cancelled one has a reason: set its status to Cancelled too.');
+            }
+        } else {
+            $saved = $row->status === self::STATUS_CANCELLED ? ($row->cancel_reason ?? self::CANCEL_WONT_FIX) : self::CANCEL_WONT_FIX;
+            $reason = array_key_exists('cancel_reason', $triage) ? ($triage['cancel_reason'] ?? self::CANCEL_WONT_FIX) : $saved;
+            $original = array_key_exists('duplicate_of', $triage) ? $triage['duplicate_of'] : ($row->duplicate_of === null ? null : (int) $row->duplicate_of);
+            if ($reason === self::CANCEL_DUPLICATE && $original === null) {
+                abort(422, 'Choose the issue or request it duplicates.');
+            }
+            if ($reason !== self::CANCEL_DUPLICATE) {
+                if (($triage['duplicate_of'] ?? null) !== null) {
+                    abort(422, 'Only a duplicate names the one it duplicates.');
+                }
+                $original = null;
+            }
+        }
+        $changed = [];
+        if ($reason !== $row->cancel_reason) {
+            $changed['cancel_reason'] = $reason;
+        }
+        if ($original !== ($row->duplicate_of === null ? null : (int) $row->duplicate_of)) {
+            $changed['duplicate_of'] = $original;
+        }
+
+        return $changed;
+    }
+
+    // The report a duplicate duplicates: another one, not a duplicate itself, so no chain or loop forms.
+    private function validatedOriginal(object $row, string $value): int
+    {
+        if (! ctype_digit($value)) {
+            abort(422, 'Choose the issue or request it duplicates.');
+        }
+        $id = (int) $value;
+        if ($id === (int) $row->id) {
+            abort(422, 'It cannot be a duplicate of itself.');
+        }
+        $original = DB::connection('portal')->table('bug_reports')->where('id', $id)->first(['id', 'status', 'cancel_reason', 'duplicate_of']);
+        if ($original === null) {
+            abort(422, 'There is no #'.$id.' to be a duplicate of.');
+        }
+        if ($original->status === self::STATUS_CANCELLED && $original->cancel_reason === self::CANCEL_DUPLICATE && $original->duplicate_of !== null) {
+            abort(422, '#'.$id.' is a duplicate itself: choose #'.$original->duplicate_of.', the one it duplicates.');
+        }
+
+        return $id;
+    }
+
+    // A report as the log names the one a duplicate duplicates: its number and title.
+    private function originalLabel(int $id): string
+    {
+        $title = DB::connection('portal')->table('bug_reports')->where('id', $id)->value('title');
+
+        return '#'.$id.($title === null ? '' : ' '.$title);
     }
 
     // The sender's id when they chose to be named; anonymous, or saying nothing, keeps none.

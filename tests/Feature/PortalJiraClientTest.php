@@ -144,7 +144,47 @@ class PortalJiraClientTest extends TestCase
         $this->assertSame(['10042'], array_column($fetched['issues'], 'id'));
         $this->assertSame(['10043'], $fetched['missing']);
         Http::assertSent(fn (Request $request): bool => $request['issueIdsOrKeys'] === ['10042', '10043']
-            && $request['fields'] === ['status', 'resolution', 'fixVersions', 'issuetype']);
+            && $request['fields'] === ['status', 'resolution', 'fixVersions', 'issuetype', 'labels', 'issuelinks']);
+    }
+
+    // Triage (2026-10-21, user): a label added through update operations, never fields, which would replace them all.
+    public function test_a_label_is_added_and_removed_without_touching_the_others(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/10042' => Http::response(null, 204)]);
+        $client = app(PortalJiraClient::class);
+
+        $client->changeLabels('10042', ['duplicate']);
+        $client->changeLabels('10042', [], ['duplicate']);
+        $client->changeLabels('10042', []);
+
+        $bodies = Http::recorded()->map(fn (array $pair): array => json_decode($pair[0]->body(), true))->values()->all();
+        $this->assertSame([
+            ['update' => ['labels' => [['add' => 'duplicate']]]],
+            ['update' => ['labels' => [['remove' => 'duplicate']]]],
+        ], $bodies);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT');
+    }
+
+    // The duplicate is the issue the link reads from, and goes in inwardIssue; a link already gone is gone.
+    public function test_a_duplicate_is_linked_from_itself_to_its_original_and_a_link_jira_lost_counts_as_removed(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issueLink' => Http::response(null, 201),
+            self::SITE.'/rest/api/3/issueLink/30001' => Http::response(['errorMessages' => ['No issue link with id 30001 exists.']], 404),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Blocks'], ['name' => 'Duplicate']]]),
+        ]);
+        $client = app(PortalJiraClient::class);
+
+        $client->linkIssues('Duplicate', '10042', '10007');
+        $client->deleteIssueLink('30001');
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && $request->url() === self::SITE.'/rest/api/3/issueLink'
+            && $request->data() === ['type' => ['name' => 'Duplicate'], 'inwardIssue' => ['id' => '10042'], 'outwardIssue' => ['id' => '10007']]);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE' && str_ends_with($request->url(), '/issueLink/30001'));
+        $this->assertSame(['Blocks', 'Duplicate'], $client->issueLinkTypes());
+        $this->assertSame('ok', $client->connection()['state']);
     }
 
     public function test_an_issue_jira_no_longer_has_reads_as_none_and_the_connection_stays_ok(): void

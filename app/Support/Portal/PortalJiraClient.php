@@ -25,6 +25,8 @@ use Throwable;
  *
  * MIS changing a linked report's kind or status changes the issue too (2026-10-20, user): its work type is
  * edited, or it is moved along the transition that lands in the matching column. Both are writes, sent once.
+ * Triage (2026-10-21, user) adds three more: a label added or removed through update operations -- a fields
+ * edit would replace every label the issue has -- and a Duplicate link made or removed.
  *
  * Every answer updates the connection the page shows: a 2xx is ok, a refused account or an unknown
  * project is refused, no answer is unreachable. A 400 is about the request, not the connection.
@@ -47,8 +49,8 @@ final class PortalJiraClient
 
     private const ISSUE_TYPES_KEY = 'portal:jira:issue-types:';
 
-    // The fields a sync reads; nothing else of an issue is ever fetched.
-    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype'];
+    // The fields a sync reads; nothing else of an issue is ever fetched. Labels and links say a duplicate's (2026-10-21).
+    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype', 'labels', 'issuelinks'];
 
     // The env keys behind config('services.jira'), for saying which one is missing.
     private const SETTINGS = [
@@ -227,6 +229,63 @@ final class PortalJiraClient
             $this->url('/rest/api/3/issue/'.rawurlencode($issueId)),
             ['fields' => $fields],
         ));
+    }
+
+    /**
+     * Labels added and removed without touching the rest: update operations, never fields.labels, which would
+     * replace them all -- the portal's own label and a server's with them.
+     *
+     * @param  list<string>  $add
+     * @param  list<string>  $remove
+     */
+    public function changeLabels(string $issueId, array $add, array $remove = []): void
+    {
+        $operations = [
+            ...array_map(fn (string $label): array => ['add' => $label], $add),
+            ...array_map(fn (string $label): array => ['remove' => $label], $remove),
+        ];
+        if ($operations === []) {
+            return;
+        }
+        $this->write(fn (PendingRequest $request): Response => $request->put(
+            $this->url('/rest/api/3/issue/'.rawurlencode($issueId)),
+            ['update' => ['labels' => $operations]],
+        ));
+    }
+
+    /**
+     * A link of the type between two issues, as "from" duplicates "to". Jira's request names the ends from the
+     * other issue's side, so the issue the link reads from goes in inwardIssue; read back, the duplicate's own
+     * links show the original as its outwardIssue. Jira takes the same link twice as one.
+     */
+    public function linkIssues(string $type, string $fromIssueId, string $toIssueId): void
+    {
+        $this->write(fn (PendingRequest $request): Response => $request->post($this->url('/rest/api/3/issueLink'), [
+            'type' => ['name' => $type],
+            'inwardIssue' => ['id' => $fromIssueId],
+            'outwardIssue' => ['id' => $toIssueId],
+        ]));
+    }
+
+    // A link removed; one Jira no longer has is gone already.
+    public function deleteIssueLink(string $linkId): void
+    {
+        $this->answer(fn (): Response => $this->request()->delete($this->url('/rest/api/3/issueLink/'.rawurlencode($linkId))), false, true);
+    }
+
+    /**
+     * The link types the site has, by name, for portal:jira-check.
+     *
+     * @return list<string>
+     */
+    public function issueLinkTypes(): array
+    {
+        $listed = $this->read('GET', '/rest/api/3/issueLinkType')->json('issueLinkTypes');
+
+        return array_values(array_filter(array_map(
+            fn (mixed $type): ?string => is_array($type) && is_string($type['name'] ?? null) ? $type['name'] : null,
+            is_array($listed) ? $listed : [],
+        )));
     }
 
     public function attach(string $issueId, string $fileName, string $contents, string $mimeType): void

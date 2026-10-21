@@ -121,16 +121,34 @@ class PortalJiraSyncTest extends TestCase
             self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
             self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
             self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Blocks'], ['name' => 'Duplicate']]]),
         ]);
 
         $this->artisan('portal:jira-check')
             ->expectsOutputToContain('Account: IKAIKA Portal Bot')
+            ->expectsOutputToContain('Duplicates are linked as: Duplicate')
             ->expectsOutputToContain('Feature request -> Task (no Story in the project)')
             // One project for every server (2026-10-21, user): this one says how its issues are told apart.
             ->expectsOutputToContain('Files as: development - labels ikaika-portal, development; marked (development report #N)')
             ->expectsOutputToContain('/api/development/jira/webhook')
             ->expectsOutputToContain('JQL:    project = IKP AND labels = ikaika-portal AND labels = development')
             ->assertExitCode(0);
+    }
+
+    // Triage links a duplicate to its original (2026-10-21, user), by a link type the site must have.
+    public function test_the_check_fails_without_the_duplicate_link_type(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Blocks'], ['name' => 'Relates']]]),
+        ]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('No Duplicate link type on the site, so a duplicate cannot be linked to its original. The site has: Blocks, Relates.')
+            ->assertExitCode(1);
     }
 
     // The Test Server carries copies of production's reports (2026-10-21, user): in the shared project they stay production's.

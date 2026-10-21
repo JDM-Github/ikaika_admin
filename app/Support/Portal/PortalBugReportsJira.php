@@ -209,18 +209,49 @@ final class PortalBugReportsJira
 
     /**
      * A linked report's new kind or status, made in Jira before the portal keeps it: the work type edited, or
-     * the issue moved along the transition landing in the matching column. Throws Jira's own words.
+     * the issue moved along the transition landing in the matching column -- and, for triage (2026-10-21, user), a
+     * duplicate labelled and linked to its original's issue, or no longer. Throws Jira's own words.
      *
      * @param  array<string, mixed>  $changes
      */
     public function changeInJira(object $row, array $changes): void
     {
         $issueId = (string) $row->jira_issue_id;
+        $status = $changes['status'] ?? (string) $row->status;
+        $reason = array_key_exists('cancel_reason', $changes) ? $changes['cancel_reason'] : $row->cancel_reason;
+        $original = array_key_exists('duplicate_of', $changes) ? $changes['duplicate_of'] : $row->duplicate_of;
+        $wasDuplicate = $row->status === PortalBugReports::STATUS_CANCELLED && $row->cancel_reason === PortalBugReports::CANCEL_DUPLICATE;
+        $isDuplicate = $status === PortalBugReports::STATUS_CANCELLED && $reason === PortalBugReports::CANCEL_DUPLICATE;
+        $oldTarget = $wasDuplicate ? $this->duplicateTarget($row->duplicate_of) : null;
+        $newTarget = $isDuplicate ? $this->duplicateTarget($original) : null;
+
+        // Reads first, so a move Jira has no way to make changes nothing.
+        $move = isset($changes['status']) && $changes['status'] !== $row->status
+            ? $this->findMove($issueId, (string) $changes['status'], (string) $row->jira_issue_key)
+            : null;
+        $staleLinks = $oldTarget !== null && $oldTarget !== $newTarget
+            ? PortalJiraIssue::duplicateLinkIds($this->jira->issue($issueId)['fields'] ?? [], $this->duplicateLinkType(), $oldTarget)
+            : [];
+
         if (isset($changes['kind']) && $changes['kind'] !== $row->kind) {
             $this->jira->editIssue($issueId, ['issuetype' => ['id' => $this->issueTypeId((string) $changes['kind'])]]);
         }
-        if (isset($changes['status']) && $changes['status'] !== $row->status) {
-            $this->jira->transition($issueId, $this->findMove($issueId, (string) $changes['status'], (string) $row->jira_issue_key)['id']);
+        // Triage (2026-10-21, user): the label and the link before the move, so a delivery racing the save already
+        // sees a cancelled duplicate as one.
+        foreach ($staleLinks as $linkId) {
+            $this->jira->deleteIssueLink($linkId);
+        }
+        if ($wasDuplicate && ! $isDuplicate) {
+            $this->jira->changeLabels($issueId, [], [$this->duplicateLabel()]);
+        }
+        if ($isDuplicate && ! $wasDuplicate) {
+            $this->jira->changeLabels($issueId, [$this->duplicateLabel()]);
+        }
+        if ($newTarget !== null && $newTarget !== $oldTarget) {
+            $this->jira->linkIssues($this->duplicateLinkType(), $issueId, $newTarget);
+        }
+        if ($move !== null) {
+            $this->jira->transition($issueId, $move['id']);
         }
         $issue = $this->jira->issue($issueId);
         if ($issue !== null) {
@@ -485,13 +516,18 @@ final class PortalBugReportsJira
         // The portal's own Fixed in stands until the issue names a fix version.
         $fixedIn = PortalJiraIssue::fixedIn($issue['fields']) ?? $row->fixed_in;
         $kind = $this->kindOfType($issue['fields']['issuetype']['name'] ?? null, (string) $row->kind);
+        [$reason, $original] = $this->triageFrom($row, $issue, $status);
         $changes = [
             'jira_issue_key' => $issue['key'],
             'jira_status' => PortalJiraIssue::statusName($issue['fields']),
             'jira_synced_at' => now('UTC')->format('Y-m-d H:i:s'),
         ];
-        if ($status !== $row->status || $fixedIn !== $row->fixed_in || $kind !== $row->kind) {
-            $changes += ['status' => $status, 'fixed_in' => $fixedIn, 'kind' => $kind, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')];
+        $was = ($row->duplicate_of ?? null) === null ? null : (int) $row->duplicate_of;
+        if ($status !== $row->status || $fixedIn !== $row->fixed_in || $kind !== $row->kind || $reason !== ($row->cancel_reason ?? null) || $original !== $was) {
+            $changes += [
+                'status' => $status, 'fixed_in' => $fixedIn, 'kind' => $kind, 'cancel_reason' => $reason, 'duplicate_of' => $original,
+                'updated_at' => now('UTC')->format('Y-m-d H:i:s'),
+            ];
             Log::info('portal.jira.synced', ['report' => (int) $row->id, 'status' => $status]);
         }
         DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update($changes);
@@ -549,10 +585,75 @@ final class PortalBugReportsJira
         }
         $issueId = (string) $row->jira_issue_id;
         $issue = $this->jira->issue($issueId);
-        if ($issue === null || PortalJiraIssue::portalStatus($issue['fields'], '') === (string) $row->status) {
+        if ($issue === null) {
             return;
         }
-        $this->jira->transition($issueId, $this->findMove($issueId, (string) $row->status, (string) $row->jira_issue_key)['id']);
+        $move = PortalJiraIssue::portalStatus($issue['fields'], '') === (string) $row->status
+            ? null
+            : $this->findMove($issueId, (string) $row->status, (string) $row->jira_issue_key);
+        // A duplicate already, before it reached Jira (2026-10-21): labelled and linked there as triage does.
+        if ($row->status === PortalBugReports::STATUS_CANCELLED && ($row->cancel_reason ?? null) === PortalBugReports::CANCEL_DUPLICATE) {
+            $this->jira->changeLabels($issueId, [$this->duplicateLabel()]);
+            $target = $this->duplicateTarget($row->duplicate_of ?? null);
+            if ($target !== null) {
+                $this->jira->linkIssues($this->duplicateLinkType(), $issueId, $target);
+            }
+        }
+        if ($move !== null) {
+            $this->jira->transition($issueId, $move['id']);
+        }
+    }
+
+    // The issue a duplicate's original became, when this server follows it; none to link to otherwise.
+    private function duplicateTarget(mixed $originalId): ?string
+    {
+        if ($originalId === null) {
+            return null;
+        }
+        $original = $this->row((int) $originalId);
+
+        return $original !== null && $this->owns($original) ? (string) $original->jira_issue_id : null;
+    }
+
+    /**
+     * A cancelled one's reason and original as the issue now stands: the portal's own while Jira says Cancelled,
+     * worked out from the issue when Jira cancelled it on its own, and none once Jira moved it on -- the label and
+     * the link then stay in Jira, for whoever moved it to tidy.
+     *
+     * @param  array{id: string, key: string, fields: array<string, mixed>}  $issue
+     * @return array{0: ?string, 1: ?int}
+     */
+    private function triageFrom(object $row, array $issue, string $status): array
+    {
+        if ($status !== PortalBugReports::STATUS_CANCELLED) {
+            return [null, null];
+        }
+        $reason = $row->cancel_reason ?? null;
+        if ($row->status === PortalBugReports::STATUS_CANCELLED && $reason !== null) {
+            return [(string) $reason, $reason === PortalBugReports::CANCEL_DUPLICATE && ($row->duplicate_of ?? null) !== null ? (int) $row->duplicate_of : null];
+        }
+        $reason = PortalJiraIssue::cancelReason($issue['fields'], $this->duplicateLabel());
+        if ($reason !== PortalBugReports::CANCEL_DUPLICATE) {
+            return [$reason, null];
+        }
+        $duplicated = PortalJiraIssue::duplicatedIssueId($issue['fields'], $this->duplicateLinkType());
+        $found = $duplicated === null ? null : $this->environment->scope(DB::connection('portal')->table('bug_reports'))
+            ->where('jira_issue_id', $duplicated)
+            ->where('id', '!=', $row->id)
+            ->first(['id', 'status', 'cancel_reason']);
+        $isOriginal = $found !== null && ! ($found->status === PortalBugReports::STATUS_CANCELLED && $found->cancel_reason === PortalBugReports::CANCEL_DUPLICATE);
+
+        return [PortalBugReports::CANCEL_DUPLICATE, $isOriginal ? (int) $found->id : null];
+    }
+
+    private function duplicateLabel(): string
+    {
+        return (string) config('services.jira.duplicate_label', 'duplicate');
+    }
+
+    private function duplicateLinkType(): string
+    {
+        return (string) config('services.jira.duplicate_link_type', 'Duplicate');
     }
 
     // The reports whose Jira side this server follows, as handles() says, for the queries that send.
