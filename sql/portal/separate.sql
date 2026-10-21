@@ -1446,6 +1446,11 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     channel       VARCHAR(32)  NULL,
     reported_on DATE         NOT NULL,
     updated_at  TIMESTAMP    NULL,
+    -- Archived out of the way behind a filter, and by whom; deleted to its deleter's Recycle Bin (2026-10-21).
+    -- Stamps, not removals, so a restore is exact. Existing databases: add_portal_bug_report_archive_and_delete.
+    archived_at TIMESTAMP    NULL,
+    archived_by INT UNSIGNED NULL,
+    deleted_at  TIMESTAMP    NULL,
     -- The Jira issue it became, and where sending it got to (2026-10-19): state is null (never sent),
     -- pending, sent, failed or deleted; attached counts the screenshots already there, attempts the
     -- scheduler's tries. Existing databases: add_portal_bug_report_jira.
@@ -1499,6 +1504,19 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
     ('member', 'bug-reports.jira', NULL, 0),
     ('admin', 'bug-reports.jira', NULL, 0),
     ('developer', 'bug-reports.jira', NULL, 0);
+
+-- Delete issues and requests (2026-10-21): to the deleter's Recycle Bin for 30 days; the same people as the
+-- page, switchable per person. Existing databases: add_portal_bug_report_archive_and_delete.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, only_department, sort_order)
+VALUES
+    ('bug-reports.delete', 'bug-reports', 'Delete issues and requests',
+     'Delete an issue or request to your Recycle Bin, where it stays for 30 days and can be restored.',
+     0, 1, 'MIS', 992);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('member', 'bug-reports.delete', NULL, 0),
+    ('admin', 'bug-reports.delete', NULL, 0),
+    ('developer', 'bug-reports.delete', NULL, 0);
 
 -- Edit transactions (2026-10-13): a transaction's name, date, payor or payee, notes and receipt, never
 -- its money; admins, executives and developers hold it like the rest of Finance.

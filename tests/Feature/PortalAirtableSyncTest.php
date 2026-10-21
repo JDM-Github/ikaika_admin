@@ -6,6 +6,7 @@ use App\Modules\Core\Models\Action;
 use App\Support\Airtable\AirtableSyncMap;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Core\CoreLedger;
+use App\Support\Core\CoreRecycleKey;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
@@ -506,6 +507,23 @@ class PortalAirtableSyncTest extends TestCase
         $this->assertSame('nothing', $items->firstWhere('actionId', $never)['outcome'] ?? null);
         $this->assertSame('superseded', $items->firstWhere('actionId', $orphanAdd)['outcome'] ?? null);
         foreach ([$synced, $never, $orphanAdd] as $actionId) {
+            $this->assertNotNull(Action::query()->findOrFail($actionId)->synced_at);
+        }
+    }
+
+    // Issues & Requests live in the portal and Jira (2026-10-21): one deleted and restored settles with nothing to send.
+    public function test_an_issue_deleted_and_restored_settles_with_nothing_to_send(): void
+    {
+        $this->fakeAirtable();
+        $ledger = app(CoreLedger::class);
+        $key = CoreRecycleKey::bugReport(900003);
+        $deleted = $ledger->recycleDeleted(CoreLedger::PRODUCT_PORTAL, $key, 'portal.bug_reports', '900003', ['title' => 'Save does nothing', 'kind' => 'issue'], 'bug-reports', 1, null)['action_id'];
+        $restored = $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, $key, 'portal.bug_reports', ['bugReportId' => 900003], 'bug-reports', '900003', 1, null);
+
+        $items = collect(app(PortalAirtableSync::class)->run(true)['items']);
+
+        foreach ([$deleted, $restored] as $actionId) {
+            $this->assertSame('nothing', $items->firstWhere('actionId', $actionId)['outcome'] ?? null);
             $this->assertNotNull(Action::query()->findOrFail($actionId)->synced_at);
         }
     }

@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Closure;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +31,10 @@ use RuntimeException;
  * production's reports, and its old links into the sandbox it used before, are left as they are. A retry searches
  * for an issue only after this server really started making one, and a new issue is first put in step with its
  * report -- moved to its column, a duplicate labelled and linked -- before a read-back may take anything from it.
+ *
+ * An archived or deleted report (2026-10-21, user) is out of Jira's way: never queued, sent or read back until it
+ * is back. Removing an open linked one moves its issue to Cancelled first (cancelForRemoval), under the same lock
+ * a send takes, so the two never cross.
  */
 final class PortalBugReportsJira
 {
@@ -170,20 +175,70 @@ final class PortalBugReportsJira
      */
     public function push(int $id): bool
     {
+        return $this->withReportLock($id, function () use ($id): void {
+            $row = $this->row($id);
+            if ($row !== null && self::isTracked($row) && $this->handles($row)) {
+                $this->sendSteps($row);
+            }
+        });
+    }
+
+    /**
+     * Run $work while holding the report against every send, and keep one off meanwhile; false when a send
+     * holds it now.
+     *
+     * @param  Closure(): void  $work
+     */
+    public function withReportLock(int $id, Closure $work): bool
+    {
         $lock = Cache::lock('portal-jira-push:'.$id, 120);
         if (! $lock->get()) {
             return false;
         }
         try {
-            $row = $this->row($id);
-            if ($row !== null && $this->handles($row)) {
-                $this->sendSteps($row);
-            }
+            $work();
         } finally {
             $lock->release();
         }
 
         return true;
+    }
+
+    // The reports still followed in Jira: neither archived nor deleted.
+    public static function tracked(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at')->whereNull('deleted_at');
+    }
+
+    public static function isTracked(object $row): bool
+    {
+        return ($row->archived_at ?? null) === null && ($row->deleted_at ?? null) === null;
+    }
+
+    /**
+     * Before an open linked report is archived or deleted (2026-10-21, user): its issue moved to Cancelled, and the
+     * report with it, as won't fix. Jira is asked first, and moves nothing for an issue it no longer has -- marked
+     * deleted -- or one already closed there, which is read back. The key of an issue this moved, else null.
+     */
+    public function cancelForRemoval(object $row): ?string
+    {
+        $issue = $this->jira->issue((string) $row->jira_issue_id);
+        if ($issue === null) {
+            $this->markDeleted((int) $row->id);
+
+            return null;
+        }
+        $closed = [PortalBugReports::STATUS_FIXED, PortalBugReports::STATUS_CANCELLED];
+        if (in_array(PortalJiraIssue::portalStatus($issue['fields'], (string) $row->status), $closed, true)) {
+            $this->apply($row, $issue);
+
+            return null;
+        }
+        $changes = ['status' => PortalBugReports::STATUS_CANCELLED, 'cancel_reason' => PortalBugReports::CANCEL_WONT_FIX, 'duplicate_of' => null];
+        $this->changeInJira($row, $changes);
+        DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update([...$changes, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
+
+        return (string) ($this->row((int) $row->id)?->jira_issue_key ?? $row->jira_issue_key);
     }
 
     /**
@@ -282,7 +337,7 @@ final class PortalBugReportsJira
     // Read one issue back, as a webhook delivery asks; a report Jira no longer has is marked deleted.
     public function syncIssue(string $issueId): void
     {
-        $row = $this->environment->scope(DB::connection('portal')->table('bug_reports'))->where('jira_issue_id', $issueId)->first();
+        $row = self::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))->where('jira_issue_id', $issueId)->first();
         if ($row === null || ! $this->owns($row)) {
             return;
         }
@@ -305,7 +360,7 @@ final class PortalBugReportsJira
         $synced = 0;
         $deleted = 0;
         $prefix = $this->jira->projectKey().'-';
-        $this->environment->scope(DB::connection('portal')->table('bug_reports'))
+        self::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))
             ->whereNotNull('jira_issue_id')
             ->where('jira_state', '!=', self::STATE_DELETED)
             ->where('jira_issue_key', 'like', str_replace(['%', '_'], ['\%', '\_'], $prefix).'%')
@@ -661,7 +716,7 @@ final class PortalBugReportsJira
     {
         $prefix = str_replace(['%', '_'], ['\%', '\_'], (string) $this->jira->projectKey()).'-%';
 
-        return $this->environment->scope($query)->where(fn ($inner) => $inner
+        return self::tracked($this->environment->scope($query))->where(fn ($inner) => $inner
             ->whereNull('jira_issue_key')
             ->orWhere('jira_state', self::STATE_DELETED)
             ->orWhere('jira_issue_key', 'like', $prefix));

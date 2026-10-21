@@ -176,6 +176,8 @@ Every issue or request people send from the portal's corner button becomes a Jir
 
 A cancelled report says why (2026-10-21): won't fix, or a duplicate of another report. Either way its issue moves to Cancelled; a duplicate is also labelled `duplicate` and linked to its original's issue ("IPS-8 duplicates IPS-3"), when the original is in Jira too. Reopened in the portal, the link and the label come off again; reopened on the board, they stay there for whoever moved it.
 
+A report can be archived out of the way or deleted to its deleter's Recycle Bin (2026-10-21). Either one moves an open report's issue to Cancelled first, and refuses when Jira does not take it; a Fixed or Cancelled one's issue stays as it is. Archived and deleted reports are not sent or read back until they are back on the page.
+
 Production and the Test Server share one project (2026-10-21), because what production's people report is fixed on staging. Staging's issues carry a second label, `staging`, and say "(staging report #N)" where production's say "(report #N)"; each server follows only the reports sent on it.
 
 **1. A service account and its token.** In Atlassian, a dedicated user (not a Jira admin) with an API token (id.atlassian.com → Security → API tokens). On each project it needs **Browse projects**, **Create issues**, **Create attachments**, **Edit issues** (a kind changed in the portal changes the work type, and a duplicate is labelled), **Transition issues** (a status changed in the portal moves the card) and **Link issues** (a duplicate is linked to its original). The site needs issue linking on, with its standard **Duplicate** link type. Every issue the portal makes is reported by this account, so nobody's name is on an anonymous report.

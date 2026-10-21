@@ -302,6 +302,32 @@ final class PortalActivityCopy
     }
 
     // MIS filing a report under another kind (2026-10-19): a bug that is really a feature request, say.
+    // Archived and back, deleted and restored (2026-10-21, user); an open one's issue moved to Cancelled says so.
+    public static function archivedBugReport(string $title, string $noun, ?string $issueKey = null): string
+    {
+        return self::YOU.' archived the '.$noun.' '.$title.self::cancelledInJira($issueKey);
+    }
+
+    public static function unarchivedBugReport(string $title, string $noun): string
+    {
+        return self::YOU.' unarchived the '.$noun.' '.$title;
+    }
+
+    public static function deletedBugReport(string $title, string $noun, ?string $issueKey = null): string
+    {
+        return self::YOU.' deleted the '.$noun.' '.$title.self::cancelledInJira($issueKey);
+    }
+
+    public static function restoredBugReport(string $title, string $noun): string
+    {
+        return self::YOU.' restored the '.$noun.' '.$title;
+    }
+
+    private static function cancelledInJira(?string $issueKey): string
+    {
+        return $issueKey === null ? '' : ' and moved '.$issueKey.' to Cancelled in Jira';
+    }
+
     public static function reclassifiedBugReport(string $title, string $fromNoun, string $asPhrase): string
     {
         return self::YOU.' filed the '.$fromNoun.' '.$title.' as '.$asPhrase;

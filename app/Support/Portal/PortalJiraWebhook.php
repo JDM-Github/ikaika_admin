@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\DB;
  *
  * The delivery is a nudge, not the news: the issue is read fresh from Jira afterwards, so a delivery
  * that comes twice, late or out of order changes nothing a fresh read would not. Production and staging share
- * one project (2026-10-21, user), so only an issue of a report sent on this server counts.
+ * one project (2026-10-21, user), so only an issue of a report sent on this server counts -- and not one archived
+ * or deleted, which is out of Jira's way until it is back.
  */
 final class PortalJiraWebhook
 {
@@ -31,7 +32,7 @@ final class PortalJiraWebhook
         if (! in_array($request->json('webhookEvent'), self::EVENTS, true) || ! is_scalar($issueId) || ! ctype_digit((string) $issueId)) {
             return null;
         }
-        $isLinked = $this->environment->scope(DB::connection('portal')->table('bug_reports'))
+        $isLinked = PortalBugReportsJira::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))
             ->where('jira_issue_id', (string) $issueId)
             ->where('jira_state', '!=', PortalBugReportsJira::STATE_DELETED)
             ->exists();

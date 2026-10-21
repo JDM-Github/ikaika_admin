@@ -43,6 +43,11 @@ use RuntimeException;
  * before read strictly -- and a cancelled report says why: nothing will change, or it duplicates another report,
  * which it names. That one cannot be itself or a duplicate, so no chain or loop forms; any other status clears
  * both. On a linked report the issue moves to Cancelled too, and a duplicate is labelled and linked there.
+ *
+ * Archive and delete (2026-10-21, user): an archived report is listed only when asked for, and stays as it was
+ * until it is unarchived; a deleted one (PortalBugReportDeletion) is gone from the page into its deleter's
+ * Recycle Bin. Either one moves an open linked report's issue to Cancelled first, and the report with it -- Jira
+ * first, or nothing -- while a closed one's issue stays as it is.
  */
 final class PortalBugReports
 {
@@ -135,6 +140,8 @@ final class PortalBugReports
 
     private const FOLDER = 'ikaika-portal/bug-reports';
 
+    public const BEING_SENT = 'It is being sent to Jira right now. Try again in a moment.';
+
     public function __construct(
         private readonly PortalCloudinary $cloudinary,
         private readonly PortalAudit $audit,
@@ -224,21 +231,32 @@ final class PortalBugReports
 
     /**
      * Every report, newest first, with its screenshots and who handles it, and the MIS members it can be
-     * given to. Nothing in a row says who sent it.
+     * given to. Nothing in a row says who sent it. Archived ones only when asked for -- an app from before
+     * never asks, so it never meets one -- and deleted ones never.
      *
      * @return array{section: string, resource: string, data: list<array<string, mixed>>, assignees: list<array{id: string, name: string}>, jira: array<string, mixed>}
      */
-    public function list(): array
+    public function list(bool $withArchived = false): array
     {
         $portal = DB::connection('portal');
-        $rows = $portal->table('bug_reports')->orderByDesc('reported_on')->orderByDesc('id')->get();
+        $rows = $portal->table('bug_reports')
+            ->whereNull('deleted_at')
+            ->when(! $withArchived, fn ($query) => $query->whereNull('archived_at'))
+            ->orderByDesc('reported_on')
+            ->orderByDesc('id')
+            ->get();
         $images = $portal->table('bug_report_images')
             ->whereIn('bug_report_id', $rows->pluck('id')->all())
             ->orderBy('id')
             ->get()
             ->groupBy('bug_report_id');
-        $names = $this->namesOf([...$rows->pluck('assignee_id')->filter()->all(), ...$rows->pluck('reporter_id')->filter()->all()]);
+        $names = $this->namesOf([...$rows->pluck('assignee_id')->all(), ...$rows->pluck('reporter_id')->all(), ...$rows->pluck('archived_by')->all()]);
         $titles = $rows->mapWithKeys(fn (object $row): array => [(int) $row->id => (string) $row->title])->all();
+        // An original out of the list, archived or deleted, still has its title.
+        $away = array_diff($rows->pluck('duplicate_of')->filter()->map(fn ($id): int => (int) $id)->unique()->all(), array_keys($titles));
+        if ($away !== []) {
+            $titles += $portal->table('bug_reports')->whereIn('id', $away)->pluck('title', 'id')->mapWithKeys(fn ($title, $id): array => [(int) $id => (string) $title])->all();
+        }
 
         return [
             'section' => 'bug-reports',
@@ -257,10 +275,7 @@ final class PortalBugReports
     public function update(Employee $actor, int $id, Request $request): array
     {
         $portal = DB::connection('portal');
-        $row = $portal->table('bug_reports')->where('id', $id)->first();
-        if ($row === null) {
-            abort(404, 'That issue or request was not found.');
-        }
+        $row = $this->changeableRow($id);
 
         $changes = [];
         if ($request->has('kind')) {
@@ -350,10 +365,7 @@ final class PortalBugReports
     public function sendToJira(Employee $actor, int $id, Request $request): array
     {
         $portal = DB::connection('portal');
-        $row = $portal->table('bug_reports')->where('id', $id)->first();
-        if ($row === null) {
-            abort(404, 'That issue or request was not found.');
-        }
+        $row = $this->changeableRow($id);
         if (! $this->jira->isConfigured()) {
             abort(503, 'Jira is not connected yet.');
         }
@@ -391,7 +403,7 @@ final class PortalBugReports
      *
      * @return array{section: string, resource: string, data: list<array<string, mixed>>, assignees: list<array{id: string, name: string}>, jira: array<string, mixed>}
      */
-    public function refreshFromJira(): array
+    public function refreshFromJira(bool $withArchived = false): array
     {
         if ($this->jira->isConfigured()) {
             try {
@@ -401,7 +413,7 @@ final class PortalBugReports
             }
         }
 
-        return $this->list();
+        return $this->list($withArchived);
     }
 
     /**
@@ -411,7 +423,7 @@ final class PortalBugReports
      *
      * @return array{section: string, resource: string, data: list<array<string, mixed>>, assignees: list<array{id: string, name: string}>, jira: array<string, mixed>, queued: int}
      */
-    public function sendAllToJira(Employee $actor, Request $request): array
+    public function sendAllToJira(Employee $actor, Request $request, bool $withArchived = false): array
     {
         if (! $this->jira->isConfigured()) {
             abort(503, 'Jira is not connected yet.');
@@ -425,7 +437,107 @@ final class PortalBugReports
             $this->audit->record($actor, PortalLogAction::POST, 'bug-reports', PortalActivityCopy::sentBugReportsToJira(count($ids)), null, $request, ['queued' => count($ids)]);
         }
 
-        return [...$this->list(), 'queued' => count($ids)];
+        return [...$this->list($withArchived), 'queued' => count($ids)];
+    }
+
+    /**
+     * MIS archives a report out of the way, or brings it back (2026-10-21, user). Archiving an open linked one
+     * moves its issue to Cancelled first; unarchiving never touches Jira. Asking for what it already is changes
+     * nothing.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function archive(Employee $actor, int $id, Request $request): array
+    {
+        $archived = $request->input('archived');
+        if (! is_bool($archived)) {
+            abort(422, 'Say whether to archive it or bring it back.');
+        }
+        $portal = DB::connection('portal');
+        $row = $this->liveRow($id);
+        if (($row->archived_at !== null) === $archived) {
+            return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($row)];
+        }
+        $moved = null;
+        $changed = false;
+        $held = $this->jira->withReportLock($id, function () use ($actor, $id, $request, $archived, $portal, &$moved, &$changed): void {
+            $row = $this->liveRow($id);
+            if (($row->archived_at !== null) === $archived) {
+                return;
+            }
+            if ($archived) {
+                $moved = $this->cancelIssueBeforeRemoval($actor, $row, $request, 'Archiving');
+            }
+            $portal->table('bug_reports')->where('id', $id)->update($archived
+                ? ['archived_at' => now('UTC')->format('Y-m-d H:i:s'), 'archived_by' => (int) $actor->getKey()]
+                : ['archived_at' => null, 'archived_by' => null]);
+            $changed = true;
+        });
+        if (! $held) {
+            abort(409, self::BEING_SENT);
+        }
+
+        $saved = $this->liveRow($id);
+        if (! $changed) {
+            return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($saved)];
+        }
+        $noun = self::KINDS[$this->kindOf($saved)]['noun'];
+        $this->audit->record(
+            $actor,
+            PortalLogAction::PATCH,
+            'bug-reports',
+            $archived ? PortalActivityCopy::archivedBugReport((string) $saved->title, $noun, $moved) : PortalActivityCopy::unarchivedBugReport((string) $saved->title, $noun),
+            (string) $id,
+            $request,
+            ['archived' => $archived, 'jiraCancelled' => $moved],
+        );
+
+        return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($saved)];
+    }
+
+    /**
+     * Before a report is archived or deleted: an open linked one's issue moved to Cancelled, which needs Send to
+     * Jira and a Jira that takes it -- or nothing changes. A closed one, one never sent and another server's are
+     * removed without Jira. The key of an issue this moved, else null. Called under the report's lock.
+     */
+    public function cancelIssueBeforeRemoval(Employee $actor, object $row, Request $request, string $doing): ?string
+    {
+        if (! $this->jira->owns($row) || in_array($row->status, [self::STATUS_FIXED, self::STATUS_CANCELLED], true)) {
+            return null;
+        }
+        if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
+            abort(403, $doing.' it moves '.$row->jira_issue_key.' to Cancelled in Jira, which needs Send to Jira.');
+        }
+        if (! $this->jira->isConfigured()) {
+            abort(503, 'Jira is not connected yet.');
+        }
+        try {
+            return $this->jira->cancelForRemoval($row);
+        } catch (RuntimeException $error) {
+            abort(422, 'Jira did not take the change: '.$error->getMessage());
+        }
+    }
+
+    // A report on the page, or 404: a deleted one is in its deleter's Recycle Bin, not here.
+    public function liveRow(int $id): object
+    {
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->whereNull('deleted_at')->first();
+        if ($row === null) {
+            abort(404, 'That issue or request was not found.');
+        }
+
+        return $row;
+    }
+
+    // A report that can change: on the page and not archived.
+    private function changeableRow(int $id): object
+    {
+        $row = $this->liveRow($id);
+        if ($row->archived_at !== null) {
+            abort(409, 'It is archived: unarchive it to change it.');
+        }
+
+        return $row;
     }
 
     /**
@@ -455,7 +567,7 @@ final class PortalBugReports
         $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->orderBy('id')->get()->all();
         $titles = $row->duplicate_of === null ? [] : [(int) $row->duplicate_of => DB::connection('portal')->table('bug_reports')->where('id', $row->duplicate_of)->value('title')];
 
-        return $this->present($row, $images, $this->namesOf([$row->assignee_id, $row->reporter_id]), array_filter($titles, fn ($title): bool => $title !== null));
+        return $this->present($row, $images, $this->namesOf([$row->assignee_id, $row->reporter_id, $row->archived_by]), array_filter($titles, fn ($title): bool => $title !== null));
     }
 
     /**
@@ -592,6 +704,7 @@ final class PortalBugReports
     {
         $assigneeId = $row->assignee_id === null ? null : (int) $row->assignee_id;
         $reporterId = $row->reporter_id === null ? null : (int) $row->reporter_id;
+        $archivedBy = $row->archived_by === null ? null : (int) $row->archived_by;
 
         return [
             'id' => (string) $row->id,
@@ -618,6 +731,9 @@ final class PortalBugReports
             // Why a cancelled one was closed, and the report a duplicate names (2026-10-21, user).
             'cancelReason' => $row->status === self::STATUS_CANCELLED ? ($row->cancel_reason ?? self::CANCEL_WONT_FIX) : null,
             'duplicateOf' => $row->duplicate_of === null ? null : ['id' => (string) $row->duplicate_of, 'title' => $titles[(int) $row->duplicate_of] ?? null],
+            // Archived out of the way, when and by whom (2026-10-21, user); null while on the page.
+            'archivedAt' => $row->archived_at === null ? null : str_replace(' ', 'T', substr((string) $row->archived_at, 0, 19)).'Z',
+            'archivedBy' => $archivedBy === null ? null : ['id' => (string) $archivedBy, 'name' => $names[$archivedBy] ?? 'Member'],
         ];
     }
 
@@ -677,7 +793,7 @@ final class PortalBugReports
         if ($id === (int) $row->id) {
             abort(422, 'It cannot be a duplicate of itself.');
         }
-        $original = DB::connection('portal')->table('bug_reports')->where('id', $id)->first(['id', 'status', 'cancel_reason', 'duplicate_of']);
+        $original = DB::connection('portal')->table('bug_reports')->where('id', $id)->whereNull('deleted_at')->first(['id', 'status', 'cancel_reason', 'duplicate_of']);
         if ($original === null) {
             abort(422, 'There is no #'.$id.' to be a duplicate of.');
         }

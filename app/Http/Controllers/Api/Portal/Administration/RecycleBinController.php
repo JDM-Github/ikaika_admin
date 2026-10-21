@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Portal\Administration;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalBugReportDeletion;
 use App\Support\Portal\PortalProjectDeletion;
 use App\Support\Portal\PortalRecycleBin;
 use App\Support\Portal\PortalSubmittedReports;
@@ -16,6 +17,7 @@ class RecycleBinController extends Controller
         private readonly PortalRecycleBin $recycleBin,
         private readonly PortalSubmittedReports $reports,
         private readonly PortalProjectDeletion $projects,
+        private readonly PortalBugReportDeletion $bugReports,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -50,6 +52,8 @@ class RecycleBinController extends Controller
         // The bin holds more than one kind of thing now, so the row says which hand puts it back.
         if (PortalProjectDeletion::owns($row)) {
             $this->projects->restoreFromBin($actor, $row, $request);
+        } elseif (PortalBugReportDeletion::owns($row)) {
+            $this->bugReports->restoreFromBin($actor, $row, $request);
         } else {
             $this->reports->restoreFromBin($actor, $row, $request);
         }

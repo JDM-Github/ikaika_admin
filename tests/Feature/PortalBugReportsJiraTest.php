@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Jobs\SendBugReportToJira;
+use App\Modules\Core\Models\Recycle;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
+use App\Support\Portal\PortalBugReportsJira;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
@@ -780,6 +782,162 @@ class PortalBugReportsJiraTest extends TestCase
         ], $this->calls());
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issueLink')
             && $request->data() === ['type' => ['name' => 'Duplicate'], 'inwardIssue' => ['id' => '10080'], 'outwardIssue' => ['id' => '10007']]);
+    }
+
+    // Archive and delete (2026-10-21, user): an open linked one's issue moves to Cancelled first, and the report with it.
+    public function test_archiving_an_open_linked_report_cancels_its_issue_first_and_a_closed_ones_stays(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $open = $this->report(['status' => 'in_progress', 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        $fixed = $this->report(['status' => 'fixed', 'jira_issue_id' => '10043', 'jira_issue_key' => 'IKP-8', 'jira_state' => 'sent']);
+        $this->fakeBoard(['10042' => ['IKP-7', ['status' => ['name' => 'In Progress', 'statusCategory' => ['key' => 'indeterminate']]]]]);
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$open.'/archive', ['archived' => true])
+            ->assertOk()->assertJsonPath('data.status', 'wont_fix')->assertJsonPath('data.cancelReason', 'wont_fix');
+        // Asked first, moved, and read back.
+        $this->assertSame(['GET issue/10042', 'GET issue/10042/transitions', 'POST issue/10042/transitions', 'GET issue/10042'], $this->calls());
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && ($request['transition'] ?? null) === ['id' => '51']);
+
+        // A closed one's issue stays where it is, and unarchiving never touches Jira.
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$fixed.'/archive', ['archived' => true])->assertOk()->assertJsonPath('data.status', 'fixed');
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$open.'/archive', ['archived' => false])->assertOk()->assertJsonPath('data.status', 'wont_fix');
+        $this->assertCount(4, $this->calls());
+        $this->assertTrue(PortalLog::query()->where('employee_id', $analyst->getKey())->where('record_id', (string) $open)->pluck('message')
+            ->contains(fn (string $message): bool => str_ends_with($message, ' archived the bug report Export the map and moved IKP-7 to Cancelled in Jira')));
+    }
+
+    // Deleted the same way: cancelled in Jira first, and the bin says so.
+    public function test_deleting_an_open_linked_report_cancels_its_issue_before_it_goes_to_the_bin(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $id = $this->report(['jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::TO_DO]]]);
+
+        $this->withHeaders($this->headersFor($analyst))->deleteJson(self::BASE.'bug-reports/'.$id)->assertNoContent();
+
+        $this->assertSame(['GET issue/10042', 'GET issue/10042/transitions', 'POST issue/10042/transitions', 'GET issue/10042'], $this->calls());
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $this->assertSame(['wont_fix', 'wont_fix'], [$row->status, $row->cancel_reason]);
+        $this->assertNotNull($row->deleted_at);
+        $issue = Recycle::query()->where('product', 'portal')->where('recycle_key', 'bug-report-'.$id)->firstOrFail()->payload['issue'];
+        $this->assertSame(['wont_fix', 'IKP-7', true], [$issue['status'], $issue['jiraKey'], $issue['jiraCancelled']]);
+        $this->assertTrue(PortalLog::query()->where('employee_id', $analyst->getKey())->where('record_id', (string) $id)->pluck('message')
+            ->contains(fn (string $message): bool => str_ends_with($message, ' deleted the bug report Export the map and moved IKP-7 to Cancelled in Jira')));
+    }
+
+    // Jira first, or nothing (2026-10-20): a move it refuses keeps the report, and so does lacking Send to Jira.
+    public function test_a_removal_jira_refuses_changes_nothing_and_needs_send_to_jira(): void
+    {
+        $this->connectJira();
+        $headers = $this->headersFor($this->memberOf('MIS'));
+        $id = $this->report(['jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/10042/transitions' => Http::response(['transitions' => [$this->boardMoves()[0]]]),
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-7', 'fields' => ['status' => self::TO_DO]]),
+        ]);
+        $refused = 'Jira did not take the change: Jira has no way to move IKP-7 to Cancelled from where it is.';
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id.'/archive', ['archived' => true])->assertStatus(422)->assertJsonPath('message', $refused);
+        $this->withHeaders($headers)->deleteJson(self::BASE.'bug-reports/'.$id)->assertStatus(422)->assertJsonPath('message', $refused);
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $this->assertSame(['new', null, null], [$row->status, $row->archived_at, $row->deleted_at]);
+        $this->assertFalse(Recycle::query()->where('product', 'portal')->where('recycle_key', 'bug-report-'.$id)->exists());
+
+        // Without Send to Jira the issue is not theirs to move, so the report is not theirs to remove.
+        $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id.'/archive', ['archived' => true])
+            ->assertForbidden()->assertJsonPath('message', 'Archiving it moves IKP-7 to Cancelled in Jira, which needs Send to Jira.');
+        $this->withHeaders($headers)->deleteJson(self::BASE.'bug-reports/'.$id)
+            ->assertForbidden()->assertJsonPath('message', 'Deleting it moves IKP-7 to Cancelled in Jira, which needs Send to Jira.');
+    }
+
+    // Gone from Jira, or closed there already: nothing to move, and the report goes as Jira has it.
+    public function test_removing_one_whose_issue_is_gone_or_closed_in_jira_moves_nothing(): void
+    {
+        $this->connectJira();
+        $headers = $this->headersFor($this->memberOf('MIS'));
+        $gone = $this->report(['jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        $done = $this->report(['status' => 'in_review', 'jira_issue_id' => '10043', 'jira_issue_key' => 'IKP-8', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['errorMessages' => ['Issue does not exist or you do not have permission to see it.']], 404),
+            self::SITE.'/rest/api/3/issue/10043*' => Http::response(['id' => '10043', 'key' => 'IKP-8', 'fields' => ['status' => ['name' => 'Done', 'statusCategory' => ['key' => 'done']]]]),
+        ]);
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$gone.'/archive', ['archived' => true])
+            ->assertOk()->assertJsonPath('data.status', 'new')->assertJsonPath('data.jira.state', 'deleted');
+        $this->withHeaders($headers)->deleteJson(self::BASE.'bug-reports/'.$done)->assertNoContent();
+
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $done)->first();
+        $this->assertSame(['fixed', 'Done'], [$row->status, $row->jira_status]);
+        $this->assertNotNull($row->deleted_at);
+        $this->assertSame(['GET issue/10042', 'GET issue/10043'], $this->calls());
+        $this->assertFalse(Recycle::query()->where('product', 'portal')->where('recycle_key', 'bug-report-'.$done)->firstOrFail()->payload['issue']['jiraCancelled']);
+    }
+
+    // A send holds the report: archiving or deleting it waits rather than crossing it.
+    public function test_archiving_or_deleting_one_being_sent_waits(): void
+    {
+        $this->connectJira();
+        $headers = $this->headersFor($this->memberOf('MIS'));
+        $id = $this->report(['jira_state' => 'pending']);
+        $lock = Cache::lock('portal-jira-push:'.$id, 120);
+        $this->assertTrue($lock->get());
+        try {
+            $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id.'/archive', ['archived' => true])
+                ->assertStatus(409)->assertJsonPath('message', 'It is being sent to Jira right now. Try again in a moment.');
+            $this->withHeaders($headers)->deleteJson(self::BASE.'bug-reports/'.$id)
+                ->assertStatus(409)->assertJsonPath('message', 'It is being sent to Jira right now. Try again in a moment.');
+        } finally {
+            $lock->release();
+        }
+
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $this->assertSame([null, null], [$row->archived_at, $row->deleted_at]);
+    }
+
+    // Out of the way is out of Jira's way: an archived or deleted one is never queued or sent, even by a job from before.
+    public function test_archived_and_deleted_reports_are_never_queued_or_sent(): void
+    {
+        Queue::fake();
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->update(['jira_state' => 'sent']);
+        $archived = $this->report(['archived_at' => '2026-10-21 01:00:00']);
+        $deleted = $this->report(['jira_state' => 'failed', 'deleted_at' => '2026-10-21 01:00:00']);
+        Http::preventStrayRequests();
+        Http::fake();
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/jira/send-all')->assertOk()->assertJsonPath('queued', 0);
+        Queue::assertNothingPushed();
+        $this->assertTrue(app(PortalBugReportsJira::class)->push($archived));
+        $this->assertTrue(app(PortalBugReportsJira::class)->push($deleted));
+
+        Http::assertNothingSent();
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$archived, $deleted])->get()->keyBy('id');
+        $this->assertSame([null, 'failed'], [$rows[$archived]->jira_state, $rows[$deleted]->jira_state]);
+    }
+
+    // Nor read back: only the live one is asked about.
+    public function test_archived_and_deleted_reports_are_never_read_back(): void
+    {
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $this->report(['archived_at' => '2026-10-21 01:00:00', 'jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent']);
+        $this->report(['deleted_at' => '2026-10-21 01:00:00', 'jira_issue_id' => '10051', 'jira_issue_key' => 'IKP-21', 'jira_state' => 'sent']);
+        $live = $this->report(['jira_issue_id' => '10052', 'jira_issue_key' => 'IKP-22', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+            ['id' => '10052', 'key' => 'IKP-22', 'fields' => ['status' => self::TO_DO]],
+        ], 'issueErrors' => []])]);
+
+        $listed = $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/jira/sync')->assertOk()->json('data');
+
+        Http::assertSent(fn (Request $request): bool => $request['issueIdsOrKeys'] === ['10052']);
+        $this->assertContains((string) $live, collect($listed)->pluck('id')->all());
     }
 
     /**

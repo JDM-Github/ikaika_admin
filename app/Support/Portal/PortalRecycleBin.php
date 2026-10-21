@@ -137,6 +137,8 @@ final class PortalRecycleBin
                     ...PortalRecycleBinPresenter::detail($row, $names),
                     // A deleted project is only stamped, so its details and reported work are still there to show.
                     'project' => PortalProjectDeletion::owns($row) ? $this->projects->binSummary((int) $row->record_id) : null,
+                    // A deleted issue or request shows what the bin kept of it (2026-10-21, user).
+                    'issue' => PortalBugReportDeletion::owns($row) ? PortalRecycleBinPresenter::issue(is_array($row->payload) ? $row->payload : []) : null,
                 ],
             ];
         });
@@ -355,6 +357,12 @@ final class PortalRecycleBin
             return;
         }
 
+        if ($type === PortalRecycleBinPresenter::TYPE_ISSUE) {
+            $query->where('resource', 'like', 'bug-report%');
+
+            return;
+        }
+
         if ($type === PortalRecycleBinPresenter::TYPE_REPORT) {
             $query->where(function (Builder $builder): void {
                 $builder
@@ -514,6 +522,7 @@ final class PortalRecycleBin
             PortalRecycleBinPresenter::TYPE_REPORT,
             PortalRecycleBinPresenter::TYPE_REQUEST,
             PortalRecycleBinPresenter::TYPE_PROJECT,
+            PortalRecycleBinPresenter::TYPE_ISSUE,
         ], true)) {
             return $value;
         }

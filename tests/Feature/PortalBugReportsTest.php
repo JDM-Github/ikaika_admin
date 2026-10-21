@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Core\Models\Recycle;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Modules\Portal\Models\PortalNotification;
@@ -69,7 +70,7 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame('development', $row->channel);
         $this->assertSame(
             ['id', 'kind', 'title', 'description', 'page', 'status', 'cancel_reason', 'duplicate_of', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reporter_id', 'channel', 'reported_on', 'updated_at',
-                'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at', 'jira_create_started_at'],
+                'archived_at', 'archived_by', 'deleted_at', 'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at', 'jira_create_started_at'],
             Schema::connection('portal')->getColumnListing('bug_reports'),
         );
         $this->assertSame($logged, PortalLog::query()->count());
@@ -188,7 +189,7 @@ class PortalBugReportsTest extends TestCase
         $engineering = $this->headersFor($this->memberOf('Engineering'));
 
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'images', 'jira', 'jiraHere', 'cancelReason', 'duplicateOf'], array_keys($listed));
+        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'images', 'jira', 'jiraHere', 'cancelReason', 'duplicateOf', 'archivedAt', 'archivedBy'], array_keys($listed));
         $this->assertNull($listed['reporter']);
         $this->assertNull($listed['jira']);
         $this->assertSame('2026-10-12', $listed['reportedOn']);
@@ -365,6 +366,9 @@ class PortalBugReportsTest extends TestCase
         $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate'])->assertJsonPath('message', 'Choose the issue or request it duplicates.');
         $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $id])->assertJsonPath('message', 'It cannot be a duplicate of itself.');
         $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => '999999999'])->assertJsonPath('message', 'There is no #999999999 to be a duplicate of.');
+        // One in the Recycle Bin is not there to be duplicated.
+        $binned = $this->unlinked('Calendar skips Monday', ['deleted_at' => '2026-10-21 01:00:00']);
+        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $binned])->assertJsonPath('message', 'There is no #'.$binned.' to be a duplicate of.');
         $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $duplicate])
             ->assertJsonPath('message', '#'.$duplicate.' is a duplicate itself: choose #'.$original.', the one it duplicates.');
         $patch(['status' => 'wont_fix', 'cancelReason' => 'wont_fix', 'duplicateOf' => (string) $original])->assertJsonPath('message', 'Only a duplicate names the one it duplicates.');
@@ -383,6 +387,100 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame('Issues & Requests', $powers['bug-reports']['label']);
         $this->assertSame('Send to Jira', $powers['bug-reports.jira']['label']);
         $this->assertSame('bug-reports', $powers['bug-reports.jira']['parentKey']);
+        $this->assertSame('Delete issues and requests', $powers['bug-reports.delete']['label']);
+        $this->assertSame('bug-reports', $powers['bug-reports.delete']['parentKey']);
+    }
+
+    // Archive (2026-10-21, user): out of the way behind a filter, frozen there, and back as it was.
+    public function test_mis_archives_a_report_out_of_the_list_and_brings_it_back(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $id = $this->unlinked('The month view jumps', ['assignee_id' => $analyst->getKey()]);
+        $listed = fn (string $query = ''): ?array => collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports'.$query)->assertOk()->json('data'))
+            ->firstWhere('id', (string) $id);
+        $archive = fn (mixed $archived) => $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id.'/archive', ['archived' => $archived]);
+
+        $archive('yes')->assertStatus(422)->assertJsonPath('message', 'Say whether to archive it or bring it back.');
+        $archive(true)->assertOk()->assertJsonPath('data.status', 'new')->assertJsonPath('data.archivedBy.id', (string) $analyst->getKey());
+        // Asked again, it already is: nothing changes and nothing more is logged.
+        $archive(true)->assertOk();
+
+        // An app from before never asks for archived ones, so it never meets one.
+        $this->assertNull($listed());
+        $this->assertNotNull($listed('?withArchived=1')['archivedAt'] ?? null);
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['note' => 'Later.'])
+            ->assertStatus(409)->assertJsonPath('message', 'It is archived: unarchive it to change it.');
+        $this->withHeaders($mis)->postJson(self::BASE.'bug-reports/'.$id.'/jira')
+            ->assertStatus(409)->assertJsonPath('message', 'It is archived: unarchive it to change it.');
+
+        $archive(false)->assertOk()->assertJsonPath('data.archivedAt', null)->assertJsonPath('data.archivedBy', null);
+        $this->assertNotNull($listed());
+        $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->where('record_id', (string) $id)->pluck('message');
+        $this->assertCount(1, $messages->filter(fn (string $message): bool => str_ends_with($message, ' archived the bug report The month view jumps')));
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, ' unarchived the bug report The month view jumps')));
+    }
+
+    // Delete (2026-10-21, user): into the deleter's Recycle Bin with only what its row shows, and back from there.
+    public function test_mis_deletes_a_report_to_the_recycle_bin_and_restores_it_from_there(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $id = $this->unlinked('The month view jumps', [
+            'kind' => 'feature', 'page' => 'Calendar', 'note' => 'Ask Jamie', 'archived_at' => '2026-10-21 01:00:00', 'archived_by' => $analyst->getKey(),
+        ]);
+        DB::connection('portal')->table('bug_report_images')->insert([
+            'bug_report_id' => $id, 'file_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/bug-reports/shot.png', 'mime_type' => 'image/png', 'size_bytes' => 9,
+        ]);
+        $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->deleteJson(self::BASE.'bug-reports/'.$id)->assertForbidden();
+
+        $this->withHeaders($mis)->deleteJson(self::BASE.'bug-reports/'.$id)->assertNoContent();
+        // A retried delete answers as the first did, and the bin holds it once.
+        $this->withHeaders($mis)->deleteJson(self::BASE.'bug-reports/'.$id)->assertNoContent();
+
+        $this->assertNotContains((string) $id, collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports?withArchived=1')->json('data'))->pluck('id')->all());
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id.'/archive', ['archived' => false])->assertNotFound();
+        $this->assertSame(1, DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $id)->count());
+        $bin = Recycle::query()->where('product', 'portal')->where('recycle_key', 'bug-report-'.$id)->get();
+        $this->assertCount(1, $bin);
+        $this->assertSame(['bug-reports', (string) $id, (int) $analyst->getKey()], [$bin[0]->resource, (string) $bin[0]->record_id, (int) $bin[0]->deleted_by]);
+        // What its row shows, and never the description, the note, the sender or where the screenshots are. A JSON
+        // column keeps no key order, so both are sorted.
+        $payload = $bin[0]->payload;
+        ksort($payload);
+        ksort($payload['issue']);
+        $this->assertSame([
+            'id' => (string) $id,
+            'issue' => ['images' => 1, 'jiraCancelled' => false, 'jiraKey' => null, 'kind' => 'feature', 'page' => 'Calendar', 'reportedOn' => '2026-10-21', 'status' => 'new'],
+            'kind' => 'issue', 'submittedOn' => '2026-10-21', 'title' => 'The month view jumps',
+        ], $payload);
+
+        $inBin = collect($this->withHeaders($mis)->getJson(self::BASE.'administration/recycle-bin?type=issue')->assertOk()->json('data'))->firstWhere('recordId', (string) $id);
+        $this->assertSame(['issue', 'The month view jumps'], [$inBin['type'] ?? null, $inBin['title'] ?? null]);
+        $this->withHeaders($mis)->getJson(self::BASE.'administration/recycle-bin/'.$bin[0]->id)->assertOk()
+            ->assertJsonPath('data.issue', ['kind' => 'feature', 'status' => 'new', 'reportedOn' => '2026-10-21', 'page' => 'Calendar', 'jiraKey' => null, 'jiraCancelled' => false, 'images' => 1])
+            ->assertJsonPath('data.project', null);
+
+        $this->withHeaders($mis)->postJson(self::BASE.'administration/recycle-bin/'.$bin[0]->id.'/restore')->assertNoContent();
+        // Back as it was: archived still.
+        $restored = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports?withArchived=1')->json('data'))->firstWhere('id', (string) $id);
+        $this->assertNotNull($restored['archivedAt'] ?? null);
+        $this->assertFalse(Recycle::query()->where('product', 'portal')->where('recycle_key', 'bug-report-'.$id)->exists());
+        $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->where('record_id', (string) $id)->pluck('message');
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, ' deleted the feature request The month view jumps')));
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, ' restored the feature request The month view jumps')));
+    }
+
+    // Deleting is a power of its own (2026-10-21, user), switched off per person while the page stays theirs.
+    public function test_deleting_needs_delete_issues_and_requests_and_archiving_does_not(): void
+    {
+        $mis = $this->headersFor($this->memberOf('MIS'));
+        $id = $this->unlinked('The month view jumps');
+        $this->withHeaders($mis)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.delete', 'on' => false])->assertOk();
+
+        $this->withHeaders($mis)->deleteJson(self::BASE.'bug-reports/'.$id)->assertForbidden();
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id.'/archive', ['archived' => true])->assertOk();
+        $this->assertNull(DB::connection('portal')->table('bug_reports')->where('id', $id)->value('deleted_at'));
     }
 
     /**

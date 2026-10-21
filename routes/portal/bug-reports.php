@@ -14,6 +14,14 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
         ->patch('bug-reports/{id}', [BugReportsController::class, 'update'])
         ->whereNumber('id');
+    // Archive and delete (2026-10-21, user): archiving comes back, so it is the page's; deleting is a power of its
+    // own, and its throttle is the Recycle Bin's, where the report lands.
+    Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
+        ->patch('bug-reports/{id}/archive', [BugReportsController::class, 'archive'])
+        ->whereNumber('id');
+    Route::middleware(['portal.rule:bug-reports.delete', 'throttle:portal-administration-recycle-bin-write'])
+        ->delete('bug-reports/{id}', [BugReportsController::class, 'destroy'])
+        ->whereNumber('id');
     // Refresh: every linked one read back from Jira now, then the list. It only reads, so it is the viewer's.
     Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
         ->post('bug-reports/jira/sync', [BugReportsController::class, 'refreshFromJira']);

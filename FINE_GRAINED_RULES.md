@@ -514,6 +514,9 @@ Descriptions (what the Access page shows on each row) live in the SQL.
   people send from the corner button, anonymously; named Bug Reports until 2026-10-19, key kept)
   - `bug-reports.jira` Send to Jira — MAD (MIS only; send one by hand, try a failed one again, and the switch
     that sends new ones on their own; migration `add_portal_bug_report_jira`)
+  - `bug-reports.delete` Delete issues and requests — MAD (MIS only; to the deleter's Recycle Bin for 30 days.
+    Archiving needs only the page; either one moves an open linked report's issue to Cancelled, which also needs
+    Send to Jira; migration `add_portal_bug_report_archive_and_delete`)
 - `developer` Developer — D (Developer mode only, never given)
   - `developer.rules` Rule catalog — D
   - `developer.flag` Developer flag — D
