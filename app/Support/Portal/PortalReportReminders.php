@@ -144,7 +144,8 @@ final class PortalReportReminders
     public function remind(Employee $recipient, array $days): void
     {
         [$subject, $body] = $this->letter($days);
-        $this->messages->sendToMembers(new Employee, Request::create('/'), [(int) $recipient->getKey()], $subject, $body, PortalShellPath::LATE_REPORT);
+        // Each day it names is marked on Missing Reports, so nobody reminds them by hand as well (2026-10-21).
+        $this->messages->sendToMembers(new Employee, Request::create('/'), [(int) $recipient->getKey()], $subject, $body, PortalShellPath::LATE_REPORT, $days);
     }
 
     /**

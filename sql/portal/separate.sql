@@ -206,6 +206,33 @@ CREATE TABLE email_attachments (
     FOREIGN KEY (uploaded_by) REFERENCES employees(id)      ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Finance / Transactions' payor list (2026-10-21): names kept by hand, and ones taken off the list (hidden).
+-- Existing databases: create_portal_finance_payors_table.
+CREATE TABLE finance_payors (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    name         VARCHAR(191) NOT NULL,
+    is_hidden    TINYINT(1)   NOT NULL DEFAULT 0,
+    updated_by   INT          NULL,
+    date_updated DATETIME     NOT NULL,
+    UNIQUE KEY uq_finance_payors_name (name),
+    FOREIGN KEY (updated_by) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Missing Reports' reminder marks (2026-10-21): who was emailed a reminder for which day, when, and by
+-- whom (null for the scheduled run). Existing databases: create_portal_report_reminders_table.
+CREATE TABLE report_reminders (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id  INT      NOT NULL,
+    report_date  DATE     NOT NULL,
+    message_id   INT      NULL,
+    sent_by      INT      NULL,
+    date_created DATETIME NOT NULL,
+    INDEX idx_report_reminders_day (report_date, employee_id),
+    FOREIGN KEY (employee_id) REFERENCES employees(id)      ON DELETE CASCADE,
+    FOREIGN KEY (message_id)  REFERENCES email_messages(id) ON DELETE SET NULL,
+    FOREIGN KEY (sent_by)     REFERENCES employees(id)      ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Built-in blocks: the company footer and the Portal email test template. The HTML is
 -- database/seeders/email/*.html, inlined here; its logo is in Cloudinary's global folder.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)

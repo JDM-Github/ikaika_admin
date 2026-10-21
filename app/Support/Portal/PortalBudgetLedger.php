@@ -130,6 +130,26 @@ final class PortalBudgetLedger
         }
     }
 
+    /**
+     * Every budget code an envelope may spend under (2026-10-21, user): those it is linked to, and any it
+     * was credited under, as Airtable's credits often were before the envelope was linked to a code.
+     *
+     * @return list<int>
+     */
+    public function codeIdsOf(int $envelopeId): array
+    {
+        $linked = $this->connection()->table('envelopes_budget_codes')->where('envelope_id', $envelopeId)->pluck('budget_code_id');
+        $credited = $this->connection()
+            ->table('transactions_budget_codes as tb')
+            ->join('transactions as t', 't.id', '=', 'tb.transaction_id')
+            ->join('transactions_envelopes as te', 'te.transaction_id', '=', 't.id')
+            ->where('te.envelope_id', $envelopeId)
+            ->where('t.type', self::TYPE_CREDIT)
+            ->pluck('tb.budget_code_id');
+
+        return $linked->merge($credited)->map(fn ($id): int => (int) $id)->unique()->values()->all();
+    }
+
     // The budget code an envelope sits under -- the first by name when it sits under more -- or null for none.
     public function codeIdOf(int $envelopeId): ?int
     {

@@ -209,6 +209,16 @@ final class PortalActivityCopy
         return self::YOU.' updated the budget code '.$name;
     }
 
+    public static function addedPayor(string $name): string
+    {
+        return self::YOU.' added '.$name.' to the payor list';
+    }
+
+    public static function removedPayor(string $name): string
+    {
+        return self::YOU.' took '.$name.' off the payor list';
+    }
+
     public static function updatedBudgetEnvelope(string $name): string
     {
         return self::YOU.' updated the envelope '.$name;

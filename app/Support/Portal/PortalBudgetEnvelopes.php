@@ -323,6 +323,15 @@ final class PortalBudgetEnvelopes
                 ->select('tb.budget_code_id')
                 ->selectRaw('COALESCE(SUM(t.amount), 0) AS received')
                 ->pluck('received', 'budget_code_id');
+            // Which envelopes each code's money went into, linked or not, so Add Transaction can find them by code.
+            $creditedByCode = $this->connection()
+                ->table('transactions_budget_codes as tb')
+                ->join('transactions as t', 't.id', '=', 'tb.transaction_id')
+                ->join('transactions_envelopes as te', 'te.transaction_id', '=', 't.id')
+                ->where('t.type', self::TYPE_CREDIT)
+                ->distinct()
+                ->get(['tb.budget_code_id', 'te.envelope_id'])
+                ->groupBy('budget_code_id');
         } catch (QueryException) {
             abort(503, 'Budget codes are unavailable right now.');
         }
@@ -349,6 +358,12 @@ final class PortalBudgetEnvelopes
                     : $this->amount($this->cents($code->expected_amount_quotation)),
                 'received' => $this->amount($this->cents($receivedByCode->get($code->id) ?? 0)),
                 'envelopes' => $members,
+                'fundedEnvelopeIds' => collect($creditedByCode->get($code->id) ?? [])
+                    ->map(fn (object $row): string => (string) $row->envelope_id)
+                    ->unique()
+                    ->sort()
+                    ->values()
+                    ->all(),
             ];
         }
 

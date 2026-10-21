@@ -205,6 +205,13 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // A receipt photo is uploaded first and named by the transaction it goes with, a new one or an edited one.
     Route::middleware(['portal.rule:finance.transactions.add|finance.transactions.edit', 'throttle:portal-manage-budget-write'])
         ->post('manage/budget-transactions/receipts', [BudgetEnvelopesController::class, 'storeTransactionReceipt']);
+    // The payor list the transaction form offers, kept and trimmed by whoever adds or edits transactions (2026-10-21).
+    Route::middleware(['portal.rule:finance.transactions.add|finance.transactions.edit', 'throttle:portal-manage-requests'])
+        ->get('manage/budget-payors', [BudgetEnvelopesController::class, 'payors']);
+    Route::middleware(['portal.rule:finance.transactions.add|finance.transactions.edit', 'throttle:portal-manage-budget-write'])->group(function (): void {
+        Route::post('manage/budget-payors', [BudgetEnvelopesController::class, 'storePayor']);
+        Route::post('manage/budget-payors/remove', [BudgetEnvelopesController::class, 'removePayor']);
+    });
     // Edit transactions: a transaction's details, never its money (2026-10-13).
     Route::middleware(['portal.rule:finance.transactions.edit', 'throttle:portal-manage-budget-write'])
         ->patch('manage/budget-transactions/{id}', [BudgetEnvelopesController::class, 'updateTransaction'])

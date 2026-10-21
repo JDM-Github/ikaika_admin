@@ -468,6 +468,33 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertSame(0, $tracker->table('transactions_budget_codes')->where('transaction_id', $plain)->count());
     }
 
+    // The reported ask (2026-10-21): a code chosen first is kept where the envelope holds money under it.
+    public function test_a_chosen_budget_code_is_kept_where_the_envelope_was_credited_under_it(): void
+    {
+        $tracker = DB::connection('tracker');
+        $account = $this->account('Seeded Chosen Account', 'chosen.seeded@example.test', 500.00);
+        $funder = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-MOVE-FUNDER']);
+        $stranger = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-MOVE-STRANGER']);
+        // Credited under a code it was never linked to, as Airtable's credits were.
+        $envelope = $this->envelope('Seeded Funded Envelope', 300.00);
+        $credit = (int) $tracker->table('transactions_envelopes')->where('envelope_id', $envelope)->value('transaction_id');
+        $tracker->table('transactions_budget_codes')->insert(['transaction_id' => $credit, 'budget_code_id' => $funder]);
+
+        $listed = collect($this->getJson(self::BASE.'budget-codes', $this->admin())->assertOk()->json('data'))->firstWhere('id', (string) $funder);
+        $this->assertSame([(string) $envelope], $listed['fundedEnvelopeIds']);
+
+        $id = (int) $this->addTransaction([
+            'type' => 'Expense', 'name' => 'Coded spend', 'amount' => 100, 'envelopeId' => $envelope, 'accountId' => $account, 'budgetCodeId' => $funder,
+        ])->assertCreated()->json('data.id');
+        $this->assertSame([$funder], $tracker->table('transactions_budget_codes')->where('transaction_id', $id)->pluck('budget_code_id')->map(fn ($code) => (int) $code)->all());
+
+        // A code it holds nothing under is not taken: the line keeps the envelope's own, here none.
+        $stray = (int) $this->addTransaction([
+            'type' => 'Expense', 'name' => 'Stray spend', 'amount' => 10, 'envelopeId' => $envelope, 'accountId' => $account, 'budgetCodeId' => $stranger,
+        ])->assertCreated()->json('data.id');
+        $this->assertSame(0, $tracker->table('transactions_budget_codes')->where('transaction_id', $stray)->count());
+    }
+
     public function test_a_member_reaches_none_of_the_money_routes(): void
     {
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($this->activeMember())];

@@ -9,8 +9,10 @@ use App\Modules\Portal\Models\EmailMessage;
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Mail\SentMessage;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -253,6 +255,10 @@ final class PortalEmailMessages
         $linkPath = $this->validatedLinkPath($request);
         [$fromName, $replyTo, $fromAddress] = $this->sender($actor, $request);
         $attachments = $this->attachments->staged($actor, $request->input('attachmentIds', []));
+        // Too large to leave from their own mailbox, it goes from the portal's address in their name instead.
+        if ($fromAddress !== null && PortalEmailAttachments::totalBytes($attachments) >= PortalEmailAttachments::OWN_ADDRESS_MAX_BYTES) {
+            $fromAddress = null;
+        }
         $footer = $footerId === null ? null : $this->blocks->footer($footerId);
         // "Send as me" may only wear a signature footer: the composer limits the picker to them, and
         // this refuses anything else, so a plain footer never leaves under a person's own name.
@@ -265,6 +271,7 @@ final class PortalEmailMessages
         $footerFormat = $footer === null ? null : $this->blockFormat($footer);
         // A footer carrying signature placeholders reads for whoever is sending, like a signature.
         $footerBody = $this->fillFooter($footerBody, $footerFormat, $actor);
+        $reminderDays = $this->validatedReminderDays($request);
 
         return $this->deliver(
             $actor,
@@ -285,6 +292,7 @@ final class PortalEmailMessages
             $fromAddress,
             $linkPath,
             $attachments,
+            $reminderDays,
         );
     }
 
@@ -294,9 +302,10 @@ final class PortalEmailMessages
      * as a sent email does.
      *
      * @param  list<int>  $memberIds
+     * @param  list<string>  $reminderDays  the days a missing-report reminder names, marked on Missing Reports
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
-    public function sendToMembers(Employee $actor, Request $request, array $memberIds, string $subject, string $body, string $linkPath): array
+    public function sendToMembers(Employee $actor, Request $request, array $memberIds, string $subject, string $body, string $linkPath, array $reminderDays = []): array
     {
         [$footerBody, $footerFormat] = PortalNotificationEmails::companyFooter();
 
@@ -318,6 +327,8 @@ final class PortalEmailMessages
             null,
             null,
             $linkPath,
+            [],
+            $reminderDays,
         );
     }
 
@@ -328,6 +339,7 @@ final class PortalEmailMessages
      * @param  list<string>  $cc
      * @param  list<string>  $bcc
      * @param  list<object>  $attachments  staged rows, checked by PortalEmailAttachments::staged
+     * @param  list<string>  $reminderDays
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     private function deliver(
@@ -349,6 +361,7 @@ final class PortalEmailMessages
         ?string $fromAddress,
         ?string $linkPath,
         array $attachments = [],
+        array $reminderDays = [],
     ): array {
         $recipients = $this->audience->recipients($audience, $filter);
         if ($recipients === []) {
@@ -396,6 +409,7 @@ final class PortalEmailMessages
             Log::warning('portal.email.queue.failed', ['message_id' => $messageId, 'reason' => $error->getMessage()]);
             abort(503, 'The email could not be queued. Try again in a moment.');
         }
+        $this->recordReminders($messageId, $recipients, $reminderDays, $employeeId);
 
         if ($employeeId !== null) {
             $this->audit->record(
@@ -638,6 +652,53 @@ final class PortalEmailMessages
         $fromAddress = $request->boolean('ownAddress') ? $this->ownAddress($email) : null;
 
         return [$name, $email, $fromAddress];
+    }
+
+    /**
+     * The day a reminder opened from Missing Reports is about (2026-10-21, user), so the page can mark who
+     * was emailed for it. Anything but a real calendar day is refused rather than marked.
+     *
+     * @return list<string>
+     */
+    private function validatedReminderDays(Request $request): array
+    {
+        $day = trim((string) $request->input('reminderFor', ''));
+        if ($day === '') {
+            return [];
+        }
+        $date = preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) === 1 ? Carbon::createFromFormat('!Y-m-d', $day) : null;
+        if ($date === null || $date->format('Y-m-d') !== $day) {
+            abort(422, 'That reminder names a day that does not exist.');
+        }
+
+        return [$day];
+    }
+
+    /**
+     * Marks each member a missing-report reminder went to, for each day it named (2026-10-21, user), once
+     * it is queued. A typed address is nobody on the roster, so it is not marked.
+     *
+     * @param  list<array{id: ?int, name: string, email: string}>  $recipients
+     * @param  list<string>  $days
+     */
+    private function recordReminders(int $messageId, array $recipients, array $days, ?int $sentBy): void
+    {
+        $now = Carbon::now('UTC')->toDateTimeString();
+        $rows = [];
+        foreach ($recipients as $recipient) {
+            foreach ($recipient['id'] === null ? [] : $days as $day) {
+                $rows[] = ['employee_id' => $recipient['id'], 'report_date' => $day, 'message_id' => $messageId, 'sent_by' => $sentBy, 'date_created' => $now];
+            }
+        }
+        if ($rows === []) {
+            return;
+        }
+        // The email is already on its way: a server not yet migrated loses the mark, never the send.
+        try {
+            $this->connection()->table('report_reminders')->insert($rows);
+        } catch (QueryException $error) {
+            Log::warning('portal.email.reminders.unrecorded', ['message_id' => $messageId, 'reason' => $error->getMessage()]);
+        }
     }
 
     // The sender's own address, refused unless it is on the portal's own domain (SPF/DKIM).

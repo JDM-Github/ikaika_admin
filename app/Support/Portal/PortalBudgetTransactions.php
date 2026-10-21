@@ -135,8 +135,11 @@ final class PortalBudgetTransactions
             $envelope = $this->ledger->lockEnvelope($envelopeId);
             $account = $accountId === null ? null : $this->ledger->lockAccount($accountId);
             $this->ledger->assertOpenEnvelope($envelope, 'adding a transaction to it');
-            // Whatever code was sent, the line is recorded against the one its envelope sits under.
-            $codeId = $this->ledger->codeIdOf((int) $envelope->id);
+            // The code chosen first on the form is kept when the envelope is under it or was credited under it
+            // (2026-10-21, user); any other code, or none, leaves the line under the one its envelope sits under.
+            $codeId = $codeId !== null && in_array($codeId, $this->ledger->codeIdsOf((int) $envelope->id), true)
+                ? $codeId
+                : $this->ledger->codeIdOf((int) $envelope->id);
             if ($account !== null) {
                 $this->ledger->assertOpenAccount($account);
             }
