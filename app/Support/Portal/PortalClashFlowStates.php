@@ -7,10 +7,11 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * ClashFlow's mock workflow, one JSON document per project plus the shared playbook library
+ * ClashFlow's mock workflow, one JSON document per ClashFlow project plus the shared playbook library
  * (2026-10-21, user: ClashFlow talks to the admin through the API only, so its SQL lives here).
- * Keys: "project-<projects.id>" and "library". A project's state is read and written only by its lead
- * and members; the library is shared by everyone signed in. Last write wins, as in the mock.
+ * Keys: "project-<clashflow_projects.id>" and "library". Anyone who may see a project reads its state;
+ * only its lead and coordinators write it (a viewer reads). The library is shared by everyone signed in.
+ * Last write wins, as in the mock.
  * ponytail: whole-document rows; per-record tables with versions replace them (ClashFlow plan R2).
  */
 final class PortalClashFlowStates
@@ -22,13 +23,13 @@ final class PortalClashFlowStates
     public function __construct(private readonly PortalClashFlowProjects $projects) {}
 
     /**
-     * The library and every project state the person may open, as raw JSON text by key.
+     * The library and the state of every ClashFlow project the person may see, as raw JSON by key.
      *
      * @return array<string, string>
      */
     public function mine(Employee $employee): array
     {
-        $keys = [self::LIBRARY, ...array_map(static fn (int $id): string => 'project-'.$id, $this->projects->projectIds($employee))];
+        $keys = [self::LIBRARY, ...array_map(static fn (array $project): string => 'project-'.$project['id'], $this->projects->forEmployee($employee))];
 
         return $this->connection()->table('clashflow_states')
             ->whereIn('state_key', $keys)
@@ -40,8 +41,14 @@ final class PortalClashFlowStates
     public function save(Employee $employee, string $key, string $state): void
     {
         $projectId = $this->projectIdOf($key);
-        if ($projectId !== null && ! $this->projects->isOn($employee, $projectId)) {
-            abort(403, 'You are not on this project.');
+        if ($projectId !== null) {
+            $role = $this->projects->roleOn($employee, $projectId);
+            if ($role === null) {
+                abort(403, 'You are not on this project.');
+            }
+            if ($role === PortalClashFlowProjects::ROLE_VIEWER) {
+                abort(403, 'Viewers cannot change this project.');
+            }
         }
         if (strlen($state) > self::MAX_BYTES) {
             abort(413, 'The workflow state is too large.');
@@ -53,14 +60,14 @@ final class PortalClashFlowStates
 
         $this->connection()->table('clashflow_states')->updateOrInsert(
             ['state_key' => $key],
-            ['project_id' => $projectId, 'state' => $state, 'updated_by' => (int) $employee->getKey(), 'updated_at' => now()],
+            ['clashflow_project_id' => $projectId, 'state' => $state, 'updated_by' => (int) $employee->getKey(), 'updated_at' => now()],
         );
     }
 
-    // Reset demo: the person's projects and the shared library go back to the seed on their next sign-in.
+    // Reset demo: the projects the person works on (lead or coordinator) and the shared library go back to the seed.
     public function reset(Employee $employee): void
     {
-        $keys = [self::LIBRARY, ...array_map(static fn (int $id): string => 'project-'.$id, $this->projects->projectIds($employee))];
+        $keys = [self::LIBRARY, ...array_map(static fn (int $id): string => 'project-'.$id, $this->projects->writableIds($employee))];
         $this->connection()->table('clashflow_states')->whereIn('state_key', $keys)->delete();
     }
 

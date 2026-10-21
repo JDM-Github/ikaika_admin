@@ -1616,19 +1616,32 @@ SELECT id, 'manage.users.information.approve', NULL FROM employees WHERE id_no I
 );
 
 -- ============================================================================
--- CLASHFLOW WORKFLOW STATE (2026-10-21, user)
--- ClashFlow, the desktop clash app, talks to the admin through the API only, so its mock workflow
--- lives here: one JSON document per project (state_key "project-<projects.id>") plus the shared
--- playbook library ("library"). Read and written through PortalClashFlowStates; a project's row only
--- by its lead and members.
+-- CLASHFLOW PROJECTS AND WORKFLOW STATE (2026-10-21, user)
+-- ClashFlow, the desktop clash app, talks to the admin through the API only, so its data lives here.
+-- clashflow_projects: a team project links one portal project (lead = its lead email, coordinators =
+-- its members, Admins/ProjectAdmins not on it view); a solo project belongs to its creator alone.
+-- clashflow_states: each ClashFlow project's mock workflow ("project-<clashflow_projects.id>") plus
+-- the shared playbook library ("library"). See PortalClashFlowProjects / PortalClashFlowStates.
 -- Existing databases: create_portal_clashflow_states.
 -- ============================================================================
 
+CREATE TABLE IF NOT EXISTS clashflow_projects (
+    id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    mode              VARCHAR(10)  NOT NULL,
+    portal_project_id INT          NULL UNIQUE,
+    name              VARCHAR(255) NULL,
+    number            VARCHAR(100) NULL,
+    owner_id          INT          NOT NULL,
+    created_at        DATETIME     NOT NULL,
+    FOREIGN KEY (portal_project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (owner_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS clashflow_states (
-    state_key  VARCHAR(64) NOT NULL PRIMARY KEY,
-    project_id INT         NULL,
-    state      LONGTEXT    NOT NULL,
-    updated_by INT         NULL,
-    updated_at DATETIME    NOT NULL,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    state_key            VARCHAR(64)  NOT NULL PRIMARY KEY,
+    clashflow_project_id INT UNSIGNED NULL,
+    state                LONGTEXT     NOT NULL,
+    updated_by           INT          NULL,
+    updated_at           DATETIME     NOT NULL,
+    FOREIGN KEY (clashflow_project_id) REFERENCES clashflow_projects(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

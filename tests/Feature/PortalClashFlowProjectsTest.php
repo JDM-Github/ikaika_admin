@@ -11,6 +11,8 @@ class PortalClashFlowProjectsTest extends TestCase
 {
     use DatabaseTransactions;
 
+    private const BASE = '/api/development/portal/clashflow';
+
     /**
      * @var list<string>
      */
@@ -22,109 +24,108 @@ class PortalClashFlowProjectsTest extends TestCase
         Cache::flush();
     }
 
-    public function test_guest_cannot_list_clashflow_projects(): void
+    public function test_guest_cannot_use_clashflow(): void
     {
-        $this->getJson('/api/development/portal/clashflow/projects')->assertStatus(401);
+        $this->getJson(self::BASE.'/projects')->assertStatus(401);
+        $this->getJson(self::BASE.'/states')->assertStatus(401);
     }
 
-    public function test_lead_and_member_each_see_the_project_with_their_role_and_the_team(): void
+    public function test_a_team_project_gives_lead_coordinator_and_viewer_roles_and_hides_it_from_others(): void
     {
-        $lead = $this->employee('cf-lead');
-        $member = $this->employee('cf-member');
-        $outsider = $this->employee('cf-outsider');
-        $project = DB::connection('portal')->table('projects')->insertGetId([
-            'project_number' => 'CF-TEST-001',
-            'project_name' => 'ClashFlow test tower',
-            'department' => 'Engineering',
-            'status' => 'Active',
-            'project_lead_email' => ' CF-LEAD@clashflow.test ',
-        ]);
-        $deleted = DB::connection('portal')->table('projects')->insertGetId([
-            'project_number' => 'CF-TEST-002',
-            'project_name' => 'Deleted tower',
-            'project_lead_email' => 'cf-lead@clashflow.test',
-            'deleted_at' => now(),
-        ]);
-        // Led by email only, with no member row: still the lead's project.
-        $ledOnly = DB::connection('portal')->table('projects')->insertGetId([
-            'project_number' => 'CF-TEST-003',
-            'project_name' => 'Lead-only tower',
-            'project_lead_email' => 'cf-lead@clashflow.test',
-        ]);
-        DB::connection('portal')->table('employees_projects')->insert([
-            ['employee_id' => $member, 'project_id' => $project, 'role_on_project' => 'member'],
-            ['employee_id' => $lead, 'project_id' => $project, 'role_on_project' => 'support'],
-        ]);
+        $this->employee('cf-admin', 'Admin');
+        $lead = $this->employee('cf-lead', 'ProjectAdmin');
+        $member = $this->employee('cf-member', 'User');
+        $this->employee('cf-outsider', 'User');
+        $portal = $this->portalProject('CF-TEST-001', 'cf-lead');
+        DB::connection('portal')->table('employees_projects')->insert(['employee_id' => $member, 'project_id' => $portal, 'role_on_project' => 'member']);
 
-        $asLead = $this->projectsFor('cf-lead');
-        $this->assertSame([$ledOnly, $project], array_column($asLead, 'id'));
-        $this->assertSame(['lead', 'lead'], array_column($asLead, 'role'));
-        $this->assertSame('CF-TEST-001', $asLead[1]['number']);
-        $this->assertSame([$lead], array_column($asLead[0]['team'], 'id'));
-        $this->assertNotContains($deleted, array_column($asLead, 'id'));
-        $team = collect($asLead[1]['team'])->keyBy('id');
-        $this->assertSame('lead', $team[$lead]['role']);
-        $this->assertSame('coordinator', $team[$member]['role']);
-        $this->assertSame('cf-member@clashflow.test', $team[$member]['email']);
-        $this->assertCount(2, $team);
+        // Nothing exists until someone creates it.
+        $this->assertSame([], $this->projectsFor('cf-member'));
 
-        $asMember = $this->projectsFor('cf-member');
-        $this->assertSame([$project], array_column($asMember, 'id'));
-        $this->assertSame('coordinator', $asMember[0]['role']);
+        $admin = $this->tokenFor('cf-admin');
+        $this->withToken($admin)->getJson(self::BASE.'/linkable?search=CF-TEST-001')->assertOk()->assertJsonPath('data.0.id', $portal);
+        $created = $this->withToken($admin)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $portal])
+            ->assertCreated()->assertJsonPath('data.role', 'viewer')->json('data');
+        $this->assertSame('CF-TEST-001', $created['number']);
+        $this->assertSame([$lead, $member], array_column($created['team'], 'id'));
 
+        // One ClashFlow project per portal project.
+        $this->withToken($admin)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $portal])->assertStatus(403);
+        $this->assertSame([], $this->withToken($admin)->getJson(self::BASE.'/linkable?search=CF-TEST-001')->json('data'));
+
+        $this->assertSame('lead', $this->projectsFor('cf-lead')[0]['role']);
+        $this->assertSame('coordinator', $this->projectsFor('cf-member')[0]['role']);
         $this->assertSame([], $this->projectsFor('cf-outsider'));
-        $this->assertIsInt($outsider);
     }
 
-    public function test_workflow_state_is_read_and_written_only_by_people_on_the_project(): void
+    public function test_a_project_admin_links_only_projects_they_lead_and_a_user_links_none(): void
     {
-        $this->employee('cf-lead');
-        $member = $this->employee('cf-member');
-        $outsider = $this->employee('cf-outsider');
-        $project = DB::connection('portal')->table('projects')->insertGetId([
-            'project_number' => 'CF-TEST-010',
-            'project_name' => 'ClashFlow state tower',
-            'project_lead_email' => 'cf-lead@clashflow.test',
-        ]);
-        $other = DB::connection('portal')->table('projects')->insertGetId([
-            'project_number' => 'CF-TEST-011',
-            'project_name' => 'Outsider tower',
-        ]);
-        DB::connection('portal')->table('employees_projects')->insert([
-            ['employee_id' => $member, 'project_id' => $project, 'role_on_project' => 'member'],
-            ['employee_id' => $outsider, 'project_id' => $other, 'role_on_project' => 'member'],
-        ]);
-        $url = '/api/development/portal/clashflow/states';
-        $key = 'project-'.$project;
-        $member = $this->tokenFor('cf-member');
+        $this->employee('cf-lead', 'ProjectAdmin');
+        $this->employee('cf-other-lead', 'ProjectAdmin');
+        $this->employee('cf-user', 'User');
+        $own = $this->portalProject('CF-TEST-010', 'cf-lead');
+        $theirs = $this->portalProject('CF-TEST-011', 'cf-other-lead');
+
         $lead = $this->tokenFor('cf-lead');
+        $this->withToken($lead)->getJson(self::BASE.'/projects')->assertJsonPath('canCreateTeam', true);
+        $this->assertSame([$own], array_column($this->withToken($lead)->getJson(self::BASE.'/linkable?search=CF-TEST-01')->json('data'), 'id'));
+        $this->withToken($lead)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $theirs])->assertStatus(403);
+        $this->withToken($lead)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $own])->assertCreated()->assertJsonPath('data.role', 'lead');
+
+        $user = $this->tokenFor('cf-user');
+        $this->withToken($user)->getJson(self::BASE.'/projects')->assertJsonPath('canCreateTeam', false);
+        $this->assertSame([], $this->withToken($user)->getJson(self::BASE.'/linkable')->json('data'));
+        $this->withToken($user)->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $theirs])->assertStatus(403);
+    }
+
+    public function test_a_solo_project_belongs_to_its_creator_alone(): void
+    {
+        $this->employee('cf-user', 'User');
+        $this->employee('cf-admin', 'Admin');
+
+        $user = $this->tokenFor('cf-user');
+        $this->withToken($user)->postJson(self::BASE.'/projects', ['mode' => 'solo'])->assertStatus(422);
+        $solo = $this->withToken($user)->postJson(self::BASE.'/projects', ['mode' => 'solo', 'name' => 'My tower', 'number' => 'S-1'])
+            ->assertCreated()->json('data');
+        $this->assertSame(['solo', 'lead', 'My tower', 'S-1', null], [$solo['mode'], $solo['role'], $solo['name'], $solo['number'], $solo['portalProjectId']]);
+
+        $this->assertNotContains($solo['id'], array_column($this->projectsFor('cf-admin'), 'id'));
+        $this->withToken($this->tokenFor('cf-admin'))->putJson(self::BASE.'/states/project-'.$solo['id'], ['state' => '{}'])->assertStatus(403);
+    }
+
+    public function test_workflow_state_is_written_by_the_team_and_only_read_by_viewers(): void
+    {
+        $this->employee('cf-admin', 'Admin');
+        $this->employee('cf-lead', 'ProjectAdmin');
+        $member = $this->employee('cf-member', 'User');
+        $this->employee('cf-outsider', 'User');
+        $portal = $this->portalProject('CF-TEST-020', 'cf-lead');
+        DB::connection('portal')->table('employees_projects')->insert(['employee_id' => $member, 'project_id' => $portal, 'role_on_project' => 'member']);
+        $id = $this->withToken($this->tokenFor('cf-lead'))->postJson(self::BASE.'/projects', ['mode' => 'team', 'portalProjectId' => $portal])->json('data.id');
+        $key = 'project-'.$id;
+        $states = self::BASE.'/states';
+        $member = $this->tokenFor('cf-member');
+        $admin = $this->tokenFor('cf-admin');
         $outsider = $this->tokenFor('cf-outsider');
 
-        $this->withToken($member)->putJson("$url/$key", ['state' => '{"run":2}'])->assertNoContent();
-        $this->withToken($lead)->getJson($url)->assertOk()->assertJsonPath("data.$key", '{"run":2}');
+        $this->withToken($member)->putJson("$states/$key", ['state' => '{"run":2}'])->assertNoContent();
+        $this->withToken($admin)->getJson($states)->assertOk()->assertJsonPath("data.$key", '{"run":2}');
+        $this->withToken($admin)->putJson("$states/$key", ['state' => '{"run":9}'])->assertStatus(403);
+        $this->withToken($outsider)->putJson("$states/$key", ['state' => '{"run":9}'])->assertStatus(403);
+        $this->assertArrayNotHasKey($key, $this->withToken($outsider)->getJson($states)->json('data'));
 
-        // Not on the project: no read, no write.
-        $this->withToken($outsider)->putJson("$url/$key", ['state' => '{"run":9}'])->assertStatus(403);
-        $this->assertArrayNotHasKey($key, $this->withToken($outsider)->getJson($url)->json('data'));
+        $this->withToken($outsider)->putJson("$states/library", ['state' => '{"versions":[]}'])->assertNoContent();
+        $this->withToken($member)->putJson("$states/project-abc", ['state' => '{}'])->assertStatus(404);
+        $this->withToken($member)->putJson("$states/$key", ['state' => '{not json'])->assertStatus(422);
 
-        // The library is shared by everyone signed in.
-        $this->withToken($outsider)->putJson("$url/library", ['state' => '{"versions":[]}'])->assertNoContent();
-        $this->withToken($member)->getJson($url)->assertJsonPath('data.library', '{"versions":[]}');
-        $this->withToken($outsider)->putJson("$url/project-$other", ['state' => '{"run":1}'])->assertNoContent();
-
-        $this->withToken($member)->putJson("$url/project-abc", ['state' => '{}'])->assertStatus(404);
-        $this->withToken($member)->putJson("$url/$key", ['state' => '{not json'])->assertStatus(422);
-        $this->withToken($member)->putJson("$url/$key", [])->assertStatus(422);
-
-        // Reset clears the person's projects and the library, never someone else's project.
-        $this->withToken($member)->deleteJson($url)->assertNoContent();
-        $left = DB::connection('portal')->table('clashflow_states')->whereIn('state_key', [$key, 'library', "project-$other"])->pluck('state_key')->all();
-        $this->assertSame(["project-$other"], $left);
-
-        $this->flushHeaders()->getJson($url)->assertStatus(401);
+        // A viewer's reset leaves the project alone; the team's reset clears it and the library.
+        $this->withToken($admin)->deleteJson($states)->assertNoContent();
+        $this->assertTrue(DB::connection('portal')->table('clashflow_states')->where('state_key', $key)->exists());
+        $this->withToken($member)->deleteJson($states)->assertNoContent();
+        $this->assertSame([], DB::connection('portal')->table('clashflow_states')->whereIn('state_key', [$key, 'library'])->pluck('state_key')->all());
     }
 
-    private function employee(string $name): int
+    private function employee(string $name, string $role): int
     {
         return DB::connection('portal')->table('employees')->insertGetId([
             'id_no' => 'CF-'.$name,
@@ -132,7 +133,16 @@ class PortalClashFlowProjectsTest extends TestCase
             'last_name' => $name,
             'email' => $name.'@clashflow.test',
             'status' => 'Active',
-            'role' => 'User',
+            'role' => $role,
+        ]);
+    }
+
+    private function portalProject(string $number, string $leadName): int
+    {
+        return DB::connection('portal')->table('projects')->insertGetId([
+            'project_number' => $number,
+            'project_name' => 'ClashFlow test '.$number,
+            'project_lead_email' => $leadName.'@clashflow.test',
         ]);
     }
 
@@ -141,10 +151,7 @@ class PortalClashFlowProjectsTest extends TestCase
      */
     private function projectsFor(string $name): array
     {
-        return $this->withToken($this->tokenFor($name))
-            ->getJson('/api/development/portal/clashflow/projects')
-            ->assertOk()
-            ->json('data');
+        return $this->withToken($this->tokenFor($name))->getJson(self::BASE.'/projects')->assertOk()->json('data');
     }
 
     private function tokenFor(string $name): string
