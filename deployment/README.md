@@ -16,6 +16,9 @@ From the repo root in PowerShell. Each is a toolkit command (`.\script.ps1 <comm
 | --- | --- |
 | **Deploy everything** (settings, admin, then portal) | `.\script.ps1 deploy/test-server` |
 | Deploy the admin | `.\script.ps1 deploy/admin` |
+| Release to the Test Server - bumped, tagged `v<version>`, then deployed | `.\script.ps1 deploy/test-server -Bump keep` (or `deploy/admin -Bump keep`; `patch`, `minor`, `major`) |
+| **Test an older version on staging** | `.\script.ps1 build-release -Debug -FromTag v1.0.0+3 -Deploy` - see [Releases](#releases-versions-tags-and-build-from) |
+| **Release to production** - both repos bumped, tagged `-released`, deployed | `.\script.ps1 deploy/production` (asks for PROD; `-Bump patch` for a new patch) |
 | Send your local secret settings to the server | `.\script.ps1 deploy/push-env` (`-Only JIRA_API_TOKEN` for one key) |
 | Copy your local databases to the Test Server (**replaces its data**) | `.\script.ps1 deploy/copy-databases` |
 | Copy just one database | `.\script.ps1 deploy/copy-databases -Only portal` (or `core`, `tracker`, `estimator`) |
@@ -31,7 +34,7 @@ Without `deploy/ssh-key` each command asks for the SSH key passphrase twice, onc
 
 **Or use the window:** `.\script.ps1 devtools/console`, or double-click `devtools\Ikaika Console.bat` (repo root). It runs these and the `migrations/` actions one at a time with live output and exit codes — including "Reset server + load local (clean)", which is `copy-databases.ps1 -Wipe`, and "Deploy all + DB reset", which is `deploy-all.ps1 -ResetDatabases`.
 
-A **Production** section (type `PROD` to confirm) adds "Load Airtable export -> prod DBs" (`import-airtable-to-prod.ps1 -Yes`) and "Deploy all prod" (`deploy-all-prod.ps1 -Force`). Production is served at **portal.ikaikabim.com/v2** (the API at `.../central-api`). Note the DB action loads the **Airtable export** in `migrations/outputs/` and **drops + recreates** the production databases — it does not push your local databases (that is Test Server only).
+A **Production** section (type `PROD` to confirm) adds "Load Airtable export -> prod DBs" (`import-airtable-to-prod.ps1 -Yes`) and "Deploy all prod" (`deploy-all-prod.ps1 -Force`), which **releases** both repos (2026-10-21): each bumps to the next build number, commits, tags `v<version>-released` and pushes, then deploys - so both checkouts must be on a branch, clean and up to date with Bitbucket. Production is served at **portal.ikaikabim.com/v2** (the API at `.../central-api`). Note the DB action loads the **Airtable export** in `migrations/outputs/` and **drops + recreates** the production databases — it does not push your local databases (that is Test Server only).
 
 **Deploy order:** admin first, then the portal (`ikaika-portal\deployment\deploy.ps1`), because the portal calls the admin. `deploy-all.ps1` does exactly that, after sending the settings (`-SkipSettings` leaves them out, `-SkipBuild` reuses the last builds). It expects the portal repo next to this one (`ikaika-portal`, or `ikaika_portal_frontend_rewrite`); `-PortalRepo` points the script elsewhere.
 
@@ -50,6 +53,30 @@ Expected last lines:
 {"product":"portal","health":{"ok":true,"database":"eoxvhumy_ts_portal","error":null}}
 Done. Previous release kept in /home2/eoxvhumy/apps/test-server/backups
 ```
+
+## Releases: versions, tags and Build from
+
+`VERSION` holds `x.y.z+n`. The build number `n` rises across every version and comes from the tags, so `1.0.0+2` is followed by `1.0.0+3`, and `1.1.0` after it takes `+4`, never `+1`: an upgrade is decided by that number. A tag names the one build its version went out as (2026-10-21):
+
+| Tag | Is | Made by |
+| --- | --- | --- |
+| `v1.0.0+3` | a staging build or prerelease, on the Test Server | `deploy/test-server -Bump <b>`, `deploy/admin -Bump <b>`, `build-release -Debug -Bump <b> -Tag`, the workflow with a version |
+| `v1.0.0+3-released` | a production release | `deploy/production`, `build-release -Bump <b> -Tag`, the workflow for production |
+
+| Way to deploy | By default | A release |
+| --- | --- | --- |
+| `deploy/test-server`, `deploy/admin` | `-Bump same`: the checkout as it is, untagged, as before | with `-Bump keep`, `patch`, `minor` or `major` |
+| `deploy/production` | `-Bump keep`: the next build number | always, tagged `-released`; `same` is refused |
+| `build-release` | builds only | `-Bump <b> -Tag`; a production `-Deploy` takes nothing else (a `-DryRun` sends nothing, so it is anyone's) |
+| The **Build release** workflow | version `same` | any other version; a production upload needs one |
+
+A bump refuses uncommitted work (`-AllowDirty` builds over it), a number a tag already holds here or on Bitbucket, and, with `-Tag`, a detached HEAD or a branch Bitbucket has moved past. A build that fails puts `VERSION` back, so it spends no number. `deploy-all-prod.ps1` checks both repos before either builds; `-SkipBuild` deploys only archives whose `deploy.json` names a version a `-released` tag holds.
+
+**Build from a tag** - to test a version again on staging: `.\script.ps1 build-release -Debug -FromTag v1.0.0+3 -Deploy`, the Build release dialog's **Build from** list, `.\script.ps1 ci-local -BuildFrom v1.0.0+3`, or the workflow's `build_from`. The tag's sources are checked out in a worktree of their own under `%TEMP%`, with their own `npm ci`, and packaged into this checkout's `out/` by today's `build.ps1`; composer runs on the server as always. Nothing is bumped or tagged, `deploy.json` names the tag, and the worktree is removed afterwards. The list offers release tags newest version first - never by the date a tag was made - and only those with a `VERSION` to build as, so `v0.0.0+0` is refused. A tag is rebuilt for **staging only**.
+
+**Migrations only go forward.** A database keeps every migration that ran on it, and installing older code does not undo them. Uploading an older build than the server runs warns, naming the migrations that build does not know (`build-release` reads the server's version from its `/health`, which every answer also names in `X-Api-Version`). On **production**, `deploy-admin.sh` refuses an older release unless the archive's `deploy.json` carries `"ALLOW_OLDER": "1"` among its `serverEnv` - added by hand, deliberately. To go back on production, release the older code as a new version, or restore the dumps as in [Roll back](#roll-back).
+
+The versions before these rules were built untagged: `1.0.0+2` stays so, and the next bump takes `+3`.
 
 ## Where things live on the server
 
@@ -75,8 +102,9 @@ Databases: `eoxvhumy_ts_core`, `eoxvhumy_ts_portal`, `eoxvhumy_ts_tracker`, `eox
 
 | File | Runs on | Does |
 | --- | --- | --- |
-| `deploy-all.ps1` | your PC | settings, admin, then portal in one go |
-| `deploy.ps1` | your PC | build, upload, deploy the admin |
+| `deploy-all.ps1` | your PC | settings, admin, then portal in one go; `-Bump` releases both first |
+| `deploy.ps1` | your PC | build, upload, deploy the admin; `-Bump` releases it through `build-release` |
+| `deploy-all-prod.ps1` | your PC | releases both repos to production - bumped, tagged `-released`, deployed, the admin first |
 | `push-env.ps1` | your PC | sends the secret settings from your local `.env`, replacing the server's lines, then applies them |
 | `copy-databases.ps1` | your PC | dump local databases, upload, create any missing database, import |
 | `build.ps1` | your PC | builds `out/central-platform.zip` only |
@@ -283,6 +311,8 @@ gunzip -c ~/apps/test-server/backups/databases-<stamp>/<database>.sql.gz | mysql
 
 `migrate:rollback` also works for a migration with a sound `down()`; read it first.
 
+To try an older version on the Test Server without touching the backups, rebuild its tag instead: `.\script.ps1 build-release -Debug -FromTag <tag> -Deploy` (see [Releases](#releases-versions-tags-and-build-from)); the newer migrations stay.
+
 ---
 
 ## Setting up from scratch
@@ -360,6 +390,11 @@ Run `deploy.ps1` here, then the portal's `deploy.ps1`.
 | Microsoft login: redirect mismatch | Azure and `PORTAL_AZURE_REDIRECT_URI` must both be exactly the portal URL |
 | `Bitbucket HTTP 401` from the sync | `BITBUCKET_TOKEN` is wrong, expired (they last a year at most) or lacks `read:repository:bitbucket` |
 | Webhook deliveries answer `401` | The webhook's secret and `BITBUCKET_WEBHOOK_SECRET` differ, or the setting was not applied |
+| `A production upload is a release` | Production takes only tagged releases: `.\script.ps1 deploy/production`, or `build-release -Bump keep -Tag -Deploy` |
+| `N uncommitted change(s), which the version's tag would not hold` | Commit or stash them before a bump - or `-AllowDirty`, knowing the tag will not hold what was built |
+| `1.0.0+3 is taken` | A tag already holds that build number, here or on Bitbucket: `git fetch --tags`, then build again for the next one |
+| `v0.0.0+0 predates VERSION` | That tag has no version to build as; pick a newer one from the Build from list |
+| `== Older release` then `Production only moves forward` | The archive is older than what production runs: release a newer version, or see `ALLOW_OLDER` under [Releases](#releases-versions-tags-and-build-from) |
 | Issues & Requests says Jira is "not connected" | One of `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` is empty on that server; `portal:jira-check` names it |
 | `Jira HTTP 401` | The token is wrong or expired, `JIRA_EMAIL` is not the token's owner, or it is a scoped token and `JIRA_CLOUD_ID` is empty |
 | `Jira HTTP 404: You cannot create issues in this project` on a report | Jira did not take the account at all and answered as for an anonymous visitor; `portal:jira-check` shows the `401` behind it |

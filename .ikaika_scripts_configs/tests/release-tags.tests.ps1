@@ -58,19 +58,22 @@ try {
     Write-UpstreamFile 'database/migrations/2026_02_01_000000_second.php' "<?php`n"
     Save-Upstream 'v1.2.0+11' @('v1.2.0+11')
     Invoke-SetupGit $upstream @('tag', 'demo')
+    # An old version tagged afterwards, dated after every other, as early tags here were: date order would put it first.
+    $env:GIT_COMMITTER_DATE = '2030-01-01T00:00:00Z'
+    try { Invoke-SetupGit $upstream @('tag', '-a', 'v1.0.0+8', 'refs/tags/v1.0.0+9^{commit}', '-m', 'v1.0.0+8') } finally { Remove-Item Env:GIT_COMMITTER_DATE }
 
     # The clone has every tag but the newest, which only origin has.
     Invoke-SetupGit $work @('clone', '--quiet', '--no-tags', $upstream, $clone)
-    foreach ($tag in 'v0.0.0+0', 'v1.0.0+9', 'v1.0.0+10', 'v1.0.0+10-released', 'demo') {
+    foreach ($tag in 'v0.0.0+0', 'v1.0.0+8', 'v1.0.0+9', 'v1.0.0+10', 'v1.0.0+10-released', 'demo') {
         Invoke-SetupGit $clone @('fetch', '--quiet', 'origin', "refs/tags/$($tag):refs/tags/$tag")
     }
     $present = @(& git -C $clone tag --list | Sort-Object)
-    if (($present -join ',') -cne 'demo,v0.0.0+0,v1.0.0+10,v1.0.0+10-released,v1.0.0+9') { throw "setup: the clone's tags are $($present -join ',')" }
+    if (($present -join ',') -cne 'demo,v0.0.0+0,v1.0.0+10,v1.0.0+10-released,v1.0.0+8,v1.0.0+9') { throw "setup: the clone's tags are $($present -join ',')" }
 
     # ---------------------------------------------------------------- the tags, and what can be rebuilt
-    Assert-Equal ((Get-VersionTags -Root $clone) -join ',') 'v1.0.0+10,v1.0.0+10-released,v1.0.0+9,v0.0.0+0' 'release tags newest version first, a -released after its twin, demo left out'
+    Assert-Equal ((Get-VersionTags -Root $clone) -join ',') 'v1.0.0+10,v1.0.0+10-released,v1.0.0+9,v1.0.0+8,v0.0.0+0' 'release tags newest version first, a -released after its twin, demo left out'
     Assert-True (Resolve-LocalTag -Root $clone -Tag 'v1.2.0+11') 'a tag only origin has is fetched'
-    Assert-Equal ((Get-VersionTags -Root $clone -Needs 'VERSION') -join ',') 'v1.2.0+11,v1.0.0+10,v1.0.0+10-released,v1.0.0+9' 'with -Needs VERSION, the tag from before VERSION is not offered'
+    Assert-Equal ((Get-VersionTags -Root $clone -Needs 'VERSION') -join ',') 'v1.2.0+11,v1.0.0+10,v1.0.0+10-released,v1.0.0+9,v1.0.0+8' 'with -Needs VERSION, the tag from before VERSION is not offered'
     Assert-Equal (Test-TagBuildable -Root $clone -Tag 'v0.0.0+0' -Needs 'VERSION', 'README.md') 'v0.0.0+0 predates VERSION, so it has no version to build as.' 'a tag from before VERSION is refused for it'
     Assert-Equal (Test-TagBuildable -Root $clone -Tag 'v1.0.0+9' -Needs 'VERSION', 'artisan') 'v1.0.0+9 has no artisan, which a build needs.' 'a tag without a later path names it'
     Assert-Equal (Test-TagBuildable -Root $clone -Tag 'demo') 'demo is not a release tag: one is v<x.y.z>+<build>, with -released for production''s.' 'a tag a person made is not a release'
@@ -104,7 +107,7 @@ try {
         "(Get-DialogChoices 'Keep').Count"
     )) -join "`n")
     $answers = @(& (Get-Process -Id $PID).Path -NoProfile -File $alone 2>&1 | ForEach-Object { "$_" })
-    Assert-Equal ($answers -join ' | ') 'FromTag | v1.2.0+11,v1.0.0+10,v1.0.0+10-released,v1.0.0+9 | 0' 'the providers, alone: FromTag, its tags newest first with a VERSION each, and nothing for another parameter'
+    Assert-Equal ($answers -join ' | ') 'FromTag | v1.2.0+11,v1.0.0+10,v1.0.0+10-released,v1.0.0+9,v1.0.0+8 | 0' 'the providers, alone: FromTag, its tags newest first with a VERSION each, and nothing for another parameter'
 
     # ---------------------------------------------------------------- deploy-admin.sh's older-release guard
     $bash = $null
