@@ -2,13 +2,16 @@
 # see deployment/README.md. Values travel over SSH only and are never printed; a key empty here is skipped, so it
 # never blanks the server's. MAIL_MAILER is left out on purpose: which mailer a server uses is its own choice.
 # -RemoteDir points it at another target, e.g. production's ~/apps/portal-prod. -EnvFile reads another file than .env,
-# for a target whose values differ: Jira's project is a sandbox on the Test Server and the real one on production, so
-# production's JIRA_* come from their own file (see deployment/README.md, Jira).
+# for a target whose values differ: production's come from their own file (see deployment/README.md, Jira). Jira's site,
+# account, project and issue types are the same on both since 2026-10-21 - one shared project - and its webhook secret
+# is each server's own.
 param(
     [string[]]$Keys = @(
         'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
         'BITBUCKET_TOKEN', 'BITBUCKET_WEBHOOK_SECRET',
         'JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_PROJECT_KEY', 'JIRA_CLOUD_ID', 'JIRA_WEBHOOK_SECRET',
+        # Both servers file each kind as the same type in the shared project (2026-10-21).
+        'JIRA_ISSUE_TYPE_BUG', 'JIRA_ISSUE_TYPE_FEATURE', 'JIRA_ISSUE_TYPE_FEEDBACK',
         'MAIL_RELAY_URL', 'MAIL_RELAY_KEY',
         'OLLAMA_API_KEY',
         'PORTAL_ID_LOGIN_PASSWORD'

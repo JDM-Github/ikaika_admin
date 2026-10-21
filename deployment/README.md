@@ -122,7 +122,7 @@ ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
 
 **Email** goes through the WordPress bridge on ikaikabim.com (`MAIL_MAILER=wprelay`), the same as local. That route arrives in Outlook without the "can't verify sender" banner.
 
-**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_CLOUD_ID`, `JIRA_WEBHOOK_SECRET`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`, `PORTAL_ID_LOGIN_PASSWORD`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
+**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_CLOUD_ID`, `JIRA_WEBHOOK_SECRET`, `JIRA_ISSUE_TYPE_BUG`, `JIRA_ISSUE_TYPE_FEATURE`, `JIRA_ISSUE_TYPE_FEEDBACK`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`, `PORTAL_ID_LOGIN_PASSWORD`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
 
 - Cloudinary (email images, reimbursement receipts): until its keys are on the server, uploads answer "Image upload is not configured." / "Receipt upload is not configured.".
 - ID-number sign-in (Settings > Advanced switch) also needs `PORTAL_ID_LOGIN_PASSWORD`; until it is on the server, every ID sign-in is refused.
@@ -172,32 +172,30 @@ The preview shows one day's commits and saves nothing; the sync prints `<reposit
 
 ## Jira (Issues & Requests)
 
-Every issue or request people send from the portal's corner button becomes a Jira issue: as it comes in (MIS can turn that off on the Issues & Requests page), sent by hand, or with every report not in Jira yet at once (**Send to Jira** in the page's header). Its status and kind then go both ways: a change on the Jira board comes back by webhook, every fifteen minutes or on **Refresh**, and MIS changing them in the portal moves the card or changes its work type first. Fixed in stays the portal's unless the issue has a fix version. Production files into the real project; the Test Server into a sandbox project, so trying things out never lands in the real board.
+Every issue or request people send from the portal's corner button becomes a Jira issue: as it comes in (MIS can turn that off on the Issues & Requests page), sent by hand, or with every report not in Jira yet at once (**Send to Jira** in the page's header). Its status and kind then go both ways: a change on the Jira board comes back by webhook, every fifteen minutes or on **Refresh**, and MIS changing them in the portal moves the card or changes its work type first. Fixed in stays the portal's unless the issue has a fix version.
+
+Production and the Test Server share one project (2026-10-21), because what production's people report is fixed on staging. Staging's issues carry a second label, `staging`, and say "(staging report #N)" where production's say "(report #N)"; each server follows only the reports sent on it.
 
 **1. A service account and its token.** In Atlassian, a dedicated user (not a Jira admin) with an API token (id.atlassian.com → Security → API tokens). On each project it needs **Browse projects**, **Create issues**, **Create attachments**, **Edit issues** (a kind changed in the portal changes the work type) and **Transition issues** (a status changed in the portal moves the card). Every issue the portal makes is reported by this account, so nobody's name is on an anonymous report.
 
-**2. The settings.** In your local `.env` (the Test Server's, with the sandbox project):
+**2. The settings.** In your local `.env` (the Test Server's):
 
 ```text
 JIRA_BASE_URL=        https://<site>.atlassian.net
 JIRA_EMAIL=           the service account's email
 JIRA_API_TOKEN=       its API token
-JIRA_PROJECT_KEY=     the sandbox project's key on the Test Server, the real one on production
+JIRA_PROJECT_KEY=     the shared project's key, the same on both servers
 JIRA_CLOUD_ID=        only for a scoped token: the site's cloudId (portal:jira-check prints it)
 JIRA_WEBHOOK_SECRET=  any long random string, also typed into the webhook below
 ```
 
 **Classic or scoped token.** A classic token ("Create API token") works against the site as it is. A scoped one ("Create API token with scopes": `read:jira-user`, `read:jira-work`, `write:jira-work`) is refused there with a 401 and works only through Atlassian's gateway, which `JIRA_CLOUD_ID` turns on; the links people open stay on the site.
 
-Optional: `JIRA_ISSUE_TYPE_BUG`, `JIRA_ISSUE_TYPE_FEATURE`, `JIRA_ISSUE_TYPE_FEEDBACK` (default Bug, Story, Task; a type the project lacks falls back to Task).
+Optional: `JIRA_ISSUE_TYPE_BUG`, `JIRA_ISSUE_TYPE_FEATURE`, `JIRA_ISSUE_TYPE_FEEDBACK` (default Bug, Story, Task; a type the project lacks falls back to Task). Both servers must file each kind as the same type, so push-env sends these too.
 
-`push-env.ps1` sends them to the Test Server with the rest. Production's differ (its own project, its own secret), so keep them in a file of their own and push only those:
+`push-env.ps1` sends them to the Test Server with the rest. Production's come from `.ikaika_scripts_configs/production-settings.env` (`.\script.ps1 deploy/push-env -Target production`): the same site, account, token, project and issue types, and its own webhook secret.
 
-```powershell
-.\deployment\push-env.ps1 -RemoteDir ~/apps/portal-prod -EnvFile C:\path\to\jira-production.env -Keys JIRA_BASE_URL,JIRA_EMAIL,JIRA_API_TOKEN,JIRA_PROJECT_KEY,JIRA_CLOUD_ID,JIRA_WEBHOOK_SECRET
-```
-
-Never give the Test Server production's project: it runs on copies of production's database, and would send the copied reports again.
+The Test Server runs on copies of production's database. Those copied reports stay production's: each report records the server it was sent on, and staging never sends one again, reads it back or changes its issue. The page marks them "Another server's".
 
 **3. Check it, and get the webhook to register:**
 
@@ -212,7 +210,7 @@ It names the account, the project and the issue type each kind becomes, and prin
 | URL | what `portal:jira-check` prints, e.g. `https://test.ikaikabim.com/central-api/api/staging/jira/webhook` |
 | Secret | the `JIRA_WEBHOOK_SECRET` value |
 | Events | Issue updated, Issue deleted |
-| JQL | `project = <KEY> AND labels = ikaika-portal` |
+| JQL | what `portal:jira-check` prints: on production `project = <KEY> AND labels = ikaika-portal`, on the Test Server `project = <KEY> AND labels = ikaika-portal AND labels = staging` |
 
 **4. The scheduler** sends what failed or waited and reads every linked issue back, in case a delivery was lost. It rides the same every-minute cron as everything else; to run it by hand:
 
@@ -222,9 +220,20 @@ ssh bluehost "cd ~/apps/test-server/app && php artisan portal:jira-sync"
 
 It prints `Sent N, failed N, read back N, gone from Jira N.` and fails when Jira refuses the account or does not answer.
 
+### Moving the Test Server onto the shared project
+
+Once, in this order, so the old code never meets the shared project:
+
+1. Turn staging's **Send new ones to Jira** off on its Issues & Requests page.
+2. Deploy the backend with `.\script.ps1 deploy/admin` (not `deploy/test-server`, which pushes the settings first). `portal:jira-check` on the Test Server should say `Files as: staging`.
+3. Set `JIRA_PROJECT_KEY` (and any `JIRA_ISSUE_TYPE_*` production uses) in your local `.env`, push them with `.\script.ps1 deploy/push-env -Only JIRA_PROJECT_KEY`, and run `portal:jira-check` again.
+4. A Jira admin changes the Test Server's webhook JQL to the one `portal:jira-check` prints. Then turn **Send new ones to Jira** back on.
+
+The Test Server's reports from before keep their links into the old sandbox project, which stay as they are; archive the sandbox when nothing in it is needed.
+
 ### Testing against a Jira space from your PC
 
-**Where the credentials go:** the `JIRA_*` lines in this repo's local `.env` (gitignored, so they never leave your PC; `.env.example` lists them). Point them at the sandbox project, never the real one:
+**Where the credentials go:** the `JIRA_*` lines in this repo's local `.env` (gitignored, so they never leave your PC; `.env.example` lists them). Point them at a sandbox project if you can; in the shared one, a PC's issues carry the label `development` and say "(development report #N)", so they are easy to find and delete:
 
 ```text
 JIRA_BASE_URL=https://<site>.atlassian.net     the site, https, no path
