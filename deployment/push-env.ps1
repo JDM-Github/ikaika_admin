@@ -9,6 +9,7 @@ param(
         'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
         'BITBUCKET_TOKEN', 'BITBUCKET_WEBHOOK_SECRET',
         'JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_PROJECT_KEY', 'JIRA_CLOUD_ID', 'JIRA_WEBHOOK_SECRET',
+        'JIRA_ISSUE_TYPE_BUG', 'JIRA_ISSUE_TYPE_FEATURE', 'JIRA_ISSUE_TYPE_FEEDBACK',
         'MAIL_RELAY_URL', 'MAIL_RELAY_KEY',
         'OLLAMA_API_KEY',
         'PORTAL_ID_LOGIN_PASSWORD'
@@ -17,10 +18,16 @@ param(
     # The target's home-relative work folder (its .env and scripts/). Test Server by default.
     [string]$RemoteDir = '~/apps/test-server',
     # The settings file to read; this repo's .env when left out.
-    [string]$EnvFile = ''
+    [string]$EnvFile = '',
+    # Production (~/apps/portal-prod). Needs -Keys: the default list carries the Test Server's Jira sandbox.
+    [switch]$Prod
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Prod) {
+    if (-not $PSBoundParameters.ContainsKey('Keys')) { throw '-Prod needs -Keys, e.g. -Keys JIRA_ISSUE_TYPE_FEATURE' }
+    $RemoteDir = '~/apps/portal-prod'
+}
 $remote  = $RemoteDir
 $envFile = if ($EnvFile) { $EnvFile } else { Join-Path (Split-Path $PSScriptRoot -Parent) '.env' }
 if (-not (Test-Path $envFile)) { throw "No .env at $envFile" }
