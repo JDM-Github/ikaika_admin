@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AddApiVersionHeaders;
 use App\Http\Middleware\RequirePortalAdmin;
 use App\Http\Middleware\RequirePortalOwnRule;
 use App\Http\Middleware\RequirePortalRule;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->prepend(AddApiVersionHeaders::class);
         $middleware->alias([
             'portal.admin' => RequirePortalAdmin::class,
             'portal.rule' => RequirePortalRule::class,

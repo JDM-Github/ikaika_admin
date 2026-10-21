@@ -4,6 +4,7 @@ use App\Modules\Core\CoreModule;
 use App\Modules\Portal\PortalModule;
 use App\Modules\ProjectEstimator\ProjectEstimatorModule;
 use App\Modules\TransactionTracker\TransactionTrackerModule;
+use App\Support\ApiVersion;
 
 /**
  * Product catalog for the central platform.
@@ -23,6 +24,11 @@ use App\Modules\TransactionTracker\TransactionTrackerModule;
 return [
 
     'channel' => env('API_CHANNEL', 'development'),
+
+    /*
+     * This release's VERSION (x.y.z+n), sent on every response as X-Api-Version and in /health; null without the file.
+     */
+    'version' => ApiVersion::fromFile(base_path('VERSION')),
 
     /*
      * Subdirectory in front of /api. Empty locally. Bluehost example: /staging/central-api

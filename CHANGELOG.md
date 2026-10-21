@@ -6,6 +6,10 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 
 ## Unreleased
 
+### Added
+
+- Every answer names the server version and channel that sent it.
+
 ## 1.0.0+2 - 2026-10-19
 
 ### Added
@@ -19,4 +23,3 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 - build-release tags and uploads when asked, as the estimator's does - -Tag, -Deploy, -DryRun - and -Clean, the Build release form's clean, removes the server's older backups and a failed deploy's leftovers.
 - build-release -Gui opens the project estimator's Build release dialog.
 - Releases and the build dialog name the backend IkaIka Portal Backend - as the estimator names its own
-
