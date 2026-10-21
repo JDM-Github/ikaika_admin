@@ -42,9 +42,12 @@ final class PortalBudgetTransactions
 
     private const RECEIPT_CACHE_TTL_SECONDS = 3600;
 
-    // The lines the ledger writes for itself, read back by these names; Edit leaves them alone.
+    /*
+     * The lines the ledger writes as linked pairs, read back by these names; Edit leaves them alone. Funds
+     * Received is one line into one account, so it is edited like a line entered by hand, its name kept
+     * (2026-10-21, user).
+     */
     private const SYSTEM_NAMES = [
-        PortalBudgetLedger::FUNDS_RECEIVED,
         PortalBudgetLedger::ACCOUNT_TRANSFER_OUT,
         PortalBudgetLedger::ACCOUNT_TRANSFER_IN,
         PortalBudgetLedger::ENVELOPE_TRANSFER_OUT,
@@ -135,8 +138,11 @@ final class PortalBudgetTransactions
             $envelope = $this->ledger->lockEnvelope($envelopeId);
             $account = $accountId === null ? null : $this->ledger->lockAccount($accountId);
             $this->ledger->assertOpenEnvelope($envelope, 'adding a transaction to it');
-            // Whatever code was sent, the line is recorded against the one its envelope sits under.
-            $codeId = $this->ledger->codeIdOf((int) $envelope->id);
+            // The code chosen first on the form is kept when the envelope is under it or was credited under it
+            // (2026-10-21, user); any other code, or none, leaves the line under the one its envelope sits under.
+            $codeId = $codeId !== null && in_array($codeId, $this->ledger->codeIdsOf((int) $envelope->id), true)
+                ? $codeId
+                : $this->ledger->codeIdOf((int) $envelope->id);
             if ($account !== null) {
                 $this->ledger->assertOpenAccount($account);
             }
@@ -206,11 +212,17 @@ final class PortalBudgetTransactions
         ];
     }
 
-    // Whether Edit may change a line: one entered by hand, not one the ledger or an approval wrote.
+    // Whether Edit may change a line: one entered by hand or funds received, not a pair or an approval's charge.
     public static function isEditable(mixed $name, mixed $sourceKey): bool
     {
         return ! in_array((string) $name, self::SYSTEM_NAMES, true)
             && ! str_starts_with((string) ($sourceKey ?? ''), self::CHARGE_SOURCE_PREFIX);
+    }
+
+    // Funds Received is read back by its name, and an edit changes only its amount and day (2026-10-21, user).
+    public static function isFundsReceived(mixed $name): bool
+    {
+        return (string) $name === PortalBudgetLedger::FUNDS_RECEIVED;
     }
 
     /**
@@ -222,29 +234,36 @@ final class PortalBudgetTransactions
     public function edit(Employee $actor, int $id, Request $request): array
     {
         $this->ledger->assertAvailable();
-        $row = $this->ledger->connection()->table('transactions')->where('id', $id)->first(['id', 'transaction_name', 'source_key']);
+        $row = $this->ledger->connection()->table('transactions')->where('id', $id)->first(['id', 'transaction_name', 'source_key', 'payor_payee', 'description']);
         if ($row === null) {
             abort(404, 'That transaction was not found.');
         }
         if (! self::isEditable($row->transaction_name, $row->source_key)) {
-            abort(422, 'This line was written by a transfer, an allocation, funds received or an approval. Change it where it was made.');
+            abort(422, 'This line was written by a transfer, an allocation or an approval. Change it where it was made.');
         }
-        $name = $this->input->validatedName($request, 'A transaction needs a name.', 'The transaction name');
+        $isFundsReceived = self::isFundsReceived($row->transaction_name);
+        $name = $isFundsReceived
+            ? PortalBudgetLedger::FUNDS_RECEIVED
+            : $this->input->validatedName($request, 'A transaction needs a name.', 'The transaction name');
         $occurredOn = $this->input->requiredDate($request, 'occurredOn', 'Choose the day of the transaction.');
-        $payorPayee = $this->input->validatedText($request, 'payorPayee', 'The payor or payee', PortalBudgetInput::MAX_NAME);
-        $notes = $this->input->validatedText($request, 'notes', 'The notes');
+        $payorPayee = $isFundsReceived
+            ? (is_string($row->payor_payee) ? $row->payor_payee : null)
+            : $this->input->validatedText($request, 'payorPayee', 'The payor or payee', PortalBudgetInput::MAX_NAME);
+        $notes = $isFundsReceived
+            ? (is_string($row->description) ? $row->description : null)
+            : $this->input->validatedText($request, 'notes', 'The notes');
         // Left out, the amount stays as it is.
         $cents = $this->input->validatedAmount($request, 'amount', 'The amount');
         if ($cents === 0) {
             abort(422, 'The amount must be more than zero.');
         }
         $isConfirmed = $this->input->confirmed($request, 'allowOverspend');
-        $receiptKey = $this->receiptKeyFrom($actor, $request);
+        $receiptKey = $isFundsReceived ? null : $this->receiptKeyFrom($actor, $request);
         $receipt = $receiptKey === null ? null : Cache::get($receiptKey);
         if ($receiptKey !== null && ! is_array($receipt)) {
             abort(422, 'That receipt upload has expired. Choose the photo again.');
         }
-        $isRemovingReceipt = $request->boolean('removeReceipt');
+        $isRemovingReceipt = ! $isFundsReceived && $request->boolean('removeReceipt');
 
         $wasCents = $this->ledger->transaction(function () use ($id, $name, $occurredOn, $payorPayee, $notes, $receipt, $isRemovingReceipt, $cents, $isConfirmed): int {
             $before = $this->ledger->connection()->table('transactions')->where('id', $id)->lockForUpdate()->first(['amount', 'type']);
@@ -328,6 +347,16 @@ final class PortalBudgetTransactions
             $taken = $type === PortalBudgetLedger::TYPE_EXPENSE ? $cents - $wasCents : $wasCents - $cents;
             if ($taken > 0) {
                 $this->ledger->assertCovers($this->ledger->envelopeRemainingCents((int) $envelopeId), $taken, $this->ledger->envelopeName($envelope), $isConfirmed);
+            }
+        }
+
+        // Money received into an account cannot come down past what the account has not yet put into envelopes.
+        $accountId = $this->ledger->connection()->table('transactions_accounts')->where('transaction_id', $id)->value('account_id');
+        if ($envelopeId === null && $accountId !== null && $type === PortalBudgetLedger::TYPE_CREDIT && $cents < $wasCents) {
+            $this->ledger->lockAccount((int) $accountId);
+            $free = $this->ledger->accountUnallocatedCents((int) $accountId);
+            if ($wasCents - $cents > $free) {
+                abort(422, 'This account has only '.$this->input->peso(max(0, $free)).' not yet allocated, so this can come down by no more than that. Move money back from its envelopes first.');
             }
         }
 

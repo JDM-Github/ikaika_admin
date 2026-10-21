@@ -383,6 +383,86 @@ class PortalReimbursementRequestsTest extends TestCase
         ])->assertStatus(404);
     }
 
+    // The reported ask (2026-10-21): a member keeps bank and e-wallet QR codes on their Profile, one per bank.
+    public function test_a_member_keeps_payment_qrs_on_their_profile_one_per_bank(): void
+    {
+        Http::preventStrayRequests();
+        $url = fn (string $name): string => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/payment-qrs/'.$name.'.png';
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::sequence()
+                ->push(['secure_url' => $url('gcash'), 'original_filename' => 'gcash', 'bytes' => 900], 200)
+                ->push(['secure_url' => $url('gcash-new'), 'original_filename' => 'gcash-new', 'bytes' => 900], 200)
+                ->push(['secure_url' => $url('maya'), 'original_filename' => 'maya', 'bytes' => 900], 200),
+        ]);
+        $token = $this->loginToken($this->activeMember());
+        $add = fn (string $bank, string $file, string $mime = 'image/png') => $this->withToken($token)->post('/api/development/portal/user/payment-qrs', [
+            'bankLabel' => $bank,
+            'file' => UploadedFile::fake()->create($file, 12, $mime),
+        ]);
+
+        $add('GCash', 'gcash.png')->assertCreated()->assertJsonPath('data.bankLabel', 'GCash')->assertJsonPath('data.fileUrl', $url('gcash'));
+        // A second QR for the same bank replaces the first rather than sitting beside it.
+        $add('GCash', 'gcash-new.png')->assertCreated()->assertJsonPath('data.fileUrl', $url('gcash-new'));
+        $maya = $add('Maya', 'maya.png')->assertCreated()->json('data.id');
+        $add('BDO Unibank', 'slip.pdf', 'application/pdf')->assertStatus(422)
+            ->assertJsonPath('message', 'A payment QR has to be a picture: JPEG, PNG, WebP or GIF.');
+        $add('', 'gcash.png')->assertStatus(422);
+
+        $this->withToken($token)->getJson('/api/development/portal/user/payment-qrs')->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.bankLabel', 'Maya')
+            ->assertJsonPath('data.1.fileUrl', $url('gcash-new'));
+
+        $this->withToken($token)->deleteJson('/api/development/portal/user/payment-qrs/'.$maya)->assertOk()->assertJsonPath('data.bankLabel', 'Maya');
+        $this->withToken($token)->deleteJson('/api/development/portal/user/payment-qrs/'.$maya)->assertNotFound();
+        $this->withToken($token)->getJson('/api/development/portal/user/payment-qrs')->assertOk()->assertJsonCount(1, 'data');
+    }
+
+    // The reported ask (2026-10-21): filing sends the Profile QR the member picked, and the admin sees which bank.
+    public function test_a_claim_carries_the_profile_qr_the_member_chose_to_the_approver(): void
+    {
+        Http::preventStrayRequests();
+        $qrUrl = 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/payment-qrs/gcash.png';
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::response(['secure_url' => $qrUrl, 'original_filename' => 'gcash', 'bytes' => 900], 200),
+        ]);
+        $actor = $this->activeMember();
+        $date = Carbon::today()->toDateString();
+        $token = $this->loginToken($actor);
+        $qrId = $this->withToken($token)->post('/api/development/portal/user/payment-qrs', [
+            'bankLabel' => 'GCash',
+            'file' => UploadedFile::fake()->create('gcash.png', 12, 'image/png'),
+        ])->assertCreated()->json('data.id');
+
+        $filed = $this->withToken($token)->postJson('/api/development/portal/requests/reimbursement', [
+            'requestDate' => $date,
+            'items' => [$this->item('Site visit transport', 850, 2), $this->item('Parking', 50, 1)],
+            'paymentQrId' => $qrId,
+        ])->assertCreated();
+        $claimId = (string) $filed->json('data.id');
+        $this->assertSame(['bankLabel' => 'GCash', 'fileUrl' => $qrUrl, 'mimeType' => 'image/png'], $filed->json('data.paymentQr'));
+
+        // The claim keeps its own copy: taking the QR off the Profile leaves the filed claim's alone.
+        $this->withToken($token)->deleteJson('/api/development/portal/user/payment-qrs/'.$qrId)->assertOk();
+        $queue = $this->getJson('/api/development/portal/manage/requests?from='.$date.'&to='.$date, [
+            'Authorization' => 'Bearer '.$this->tokenForAdmin(),
+        ])->assertOk();
+        $queued = collect($queue->json('reimbursements'))->firstWhere('id', $claimId);
+        $this->assertSame('GCash', $queued['paymentQr']['bankLabel'] ?? null);
+        $this->assertSame($qrUrl, $queued['paymentQr']['fileUrl'] ?? null);
+
+        // A QR no longer on the Profile is refused, and an edit that names none takes the claim's off.
+        $items = [$this->item('Site visit transport', 900, 2)];
+        $this->withToken($token)->patchJson('/api/development/portal/requests/reimbursement/'.$claimId, [
+            'requestDate' => $date, 'items' => $items, 'paymentQrId' => $qrId,
+        ])->assertStatus(422)->assertJsonPath('message', 'That payment QR is no longer on your Profile. Choose another.');
+        $this->withToken($token)->patchJson('/api/development/portal/requests/reimbursement/'.$claimId, [
+            'requestDate' => $date, 'items' => $items,
+        ])->assertOk()->assertJsonPath('data.paymentQr', null);
+        $this->assertSame(0, DB::connection('portal')->table('attachments')
+            ->where('table_name', 'reimbursements')->where('field_name', 'payment_qr')->where('record_id', (int) $claimId)->count());
+    }
+
     public function test_a_receipt_uploads_then_lands_on_the_filed_item(): void
     {
         Http::preventStrayRequests();

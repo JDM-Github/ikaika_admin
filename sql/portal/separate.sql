@@ -206,6 +206,48 @@ CREATE TABLE email_attachments (
     FOREIGN KEY (uploaded_by) REFERENCES employees(id)      ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Finance / Transactions' payor list (2026-10-21): names kept by hand, and ones taken off the list (hidden).
+-- Existing databases: create_portal_finance_payors_table.
+CREATE TABLE finance_payors (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    name         VARCHAR(191) NOT NULL,
+    is_hidden    TINYINT(1)   NOT NULL DEFAULT 0,
+    updated_by   INT          NULL,
+    date_updated DATETIME     NOT NULL,
+    UNIQUE KEY uq_finance_payors_name (name),
+    FOREIGN KEY (updated_by) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Missing Reports' reminder marks (2026-10-21): who was emailed a reminder for which day, when, and by
+-- whom (null for the scheduled run). Existing databases: create_portal_report_reminders_table.
+CREATE TABLE report_reminders (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id  INT      NOT NULL,
+    report_date  DATE     NOT NULL,
+    message_id   INT      NULL,
+    sent_by      INT      NULL,
+    date_created DATETIME NOT NULL,
+    INDEX idx_report_reminders_day (report_date, employee_id),
+    FOREIGN KEY (employee_id) REFERENCES employees(id)      ON DELETE CASCADE,
+    FOREIGN KEY (message_id)  REFERENCES email_messages(id) ON DELETE SET NULL,
+    FOREIGN KEY (sent_by)     REFERENCES employees(id)      ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Profile's payment QR codes (2026-10-21): one per bank or e-wallet, that a reimbursement picks from; the
+-- claim keeps its own copy in attachments. Existing databases: create_portal_employee_payment_qrs_table.
+CREATE TABLE employee_payment_qrs (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id     INT           NOT NULL,
+    bank_label      VARCHAR(120)  NOT NULL,
+    file_url        VARCHAR(1000) NOT NULL,
+    file_name       VARCHAR(255)  NOT NULL,
+    mime_type       VARCHAR(150)  NULL,
+    file_size_bytes BIGINT        NULL,
+    date_updated    DATETIME      NOT NULL,
+    UNIQUE KEY uq_employee_payment_qrs_bank (employee_id, bank_label),
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Built-in blocks: the company footer and the Portal email test template. The HTML is
 -- database/seeders/email/*.html, inlined here; its logo is in Cloudinary's global folder.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)
@@ -750,8 +792,9 @@ INSERT INTO access_permissions (permission_key, parent_key, label, description, 
 ('manage.requests.reimbursement', 'manage.requests', 'Reimbursement Requests', 'See reimbursement claims and their receipts.', 1, 1, 817),
 ('manage.requests.reimbursement.decide', 'manage.requests.reimbursement', 'Approve or reject', 'Approve or reject each claim line, with remarks.', 0, 1, 818),
 ('manage.requests.reimbursement.payout', 'manage.requests.reimbursement', 'Attach payout receipts', 'Attach the proof of payment to an approved claim.', 0, 1, 819),
-('manage.requests.flagged', 'manage.requests', 'Flag Reports', 'See reports filed while their author was on a warning.', 1, 1, 820),
+('manage.requests.flagged', 'manage.requests', 'Daily Reports', 'See the daily reports filed while their author was flagged.', 1, 1, 820),
 ('manage.requests.flagged.decide', 'manage.requests.flagged', 'Approve or reject', 'Approve or reject a flagged report, with remarks.', 0, 1, 821),
+('manage.requests.flagged.flag', 'manage.requests.flagged', 'Flag users', 'Put someone in {UserName|Your} reach on report review, or take them off it. Every daily report they file then waits here.', 0, 1, 821),
 ('manage.requests.late', 'manage.requests', 'Late Reports', 'See reports filed after their day, and whether each was excused.', 1, 1, 822),
 ('manage.requests.late.decide', 'manage.requests.late', 'Approve or reject', 'Approve or reject a late report, with remarks.', 0, 1, 823),
 ('manage.requests.notified', 'manage.requests', 'Request alerts', 'Get an inbox alert when someone in {UserName|Your} reach files or changes a request.', 0, 1, 824),
@@ -1645,3 +1688,15 @@ CREATE TABLE IF NOT EXISTS clashflow_states (
     updated_at           DATETIME     NOT NULL,
     FOREIGN KEY (clashflow_project_id) REFERENCES clashflow_projects(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- Edit profile (2026-10-20, user): changing one's own details on Profile, held by everyone with User by preset.
+-- Existing databases: add_portal_edit_profile_power.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, min_tier, sort_order)
+VALUES
+    ('user.profile', 'user', 'Edit profile',
+     'Change {UserName|your} own details, bank information and documents on Profile, for a head admin to approve.',
+     0, 1, NULL, 505);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('member', 'user.profile', NULL, 0),
+    ('admin', 'user.profile', NULL, 0),
+    ('developer', 'user.profile', NULL, 0);

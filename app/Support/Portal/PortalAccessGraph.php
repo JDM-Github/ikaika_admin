@@ -41,6 +41,13 @@ final class PortalAccessGraph
 
     public const PEERS_KEY = 'manage.users.access.peers';
 
+    /**
+     * The powers a department's head switches on or off for a fellow administrator in that department
+     * without Manage other admins (2026-10-20, user): flagging reports and people, and editing their own
+     * profile. Everything else about a fellow admin stays Manage other admins'.
+     */
+    public const HEAD_KEYS = ['manage.requests.flagged', 'manage.requests.flagged.decide', 'manage.requests.flagged.flag', 'user.profile'];
+
     // How a Developer mode act is named to anyone not in Developer mode, and the mode to someone who is.
     public const DEVELOPER_NAME = 'a developer';
 
@@ -439,6 +446,39 @@ final class PortalAccessGraph
         return $this->manages($makerId, $targetId, true);
     }
 
+    // Whether one person may give or limit this one power for another: as canManage, or a head's HEAD_KEYS.
+    public function canManageKey(int $makerId, int $targetId, string $key): bool
+    {
+        return $this->canManage($makerId, $targetId) || (in_array($key, self::HEAD_KEYS, true) && $this->headsOver($makerId, $targetId));
+    }
+
+    // A department's head over a fellow admin there, who opens their Access Rules for the HEAD_KEYS only.
+    public function headOnly(int $makerId, int $targetId): bool
+    {
+        return ! $this->canManage($makerId, $targetId) && $this->headsOver($makerId, $targetId);
+    }
+
+    /**
+     * A department's head over a fellow administrator in that department (2026-10-20, user), while the
+     * head holds Access Rules. Judged on the head's own powers without an equal's gifts, as an equal's
+     * gift is, so one head's limit never leans on another's and cannot loop.
+     */
+    private function headsOver(int $makerId, int $targetId): bool
+    {
+        $maker = $this->employees[$makerId] ?? null;
+        $target = $this->employees[$targetId] ?? null;
+        $department = $this->heads[$makerId] ?? null;
+        if ($maker === null || $target === null || $department === null || $makerId === $targetId || ! self::isActive($maker) || ! self::isActive($target)) {
+            return false;
+        }
+        if (self::TIER_RANK[$this->actingTier($makerId)] !== self::TIER_RANK[self::tier($target)]
+            || PortalPreview::department($target->department) !== PortalPreview::department($department)) {
+            return false;
+        }
+
+        return isset($this->compute($makerId, false)[self::MANAGE_KEY]);
+    }
+
     /**
      * With $borrowed, "Manage other admins" received from an equal counts too, except over whoever
      * gave it. Without it only a base "Manage other admins" does, which is how an equal's gift is
@@ -651,7 +691,7 @@ final class PortalAccessGraph
                 : null;
         }
         $judge = $this->judgeOf($makerId);
-        if (! $judge->canManage($makerId, $targetId)) {
+        if (! $judge->canManageKey($makerId, $targetId, $key)) {
             return null;
         }
 

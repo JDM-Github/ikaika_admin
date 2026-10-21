@@ -5,7 +5,7 @@ namespace App\Support\Portal;
 /**
  * Daily report review (2026-10-07): which reports wait for an approver, and where a filed one stands.
  *
- * Every Engineering member's daily report waits for review on Manage / Requests' Flag Reports, which an
+ * Every Engineering member's daily report waits for review on Manage / Requests' Daily Reports, which an
  * admin reaches for their own department. Every other department, MIS included, and every late report
  * keeps the older rule: a report is approved the moment it is filed unless its author is on an active
  * warning (Flagged users), when it waits (2026-10-13, user). A late report answers to its late approval too.

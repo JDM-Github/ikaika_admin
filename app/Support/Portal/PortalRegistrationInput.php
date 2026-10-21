@@ -30,6 +30,9 @@ final class PortalRegistrationInput
 
     private const SWIFT = 'swift';
 
+    // A zip or postal code (2026-10-20, user): the Philippines' four digits, or another country's own.
+    private const ZIP = 'zip';
+
     private const DATE = 'date';
 
     private const BLOOD = 'blood';
@@ -65,11 +68,13 @@ final class PortalRegistrationInput
         'addressCity' => [self::TEXT, 'city'],
         'addressBarangay' => [self::TEXT, 'barangay'],
         'addressStreet' => [self::TEXT, 'house number and street'],
+        'addressZip' => [self::ZIP, 'zip code'],
         'emergencyContactCountry' => [self::TEXT, 'contact country'],
         'emergencyContactProvince' => [self::TEXT, 'contact province'],
         'emergencyContactCity' => [self::TEXT, 'contact city'],
         'emergencyContactBarangay' => [self::TEXT, 'contact barangay'],
         'emergencyContactStreet' => [self::TEXT, 'contact house number and street'],
+        'emergencyContactZip' => [self::ZIP, 'contact zip code'],
     ];
 
     /** The letters a full name must carry at least. */
@@ -133,6 +138,7 @@ final class PortalRegistrationInput
             self::PHONE => $this->phone($clean, $label, $rule[2] ?? 0, $rule[3] ?? 0),
             self::NUMBER => $this->number($clean, $label, $rule[2] ?? 0, $rule[3] ?? 0),
             self::SWIFT => $this->swift($clean),
+            self::ZIP => $this->zip($clean, $label),
             self::BLOOD => $this->bloodType($clean),
             default => $this->date($field, $clean, $label),
         };
@@ -244,6 +250,16 @@ final class PortalRegistrationInput
         $code = strtoupper(str_replace(' ', '', $value));
         if (preg_match('/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/', $code) !== 1 || preg_match('/^(.)\1*$/', $code) === 1) {
             abort(422, 'Enter an 8 or 11 character SWIFT code, such as BNORPHMM.');
+        }
+
+        return $code;
+    }
+
+    private function zip(string $value, string $label): string
+    {
+        $code = strtoupper($value);
+        if (preg_match('/^[A-Z0-9][A-Z0-9 \-]{1,9}$/', $code) !== 1 || preg_match('/\d/', $code) !== 1) {
+            abort(422, ucfirst($label).' can only have letters, numbers, spaces and hyphens, such as 4027.');
         }
 
         return $code;

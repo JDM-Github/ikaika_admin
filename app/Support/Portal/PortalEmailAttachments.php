@@ -29,6 +29,13 @@ final class PortalEmailAttachments
 
     public const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 
+    /**
+     * Microsoft Graph takes a file inside the one message it sends from a person's own mailbox only under
+     * 3 MB, and the whole request under 4 MB once encoded (2026-10-21, user). Files that come to this or
+     * more leave from the portal's address instead, still in the person's name, so the email arrives.
+     */
+    public const OWN_ADDRESS_MAX_BYTES = 3_000_000;
+
     private const DIRECTORY = 'email-attachments';
 
     // A staged file older than this belongs to a draft that was never sent.

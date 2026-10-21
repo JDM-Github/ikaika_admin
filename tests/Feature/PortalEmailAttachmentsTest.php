@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
+use App\Modules\Portal\Models\EmailMessage;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
+use App\Support\Portal\PortalEmailAttachments;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Mail\Mailables\Attachment;
@@ -60,6 +62,32 @@ class PortalEmailAttachmentsTest extends TestCase
             @unlink($path);
         }
         parent::tearDown();
+    }
+
+    // The reported case (2026-10-21): Microsoft takes a file from a person's own mailbox only under 3 MB,
+    // so an Onboarding contract sent as yourself failed outright. Past it the email leaves from the portal.
+    public function test_files_of_three_megabytes_leave_from_the_portal_address_even_sent_as_yourself(): void
+    {
+        Mail::fake();
+        config(['mail.from.address' => 'noreply@ikaikabim.com']);
+        $this->administrator()->forceFill(['email' => 'ada@ikaikabim.com'])->save();
+        $headers = $this->authHeaders();
+        $draft = [
+            'category' => 'notice', 'subject' => 'Your contract', 'body' => 'Attached.',
+            'audience' => 'custom', 'emails' => ['new.hire@supplier.test'], 'asSender' => true, 'ownAddress' => true,
+        ];
+
+        $small = $this->stage($this->upload('Offer.pdf', self::PDF), $headers)->assertCreated()->json('data.id');
+        $kept = $this->postJson(self::BASE.'/administration/emails', [...$draft, 'attachmentIds' => [$small]], $headers)->assertCreated()->json('data.id');
+        $this->assertSame('ada@ikaikabim.com', EmailMessage::query()->whereKey($kept)->value('from_address'));
+
+        $large = $this->stage($this->upload('Contract.pdf', self::PDF), $headers)->assertCreated()->json('data.id');
+        DB::connection('portal')->table('email_attachments')->where('token', $large)->update(['size_bytes' => PortalEmailAttachments::OWN_ADDRESS_MAX_BYTES]);
+        $sent = $this->postJson(self::BASE.'/administration/emails', [...$draft, 'attachmentIds' => [$large]], $headers)->assertCreated()->json('data.id');
+
+        $this->assertNull(EmailMessage::query()->whereKey($sent)->value('from_address'));
+        Mail::assertSent(PortalEmailMail::class, fn (PortalEmailMail $mail): bool => $mail->envelope()->from?->address === 'noreply@ikaikabim.com'
+            && $mail->envelope()->replyTo[0]->address === 'ada@ikaikabim.com');
     }
 
     // The reported ask: an email that carries a file.

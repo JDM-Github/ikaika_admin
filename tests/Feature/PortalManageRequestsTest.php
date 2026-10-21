@@ -786,7 +786,7 @@ class PortalManageRequestsTest extends TestCase
             ->assertNotFound();
     }
 
-    // Flagging reaches only as far as Approve or reject on Flag Reports does: another department is not found.
+    // Flagging reaches only as far as Daily Reports does: another department is not found.
     public function test_a_department_admin_flags_only_their_own_department(): void
     {
         [$inside, $outside] = $this->membersInBothDepartments();

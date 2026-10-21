@@ -17,14 +17,14 @@ use Illuminate\Support\Carbon;
  * review. Taking a flag off sets it Inactive rather than deleting it, so the history stays.
  *
  * The flagged person is never told: there is no notice to them and no line in their own log. Only the
- * approver's act is logged, under the approver. Flagging follows Approve or reject on Flag Reports and
- * reaches only as far as that rule does.
+ * approver's act is logged, under the approver. Flagging is Flag users on Daily Reports, a power of its
+ * own since 2026-10-20 so a head admin can take it away, and reaches only as far as Daily Reports does.
  */
 final class PortalFlaggedMembers
 {
-    public const RULE = 'manage.requests.flagged.decide';
+    public const RULE = 'manage.requests.flagged.flag';
 
-    // Approve or reject carries no reach of its own; how far it goes is Flag Reports' reach, as on the queue.
+    // Flag users carries no reach of its own; how far it goes is Daily Reports' reach, as on the queue.
     private const REACH_RULE = 'manage.requests.flagged';
 
     public const RESOURCE = 'manage.flagged-members';

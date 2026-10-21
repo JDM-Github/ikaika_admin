@@ -3,7 +3,9 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -34,7 +36,7 @@ final class PortalMissingReports
      * @return array{
      *     section: string,
      *     resource: string,
-     *     data: list<array{employeeId: string, name: string, email: ?string, isAdmin: bool, days: list<string>, earlierDay: ?string}>,
+     *     data: list<array{employeeId: string, name: string, email: ?string, isAdmin: bool, days: list<string>, earlierDay: ?string, reminders: list<array{day: string, sentAt: string, sentBy: ?string}>}>,
      *     range: array{from: string, to: string}
      * }
      */
@@ -45,6 +47,7 @@ final class PortalMissingReports
         foreach ($filed['data'] as $row) {
             $byId[(int) $row['employeeId']] = $row;
         }
+        $reminders = $this->remindersByMember($filed['range']);
 
         $data = [];
         foreach (PortalRules::people($actor, $request, self::RULE) as $person) {
@@ -57,6 +60,7 @@ final class PortalMissingReports
                 'isAdmin' => PortalRole::isAdmin($person->role, $person->role_level),
                 'days' => $byId[$id]['days'] ?? [],
                 'earlierDay' => $byId[$id]['earlierDay'] ?? null,
+                'reminders' => $reminders[$id] ?? [],
             ];
         }
 
@@ -105,7 +109,51 @@ final class PortalMissingReports
             'Reminder: report not yet filed for '.$label,
             'Our records show you have not yet filed a report for '.$label.'. Please submit it as soon as you can.',
             $link,
+            [$day],
         );
+    }
+
+    /**
+     * Who was emailed a reminder for a day in the range (2026-10-21, user), the latest one per person and
+     * day, and by whom: nobody named for the scheduled run, which sends as the portal.
+     *
+     * @param  array{from: string, to: string}  $range
+     * @return array<int, list<array{day: string, sentAt: string, sentBy: ?string}>>
+     */
+    private function remindersByMember(array $range): array
+    {
+        // A server not yet migrated shows no marks rather than no page.
+        try {
+            $rows = DB::connection('portal')->table('report_reminders as r')
+                ->leftJoin('employees as e', 'e.id', '=', 'r.sent_by')
+                ->whereBetween('r.report_date', [$range['from'], $range['to']])
+                ->orderByDesc('r.date_created')
+                ->orderByDesc('r.id')
+                ->get(['r.employee_id', 'r.report_date', 'r.date_created', 'r.sent_by', 'e.first_name', 'e.last_name']);
+        } catch (QueryException) {
+            return [];
+        }
+
+        $byMember = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            $day = substr((string) $row->report_date, 0, 10);
+            $key = $row->employee_id.'|'.$day;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $byMember[(int) $row->employee_id][] = [
+                'day' => $day,
+                'sentAt' => Carbon::parse((string) $row->date_created, 'UTC')->toIso8601String(),
+                'sentBy' => $row->sent_by === null ? null : PortalSubmittedReportPresenter::memberName(
+                    is_string($row->first_name) ? $row->first_name : null,
+                    is_string($row->last_name) ? $row->last_name : null,
+                ),
+            ];
+        }
+
+        return $byMember;
     }
 
     private function validatedDay(Request $request): string

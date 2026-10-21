@@ -288,6 +288,13 @@ final class PortalRules
         return $guest instanceof PortalGuest ? $guest : null;
     }
 
+    // A shared Finance page brings its own Export (2026-10-20, user): a guest downloads only what they already see.
+    private const GUEST_EXPORTS = [
+        'finance.overview' => 'finance.transactions.export',
+        'finance.transactions' => 'finance.transactions.export',
+        'finance.envelopes' => 'finance.envelopes.export',
+    ];
+
     // The Requests page's kinds, lent with the page at the same reach: the queue's lists follow the kind rules.
     private const REQUEST_KINDS = [
         'manage.requests.leave',
@@ -313,6 +320,9 @@ final class PortalRules
             $rules[$key] = $reach ?? 'all';
             if ($key === 'email') {
                 $rules['email.send'] = 'all';
+            }
+            if (isset(self::GUEST_EXPORTS[$key])) {
+                $rules[self::GUEST_EXPORTS[$key]] = 'all';
             }
             if ($key === 'manage.requests') {
                 foreach (self::REQUEST_KINDS as $kind) {

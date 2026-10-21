@@ -158,7 +158,7 @@ final class PortalManageUsers
                 if ($employee instanceof Employee) {
                     $rows[] = [
                         ...PortalManageUserPresenter::rosterItem($employee),
-                        'canEditAccess' => $graph->canManage($viewerId, (int) $employee->getKey()),
+                        'canEditAccess' => $graph->canManage($viewerId, (int) $employee->getKey()) || $graph->headOnly($viewerId, (int) $employee->getKey()),
                         'canChangeStatus' => $holdsStatus && $this->statusRefusal($viewerId, $employee, $holdsPeers) === null,
                     ];
                 }

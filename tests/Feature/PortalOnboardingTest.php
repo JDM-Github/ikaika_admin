@@ -419,6 +419,11 @@ class PortalOnboardingTest extends TestCase
             ->assertOk()->json('data.details');
         $this->assertSame(['Cruz', 'Dela Reyes-Santos', 'LIZ'], [$named['middleName'], $named['lastName'], $named['nickname']]);
 
+        // A zip code beside the street (2026-10-20, user): kept in capitals, and refused when it is not one.
+        $this->assertSame('4027', $this->withToken($session)->patchJson(self::REGISTER.'/details', ['addressZip' => ' 4027 '])->assertOk()->json('data.details.addressZip'));
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', ['addressZip' => 'zip!'])
+            ->assertStatus(422)->assertJsonPath('message', 'Zip code can only have letters, numbers, spaces and hyphens, such as 4027.');
+
         // A refused save changes nothing.
         $this->withToken($session)->patchJson(self::REGISTER.'/details', ['firstName' => 'Liza2'])
             ->assertStatus(422)

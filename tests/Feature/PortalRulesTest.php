@@ -114,7 +114,8 @@ class PortalRulesTest extends TestCase
         $catalog = DB::connection('portal')->table('access_permissions')->where('permission_key', 'like', 'manage.requests%')->pluck('supports_reach', 'permission_key');
         $presets = DB::connection('portal')->table('access_presets')->where('role', 'admin')->where('permission_key', 'like', 'manage.requests%')->pluck('reach', 'permission_key');
 
-        $this->assertCount(16, $catalog);
+        // Flag users joined Daily Reports on 2026-10-20.
+        $this->assertCount(17, $catalog);
         foreach ($catalog as $key => $supportsReach) {
             $this->assertTrue($presets->has($key), "Admins are missing {$key}.");
             $this->assertSame((bool) $supportsReach ? 'department' : null, $presets[$key]);
