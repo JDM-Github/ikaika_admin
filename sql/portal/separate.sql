@@ -233,6 +233,21 @@ CREATE TABLE report_reminders (
     FOREIGN KEY (sent_by)     REFERENCES employees(id)      ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Profile's payment QR codes (2026-10-21): one per bank or e-wallet, that a reimbursement picks from; the
+-- claim keeps its own copy in attachments. Existing databases: create_portal_employee_payment_qrs_table.
+CREATE TABLE employee_payment_qrs (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id     INT           NOT NULL,
+    bank_label      VARCHAR(120)  NOT NULL,
+    file_url        VARCHAR(1000) NOT NULL,
+    file_name       VARCHAR(255)  NOT NULL,
+    mime_type       VARCHAR(150)  NULL,
+    file_size_bytes BIGINT        NULL,
+    date_updated    DATETIME      NOT NULL,
+    UNIQUE KEY uq_employee_payment_qrs_bank (employee_id, bank_label),
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Built-in blocks: the company footer and the Portal email test template. The HTML is
 -- database/seeders/email/*.html, inlined here; its logo is in Cloudinary's global folder.
 INSERT INTO email_blocks (kind, name, category, subject, body, format, created_by)

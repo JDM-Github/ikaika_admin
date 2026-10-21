@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Portal\User\HomeController;
 use App\Http\Controllers\Api\Portal\User\InformationController;
 use App\Http\Controllers\Api\Portal\User\LogsController;
 use App\Http\Controllers\Api\Portal\User\NotificationsController;
+use App\Http\Controllers\Api\Portal\User\PaymentQrsController;
 use App\Http\Middleware\AuthenticatePortalJwt;
 use Illuminate\Support\Facades\Route;
 
@@ -39,5 +40,11 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware('throttle:portal-user-information-write')->group(function (): void {
         Route::post('user/information/changes', [InformationController::class, 'submit']);
         Route::delete('user/information/changes', [InformationController::class, 'withdraw']);
+    });
+    // Profile's payment QR codes, one per bank, that a reimbursement picks from (2026-10-21, user).
+    Route::middleware('throttle:portal-user-information')->get('user/payment-qrs', [PaymentQrsController::class, 'index']);
+    Route::middleware('throttle:portal-user-information-write')->group(function (): void {
+        Route::post('user/payment-qrs', [PaymentQrsController::class, 'store']);
+        Route::delete('user/payment-qrs/{id}', [PaymentQrsController::class, 'destroy'])->whereNumber('id');
     });
 });

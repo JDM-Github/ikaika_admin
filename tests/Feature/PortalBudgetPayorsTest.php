@@ -11,8 +11,9 @@ use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
- * Finance / Transactions' payor list (2026-10-21): the ledger's names most used first, a name added by
- * hand kept at once, and one taken off the list hidden even while old transactions still carry it.
+ * Finance / Transactions' payor list (2026-10-21): the ledger's names, the most recently used first and then
+ * the most used, a name added by hand kept at once and put first, and one taken off the list hidden even while
+ * old transactions still carry it.
  *
  * Runs against the real tracker database inside a transaction, so the seeded names sit among live ones.
  */
@@ -50,6 +51,21 @@ class PortalBudgetPayorsTest extends TestCase
         $this->assertTrue(PortalLog::query()->where('resource', 'manage.budget-payors')->where('message', 'like', '%SEED-PAYOR New Supplier%')->exists());
     }
 
+    // The reported miss (2026-10-21): a name just added sat past the first few the form shows, so it could not be picked again.
+    public function test_the_name_used_or_added_most_recently_comes_first(): void
+    {
+        $this->line('SEED-PAYOR Often');
+        $this->line('SEED-PAYOR Often');
+        $headers = $this->admin();
+
+        $this->assertSame('SEED-PAYOR Brand New', $this->names($this->postJson(self::BASE, ['name' => 'SEED-PAYOR Brand New'], $headers)->assertCreated())[0]);
+        $this->assertSame('SEED-PAYOR Brand New', $this->names($this->getJson(self::BASE, $headers)->assertOk())[0]);
+
+        // A line saved under a name brings that name up the same way.
+        $this->line('SEED-PAYOR Often', now('UTC')->addMinute()->format('Y-m-d H:i:s'));
+        $this->assertSame('SEED-PAYOR Often', $this->names($this->getJson(self::BASE, $headers)->assertOk())[0]);
+    }
+
     public function test_a_name_taken_off_the_list_stays_off_until_it_is_added_again(): void
     {
         $this->line('SEED-PAYOR Old Vendor');
@@ -73,7 +89,7 @@ class PortalBudgetPayorsTest extends TestCase
         $this->postJson(self::BASE.'/remove', ['name' => 'SEED-PAYOR Stranger'], $member)->assertForbidden();
     }
 
-    private function line(string $payor): void
+    private function line(string $payor, ?string $createdAt = null): void
     {
         DB::connection('tracker')->table('transactions')->insert([
             'transaction_name' => 'Seeded payor line',
@@ -81,6 +97,7 @@ class PortalBudgetPayorsTest extends TestCase
             'amount' => 10,
             'type' => 'Expense',
             'payor_payee' => $payor,
+            'created_at' => $createdAt,
         ]);
     }
 

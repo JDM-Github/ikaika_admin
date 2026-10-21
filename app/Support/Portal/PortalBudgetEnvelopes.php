@@ -239,6 +239,8 @@ final class PortalBudgetEnvelopes
                 'isAllocation' => $isAllocation,
                 // Entered by hand, so Edit transactions may change its details (2026-10-13).
                 'isEditable' => PortalBudgetTransactions::isEditable($row->transaction_name, $row->source_key),
+                // Funds Received, whose edit changes only its amount and day (2026-10-21, user).
+                'isFundsReceived' => PortalBudgetTransactions::isFundsReceived($row->transaction_name),
             ];
         }
 

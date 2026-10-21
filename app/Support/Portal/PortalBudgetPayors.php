@@ -12,10 +12,11 @@ use Illuminate\Support\Facades\DB;
  * Finance / Transactions' payor list (2026-10-21, user): the names Add Transaction offers for a payor or
  * payee, so the same one is picked rather than retyped.
  *
- * The list is every name the tracker's transactions already carry, most used first, plus the names added
- * here by hand, less any taken off it. Taking a name off only hides it from the list: the transactions
- * that carry it keep it, and adding it again brings it back. Names match without case, as the database
- * compares them.
+ * The list is every name the tracker's transactions already carry, plus the names added here by hand, less
+ * any taken off it. The one used or added most recently comes first, then the most used: the form shows
+ * only the first few until something is typed, so a name just added has to be among them to be picked
+ * again (2026-10-21, user). Taking a name off only hides it from the list: the transactions that carry it
+ * keep it, and adding it again brings it back. Names match without case, as the database compares them.
  */
 final class PortalBudgetPayors
 {
@@ -36,8 +37,8 @@ final class PortalBudgetPayors
     public function list(): array
     {
         $byKey = [];
-        foreach ($this->ledgerUses() as $name => $uses) {
-            $byKey[mb_strtolower($name)] = ['name' => $name, 'uses' => $uses];
+        foreach ($this->ledgerUses() as $name => $use) {
+            $byKey[mb_strtolower($name)] = ['name' => $name, 'uses' => $use['uses'], 'lastUsed' => $use['lastUsed']];
         }
         foreach ($this->rows() as $row) {
             $key = mb_strtolower($row['name']);
@@ -46,13 +47,20 @@ final class PortalBudgetPayors
 
                 continue;
             }
-            $byKey[$key] ??= ['name' => $row['name'], 'uses' => 0];
+            $byKey[$key] ??= ['name' => $row['name'], 'uses' => 0, 'lastUsed' => ''];
+            // Adding a name by hand counts as using it.
+            $byKey[$key]['lastUsed'] = max($byKey[$key]['lastUsed'], $row['dateUpdated']);
         }
 
         $data = array_values($byKey);
-        usort($data, static fn (array $left, array $right): int => [$right['uses'], mb_strtolower($left['name'])] <=> [$left['uses'], mb_strtolower($right['name'])]);
+        usort($data, static fn (array $left, array $right): int => [$right['lastUsed'], $right['uses'], mb_strtolower($left['name'])]
+            <=> [$left['lastUsed'], $left['uses'], mb_strtolower($right['name'])]);
 
-        return ['section' => 'manage', 'resource' => 'budget-payors', 'data' => $data];
+        return [
+            'section' => 'manage',
+            'resource' => 'budget-payors',
+            'data' => array_map(static fn (array $entry): array => ['name' => $entry['name'], 'uses' => $entry['uses']], $data),
+        ];
     }
 
     /**
@@ -105,10 +113,11 @@ final class PortalBudgetPayors
     }
 
     /**
-     * How many transactions carry each payor or payee, by the spelling the database groups them under.
-     * Nothing when the tracker is switched off here or cannot be read: the hand-kept names still show.
+     * How many transactions carry each payor or payee, and when one last did, by the spelling the database
+     * groups them under. Nothing when the tracker is switched off here or cannot be read: the hand-kept names
+     * still show. Both stamps are UTC, as the ledger writes them.
      *
-     * @return array<string, int>
+     * @return array<string, array{uses: int, lastUsed: string}>
      */
     private function ledgerUses(): array
     {
@@ -123,6 +132,7 @@ final class PortalBudgetPayors
                 ->groupBy('payor_payee')
                 ->select('payor_payee')
                 ->selectRaw('COUNT(*) AS uses')
+                ->selectRaw('MAX(COALESCE(created_at, transaction_date)) AS last_used')
                 ->get();
         } catch (QueryException) {
             return [];
@@ -132,7 +142,10 @@ final class PortalBudgetPayors
         foreach ($rows as $row) {
             $name = trim((string) $row->payor_payee);
             if ($name !== '') {
-                $uses[$name] = ($uses[$name] ?? 0) + (int) $row->uses;
+                $uses[$name] = [
+                    'uses' => ($uses[$name]['uses'] ?? 0) + (int) $row->uses,
+                    'lastUsed' => max($uses[$name]['lastUsed'] ?? '', (string) ($row->last_used ?? '')),
+                ];
             }
         }
 
@@ -140,13 +153,17 @@ final class PortalBudgetPayors
     }
 
     /**
-     * @return list<array{name: string, isHidden: bool}>
+     * @return list<array{name: string, isHidden: bool, dateUpdated: string}>
      */
     private function rows(): array
     {
         try {
-            return DB::connection('portal')->table(self::TABLE)->get(['name', 'is_hidden'])
-                ->map(static fn (object $row): array => ['name' => trim((string) $row->name), 'isHidden' => (bool) $row->is_hidden])
+            return DB::connection('portal')->table(self::TABLE)->get(['name', 'is_hidden', 'date_updated'])
+                ->map(static fn (object $row): array => [
+                    'name' => trim((string) $row->name),
+                    'isHidden' => (bool) $row->is_hidden,
+                    'dateUpdated' => (string) ($row->date_updated ?? ''),
+                ])
                 ->all();
         } catch (QueryException) {
             return [];
