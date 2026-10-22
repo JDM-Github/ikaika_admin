@@ -347,6 +347,12 @@ Artisan::command('portal:geocode-homes', function (PortalHomeLocations $homes): 
 Artisan::command('portal:remind-missing-reports
     {--dry-run : List who would be reminded and for which days; sends nothing}
     {--to= : Send one sample reminder to this address only, outside the outbox}', function (PortalReportReminders $reminders): int {
+    // A day too few filed on is one the records lack (2026-10-22, user: false reminders), and nobody hears of it.
+    foreach ($reminders->coverage(now()) as $day => $count) {
+        if (! $count['whole']) {
+            $this->warn($day.': '.$count['filed'].' of '.$count['expected'].' filed, too few for these records to be whole - nobody is reminded of it.');
+        }
+    }
     $plan = $reminders->missing(now());
     $summaries = $reminders->summaries($plan);
     foreach ($plan as $row) {
@@ -383,6 +389,11 @@ Artisan::command('portal:remind-missing-reports
             return 1;
         }
         $this->info('Samples sent to '.$to.': '.$plan[0]['name']."'s reminder".($summaries === [] ? '' : ' and the '.$summaries[0]['department'].' summary').'.');
+    } elseif (! PortalReportReminders::scheduled()) {
+        // Only production reminds people (2026-10-22, user): any other server's reports are a copy.
+        $this->error('Reminders are off on this server ('.config('products.channel').'): its reports are a copy of production\'s, so it would remind people of days they filed there. --dry-run lists, --to sends a sample; REPORT_REMINDERS_SCHEDULED=true turns them on.');
+
+        return 1;
     } else {
         foreach ($plan as $row) {
             $reminders->remind($row['employee'], $row['days']);
@@ -526,7 +537,10 @@ Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
 // Jira's backstop: what failed or waits is sent again, and every linked issue is read back, if a delivery was lost.
 Schedule::command('portal:jira-sync')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();
-Schedule::command('portal:remind-missing-reports')->weekdays()->at('18:00')->timezone('Asia/Manila')->withoutOverlapping();
+// Production's alone unless REPORT_REMINDERS_SCHEDULED says otherwise (2026-10-22, user): the Test Server's
+// reports are a copy of production's, and it reminded people of days they had filed there.
+Schedule::command('portal:remind-missing-reports')->weekdays()->at('18:00')->timezone('Asia/Manila')->withoutOverlapping()
+    ->when(fn (): bool => PortalReportReminders::scheduled());
 // The Airtable sync, off until AIRTABLE_SYNC_SCHEDULED=true (2026-10-20). Every tick, so it follows the cron's cadence.
 Schedule::command('portal:airtable-sync --send --backoff')->everyMinute()->withoutOverlapping(15)->runInBackground()
     ->when(fn (): bool => (bool) config('services.airtable.scheduled'));

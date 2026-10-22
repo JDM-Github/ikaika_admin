@@ -18,6 +18,7 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 ### Fixed
 
 - Issues & Requests still follows its Jira issues after the Jira project key is changed.
+- Missing report reminders come only from production and never name a day the records are missing.
 
 ### Other
 

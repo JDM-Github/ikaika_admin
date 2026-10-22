@@ -7,6 +7,7 @@ use App\Modules\ProjectEstimator\Models\Holiday;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
 
@@ -18,6 +19,14 @@ use Throwable;
  * No request and no signed-in sender stand behind a scheduled run, so the day is the office's
  * (Asia/Manila) and the sender is a guest. The window is the last few work days up to yesterday:
  * today is still fileable as a daily report, and an older day is not worth a nag.
+ *
+ * False reminders (2026-10-22, user: people were told they had not filed days they had). A reminder is only as
+ * true as the database it reads, so two guards stand before one is sent. Only production's scheduled run sends
+ * (scheduled()): every other server runs on a copy of production's reports -- the Test Server above all, with the
+ * same mail relay -- and would remind people of days they have filed there since. And a day on which fewer than
+ * half of those it counts for filed anything is one the records lack -- a holiday the calendar does not have, or
+ * reports this database never received, as an import from Airtable leaves -- so nobody is reminded of it, and the
+ * command and the log say so.
  */
 final class PortalReportReminders
 {
@@ -25,22 +34,71 @@ final class PortalReportReminders
 
     public const WORK_DAYS = 5;
 
+    // The share of those a day counts for who must have filed before anyone is reminded of it.
+    public const MIN_FILED_SHARE = 0.5;
+
     public function __construct(
         private readonly PortalSubmittedReports $reports,
         private readonly PortalEmailMessages $messages,
     ) {}
 
     /**
+     * Whether the scheduled run sends here: as REPORT_REMINDERS_SCHEDULED says, else only on production, whose
+     * reports are the ones people file.
+     */
+    public static function scheduled(): bool
+    {
+        $set = config('products.report_reminders.scheduled');
+        if (is_bool($set)) {
+            return $set;
+        }
+
+        return strtolower(trim((string) config('products.channel'))) === 'production';
+    }
+
+    /**
      * Who is missing which work days in the window ending yesterday, never a day before they started,
-     * after they left, or one their leave or an offset already covers.
+     * after they left, or one their leave or an offset already covers -- nor one too few filed on.
      *
      * @return list<array{employee: Employee, name: string, email: string, department: string, days: list<string>}>
      */
     public function missing(Carbon $today): array
     {
+        $survey = $this->survey($today);
+        $unrecorded = array_keys(array_filter($survey['coverage'], static fn (array $day): bool => ! $day['whole']));
+        if ($unrecorded !== []) {
+            Log::warning('portal.report-reminders.unrecorded', ['days' => $unrecorded, 'coverage' => $survey['coverage']]);
+        }
+        $plan = [];
+        foreach ($survey['people'] as $entry) {
+            $days = array_values(array_diff($entry['missing'], $unrecorded));
+            if ($days !== []) {
+                $plan[] = [...$entry['row'], 'days' => array_reverse($days)];
+            }
+        }
+
+        return $plan;
+    }
+
+    /**
+     * Each day of the window, newest first: how many it counts for, how many of them filed, and whether that is
+     * enough for the records to be whole.
+     *
+     * @return array<string, array{expected: int, filed: int, whole: bool}>
+     */
+    public function coverage(Carbon $today): array
+    {
+        return $this->survey($today)['coverage'];
+    }
+
+    /**
+     * @return array{coverage: array<string, array{expected: int, filed: int, whole: bool}>, people: list<array{row: array{employee: Employee, name: string, email: string, department: string}, missing: list<string>}>}
+     */
+    private function survey(Carbon $today): array
+    {
         $window = $this->workDays($today->copy()->setTimezone(self::ZONE)->startOfDay());
         if ($window === []) {
-            return [];
+            return ['coverage' => [], 'people' => []];
         }
         $from = $window[array_key_last($window)];
         $to = $window[0];
@@ -55,7 +113,8 @@ final class PortalReportReminders
             $filed[(int) $row->employee_id][substr((string) $row->report_date, 0, 10)] = true;
         }
 
-        $plan = [];
+        $coverage = array_fill_keys($window, ['expected' => 0, 'filed' => 0, 'whole' => true]);
+        $entries = [];
         $people = Employee::query()
             ->select(['id', 'first_name', 'last_name', 'email', 'department', 'role', 'role_level', 'start_date', 'end_date'])
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
@@ -71,26 +130,40 @@ final class PortalReportReminders
             $start = $this->date($person->start_date);
             $end = $this->date($person->end_date);
             $away = array_flip([...$this->reports->leaveDays($person, $from, $to), ...$this->reports->offsetDays($person, $from, $to)]);
-            $days = array_values(array_filter($window, static fn (string $day): bool => ! isset($filed[(int) $person->getKey()][$day])
-                && ! isset($away[$day])
+            $counted = array_values(array_filter($window, static fn (string $day): bool => ! isset($away[$day])
                 && ($start === null || $day >= $start)
                 && ($end === null || $day <= $end)));
-            if ($days === []) {
+            $missing = [];
+            foreach ($counted as $day) {
+                $coverage[$day]['expected']++;
+                if (isset($filed[(int) $person->getKey()][$day])) {
+                    $coverage[$day]['filed']++;
+                } else {
+                    $missing[] = $day;
+                }
+            }
+            if ($missing === []) {
                 continue;
             }
-            $plan[] = [
-                'employee' => $person,
-                'name' => PortalSubmittedReportPresenter::memberName(
-                    is_string($person->first_name) ? $person->first_name : null,
-                    is_string($person->last_name) ? $person->last_name : null,
-                ),
-                'email' => $email,
-                'department' => trim((string) ($person->department ?? '')),
-                'days' => array_reverse($days),
+            $entries[] = [
+                'row' => [
+                    'employee' => $person,
+                    'name' => PortalSubmittedReportPresenter::memberName(
+                        is_string($person->first_name) ? $person->first_name : null,
+                        is_string($person->last_name) ? $person->last_name : null,
+                    ),
+                    'email' => $email,
+                    'department' => trim((string) ($person->department ?? '')),
+                ],
+                'missing' => $missing,
             ];
         }
+        $share = (float) config('products.report_reminders.min_filed_share', self::MIN_FILED_SHARE);
+        foreach ($coverage as $day => $count) {
+            $coverage[$day]['whole'] = $count['expected'] === 0 || $count['filed'] >= $share * $count['expected'];
+        }
 
-        return $plan;
+        return ['coverage' => $coverage, 'people' => $entries];
     }
 
     /**
