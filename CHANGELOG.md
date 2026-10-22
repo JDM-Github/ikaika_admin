@@ -13,6 +13,10 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 - Issues & Requests can cancel a report as won't fix or as a duplicate and a duplicate is labelled and linked to its original in Jira.
 - Issues & Requests can be archived and deleted to the Recycle Bin.
 
+### Fixed
+
+- Issues & Requests still follows its Jira issues after the Jira project key is changed.
+
 ### Other
 
 - Every production deploy is a tagged release and any version tag can be rebuilt to test it on staging.

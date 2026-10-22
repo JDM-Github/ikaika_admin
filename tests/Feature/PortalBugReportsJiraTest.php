@@ -563,19 +563,108 @@ class PortalBugReportsJiraTest extends TestCase
         $unsent = $this->report();
         $sandbox = $this->report(['channel' => 'staging', 'jira_issue_id' => '10043', 'jira_issue_key' => 'SBX-3', 'jira_state' => 'failed']);
         Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues'])]);
 
         $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$copied.'/jira')
             ->assertStatus(409)->assertJsonPath('message', "It came here with another server's data, so that server sends it to Jira and follows its issue.");
         $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$sandbox.'/jira')
             ->assertStatus(409)->assertJsonPath('message', 'SBX-3 is in another Jira project than IKP, so this server leaves it as it is.');
-        // Its status changes in the portal only: the issue is the other server's.
+        // Its status changes in the portal only: the issue is the other server's, and the page is told why.
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$copied, ['status' => 'fixed'])
-            ->assertOk()->assertJsonPath('data.status', 'fixed')->assertJsonPath('data.jiraHere', false);
+            ->assertOk()->assertJsonPath('data.status', 'fixed')->assertJsonPath('data.jiraHere', false)
+            ->assertJsonPath('data.jiraElsewhere', "It came here with another server's data, so that server sends it to Jira and follows its issue.");
         $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/send-all')->assertOk()->assertJsonPath('queued', 0);
 
-        Http::assertNothingSent();
+        // Jira is only asked which keys IKP goes by, once, to tell that SBX-3 is none of them.
+        $this->assertSame(['GET project/IKP'], $this->calls());
         Queue::assertNothingPushed();
         $this->assertNull(DB::connection('portal')->table('bug_reports')->where('id', $unsent)->value('jira_state'));
+    }
+
+    // A project's key changed (2026-10-22, user: IPS became IP2). Jira still files under the old key, so a new issue
+    // is IKN-4 while the configuration says IKP: this server's all the same, and followed both ways.
+    public function test_a_project_whose_key_changed_is_still_followed_under_its_new_key(): void
+    {
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $older = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10043', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
+        $newer = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10044', 'jira_issue_key' => 'IKN-4', 'jira_state' => 'sent']);
+        $story = ['status' => self::TO_DO, 'issuetype' => ['name' => 'Story']];
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKN', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10002', 'name' => 'Story']]]),
+            self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+                ['id' => '10043', 'key' => 'IKN-3', 'fields' => ['status' => self::TO_DO]],
+                ['id' => '10044', 'key' => 'IKN-4', 'fields' => $story],
+            ], 'issueErrors' => []]),
+            self::SITE.'/rest/api/3/issue/10044*' => Http::response(['id' => '10044', 'key' => 'IKN-4', 'fields' => $story]),
+        ]);
+
+        $listed = collect($this->withHeaders($headers)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->keyBy('id');
+        $this->assertSame([true, null], [$listed[(string) $newer]['jiraHere'], $listed[(string) $newer]['jiraElsewhere']]);
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$newer, ['kind' => 'feature'])
+            ->assertOk()->assertJsonPath('data.kind', 'feature');
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT' && str_ends_with($request->url(), '/issue/10044') && $request['fields'] === ['issuetype' => ['id' => '10002']]);
+
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issue/bulkfetch') && $request['issueIdsOrKeys'] === ['10043', '10044']);
+        // Read back, the older one keeps the key its issue has now.
+        $this->assertSame('IKN-3', DB::connection('portal')->table('bug_reports')->where('id', $older)->value('jira_issue_key'));
+        // Which keys the project goes by is asked once, not for every report on the page.
+        $this->assertCount(1, Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/rest/api/3/project/IKP')));
+    }
+
+    // Once the configuration names the new key, a report still linked under the old one is found again by its issue's
+    // id, which Jira answers with the key it has now. One in another project, or one Jira does not show, stays as it is.
+    public function test_a_report_linked_under_an_old_key_is_found_again_by_its_issue(): void
+    {
+        $this->connectJira();
+        config(['services.jira.project' => 'IKN']);
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $headers = $this->headersFor($this->memberOf('MIS'));
+        $renamed = $this->report(['jira_issue_id' => '10043', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
+        $sandbox = $this->report(['jira_issue_id' => '10090', 'jira_issue_key' => 'SBX-9', 'jira_state' => 'sent']);
+        $unseen = $this->report(['jira_issue_id' => '10095', 'jira_issue_key' => 'OLD-5', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/project/IKN' => Http::response(['id' => '10000', 'key' => 'IKN', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+                ['id' => '10043', 'key' => 'IKN-3', 'fields' => ['status' => ['name' => 'In Progress', 'statusCategory' => ['key' => 'indeterminate']]]],
+                ['id' => '10090', 'key' => 'SBX-9', 'fields' => ['status' => self::TO_DO]],
+            ], 'issueErrors' => [['id' => '10095']]]),
+        ]);
+
+        $before = collect($this->withHeaders($headers)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->keyBy('id');
+        $this->assertSame('IKP-3 is in another Jira project than IKN, so this server leaves it as it is.', $before[(string) $renamed]['jiraElsewhere']);
+
+        $after = collect($this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/sync')->assertOk()->json('data'))->keyBy('id');
+
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issue/bulkfetch') && $request['issueIdsOrKeys'] === ['10043', '10090', '10095']);
+        $this->assertSame([true, null, 'IKN-3', 'in_progress'], [$after[(string) $renamed]['jiraHere'], $after[(string) $renamed]['jiraElsewhere'], $after[(string) $renamed]['jira']['key'], $after[(string) $renamed]['status']]);
+        $this->assertFalse($after[(string) $sandbox]['jiraHere']);
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$sandbox, $unseen])->orderBy('id')->get(['jira_issue_key', 'jira_state']);
+        $this->assertSame([['SBX-9', 'sent'], ['OLD-5', 'sent']], $rows->map(fn (object $row): array => [$row->jira_issue_key, $row->jira_state])->all());
+    }
+
+    // Without Jira's answer the configured key alone counts, and Jira is asked again in minutes, not for every report.
+    public function test_without_an_answer_the_configured_key_alone_counts(): void
+    {
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $one = $this->report(['jira_issue_id' => '10044', 'jira_issue_key' => 'IKN-4', 'jira_state' => 'sent']);
+        $two = $this->report(['jira_issue_id' => '10045', 'jira_issue_key' => 'IKN-5', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/project/IKP' => Http::response(['errorMessages' => ["No project could be found with key 'IKP'."]], 404)]);
+
+        $listed = collect($this->withHeaders($this->headersFor($this->memberOf('MIS')))->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->keyBy('id');
+
+        $this->assertSame([false, false], [$listed[(string) $one]['jiraHere'], $listed[(string) $two]['jiraHere']]);
+        $this->assertSame('IKN-4 is in another Jira project than IKP, so this server leaves it as it is.', $listed[(string) $one]['jiraElsewhere']);
+        Http::assertSentCount(1);
     }
 
     // A report moved on before it reached Jira (2026-10-21): its new issue goes to its column, not New.

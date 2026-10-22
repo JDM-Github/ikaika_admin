@@ -49,6 +49,8 @@ final class PortalJiraClient
 
     private const ISSUE_TYPES_KEY = 'portal:jira:issue-types:';
 
+    private const PROJECT_KEYS_KEY = 'portal:jira:project-keys:';
+
     // The fields a sync reads; nothing else of an issue is ever fetched. Labels and links say a duplicate's (2026-10-21).
     private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype', 'labels', 'issuelinks'];
 
@@ -141,6 +143,37 @@ final class PortalJiraClient
         $body = $this->read('GET', '/rest/api/3/project/'.rawurlencode((string) $this->projectKey()), missingIsRefusal: true)->json();
 
         return ['id' => (string) ($body['id'] ?? ''), 'key' => (string) ($body['key'] ?? ''), 'name' => (string) ($body['name'] ?? '')];
+    }
+
+    /**
+     * The keys the project's issues carry: the configured one, and the one Jira files under now when the project's
+     * key was changed since (2026-10-22: IPS became IP2, Jira still takes IPS, and what it files is IP2-4). Asked
+     * once a day; without an answer, the configured key alone -- for a few minutes, not for every report on a page.
+     *
+     * @return list<string>
+     */
+    public function projectKeys(): array
+    {
+        $configured = $this->projectKey();
+        if ($configured === null) {
+            return [];
+        }
+        $cacheKey = self::PROJECT_KEYS_KEY.$configured;
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached)) {
+            return $cached;
+        }
+        try {
+            $current = strtoupper($this->project()['key']);
+        } catch (RuntimeException) {
+            Cache::put($cacheKey, [$configured], now()->addMinutes(5));
+
+            return [$configured];
+        }
+        $keys = array_values(array_unique(array_filter([$configured, $current])));
+        Cache::put($cacheKey, $keys, now()->addDay());
+
+        return $keys;
     }
 
     /**

@@ -392,6 +392,10 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         $this->info('Account: '.$account['displayName'].' ('.$account['accountId'].')');
         $project = $client->project();
         $this->info('Project: '.$project['key'].' - '.$project['name']);
+        // A key the project had before still files (2026-10-22, user: IPS became IP2), under the key it has now.
+        if (strtoupper($project['key']) !== $client->projectKey()) {
+            $this->warn('JIRA_PROJECT_KEY is a key '.$project['key'].' had before: Jira files new issues as '.$project['key'].'-N, which this server follows too. Set JIRA_PROJECT_KEY='.$project['key'].' to match.');
+        }
         // One project for production and staging (2026-10-21, user): how this server's issues are told apart.
         $this->info('Files as: '.$environment->channel().' - labels '.implode(', ', $environment->labels()).'; marked '.str_replace('#0', '#N', PortalJiraIssue::reportMark(0, $environment->label())));
         foreach (PortalBugReports::KINDS as $kind => $words) {
@@ -428,7 +432,7 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
     $this->line('A Jira admin registers the webhook in Jira settings > System > WebHooks:');
     $this->line('  URL:    '.url(ApiPath::join((string) config('products.channel'), 'jira', 'webhook')));
     $this->line('  Events: Issue updated, Issue deleted');
-    $this->line('  JQL:    '.$environment->webhookJql($client->projectKey()));
+    $this->line('  JQL:    '.$environment->webhookJql($project['key']));
     $this->line('  Secret: the value of JIRA_WEBHOOK_SECRET');
 
     return $failed ? 1 : 0;

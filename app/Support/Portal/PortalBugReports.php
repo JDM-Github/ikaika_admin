@@ -705,6 +705,7 @@ final class PortalBugReports
         $assigneeId = $row->assignee_id === null ? null : (int) $row->assignee_id;
         $reporterId = $row->reporter_id === null ? null : (int) $row->reporter_id;
         $archivedBy = $row->archived_by === null ? null : (int) $row->archived_by;
+        $elsewhere = $this->jira->whyNotHandled($row);
 
         return [
             'id' => (string) $row->id,
@@ -727,7 +728,10 @@ final class PortalBugReports
             ], $images),
             'jira' => $this->jira->present($row),
             // Whether this server follows its Jira side; false for another server's report (2026-10-21, user).
-            'jiraHere' => $this->jira->handles($row),
+            'jiraHere' => $elsewhere === null,
+            // And why not, in the words a refusal to send it uses: a page that guessed blamed another server for a
+            // project whose key had changed (2026-10-22).
+            'jiraElsewhere' => $elsewhere,
             // Why a cancelled one was closed, and the report a duplicate names (2026-10-21, user).
             'cancelReason' => $row->status === self::STATUS_CANCELLED ? ($row->cancel_reason ?? self::CANCEL_WONT_FIX) : null,
             'duplicateOf' => $row->duplicate_of === null ? null : ['id' => (string) $row->duplicate_of, 'title' => $titles[(int) $row->duplicate_of] ?? null],

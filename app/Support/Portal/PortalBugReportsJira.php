@@ -32,6 +32,10 @@ use RuntimeException;
  * for an issue only after this server really started making one, and a new issue is first put in step with its
  * report -- moved to its column, a duplicate labelled and linked -- before a read-back may take anything from it.
  *
+ * A project's key can change (2026-10-22, user: IPS became IP2, and IPS-1 to IPS-3 were followed by IP2-4). Jira
+ * still takes the old key, so an issue is this project's under the configured key or the one Jira gives it now,
+ * and a report linked under a key the project no longer goes by is found again by its id when issues are read back.
+ *
  * An archived or deleted report (2026-10-21, user) is out of Jira's way: never queued, sent or read back until it
  * is back. Removing an open linked one moves its issue to Cancelled first (cancelForRemoval), under the same lock
  * a send takes, so the two never cross.
@@ -91,7 +95,9 @@ final class PortalBugReportsJira
         }
         $key = $row->jira_issue_key ?? null;
         $project = $this->jira->projectKey();
-        if ($key === null || $row->jira_state === self::STATE_DELETED || $project === null || str_starts_with(strtoupper((string) $key), $project.'-')) {
+        // Jira is asked which keys the project goes by only for an issue whose key is not the configured one's.
+        if ($key === null || $row->jira_state === self::STATE_DELETED || $project === null
+            || self::isKeyOf((string) $key, [$project]) || self::isKeyOf((string) $key, $this->jira->projectKeys())) {
             return null;
         }
 
@@ -351,7 +357,8 @@ final class PortalBugReportsJira
     }
 
     /**
-     * Read every linked report of the configured project back, a hundred at a time.
+     * Read every linked report of the configured project back, a hundred at a time, then find again by id any
+     * linked under a key the project no longer goes by.
      *
      * @return array{synced: int, deleted: int}
      */
@@ -359,12 +366,20 @@ final class PortalBugReportsJira
     {
         $synced = 0;
         $deleted = 0;
-        $prefix = $this->jira->projectKey().'-';
+        $keys = $this->linkedProjectKeys();
+        if ($keys === []) {
+            return ['synced' => 0, 'deleted' => 0];
+        }
+        $refused = false;
         self::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))
             ->whereNotNull('jira_issue_id')
             ->where('jira_state', '!=', self::STATE_DELETED)
-            ->where('jira_issue_key', 'like', str_replace(['%', '_'], ['\%', '\_'], $prefix).'%')
-            ->chunkById(100, function ($rows) use (&$synced, &$deleted): ?bool {
+            ->where(function (Builder $inner) use ($keys): void {
+                foreach ($keys as $key) {
+                    $inner->orWhere('jira_issue_key', 'like', self::keyPattern($key));
+                }
+            })
+            ->chunkById(100, function ($rows) use (&$synced, &$deleted, &$refused): ?bool {
                 $byIssue = $rows->keyBy('jira_issue_id');
                 $fetched = $this->jira->bulkFetch(array_map('strval', $byIssue->keys()->all()));
                 foreach ($fetched['issues'] as $issue) {
@@ -376,6 +391,7 @@ final class PortalBugReportsJira
                 if ($fetched['issues'] === [] && count($fetched['missing']) >= 2) {
                     Log::warning('portal.jira.all_missing', ['asked' => count($fetched['missing'])]);
                     $this->jira->refuse('Jira returned none of the '.count($fetched['missing']).' issues asked about: check the account can still browse the project.');
+                    $refused = true;
 
                     return false;
                 }
@@ -386,8 +402,41 @@ final class PortalBugReportsJira
 
                 return null;
             });
+        if (! $refused) {
+            $synced += $this->rekey($keys);
+        }
 
         return ['synced' => $synced, 'deleted' => $deleted];
+    }
+
+    /**
+     * The reports linked under a key the project no longer goes by -- its key changed, and the configuration moved
+     * on with it -- asked for by id: Jira answers with each issue's key now, which apply() keeps when it is this
+     * project's. An issue in another project, or one Jira does not show, is left as it is.
+     *
+     * @param  list<string>  $keys
+     */
+    private function rekey(array $keys): int
+    {
+        $found = 0;
+        $query = self::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))
+            ->whereNotNull('jira_issue_id')
+            ->whereNotNull('jira_issue_key')
+            ->where('jira_state', '!=', self::STATE_DELETED);
+        foreach ($keys as $key) {
+            $query->where('jira_issue_key', 'not like', self::keyPattern($key));
+        }
+        $query->chunkById(100, function ($rows) use ($keys, &$found): void {
+            $byIssue = $rows->keyBy('jira_issue_id');
+            foreach ($this->jira->bulkFetch(array_map('strval', $byIssue->keys()->all()))['issues'] as $issue) {
+                if ($byIssue->has($issue['id']) && self::isKeyOf($issue['key'], $keys)) {
+                    $this->apply($byIssue[$issue['id']], $issue);
+                    $found++;
+                }
+            }
+        });
+
+        return $found;
     }
 
     /**
@@ -714,12 +763,57 @@ final class PortalBugReportsJira
     // The reports whose Jira side this server follows, as handles() says, for the queries that send.
     private function handled(Builder $query): Builder
     {
-        $prefix = str_replace(['%', '_'], ['\%', '\_'], (string) $this->jira->projectKey()).'-%';
+        $keys = $this->linkedProjectKeys();
 
-        return self::tracked($this->environment->scope($query))->where(fn ($inner) => $inner
-            ->whereNull('jira_issue_key')
-            ->orWhere('jira_state', self::STATE_DELETED)
-            ->orWhere('jira_issue_key', 'like', $prefix));
+        return self::tracked($this->environment->scope($query))->where(function (Builder $inner) use ($keys): void {
+            $inner->whereNull('jira_issue_key')->orWhere('jira_state', self::STATE_DELETED);
+            foreach ($keys as $key) {
+                $inner->orWhere('jira_issue_key', 'like', self::keyPattern($key));
+            }
+        });
+    }
+
+    /**
+     * The keys a linked report's issue may carry here: the configured one, and -- only once a report this server
+     * sent is linked under another, as a changed project key leaves them -- the ones Jira says the project goes by.
+     *
+     * @return list<string>
+     */
+    private function linkedProjectKeys(): array
+    {
+        $configured = $this->jira->projectKey();
+        if ($configured === null) {
+            return [];
+        }
+        $other = self::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))
+            ->whereNotNull('jira_issue_key')
+            ->where('jira_state', '!=', self::STATE_DELETED)
+            ->where('jira_issue_key', 'not like', self::keyPattern($configured))
+            ->exists();
+
+        return $other ? $this->jira->projectKeys() : [$configured];
+    }
+
+    /**
+     * Whether an issue's key is one of these projects': IP2-4 is IP2's, and not IP's.
+     *
+     * @param  list<string>  $projectKeys
+     */
+    private static function isKeyOf(string $issueKey, array $projectKeys): bool
+    {
+        foreach ($projectKeys as $projectKey) {
+            if (str_starts_with(strtoupper($issueKey), $projectKey.'-')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A LIKE pattern for one project's issue keys, its key's own % and _ escaped.
+    private static function keyPattern(string $projectKey): string
+    {
+        return str_replace(['%', '_'], ['\%', '\_'], $projectKey).'-%';
     }
 
     private function markDeleted(int $id): void

@@ -399,6 +399,7 @@ Run `deploy.ps1` here, then the portal's `deploy.ps1`.
 | `Jira HTTP 401` | The token is wrong or expired, `JIRA_EMAIL` is not the token's owner, or it is a scoped token and `JIRA_CLOUD_ID` is empty |
 | `Jira HTTP 404: You cannot create issues in this project` on a report | Jira did not take the account at all and answered as for an anonymous visitor; `portal:jira-check` shows the `401` behind it |
 | `Jira HTTP 403` or `404` on the project | The service account lacks Browse projects / Create issues / Create attachments on it, or `JIRA_PROJECT_KEY` names another project |
+| `portal:jira-check` says `JIRA_PROJECT_KEY is a key ... had before` | The project's key was changed in Jira. Jira still files under the old key and the server follows the issues either way; set `JIRA_PROJECT_KEY` to the new key, push it with `deploy/push-env`, and the next read-back finds the reports linked under the old one by their issues |
 | `Jira HTTP 400` naming a field | The project requires a field the portal does not fill (a required custom field); make it optional for these issue types |
 | Cancelling a duplicate says `Jira HTTP 404` or `403` | The service account lacks **Link issues** on the project, or issue linking is off on the site; `portal:jira-check` says whether the Duplicate link type is there |
 | Cancelling a duplicate says `Jira HTTP 400` naming `labels` | The project's edit screen has no Labels field, so the issue cannot be labelled; add the field to the screen |

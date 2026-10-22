@@ -135,6 +135,25 @@ class PortalJiraSyncTest extends TestCase
             ->assertExitCode(0);
     }
 
+    // A key the project had before still files (2026-10-22, user: IPS became IP2): the check says to move to the key it
+    // has now, and prints the webhook's JQL with that one.
+    public function test_the_check_names_the_key_a_renamed_project_has_now(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKN', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
+        ]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('Project: IKN - Portal Issues')
+            ->expectsOutputToContain('JIRA_PROJECT_KEY is a key IKN had before: Jira files new issues as IKN-N, which this server follows too. Set JIRA_PROJECT_KEY=IKN to match.')
+            ->expectsOutputToContain('JQL:    project = IKN AND labels = ikaika-portal AND labels = development')
+            ->assertExitCode(0);
+    }
+
     // Triage links a duplicate to its original (2026-10-21, user), by a link type the site must have.
     public function test_the_check_fails_without_the_duplicate_link_type(): void
     {
