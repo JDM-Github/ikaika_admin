@@ -108,6 +108,12 @@ final class PortalJiraClient
         return $key === null ? null : strtoupper($key);
     }
 
+    // The configured site, which keeps what is learnt of one site's people and fields apart from another's.
+    public function site(): ?string
+    {
+        return $this->base();
+    }
+
     // The issue as a person opens it, or null with no site configured.
     public function browseUrl(string $issueKey): ?string
     {
@@ -330,6 +336,46 @@ final class PortalJiraClient
         Cache::put($key, $fields, now()->addDay());
 
         return $fields;
+    }
+
+    /**
+     * The Jira account a work address belongs to (2026-10-22, user): the one active person a search for the
+     * address finds, whose address matches wherever Jira shows it; null for none or several. Jira hides most
+     * people's addresses, so the address is searched for rather than read.
+     */
+    public function accountByAddress(string $address): ?string
+    {
+        $body = $this->read('GET', '/rest/api/3/user/search?'.http_build_query(['query' => $address, 'maxResults' => 10]))->json();
+        $found = [];
+        foreach (is_array($body) ? $body : [] as $user) {
+            if (! is_array($user) || ($user['accountType'] ?? '') !== 'atlassian' || ($user['active'] ?? false) !== true || ! is_string($user['accountId'] ?? null)) {
+                continue;
+            }
+            $shown = $user['emailAddress'] ?? null;
+            if (is_string($shown) && $shown !== '' && strcasecmp($shown, $address) !== 0) {
+                continue;
+            }
+            $found[$user['accountId']] = true;
+        }
+
+        return count($found) === 1 ? (string) array_key_first($found) : null;
+    }
+
+    /**
+     * Which of these the account holds in the project: ASSIGN_ISSUES, EDIT_ISSUES, USER_PICKER and the like.
+     *
+     * @param  list<string>  $keys
+     * @return array<string, bool>
+     */
+    public function permissions(array $keys): array
+    {
+        $body = $this->read('GET', '/rest/api/3/mypermissions?'.http_build_query(['projectKey' => $this->projectKey(), 'permissions' => implode(',', $keys)]))->json();
+        $held = [];
+        foreach ($keys as $key) {
+            $held[$key] = ($body['permissions'][$key]['havePermission'] ?? false) === true;
+        }
+
+        return $held;
     }
 
     // What the answers alone cannot tell: every issue asked about came back missing, so the account lost sight of them.

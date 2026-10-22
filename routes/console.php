@@ -15,6 +15,7 @@ use App\Support\Portal\PortalHomeLocations;
 use App\Support\Portal\PortalJiraClient;
 use App\Support\Portal\PortalJiraEnvironment;
 use App\Support\Portal\PortalJiraIssue;
+use App\Support\Portal\PortalJiraPeople;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
 use App\Support\Portal\PortalPlaces;
@@ -379,7 +380,7 @@ Artisan::command('portal:jira-sync', function (PortalBugReportsJira $jira, Porta
     return 0;
 })->purpose('Send the issues and requests waiting for Jira, and read every linked one back');
 
-Artisan::command('portal:jira-check', function (PortalJiraClient $client, PortalBugReportsJira $jira, PortalJiraEnvironment $environment): int {
+Artisan::command('portal:jira-check', function (PortalJiraClient $client, PortalBugReportsJira $jira, PortalJiraEnvironment $environment, PortalJiraPeople $people): int {
     $missing = $client->missingSettings();
     if ($missing !== []) {
         $this->error('Jira is not configured: set '.implode(', ', $missing).' (JIRA_BASE_URL as https://<site>.atlassian.net).');
@@ -441,6 +442,20 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
             $lacking = $screen === null ? [] : array_values(array_diff(array_filter(['assignee', 'parent', 'duedate', $ids['team'], $ids['startDate']]), $screen));
             if ($lacking !== []) {
                 $this->warn($words['label'].' ('.$type['name'].') has no '.implode(', ', $lacking).' on its create screen, so a new one goes without.');
+            }
+        }
+        // Who in MIS is who in Jira (2026-10-22, user), found by work address, which needs Browse users and groups.
+        $held = $client->permissions(['ASSIGN_ISSUES', 'EDIT_ISSUES', 'USER_PICKER']);
+        foreach (['ASSIGN_ISSUES' => 'Assign issues', 'EDIT_ISSUES' => 'Edit issues', 'USER_PICKER' => 'Browse users and groups'] as $key => $name) {
+            if (! $held[$key]) {
+                $this->warn('The account lacks '.$name.', so '.($key === 'USER_PICKER' ? 'nobody in MIS can be found in Jira.' : 'a change to an issue it needs is refused.'));
+            }
+        }
+        if ($held['USER_PICKER']) {
+            foreach ($people->roster(fresh: true) as $member) {
+                $member['accountId'] === null
+                    ? $this->warn($member['name'].': no Jira account found by their work address - they can be assigned here, and their issues stay unassigned in Jira.')
+                    : $this->info($member['name'].' -> '.$member['accountId']);
             }
         }
     } catch (RuntimeException $error) {

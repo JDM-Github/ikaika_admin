@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
@@ -122,6 +123,7 @@ class PortalJiraSyncTest extends TestCase
             self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
             self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
             self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Blocks'], ['name' => 'Duplicate']]]),
+            ...$this->peopleStubs(),
         ]);
 
         $this->artisan('portal:jira-check')
@@ -154,6 +156,7 @@ class PortalJiraSyncTest extends TestCase
             self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
             self::SITE.'/rest/api/3/jql/autocompletedata/suggestions*' => Http::response(['results' => [['value' => '3688-uuid', 'displayName' => 'DEV']]]),
             self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => [['key' => 'IKP-12', 'fields' => ['summary' => 'Payroll revamp']]]]),
+            ...$this->peopleStubs(),
         ]);
 
         $this->artisan('portal:jira-check')
@@ -175,6 +178,7 @@ class PortalJiraSyncTest extends TestCase
             self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKN', 'name' => 'Portal Issues']),
             self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
             self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
+            ...$this->peopleStubs(),
         ]);
 
         $this->artisan('portal:jira-check')
@@ -193,6 +197,7 @@ class PortalJiraSyncTest extends TestCase
             self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
             self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
             self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Blocks'], ['name' => 'Relates']]]),
+            ...$this->peopleStubs(),
         ]);
 
         $this->artisan('portal:jira-check')
@@ -216,6 +221,50 @@ class PortalJiraSyncTest extends TestCase
         Http::assertSent(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue/bulkfetch' && $request['issueIdsOrKeys'] === ['10003']);
         Http::assertSentCount(1);
         $this->assertSame(['sent', 'pending', 'in_progress'], [$this->state($copied), $this->state($waitingThere), $this->column($own, 'status')]);
+    }
+
+    // Who in MIS is who in Jira (2026-10-22, user): the check asks Jira afresh, names each member's account or that
+    // there is none, and says when the account may not look people up at all.
+    public function test_the_check_names_each_mis_member_s_jira_account(): void
+    {
+        $members = DB::connection('portal')->table('employees')
+            ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = 'mis'")->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'active'")
+            ->orderBy('first_name')->orderBy('last_name')->get(['id', 'first_name', 'last_name']);
+        $this->assertGreaterThanOrEqual(2, $members->count(), 'Two active MIS members are needed.');
+        DB::connection('portal')->table('employees')->where('id', $members[0]->id)->update(['email' => 'found@ikaika.test']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
+            self::SITE.'/rest/api/3/user/search?query=found%40ikaika.test*' => Http::response([['accountId' => '712020:found', 'accountType' => 'atlassian', 'active' => true]]),
+            ...$this->peopleStubs(),
+        ]);
+        $name = fn (object $member): string => PortalSubmittedReportPresenter::memberName($member->first_name, $member->last_name);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain($name($members[0]).' -> 712020:found')
+            ->expectsOutputToContain($name($members[1]).': no Jira account found by their work address - they can be assigned here, and their issues stay unassigned in Jira.')
+            ->assertExitCode(0);
+    }
+
+    // Without Browse users and groups, nobody is looked up, and the check says why.
+    public function test_the_check_looks_nobody_up_without_browse_users_and_groups(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
+            ...$this->peopleStubs(userPicker: false),
+        ]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('The account lacks Browse users and groups, so nobody in MIS can be found in Jira.')
+            ->assertExitCode(0);
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/user/search'));
     }
 
     public function test_the_check_fails_on_a_refused_account_without_showing_its_token(): void
@@ -253,6 +302,21 @@ class PortalJiraSyncTest extends TestCase
     /**
      * @param  array<string, mixed>  $columns
      */
+    /**
+     * What the check asks about people (2026-10-22): the account's permissions, and nobody found by address.
+     *
+     * @return array<string, mixed>
+     */
+    private function peopleStubs(bool $userPicker = true): array
+    {
+        return [
+            self::SITE.'/rest/api/3/mypermissions*' => Http::response(['permissions' => [
+                'ASSIGN_ISSUES' => ['havePermission' => true], 'EDIT_ISSUES' => ['havePermission' => true], 'USER_PICKER' => ['havePermission' => $userPicker],
+            ]]),
+            self::SITE.'/rest/api/3/user/search*' => Http::response([]),
+        ];
+    }
+
     private function report(array $columns): int
     {
         return (int) DB::connection('portal')->table('bug_reports')->insertGetId([
