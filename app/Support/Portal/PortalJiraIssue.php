@@ -8,7 +8,8 @@ namespace App\Support\Portal;
  *
  * The issue says only what the report says -- its title, what happened, its kind, the page and the day
  * -- and that it came from the portal: anonymously, or from the sender who chose to be named (2026-10-20,
- * user). Never MIS's note or who handles it, which stay in the portal. Its summary is named as the KAN
+ * user). Never MIS's note, which stays in the portal; who handles it goes only as their Jira account, the
+ * issue's assignee (2026-10-22, user), never by name or address. Its summary is named as the KAN
  * board's cards are (2026-10-20, user): IP- and the title's words joined by hyphens, each capitalised but
  * the small ones -- "save does nothing" is IP-Save-Does-Nothing. One label, the portal's own, which the admin
  * webhook filters on (2026-10-20, user): the work type already says the kind, and the report's number is
@@ -122,6 +123,23 @@ final class PortalJiraIssue
         }
 
         return $epics;
+    }
+
+    /**
+     * The issue's assignee, as their account and the name Jira shows; nobody is none of either.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array{0: ?string, 1: ?string}
+     */
+    public static function assigneeOf(array $fields): array
+    {
+        $assignee = $fields['assignee'] ?? null;
+        if (! is_array($assignee) || ! is_string($assignee['accountId'] ?? null) || $assignee['accountId'] === '') {
+            return [null, null];
+        }
+        $name = trim((string) ($assignee['displayName'] ?? ''));
+
+        return [$assignee['accountId'], $name === '' ? null : $name];
     }
 
     /**

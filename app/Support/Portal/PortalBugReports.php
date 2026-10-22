@@ -36,7 +36,9 @@ use RuntimeException;
  * this was -- and MIS may file it under another. The page, notices and log name it by its kind.
  *
  * Each report becomes a Jira issue (PortalBugReportsJira). Once it is one, its kind and status are the
- * issue's too: a change here changes Jira first, and Jira's are read back. A report records the server it was
+ * issue's too: a change here changes Jira first, and Jira's are read back -- and so is who handles it, the
+ * issue's assignee (2026-10-22, user), which needs Send to Jira to change. Someone Jira has it assigned to from
+ * outside MIS counts as handling it, though the page cannot assign them. A report records the server it was
  * sent on (2026-10-21, user: production and staging share one project), and only that server touches its issue.
  *
  * Triage (2026-10-21, user): Won't fix is shown as Cancelled -- the value stays wont_fix, which the apps from
@@ -286,30 +288,33 @@ final class PortalBugReports
             $row = $this->changeableRow($id);
             $changes = $this->validatedChanges($row, $request);
             $handler = array_key_exists('assignee_id', $changes) ? $changes['assignee_id'] : $row->assignee_id;
-            if ($handler === null && array_diff(array_keys($changes), ['assignee_id']) !== []) {
+            // Someone Jira has it assigned to from outside MIS handles it too (2026-10-22, user).
+            $inJira = ! array_key_exists('assignee_id', $changes) && ($row->jira_assignee_id ?? null) !== null && $this->jira->owns($row);
+            if ($handler === null && ! $inJira && array_diff(array_keys($changes), ['assignee_id']) !== []) {
                 abort(422, 'Assign someone to handle it before changing it.');
             }
-            // A linked report's kind, status and plan are the issue's too (2026-10-20, 2026-10-22, user): Jira changes
-            // first, or nothing does.
+            // A linked report's kind, status, plan and assignee are the issue's too (2026-10-20, 2026-10-22, user):
+            // Jira changes first, or nothing does.
             $toJira = $this->jira->owns($row)
                 && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status)
                     || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes)
-                    || PortalBugReportsJira::planChanges($row, $changes) !== []);
+                    || PortalBugReportsJira::planChanges($row, $changes) !== [] || PortalBugReportsJira::assigneeChanges($row, $changes));
+            $fromJira = [];
             if ($toJira) {
                 if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
-                    abort(403, 'Its kind, status, team, parent and dates change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
+                    abort(403, 'Its kind, status, assignee, team, parent and dates change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
                 }
                 if (! $this->jira->isConfigured()) {
                     abort(503, 'Jira is not connected yet.');
                 }
                 try {
-                    $this->jira->changeInJira($row, $changes);
+                    $fromJira = $this->jira->changeInJira($row, $changes);
                 } catch (RuntimeException $error) {
                     abort(422, 'Jira did not take the change: '.$error->getMessage());
                 }
             }
 
-            $portal->table('bug_reports')->where('id', $id)->update([...$changes, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
+            $portal->table('bug_reports')->where('id', $id)->update([...$changes, ...$fromJira, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
         });
         if (! $held) {
             abort(409, self::BEING_SENT);
@@ -397,6 +402,26 @@ final class PortalBugReports
         }
 
         return $changes;
+    }
+
+    /**
+     * Who has a followed issue in Jira, against who handles it here: the same, nobody while someone here has it -- an
+     * MIS member Jira has no account for -- or someone outside MIS, by the name Jira shows. Null for an issue this
+     * server does not follow, or a report never sent.
+     *
+     * @return array{state: string, name: ?string}|null
+     */
+    private function jiraAssignee(object $row, ?string $elsewhere): ?array
+    {
+        if ($elsewhere !== null || $row->jira_issue_id === null || $row->jira_state === PortalBugReportsJira::STATE_DELETED) {
+            return null;
+        }
+        $agreed = $row->jira_assignee_id ?? null;
+        if ($row->assignee_id === null && $agreed !== null) {
+            return ['state' => 'other', 'name' => $row->jira_assignee_name ?? null];
+        }
+
+        return ['state' => $row->assignee_id !== null && $agreed === null ? 'unassigned' : 'same', 'name' => null];
     }
 
     // A day the calendar has, as YYYY-MM-DD; nothing clears it.
@@ -882,6 +907,8 @@ final class PortalBugReports
             // And why not, in the words a refusal to send it uses: a page that guessed blamed another server for a
             // project whose key had changed (2026-10-22).
             'jiraElsewhere' => $elsewhere,
+            // Who has it in Jira while this server follows the issue (2026-10-22, user).
+            'jiraAssignee' => $this->jiraAssignee($row, $elsewhere),
             // Why a cancelled one was closed, and the report a duplicate names (2026-10-21, user).
             'cancelReason' => $row->status === self::STATUS_CANCELLED ? ($row->cancel_reason ?? self::CANCEL_WONT_FIX) : null,
             'duplicateOf' => $row->duplicate_of === null ? null : ['id' => (string) $row->duplicate_of, 'title' => $titles[(int) $row->duplicate_of] ?? null],

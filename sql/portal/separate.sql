@@ -1474,6 +1474,10 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     -- When this server last asked Jira to make the issue, until it is in step (2026-10-21): what a retry's search
     -- and a read-back go by. Existing databases: add_portal_bug_report_channel.
     jira_create_started_at TIMESTAMP NULL,
+    -- The issue's assignee the last time the two sides agreed (2026-10-22), and their name while they are not in
+    -- MIS. Existing databases: add_portal_bug_report_jira_assignee.
+    jira_assignee_id   VARCHAR(128) NULL,
+    jira_assignee_name VARCHAR(255) NULL,
     INDEX bug_reports_status_reported_on_index (status, reported_on),
     INDEX bug_reports_duplicate_of_index (duplicate_of),
     UNIQUE KEY bug_reports_jira_issue_id_unique (jira_issue_id)

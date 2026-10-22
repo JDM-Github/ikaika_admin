@@ -64,6 +64,7 @@ class PortalBugReportsJiraTest extends TestCase
             self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10042', 'key' => 'IKP-12'], 201),
             self::SITE.'/rest/api/3/issue/10042/attachments' => Http::response([['id' => '1']]),
             self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-12', 'fields' => ['status' => ['name' => 'To Do', 'statusCategory' => ['key' => 'new']]]]),
+            self::SITE.'/rest/api/3/user/search*' => Http::response([['accountId' => '712020:analyst', 'accountType' => 'atlassian', 'active' => true]]),
             self::SHOT.'*' => Http::response('png-bytes'),
         ]);
 
@@ -72,14 +73,18 @@ class PortalBugReportsJiraTest extends TestCase
             ->assertJsonPath('data.jira.state', 'sent')
             ->assertJsonPath('data.jira.key', 'IKP-12')
             ->assertJsonPath('data.jira.url', self::SITE.'/browse/IKP-12')
-            ->assertJsonPath('data.jira.status', 'To Do');
+            ->assertJsonPath('data.jira.status', 'To Do')
+            ->assertJsonPath('data.jiraAssignee', ['state' => 'same', 'name' => null]);
 
         // A feature request goes as Story when the project has one, and as Task when it does not.
         $created = Http::recorded(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue')->first()[0];
         $this->assertSame('10003', $created['fields']['issuetype']['id']);
         $this->assertSame(['ikaika-portal'], $created['fields']['labels']);
+        // Who handles it goes as their Jira account alone (2026-10-22, user): never their name or address.
+        $this->assertSame(['accountId' => '712020:analyst'], $created['fields']['assignee']);
         $this->assertStringNotContainsString('Jamie', $created->body());
         $this->assertStringNotContainsString((string) $analyst->first_name, $created->body());
+        $this->assertStringNotContainsString(strtolower((string) $analyst->email), strtolower($created->body()));
         $attached = Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/attachments'))->map(fn (array $pair): Request => $pair[0])->values();
         $this->assertCount(2, $attached);
         $this->assertTrue($attached->every(fn (Request $request): bool => $request->hasHeader('X-Atlassian-Token', 'no-check')));
@@ -306,7 +311,7 @@ class PortalBugReportsJiraTest extends TestCase
         $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
         $before = count(Http::recorded());
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed'])
-            ->assertForbidden()->assertJsonPath('message', 'Its kind, status, team, parent and dates change IKP-7 in Jira too, which needs Send to Jira.');
+            ->assertForbidden()->assertJsonPath('message', 'Its kind, status, assignee, team, parent and dates change IKP-7 in Jira too, which needs Send to Jira.');
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['note' => 'Waiting on Jira.', 'versionLevel' => 'patch'])
             ->assertOk()->assertJsonPath('data.note', 'Waiting on Jira.');
         $this->assertCount($before, Http::recorded());
@@ -409,7 +414,7 @@ class PortalBugReportsJiraTest extends TestCase
 
         $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['dueOn' => '2026-10-30'])
-            ->assertForbidden()->assertJsonPath('message', 'Its kind, status, team, parent and dates change IKP-7 in Jira too, which needs Send to Jira.');
+            ->assertForbidden()->assertJsonPath('message', 'Its kind, status, assignee, team, parent and dates change IKP-7 in Jira too, which needs Send to Jira.');
         // A report not in Jira keeps its plan here, without Send to Jira.
         $before = count(Http::recorded());
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$unsent, ['dueOn' => '2026-10-30', 'startOn' => '2026-10-23'])
@@ -500,6 +505,68 @@ class PortalBugReportsJiraTest extends TestCase
         $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->getJson(self::BASE.'bug-reports/jira/options')->assertForbidden();
         config(['services.jira.base_url' => null]);
         $this->withHeaders($mis)->getJson(self::BASE.'bug-reports/jira/options')->assertStatus(503)->assertJsonPath('message', 'Jira is not connected yet.');
+    }
+
+    // Who works on it (2026-10-22, user): assigning a linked report assigns its issue first; a member Jira has no
+    // account for leaves it unassigned there, and stays assigned here when it is read back.
+    public function test_assigning_a_linked_report_assigns_its_issue_too(): void
+    {
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $headers = $this->headersFor($this->memberOf('MIS'));
+        [$first, $second, $third] = $this->misAddresses(['first@ikaika.test', 'second@ikaika.test', 'third@ikaika.test']);
+        $id = $this->report(['assignee_id' => $first, 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent', 'jira_assignee_id' => '712020:first']);
+        $inJira = ['accountId' => '712020:first', 'displayName' => 'First'];
+        $this->fakeAssignableIssue($inJira, ['first@ikaika.test' => '712020:first', 'second@ikaika.test' => '712020:second']);
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['assigneeId' => (string) $second])
+            ->assertOk()->assertJsonPath('data.assignee.id', (string) $second)->assertJsonPath('data.jiraAssignee', ['state' => 'same', 'name' => null]);
+        $this->assertSame('712020:second', $inJira['accountId'] ?? null);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT' && $request->data() === ['fields' => ['assignee' => ['accountId' => '712020:second']]]);
+
+        // Third has no Jira account: the issue is unassigned there, and a read-back keeps them here.
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['assigneeId' => (string) $third])
+            ->assertOk()->assertJsonPath('data.jiraAssignee', ['state' => 'unassigned', 'name' => null]);
+        $this->assertNull($inJira);
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+        $this->assertSame($third, (int) DB::connection('portal')->table('bug_reports')->where('id', $id)->value('assignee_id'));
+        foreach (Http::recorded(fn (Request $request): bool => $request->method() === 'PUT') as [$request]) {
+            $this->assertStringNotContainsString('@ikaika.test', $request->body());
+        }
+
+        // Without Send to Jira, who works on a linked report is not theirs to change.
+        $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['assigneeId' => (string) $second])
+            ->assertForbidden()->assertJsonPath('message', 'Its kind, status, assignee, team, parent and dates change IKP-7 in Jira too, which needs Send to Jira.');
+    }
+
+    // Read back, Jira's assignee comes back: an MIS member's account is that member; anyone else is named, and counts
+    // as handling it until Jira lets them go -- or MIS does, from here.
+    public function test_jiras_assignee_comes_back_and_someone_outside_mis_counts_as_handling_it(): void
+    {
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $headers = $this->headersFor($this->memberOf('MIS'));
+        [$member] = $this->misAddresses(['member@ikaika.test']);
+        $id = $this->report(['jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        $inJira = ['accountId' => '712020:member', 'displayName' => 'Member'];
+        $this->fakeAssignableIssue($inJira, ['member@ikaika.test' => '712020:member']);
+        $sync = fn () => $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+        $row = fn (): object => DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+
+        $sync();
+        $this->assertSame([$member, '712020:member', null], [(int) $row()->assignee_id, $row()->jira_assignee_id, $row()->jira_assignee_name]);
+
+        $inJira = ['accountId' => '712020:outside', 'displayName' => 'Jane Doe'];
+        $listed = collect($sync()->json('data'))->firstWhere('id', (string) $id);
+        $this->assertSame([null, ['state' => 'other', 'name' => 'Jane Doe']], [$listed['assignee'], $listed['jiraAssignee']]);
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])->assertOk()->assertJsonPath('data.status', 'in_progress');
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['assigneeId' => ''])
+            ->assertOk()->assertJsonPath('data.jiraAssignee', ['state' => 'same', 'name' => null]);
+        $this->assertNull($inJira);
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_review'])
+            ->assertStatus(422)->assertJsonPath('message', 'Assign someone to handle it before changing it.');
     }
 
     // Read back (2026-10-20, user): a work type changed in Jira changes the kind, and Fixed in stays without a fix version.
@@ -1220,6 +1287,64 @@ class PortalBugReportsJiraTest extends TestCase
     }
 
     /**
+     * IKP-7 (10042) as a board whose assignee is $inJira: an edit sets it, every read and the bulk fetch say it, the
+     * moves are the board's, and Jira finds an account for each of these addresses and for nobody else.
+     *
+     * @param  array{accountId: string, displayName: string}|null  $inJira
+     * @param  array<string, string>  $accounts
+     */
+    private function fakeAssignableIssue(?array &$inJira, array $accounts): void
+    {
+        $issue = function () use (&$inJira): array {
+            return ['id' => '10042', 'key' => 'IKP-7', 'fields' => ['status' => self::TO_DO, 'assignee' => $inJira]];
+        };
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/user/search*' => fn (Request $request) => Http::response(isset($accounts[$this->searchedFor($request)])
+                ? [['accountId' => $accounts[$this->searchedFor($request)], 'accountType' => 'atlassian', 'active' => true]]
+                : []),
+            self::SITE.'/rest/api/3/issue/bulkfetch' => fn () => Http::response(['issues' => [$issue()], 'issueErrors' => []]),
+            self::SITE.'/rest/api/3/issue/10042/transitions' => Http::response(['transitions' => $this->boardMoves()]),
+            self::SITE.'/rest/api/3/issue/10042*' => function (Request $request) use (&$inJira, $issue) {
+                if ($request->method() === 'PUT') {
+                    $account = $request['fields']['assignee']['accountId'] ?? null;
+                    $inJira = $account === null ? null : ['accountId' => $account, 'displayName' => 'Someone'];
+
+                    return Http::response(null, 204);
+                }
+
+                return Http::response($issue());
+            },
+        ]);
+    }
+
+    private function searchedFor(Request $request): string
+    {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        return strtolower((string) ($query['query'] ?? ''));
+    }
+
+    /**
+     * Active MIS members -- anyone a report can be assigned to -- each given one of these work addresses for the test.
+     *
+     * @param  list<string>  $addresses
+     * @return list<int>
+     */
+    private function misAddresses(array $addresses): array
+    {
+        $ids = DB::connection('portal')->table('employees')
+            ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = 'mis'")->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'active'")
+            ->orderBy('id')->limit(count($addresses))->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $this->assertCount(count($addresses), $ids, count($addresses).' active MIS members are needed.');
+        foreach ($ids as $index => $id) {
+            DB::connection('portal')->table('employees')->where('id', $id)->update(['email' => $addresses[$index]]);
+        }
+
+        return $ids;
+    }
+
+    /**
      * What a report's plan is picked from (2026-10-22): the project's types with its epic type, each kind's create
      * screen (Task's without a start date), the site's one team, and one epic.
      *
@@ -1315,17 +1440,22 @@ class PortalBugReportsJiraTest extends TestCase
         return $id;
     }
 
-    // An active ordinary member of the department.
+    // An active ordinary member of the department; when the database has none -- its members all admins -- one of
+    // them is made one for this test alone, inside its transaction (2026-10-22).
     private function memberOf(string $department): Employee
     {
-        $employee = Employee::query()
+        $members = fn () => Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->whereRaw("LOWER(COALESCE(role, '')) = 'user'")
             ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
             ->whereRaw('LOWER(TRIM(department)) = ?', [strtolower($department)])
             ->whereNotNull('id_no')
-            ->where('id_no', '!=', '')
-            ->first();
+            ->where('id_no', '!=', '');
+        $employee = $members()->whereRaw("LOWER(COALESCE(role, '')) = 'user'")->first();
+        $any = $employee === null ? $members()->first() : null;
+        if ($any !== null) {
+            DB::connection('portal')->table('employees')->where('id', $any->getKey())->update(['role' => 'User']);
+            $employee = $any->fresh();
+        }
         $this->assertNotNull($employee, "No active {$department} member.");
 
         return $employee;

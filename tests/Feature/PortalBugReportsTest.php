@@ -71,7 +71,8 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame(
             ['id', 'kind', 'title', 'description', 'page', 'status', 'cancel_reason', 'duplicate_of', 'note', 'assignee_id', 'version_level', 'fixed_in',
                 'start_on', 'due_on', 'parent_key', 'parent_summary', 'team_id', 'team_name', 'reporter_id', 'channel', 'reported_on', 'updated_at',
-                'archived_at', 'archived_by', 'deleted_at', 'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at', 'jira_create_started_at'],
+                'archived_at', 'archived_by', 'deleted_at', 'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at', 'jira_create_started_at',
+                'jira_assignee_id', 'jira_assignee_name'],
             Schema::connection('portal')->getColumnListing('bug_reports'),
         );
         $this->assertSame($logged, PortalLog::query()->count());
@@ -190,7 +191,7 @@ class PortalBugReportsTest extends TestCase
         $engineering = $this->headersFor($this->memberOf('Engineering'));
 
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'startOn', 'dueOn', 'parent', 'team', 'images', 'jira', 'jiraHere', 'jiraElsewhere', 'cancelReason', 'duplicateOf', 'archivedAt', 'archivedBy'], array_keys($listed));
+        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'startOn', 'dueOn', 'parent', 'team', 'images', 'jira', 'jiraHere', 'jiraElsewhere', 'jiraAssignee', 'cancelReason', 'duplicateOf', 'archivedAt', 'archivedBy'], array_keys($listed));
         $this->assertNull($listed['reporter']);
         $this->assertNull($listed['jira']);
         $this->assertSame('2026-10-12', $listed['reportedOn']);
@@ -500,17 +501,22 @@ class PortalBugReportsTest extends TestCase
         ]);
     }
 
-    // An active ordinary member of the department.
+    // An active ordinary member of the department; when the database has none -- its members all admins -- one of
+    // them is made one for this test alone, inside its transaction (2026-10-22).
     private function memberOf(string $department): Employee
     {
-        $employee = Employee::query()
+        $members = fn () => Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
-            ->whereRaw("LOWER(COALESCE(role, '')) = 'user'")
             ->whereRaw("LOWER(COALESCE(role_level, '')) != 'executive'")
             ->whereRaw('LOWER(TRIM(department)) = ?', [strtolower($department)])
             ->whereNotNull('id_no')
-            ->where('id_no', '!=', '')
-            ->first();
+            ->where('id_no', '!=', '');
+        $employee = $members()->whereRaw("LOWER(COALESCE(role, '')) = 'user'")->first();
+        $any = $employee === null ? $members()->first() : null;
+        if ($any !== null) {
+            DB::connection('portal')->table('employees')->where('id', $any->getKey())->update(['role' => 'User']);
+            $employee = $any->fresh();
+        }
         $this->assertNotNull($employee, "No active {$department} member.");
 
         return $employee;

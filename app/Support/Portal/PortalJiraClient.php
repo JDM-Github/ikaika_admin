@@ -61,8 +61,9 @@ final class PortalJiraClient
     private const CREATE_FIELDS_KEY = 'portal:jira:create-fields:';
 
     // The fields a sync reads; nothing else of an issue is ever fetched. Labels and links say a duplicate's (2026-10-21);
-    // the parent and due date a report's plan (2026-10-22), with the site's Team and Start date fields (syncFields()).
-    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype', 'labels', 'issuelinks', 'parent', 'duedate'];
+    // the parent and due date a report's plan (2026-10-22), with the site's Team and Start date fields (syncFields());
+    // the assignee who works on it (2026-10-22).
+    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype', 'labels', 'issuelinks', 'parent', 'duedate', 'assignee'];
 
     // The env keys behind config('services.jira'), for saying which one is missing.
     private const SETTINGS = [

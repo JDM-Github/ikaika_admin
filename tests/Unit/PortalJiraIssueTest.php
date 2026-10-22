@@ -225,6 +225,15 @@ class PortalJiraIssueTest extends TestCase
         );
     }
 
+    public function test_the_assignee_is_their_account_and_the_name_jira_shows(): void
+    {
+        $this->assertSame(['712020:a1', 'Jane Doe'], PortalJiraIssue::assigneeOf(['assignee' => ['accountId' => '712020:a1', 'displayName' => ' Jane Doe ', 'emailAddress' => null]]));
+        $this->assertSame(['712020:a1', null], PortalJiraIssue::assigneeOf(['assignee' => ['accountId' => '712020:a1']]));
+        $this->assertSame([null, null], PortalJiraIssue::assigneeOf(['assignee' => null]));
+        $this->assertSame([null, null], PortalJiraIssue::assigneeOf(['assignee' => ['displayName' => 'No account']]));
+        $this->assertSame([null, null], PortalJiraIssue::assigneeOf([]));
+    }
+
     // Back from Jira, a field the issue was not read with keeps the portal's; a parent left out is none.
     public function test_the_plan_is_read_only_from_what_the_issue_was_read_with(): void
     {
