@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalBugReportDeletion;
 use App\Support\Portal\PortalBugReports;
+use App\Support\Portal\PortalBugReportsBulk;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -14,13 +15,15 @@ use Illuminate\Http\Request;
  * who is signed in kept (2026-10-20, user). `index` and
  * `update` are MIS's, behind the bug-reports rule, as are `refreshFromJira`, which only reads Jira, and
  * `archive`, which can be undone; `sendToJira`, `sendAllToJira` and `updateJira` are behind bug-reports.jira,
- * and `destroy` behind bug-reports.delete (2026-10-21, user).
+ * and `destroy` behind bug-reports.delete (2026-10-21, user). `bulk` is the page's, each action asking its own rule
+ * on top (2026-10-22, user).
  */
 class BugReportsController extends Controller
 {
     public function __construct(
         private readonly PortalBugReports $reports,
         private readonly PortalBugReportDeletion $deletion,
+        private readonly PortalBugReportsBulk $bulk,
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -36,6 +39,11 @@ class BugReportsController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         return response()->json($this->reports->update($this->actor($request), $id, $request));
+    }
+
+    public function bulk(Request $request): JsonResponse
+    {
+        return response()->json($this->bulk->change($this->actor($request), $request));
     }
 
     public function archive(Request $request, int $id): JsonResponse

@@ -14,6 +14,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
         ->patch('bug-reports/{id}', [BugReportsController::class, 'update'])
         ->whereNumber('id');
+    // Many at once (2026-10-22, user): each through its own change, under its own rules.
+    Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
+        ->post('bug-reports/bulk', [BugReportsController::class, 'bulk']);
     // Archive and delete (2026-10-21, user): archiving comes back, so it is the page's; deleting is a power of its
     // own, and its throttle is the Recycle Bin's, where the report lands.
     Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])

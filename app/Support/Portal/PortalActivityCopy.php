@@ -320,6 +320,13 @@ final class PortalActivityCopy
         return self::YOU.' cancelled the '.$noun.' '.$title." as won't fix";
     }
 
+    // Many at once from the page (2026-10-22, user): what was done, to how many, and how many were refused.
+    public static function bulkBugReports(string $done, int $count, int $refused): string
+    {
+        return self::YOU.' '.$done.' '.$count.' '.($count === 1 ? 'issue or request' : 'issues and requests').' at once'
+            .($refused === 0 ? '' : '; '.$refused.' '.($refused === 1 ? 'was' : 'were').' refused');
+    }
+
     // Marked a duplicate of the report it names, and fixed with it (2026-10-22, user) -- or, before then, cancelled.
     public static function duplicateBugReport(string $title, string $noun, string $original, bool $fixed): string
     {

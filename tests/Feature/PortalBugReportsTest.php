@@ -478,6 +478,70 @@ class PortalBugReportsTest extends TestCase
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$other, ['note' => 'Still here'])->assertOk()->assertJsonPath('data.parentReport', null);
     }
 
+    // Many at once (2026-10-22, user): each through its own change and rules, one refused stopping none, and the
+    // answer saying which beside the list; the log sums it up.
+    public function test_mis_changes_many_reports_at_once_and_one_refused_stops_none(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $handled = ['assignee_id' => $analyst->getKey()];
+        $first = $this->unlinked('The month view jumps', $handled);
+        $second = $this->unlinked('Calendar skips Sunday', $handled);
+        $archived = $this->unlinked('Calendar skips Monday', [...$handled, 'archived_at' => '2026-10-21 01:00:00']);
+        $bulk = fn (string $action, mixed $value = null, array $ids = []) => $this->withHeaders($mis)->postJson(self::BASE.'bug-reports/bulk', [
+            'ids' => array_map('strval', $ids === [] ? [$first, $second, $archived] : $ids), 'action' => $action, 'value' => $value,
+        ]);
+
+        $answer = $bulk('status', 'in_progress')->assertOk()->assertJsonPath('resource', 'bug-reports');
+        $this->assertSame([true, true, false], array_column($answer->json('results'), 'ok'));
+        $this->assertNotNull($answer->json('results.2.message'));
+        $this->assertSame(['in_progress', 'in_progress', 'new'], DB::connection('portal')->table('bug_reports')->whereIn('id', [$first, $second, $archived])->orderBy('id')->pluck('status')->all());
+        $this->assertNotNull(collect($answer->json('data'))->firstWhere('id', (string) $first));
+        $this->assertTrue(PortalLog::query()->where('employee_id', $analyst->getKey())
+            ->where('message', 'like', '%moved 2 issues and requests at once; 1 was refused')->exists());
+
+        // Assigning adds to who is on each; unassigning takes them off.
+        $other = (int) DB::connection('portal')->table('employees')->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = 'mis'")
+            ->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'active'")->where('id', '!=', $analyst->getKey())->value('id');
+        $bulk('assign', [(string) $other], [$first, $second])->assertOk();
+        $everyone = fn (int $id): array => array_column(collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->json('data'))->firstWhere('id', (string) $id)['assignees'], 'id');
+        $this->assertSame([(string) $analyst->getKey(), (string) $other], $everyone($first));
+        $bulk('unassign', [(string) $analyst->getKey()], [$first])->assertOk();
+        $this->assertSame([(string) $other], $everyone($first));
+
+        // Under an epic, archived and back, then deleted to the Recycle Bin.
+        $epic = $this->unlinked('Calendar', ['kind' => 'epic']);
+        $bulk('parent', (string) $epic, [$first, $second])->assertOk()->assertJsonPath('results.1.ok', true);
+        $this->assertSame([$epic, $epic], DB::connection('portal')->table('bug_reports')->whereIn('id', [$first, $second])->pluck('parent_report_id')->map(fn ($id): int => (int) $id)->all());
+        $bulk('archive', null, [$first, $second])->assertOk();
+        $this->assertSame(2, DB::connection('portal')->table('bug_reports')->whereIn('id', [$first, $second])->whereNotNull('archived_at')->count());
+        $bulk('unarchive', null, [$first, $second, $archived])->assertOk();
+        $bulk('delete', null, [$first])->assertOk()->assertJsonPath('results.0.ok', true);
+        $this->assertNotNull(DB::connection('portal')->table('bug_reports')->where('id', $first)->value('deleted_at'));
+    }
+
+    public function test_a_bulk_change_says_what_it_changes_and_asks_each_actions_own_rule(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $id = $this->unlinked('The month view jumps', ['assignee_id' => $analyst->getKey()]);
+        $bulk = fn (array $body) => $this->withHeaders($mis)->postJson(self::BASE.'bug-reports/bulk', $body);
+
+        $bulk(['ids' => (string) $id, 'action' => 'status', 'value' => 'fixed'])->assertStatus(422)->assertJsonPath('message', 'Choose the issues and requests to change.');
+        $bulk(['ids' => ['one'], 'action' => 'status', 'value' => 'fixed'])->assertStatus(422)->assertJsonPath('message', 'Choose the issues and requests to change.');
+        $bulk(['ids' => array_map('strval', range(1, 101)), 'action' => 'status', 'value' => 'fixed'])->assertStatus(422)->assertJsonPath('message', 'Change at most 100 at once.');
+        $bulk(['ids' => [(string) $id], 'action' => 'shred'])->assertStatus(422)->assertJsonPath('message', 'Choose what to do with them.');
+        $bulk(['ids' => [(string) $id], 'action' => 'assign', 'value' => []])->assertOk()->assertJsonPath('results.0.message', 'Choose someone in MIS to handle them.');
+
+        $this->withHeaders($mis)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.delete', 'on' => false])->assertOk();
+        $bulk(['ids' => [(string) $id], 'action' => 'delete'])->assertForbidden()->assertJsonPath('message', 'Deleting them needs Delete issues and requests.');
+        $this->withHeaders($mis)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
+        $bulk(['ids' => [(string) $id], 'action' => 'send'])->assertForbidden()->assertJsonPath('message', 'Sending them to Jira needs Send to Jira.');
+        $this->assertNull(DB::connection('portal')->table('bug_reports')->where('id', $id)->value('deleted_at'));
+
+        $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->postJson(self::BASE.'bug-reports/bulk', ['ids' => [(string) $id], 'action' => 'archive'])->assertForbidden();
+    }
+
     // One cancelled as a duplicate before 2026-10-22 stays one while it stays cancelled, and moved to Fixed it stays one.
     public function test_a_duplicate_cancelled_before_stays_one_and_fixed_it_still_is(): void
     {

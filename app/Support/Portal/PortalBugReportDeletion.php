@@ -25,6 +25,9 @@ use Throwable;
  */
 final class PortalBugReportDeletion
 {
+    // The power to delete one, beside the page's rule (2026-10-21, user).
+    public const RULE = 'bug-reports.delete';
+
     private const CORE_TARGET = 'portal.bug_reports';
 
     private const CORE_RESOURCE = 'bug-reports';

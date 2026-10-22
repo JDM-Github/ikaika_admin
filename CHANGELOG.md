@@ -17,6 +17,7 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 - MIS chooses when a report's assignee and dates and parent and team start following Jira and until then they stay in the portal.
 - Issues & Requests can assign a report to several people and the others watch its Jira issue.
 - Issues & Requests has epics and sub-tasks that are Jira's too.
+- Issues & Requests can change many reports at once.
 
 ### Fixed
 
