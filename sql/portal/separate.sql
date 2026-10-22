@@ -1538,6 +1538,17 @@ CREATE TABLE IF NOT EXISTS bug_report_images (
     FOREIGN KEY (bug_report_id) REFERENCES bug_reports(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Everyone but the first who works on a report, in order (2026-10-22): the first is bug_reports.assignee_id, Jira's
+-- assignee; these are the issue's watchers. Existing databases: create_portal_bug_report_other_assignees.
+CREATE TABLE IF NOT EXISTS bug_report_other_assignees (
+    bug_report_id INT UNSIGNED NOT NULL,
+    employee_id   INT UNSIGNED NOT NULL,
+    position      SMALLINT UNSIGNED NOT NULL,
+    PRIMARY KEY (bug_report_id, employee_id),
+    INDEX bug_report_other_assignees_employee_id_index (employee_id),
+    FOREIGN KEY (bug_report_id) REFERENCES bug_reports(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- The Issues & Requests page (named Bug Reports until 2026-10-19; the key kept): every MIS member and
 -- admin (only_department), and developers. Existing databases: add_portal_bug_report_kind renames it.
 INSERT INTO access_permissions

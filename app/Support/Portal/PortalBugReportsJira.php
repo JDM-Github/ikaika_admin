@@ -37,7 +37,8 @@ use RuntimeException;
  * that owns it go both ways as kind and status do. A new issue carries what its create screen takes of them -- and the
  * default team (DEV) when the report names none -- and a change in the portal edits only what Jira holds otherwise.
  *
- * So does who works on it (2026-10-22, user). jira_assignee_id is the assignee both sides last agreed on: a read-back
+ * So does who works on it (2026-10-22, user), and the others on it are the issue's watchers -- best-effort, since
+ * only an account with Manage watcher list may change them, so a refusal is logged and never stops a save. jira_assignee_id is the assignee both sides last agreed on: a read-back
  * finding the same changes nothing -- which keeps an MIS member Jira has no account for assigned here, and unassigned
  * there -- and finding another takes it: an MIS member's account is that member, anyone else unassigns it here and is
  * named, so the page can say who has it in Jira.
@@ -78,8 +79,6 @@ final class PortalBugReportsJira
     private const FALLBACK_TYPE = 'Task';
 
     private const DELETED_MESSAGE = 'Deleted in Jira, or the Jira account can no longer see it.';
-
-    private ?bool $syncing = null;
 
     public function __construct(
         private readonly PortalJiraClient $jira,
@@ -152,15 +151,12 @@ final class PortalBugReportsJira
      */
     public function syncFields(): bool
     {
-        if ($this->syncing === null) {
-            $value = DB::connection('core')->table('settings')
-                ->where('product', 'portal')
-                ->where('setting_key', self::SYNC_SETTING)
-                ->value('setting_value');
-            $this->syncing = $value !== null && in_array(strtolower(trim((string) $value)), ['1', 'true'], true);
-        }
+        $value = DB::connection('core')->table('settings')
+            ->where('product', 'portal')
+            ->where('setting_key', self::SYNC_SETTING)
+            ->value('setting_value');
 
-        return $this->syncing;
+        return $value !== null && in_array(strtolower(trim((string) $value)), ['1', 'true'], true);
     }
 
     /**
@@ -173,7 +169,6 @@ final class PortalBugReportsJira
             ['product' => 'portal', 'setting_key' => self::SYNC_SETTING],
             ['setting_value' => $on ? '1' : '0'],
         );
-        $this->syncing = $on;
         if (! $on) {
             $this->environment->scope(DB::connection('portal')->table('bug_reports'))->whereNotNull('jira_fields_synced_at')->update(['jira_fields_synced_at' => null]);
         }
@@ -348,6 +343,7 @@ final class PortalBugReportsJira
         $sync = $this->syncFields();
         $plan = $sync ? self::planChanges($row, $changes) : [];
         $assigning = $sync && self::assigneeChanges($row, $changes);
+        $watching = $sync && self::othersChange($row, $changes);
         $account = $assigning ? $this->people->accountOf($changes['assignee_id'] === null ? null : (int) $changes['assignee_id']) : null;
         $unlinks = $oldTarget !== null && $oldTarget !== $newTarget;
         $current = $unlinks || $plan !== [] || $assigning ? ($this->jira->issue($issueId)['fields'] ?? []) : [];
@@ -364,6 +360,10 @@ final class PortalBugReportsJira
         // The plan after the kind, whose work type decides the screen the fields are edited on.
         if ($planEdit !== []) {
             $this->editPlan($issueId, $planEdit);
+        }
+        if ($watching) {
+            $first = array_key_exists('assignee_id', $changes) ? $changes['assignee_id'] : $row->assignee_id;
+            $this->keepWatchers($issueId, $row->other_assignees ?? [], $changes['other_assignees'], $first === null ? null : (int) $first);
         }
         // Triage (2026-10-21, user): the label and the link before the move, so a delivery racing the save already
         // sees a cancelled duplicate as one.
@@ -409,6 +409,48 @@ final class PortalBugReportsJira
         $was = $row->assignee_id === null ? null : (int) $row->assignee_id;
 
         return $now !== $was || ($now === null && ($row->jira_assignee_id ?? null) !== null);
+    }
+
+    /**
+     * Whether a save changes the others who work on it, which a report read with them knows.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    public static function othersChange(object $row, array $changes): bool
+    {
+        return array_key_exists('other_assignees', $changes) && $changes['other_assignees'] !== ($row->other_assignees ?? []);
+    }
+
+    /**
+     * The others' accounts as the issue's watchers: who joined added, who left taken off -- but its assignee now -- and
+     * nobody the portal never added. Best-effort: without Manage watcher list, or a lookup Jira does not answer, the
+     * watchers stay as they are and the save stands.
+     *
+     * @param  list<int>  $before
+     * @param  list<int>  $after
+     */
+    private function keepWatchers(string $issueId, array $before, array $after, ?int $first): void
+    {
+        try {
+            $accounts = fn (array $ids): array => array_values(array_filter(array_map(fn (int $id): ?string => $this->people->accountOf($id), $ids)));
+            $old = $accounts($before);
+            $new = $accounts($after);
+            $assignee = $first === null ? null : $this->people->accountOf($first);
+            foreach (array_diff($new, $old) as $account) {
+                $this->jira->addWatcher($issueId, $account);
+            }
+            foreach (array_diff($old, $new, array_filter([$assignee])) as $account) {
+                $this->jira->removeWatcher($issueId, $account);
+            }
+        } catch (RuntimeException $error) {
+            Log::warning('portal.jira.watchers_refused', ['issue' => $issueId, 'status' => $error->getCode()]);
+        }
+    }
+
+    // The others on a report, in order.
+    private function othersOn(object $row): array
+    {
+        return PortalBugReportAssignees::othersOf([(int) $row->id])[(int) $row->id] ?? [];
     }
 
     /**
@@ -574,6 +616,9 @@ final class PortalBugReportsJira
             }
             if ($row->jira_create_started_at !== null) {
                 $this->putInStep($row);
+                if ($this->syncFields()) {
+                    $this->keepWatchers((string) $row->jira_issue_id, [], $this->othersOn($row), $row->assignee_id === null ? null : (int) $row->assignee_id);
+                }
                 DB::connection('portal')->table('bug_reports')->where('id', $id)->update(['jira_create_started_at' => null]);
                 $row = $this->row($id) ?? $row;
             }
@@ -825,6 +870,9 @@ final class PortalBugReportsJira
             Log::info('portal.jira.synced', ['report' => (int) $row->id, 'status' => $status]);
         }
         DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update($changes);
+        if (($changes['assignee_id'] ?? null) !== null) {
+            PortalBugReportAssignees::madeFirst((int) $row->id, (int) $changes['assignee_id']);
+        }
     }
 
     /**
@@ -862,6 +910,7 @@ final class PortalBugReportsJira
                 return [];
             }
         }
+        $this->keepWatchers((string) $row->jira_issue_id, [], $this->othersOn($row), $row->assignee_id === null ? null : (int) $row->assignee_id);
         $adopted = [];
         foreach (self::PLAN_COLUMNS as $column) {
             if (! isset($ours[$column]) && ($held[$column] ?? null) !== null) {

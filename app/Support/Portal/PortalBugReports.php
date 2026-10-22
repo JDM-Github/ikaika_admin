@@ -6,6 +6,7 @@ use App\Jobs\SendBugReportToJira;
 use App\Modules\Portal\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
@@ -37,7 +38,8 @@ use RuntimeException;
  *
  * Each report becomes a Jira issue (PortalBugReportsJira). Once it is one, its kind and status are the
  * issue's too: a change here changes Jira first, and Jira's are read back -- and so is who handles it, the
- * issue's assignee (2026-10-22, user), which needs Send to Jira to change. Someone Jira has it assigned to from
+ * issue's assignee (2026-10-22, user), which needs Send to Jira to change; up to ten can, the first Jira's
+ * assignee and the others its watchers (PortalBugReportAssignees). Someone Jira has it assigned to from
  * outside MIS counts as handling it, though the page cannot assign them. A report records the server it was
  * sent on (2026-10-21, user: production and staging share one project), and only that server touches its issue.
  *
@@ -268,8 +270,13 @@ final class PortalBugReports
             ->orderBy('id')
             ->get()
             ->groupBy('bug_report_id');
-        $names = $this->namesOf([...$rows->pluck('assignee_id')->all(), ...$rows->pluck('reporter_id')->all(), ...$rows->pluck('archived_by')->all()]);
+        $others = PortalBugReportAssignees::othersOf($rows->pluck('id')->all());
+        foreach ($rows as $row) {
+            $row->other_assignees = $others[(int) $row->id] ?? [];
+        }
+        $names = $this->namesOf([...$rows->pluck('assignee_id')->all(), ...array_merge([], ...array_values($others)), ...$rows->pluck('reporter_id')->all(), ...$rows->pluck('archived_by')->all()]);
         $titles = $rows->mapWithKeys(fn (object $row): array => [(int) $row->id => (string) $row->title])->all();
+        $sync = $this->jira->syncFields();
         // An original out of the list, archived or deleted, still has its title.
         $away = array_diff($rows->pluck('duplicate_of')->filter()->map(fn ($id): int => (int) $id)->unique()->all(), array_keys($titles));
         if ($away !== []) {
@@ -279,7 +286,7 @@ final class PortalBugReports
         return [
             'section' => 'bug-reports',
             'resource' => 'bug-reports',
-            'data' => $rows->map(fn (object $row): array => $this->present($row, $images->get($row->id, collect())->all(), $names, $titles))->values()->all(),
+            'data' => $rows->map(fn (object $row): array => $this->present($row, $images->get($row->id, collect())->all(), $names, $titles, $sync))->values()->all(),
             'assignees' => $this->assignees(),
             'jira' => $this->jira->settings(),
         ];
@@ -298,12 +305,14 @@ final class PortalBugReports
         $changes = [];
         $held = $this->jira->withReportLock($id, function () use ($actor, $id, $request, $portal, &$row, &$changes): void {
             $row = $this->changeableRow($id);
+            $row->other_assignees = PortalBugReportAssignees::othersOf([$id])[$id] ?? [];
             $changes = $this->validatedChanges($row, $request);
             $handler = array_key_exists('assignee_id', $changes) ? $changes['assignee_id'] : $row->assignee_id;
+            $others = $changes['other_assignees'] ?? $row->other_assignees;
             // Someone Jira has it assigned to from outside MIS handles it too (2026-10-22, user).
             $sync = $this->jira->syncFields();
             $inJira = $sync && ! array_key_exists('assignee_id', $changes) && ($row->jira_assignee_id ?? null) !== null && $this->jira->owns($row);
-            if ($handler === null && ! $inJira && array_diff(array_keys($changes), ['assignee_id']) !== []) {
+            if ($handler === null && $others === [] && ! $inJira && array_diff(array_keys($changes), ['assignee_id', 'other_assignees']) !== []) {
                 abort(422, 'Assign someone to handle it before changing it.');
             }
             // A linked report's kind, status, plan and assignee are the issue's too (2026-10-20, 2026-10-22, user):
@@ -311,7 +320,8 @@ final class PortalBugReports
             $toJira = $this->jira->owns($row)
                 && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status)
                     || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes)
-                    || ($sync && (PortalBugReportsJira::planChanges($row, $changes) !== [] || PortalBugReportsJira::assigneeChanges($row, $changes))));
+                    || ($sync && (PortalBugReportsJira::planChanges($row, $changes) !== [] || PortalBugReportsJira::assigneeChanges($row, $changes)
+                        || PortalBugReportsJira::othersChange($row, $changes))));
             $fromJira = [];
             if ($toJira) {
                 if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
@@ -327,14 +337,17 @@ final class PortalBugReports
                 }
             }
 
-            $portal->table('bug_reports')->where('id', $id)->update([...$changes, ...$fromJira, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
+            $portal->table('bug_reports')->where('id', $id)->update([...Arr::except($changes, ['other_assignees']), ...$fromJira, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
+            if (array_key_exists('other_assignees', $changes)) {
+                PortalBugReportAssignees::setOthers($id, $changes['other_assignees']);
+            }
         });
         if (! $held) {
             abort(409, self::BEING_SENT);
         }
 
         $saved = $portal->table('bug_reports')->where('id', $id)->first();
-        $names = $this->namesOf([$saved->assignee_id]);
+        $names = $this->namesOf([$saved->assignee_id, ...($changes['other_assignees'] ?? [])]);
         $this->audit->record($actor, PortalLogAction::PATCH, 'bug-reports', $this->logMessage($actor, $row, $changes, $names), (string) $id, $request, $changes);
 
         return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($saved)];
@@ -361,8 +374,17 @@ final class PortalBugReports
         if ($request->has('note')) {
             $changes['note'] = $this->optionalText($request, 'note', self::MAX_NOTE, 'Keep the note under 2,000 characters.');
         }
-        if ($request->has('assigneeId')) {
+        // Several (2026-10-22, user), in order, the first Jira's assignee; an app from before sends just this one.
+        if ($request->has('assigneeIds')) {
+            $chosen = $this->validatedAssignees($request->input('assigneeIds'));
+            $changes['assignee_id'] = $chosen[0] ?? null;
+            $changes['other_assignees'] = array_slice($chosen, 1);
+        } elseif ($request->has('assigneeId')) {
             $changes['assignee_id'] = $this->validatedAssignee($request->input('assigneeId'));
+            $changes['other_assignees'] = [];
+        }
+        if (($changes['other_assignees'] ?? null) === $row->other_assignees) {
+            unset($changes['other_assignees']);
         }
         if ($request->has('versionLevel')) {
             $level = trim((string) $request->input('versionLevel', ''));
@@ -424,9 +446,9 @@ final class PortalBugReports
      *
      * @return array{state: string, name: ?string}|null
      */
-    private function jiraAssignee(object $row, ?string $elsewhere): ?array
+    private function jiraAssignee(object $row, ?string $elsewhere, bool $sync): ?array
     {
-        if ($elsewhere !== null || $row->jira_issue_id === null || $row->jira_state === PortalBugReportsJira::STATE_DELETED || ! $this->jira->syncFields()) {
+        if (! $sync || $elsewhere !== null || $row->jira_issue_id === null || $row->jira_state === PortalBugReportsJira::STATE_DELETED) {
             return null;
         }
         $agreed = $row->jira_assignee_id ?? null;
@@ -757,8 +779,9 @@ final class PortalBugReports
     {
         $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->orderBy('id')->get()->all();
         $titles = $row->duplicate_of === null ? [] : [(int) $row->duplicate_of => DB::connection('portal')->table('bug_reports')->where('id', $row->duplicate_of)->value('title')];
+        $row->other_assignees = PortalBugReportAssignees::othersOf([(int) $row->id])[(int) $row->id] ?? [];
 
-        return $this->present($row, $images, $this->namesOf([$row->assignee_id, $row->reporter_id, $row->archived_by]), array_filter($titles, fn ($title): bool => $title !== null));
+        return $this->present($row, $images, $this->namesOf([$row->assignee_id, ...$row->other_assignees, $row->reporter_id, $row->archived_by]), array_filter($titles, fn ($title): bool => $title !== null));
     }
 
     /**
@@ -786,14 +809,18 @@ final class PortalBugReports
         if (isset($changes['status']) && $changes['status'] !== $row->status) {
             return PortalActivityCopy::updatedBugReport($title, self::STATUS_LABELS[$changes['status']], $noun);
         }
-        $before = $row->assignee_id === null ? null : (int) $row->assignee_id;
-        if (array_key_exists('assignee_id', $changes) && $changes['assignee_id'] !== $before) {
-            $assignee = $changes['assignee_id'];
+        $before = array_values(array_filter([$row->assignee_id === null ? null : (int) $row->assignee_id, ...($row->other_assignees ?? [])]));
+        $after = array_key_exists('assignee_id', $changes)
+            ? array_values(array_filter([$changes['assignee_id'], ...($changes['other_assignees'] ?? [])]))
+            : $before;
+        if ($after !== $before) {
+            $me = (int) $actor->getKey();
+            $took = in_array($me, $after, true) && ! in_array($me, $before, true) && array_values(array_diff($after, [$me])) === $before;
 
             return PortalActivityCopy::assignedBugReport(
                 $title,
-                $assignee === null ? null : ($names[$assignee] ?? null),
-                $assignee === (int) $actor->getKey(),
+                array_map(fn (int $id): string => $names[$id] ?? 'Member', $took ? $before : $after),
+                $took,
                 $noun,
             );
         }
@@ -824,6 +851,30 @@ final class PortalBugReports
         $kind = (string) ($row->kind ?? self::KIND_BUG);
 
         return array_key_exists($kind, self::KINDS) ? $kind : self::KIND_BUG;
+    }
+
+    /**
+     * Active MIS members by id, in the order chosen and each once; none unassigns it.
+     *
+     * @return list<int>
+     */
+    private function validatedAssignees(mixed $value): array
+    {
+        if (! is_array($value) || ! array_is_list($value)) {
+            abort(422, 'Choose someone in MIS to handle it.');
+        }
+        $chosen = [];
+        foreach ($value as $id) {
+            $member = $this->validatedAssignee(is_scalar($id) ? $id : '-');
+            if ($member !== null && ! in_array($member, $chosen, true)) {
+                $chosen[] = $member;
+            }
+        }
+        if (count($chosen) > PortalBugReportAssignees::MAX) {
+            abort(422, 'Choose at most '.PortalBugReportAssignees::MAX.' people to handle it.');
+        }
+
+        return $chosen;
     }
 
     // An active MIS member by id, or null to unassign; anyone else is refused.
@@ -894,7 +945,7 @@ final class PortalBugReports
      * @param  array<int, string>  $titles
      * @return array<string, mixed>
      */
-    private function present(object $row, array $images, array $names, array $titles = []): array
+    private function present(object $row, array $images, array $names, array $titles = [], ?bool $sync = null): array
     {
         $assigneeId = $row->assignee_id === null ? null : (int) $row->assignee_id;
         $reporterId = $row->reporter_id === null ? null : (int) $row->reporter_id;
@@ -911,6 +962,9 @@ final class PortalBugReports
             'note' => $row->note,
             'reportedOn' => substr((string) $row->reported_on, 0, 10),
             'assignee' => $assigneeId === null ? null : ['id' => (string) $assigneeId, 'name' => $names[$assigneeId] ?? 'Member'],
+            // Everyone who works on it (2026-10-22, user), the assignee first.
+            'assignees' => array_map(fn (int $id): array => ['id' => (string) $id, 'name' => $names[$id] ?? 'Member'],
+                array_values(array_filter([$assigneeId, ...($row->other_assignees ?? [])]))),
             // Who sent it, only when they chose to be named; null is anonymous.
             'reporter' => $reporterId === null ? null : ['id' => (string) $reporterId, 'name' => $names[$reporterId] ?? 'Member'],
             'versionLevel' => $row->version_level,
@@ -932,7 +986,7 @@ final class PortalBugReports
             // project whose key had changed (2026-10-22).
             'jiraElsewhere' => $elsewhere,
             // Who has it in Jira while this server follows the issue (2026-10-22, user).
-            'jiraAssignee' => $this->jiraAssignee($row, $elsewhere),
+            'jiraAssignee' => $this->jiraAssignee($row, $elsewhere, $sync ?? $this->jira->syncFields()),
             // Why a closed one was closed, and the report a duplicate names (2026-10-21, 2026-10-22, user).
             'cancelReason' => match ((string) $row->status) {
                 self::STATUS_CANCELLED => $row->cancel_reason ?? self::CANCEL_WONT_FIX,

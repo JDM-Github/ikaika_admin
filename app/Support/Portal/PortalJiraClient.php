@@ -479,6 +479,23 @@ final class PortalJiraClient
         ]));
     }
 
+    // Someone made a watcher (2026-10-22, user: the others who work on a report). The body is the account id alone,
+    // as a JSON string; another user takes Manage watcher list on the project.
+    public function addWatcher(string $issueId, string $accountId): void
+    {
+        $this->write(fn (PendingRequest $request): Response => $request
+            ->withBody((string) json_encode($accountId), 'application/json')
+            ->post($this->url('/rest/api/3/issue/'.rawurlencode($issueId).'/watchers')));
+    }
+
+    // A watcher taken off; one Jira no longer has is gone already.
+    public function removeWatcher(string $issueId, string $accountId): void
+    {
+        $this->answer(fn (): Response => $this->request()->delete(
+            $this->url('/rest/api/3/issue/'.rawurlencode($issueId).'/watchers?'.http_build_query(['accountId' => $accountId])),
+        ), false, true);
+    }
+
     // A link removed; one Jira no longer has is gone already.
     public function deleteIssueLink(string $linkId): void
     {

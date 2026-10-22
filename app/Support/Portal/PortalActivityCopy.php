@@ -274,15 +274,21 @@ final class PortalActivityCopy
     }
 
     // Who handles an issue or request: taken by the person themselves, given to someone, or let go.
-    public static function assignedBugReport(string $title, ?string $assigneeName, bool $isTaken, string $noun = 'bug report'): string
+    /**
+     * Several can work on one (2026-10-22, user): named in order, or, when you joined, those already on it.
+     *
+     * @param  list<string>  $names
+     */
+    public static function assignedBugReport(string $title, array $names, bool $isTaken, string $noun = 'bug report'): string
     {
+        $listed = count($names) > 1 ? implode(', ', array_slice($names, 0, -1)).' and '.$names[count($names) - 1] : ($names[0] ?? '');
         if ($isTaken) {
-            return self::YOU.' took the '.$noun.' '.$title;
+            return self::YOU.' took the '.$noun.' '.$title.($listed === '' ? '' : ' with '.$listed);
         }
 
-        return $assigneeName === null
+        return $listed === ''
             ? self::YOU.' unassigned the '.$noun.' '.$title
-            : self::YOU.' assigned the '.$noun.' '.$title.' to '.$assigneeName;
+            : self::YOU.' assigned the '.$noun.' '.$title.' to '.$listed;
     }
 
     // MIS sending an issue or request to Jira by hand (2026-10-19), named by the issue it became.

@@ -498,10 +498,15 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
             }
         }
         // Who in MIS is who in Jira (2026-10-22, user), found by work address, which needs Browse users and groups.
-        $held = $client->permissions(['ASSIGN_ISSUES', 'EDIT_ISSUES', 'USER_PICKER']);
-        foreach (['ASSIGN_ISSUES' => 'Assign issues', 'EDIT_ISSUES' => 'Edit issues', 'USER_PICKER' => 'Browse users and groups'] as $key => $name) {
+        $held = $client->permissions(['ASSIGN_ISSUES', 'EDIT_ISSUES', 'USER_PICKER', 'MANAGE_WATCHERS']);
+        $without = [
+            'USER_PICKER' => 'nobody in MIS can be found in Jira.',
+            // The others who work on a report are the issue's watchers (2026-10-22, user), which only this may change.
+            'MANAGE_WATCHERS' => 'the others who work on a report stay in the portal and do not watch its issue.',
+        ];
+        foreach (['ASSIGN_ISSUES' => 'Assign issues', 'EDIT_ISSUES' => 'Edit issues', 'USER_PICKER' => 'Browse users and groups', 'MANAGE_WATCHERS' => 'Manage watcher list'] as $key => $name) {
             if (! $held[$key]) {
-                $this->warn('The account lacks '.$name.', so '.($key === 'USER_PICKER' ? 'nobody in MIS can be found in Jira.' : 'a change to an issue it needs is refused.'));
+                $this->warn('The account lacks '.$name.', so '.($without[$key] ?? 'a change to an issue it needs is refused.'));
             }
         }
         if ($held['USER_PICKER']) {

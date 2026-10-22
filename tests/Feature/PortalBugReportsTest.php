@@ -191,7 +191,7 @@ class PortalBugReportsTest extends TestCase
         $engineering = $this->headersFor($this->memberOf('Engineering'));
 
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'startOn', 'dueOn', 'parent', 'team', 'images', 'jira', 'jiraHere', 'jiraElsewhere', 'jiraAssignee', 'cancelReason', 'duplicateOf', 'archivedAt', 'archivedBy'], array_keys($listed));
+        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'assignees', 'reporter', 'versionLevel', 'fixedIn', 'startOn', 'dueOn', 'parent', 'team', 'images', 'jira', 'jiraHere', 'jiraElsewhere', 'jiraAssignee', 'cancelReason', 'duplicateOf', 'archivedAt', 'archivedBy'], array_keys($listed));
         $this->assertNull($listed['reporter']);
         $this->assertNull($listed['jira']);
         $this->assertSame('2026-10-12', $listed['reportedOn']);
@@ -356,6 +356,63 @@ class PortalBugReportsTest extends TestCase
         $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->where('record_id', (string) $id)->pluck('message');
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, "cancelled the bug report The month view jumps as won't fix")));
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the bug report The month view jumps a duplicate of #'.$original.' Calendar skips Sunday and fixed it')));
+    }
+
+    // Several handle one (2026-10-22, user): in the order chosen, the first its assignee; an app from before sends one.
+    public function test_several_in_mis_handle_a_report_in_order_and_the_log_names_them(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $team = DB::connection('portal')->table('employees')
+            ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = 'mis'")->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'active'")
+            ->where('id', '!=', $analyst->getKey())->orderBy('id')->limit(2)->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $this->assertCount(2, $team, 'Three active MIS members are needed.');
+        [$second, $third] = $team;
+        $id = $this->unlinked('The month view jumps');
+        $patch = fn (array $body) => $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, $body);
+        $everyone = fn (): array => array_column($patch(['note' => 'Checking'])->assertOk()->json('data.assignees'), 'id');
+
+        $patch(['assigneeIds' => [(string) $second, (string) $third, (string) $second]])->assertOk()
+            ->assertJsonPath('data.assignee.id', (string) $second)->assertJsonPath('data.assignees.1.id', (string) $third);
+        $this->assertSame([(string) $second, (string) $third], $everyone());
+        $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
+        $this->assertSame([(string) $second, (string) $third], array_column($listed['assignees'], 'id'));
+        // Joining them, you took it with them; an app from before assigns just the one it names.
+        $patch(['assigneeIds' => [(string) $second, (string) $third, (string) $analyst->getKey()]])->assertOk()->assertJsonCount(3, 'data.assignees');
+        $patch(['assigneeId' => (string) $third])->assertOk()->assertJsonPath('data.assignees', [['id' => (string) $third, 'name' => $listed['assignees'][1]['name']]]);
+        $this->assertSame(0, DB::connection('portal')->table('bug_report_other_assignees')->where('bug_report_id', $id)->count());
+        $patch(['assigneeIds' => []])->assertOk()->assertJsonPath('data.assignee', null)->assertJsonPath('data.assignees', []);
+
+        $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('record_id', (string) $id)->pluck('message');
+        $names = array_column($listed['assignees'], 'name');
+        foreach ([
+            'assigned the bug report The month view jumps to '.$names[0].' and '.$names[1],
+            'took the bug report The month view jumps with '.$names[0].' and '.$names[1],
+            'assigned the bug report The month view jumps to '.$names[1],
+            'unassigned the bug report The month view jumps',
+        ] as $said) {
+            $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, $said)), $said);
+        }
+    }
+
+    public function test_who_handles_a_report_is_chosen_from_mis_ten_at_most(): void
+    {
+        $mis = $this->headersFor($this->memberOf('MIS'));
+        $id = $this->unlinked('The month view jumps');
+        $outsider = $this->memberOf('Engineering');
+        $patch = fn (array $body) => $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, $body)->assertStatus(422);
+        // Eleven in MIS, for this test alone.
+        $active = fn () => DB::connection('portal')->table('employees')->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'active'");
+        $active()->whereRaw("LOWER(TRIM(COALESCE(department, ''))) != 'mis'")->where('id', '!=', $outsider->getKey())->orderBy('id')->limit(11)->update(['department' => 'MIS']);
+        $eleven = $active()->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = 'mis'")->orderBy('id')->limit(11)->pluck('id')->map(fn ($id): string => (string) $id)->all();
+        $this->assertCount(11, $eleven);
+
+        $patch(['assigneeIds' => (string) $eleven[0]])->assertJsonPath('message', 'Choose someone in MIS to handle it.');
+        $patch(['assigneeIds' => ['a' => $eleven[0]]])->assertJsonPath('message', 'Choose someone in MIS to handle it.');
+        $patch(['assigneeIds' => [$eleven[0], (string) $outsider->getKey()]])->assertJsonPath('message', 'Choose someone in MIS to handle it.');
+        $patch(['assigneeIds' => [$eleven[0], ['nested']]])->assertJsonPath('message', 'Choose someone in MIS to handle it.');
+        $patch(['assigneeIds' => $eleven])->assertJsonPath('message', 'Choose at most 10 people to handle it.');
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['assigneeIds' => array_slice($eleven, 0, 10)])->assertOk()->assertJsonCount(10, 'data.assignees');
     }
 
     // One cancelled as a duplicate before 2026-10-22 stays one while it stays cancelled, and moved to Fixed it stays one.

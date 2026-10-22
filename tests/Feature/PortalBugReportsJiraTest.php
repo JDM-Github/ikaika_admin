@@ -13,6 +13,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\Concerns\ActsAsPortalEmployee;
@@ -703,6 +704,67 @@ class PortalBugReportsJiraTest extends TestCase
         $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/jira', ['syncFields' => true])->assertForbidden();
         $this->withHeaders($headers)->getJson(self::BASE.'bug-reports')->assertOk()->assertJsonPath('jira.syncFields', false);
+    }
+
+    // The others on it (2026-10-22, user): each one Jira has an account for watches its issue, and stops when they leave;
+    // the save never waits on that. Only while fields are kept in step, and only the watchers the portal added.
+    public function test_the_others_who_work_on_a_linked_report_watch_its_issue(): void
+    {
+        $this->syncFieldsOn();
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $headers = $this->headersFor($this->memberOf('MIS'));
+        [$first, $second, $third] = $this->misAddresses(['first@ikaika.test', 'second@ikaika.test', 'third@ikaika.test']);
+        $id = $this->report(['assignee_id' => $first, 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent',
+            'jira_assignee_id' => '712020:first', 'jira_fields_synced_at' => '2026-10-22 01:00:00']);
+        $inJira = ['accountId' => '712020:first', 'displayName' => 'First'];
+        $refuse = false;
+        $accounts = ['first@ikaika.test' => '712020:first', 'second@ikaika.test' => '712020:second'];
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/10042/watchers*' => function () use (&$refuse) {
+                return $refuse ? Http::response(['errorMessages' => ['No.']], 403) : Http::response(null, 204);
+            },
+            self::SITE.'/rest/api/3/user/search*' => fn (Request $request) => Http::response(isset($accounts[$this->searchedFor($request)])
+                ? [['accountId' => $accounts[$this->searchedFor($request)], 'accountType' => 'atlassian', 'active' => true]]
+                : []),
+            self::SITE.'/rest/api/3/issue/bulkfetch' => function () use (&$inJira) {
+                return Http::response(['issues' => [['id' => '10042', 'key' => 'IKP-7', 'fields' => ['status' => self::TO_DO, 'assignee' => $inJira]]], 'issueErrors' => []]);
+            },
+            self::SITE.'/rest/api/3/issue/10042*' => function () use (&$inJira) {
+                return Http::response(['id' => '10042', 'key' => 'IKP-7', 'fields' => ['status' => self::TO_DO, 'assignee' => $inJira]]);
+            },
+        ]);
+        $watching = fn (): array => Http::recorded(fn (Request $request): bool => str_contains($request->url(), '/watchers'))
+            ->map(fn (array $pair): string => $pair[0]->method().' '.($pair[0]->method() === 'POST' ? json_decode($pair[0]->body()) : urldecode(Str::after($pair[0]->url(), 'accountId='))))
+            ->values()->all();
+        $patch = fn (array $ids) => $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['assigneeIds' => array_map('strval', $ids)]);
+
+        // Third has no Jira account, so watches nothing; the first stays its assignee, with no edit.
+        $patch([$first, $second, $third])->assertOk()->assertJsonCount(3, 'data.assignees');
+        $this->assertSame(['POST 712020:second'], $watching());
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'PUT');
+        $patch([$first, $third])->assertOk();
+        $this->assertSame(['POST 712020:second', 'DELETE 712020:second'], $watching());
+
+        // Refused, the save stands and the log says so.
+        $refuse = true;
+        Log::spy();
+        $patch([$first, $third, $second])->assertOk()->assertJsonCount(3, 'data.assignees');
+        Log::shouldHaveReceived('warning')->with('portal.jira.watchers_refused', ['issue' => '10042', 'status' => 403])->once();
+        $this->assertSame([$third, $second], DB::connection('portal')->table('bug_report_other_assignees')->where('bug_report_id', $id)->orderBy('position')->pluck('employee_id')->map(fn ($id): int => (int) $id)->all());
+
+        // Jira making one of the others its assignee makes them the first, and one of the others no longer.
+        $inJira = ['accountId' => '712020:second', 'displayName' => 'Second'];
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+        $this->assertSame($second, (int) DB::connection('portal')->table('bug_reports')->where('id', $id)->value('assignee_id'));
+        $this->assertSame([$third], DB::connection('portal')->table('bug_report_other_assignees')->where('bug_report_id', $id)->pluck('employee_id')->map(fn ($id): int => (int) $id)->all());
+
+        // With the field sync off, the others change here alone.
+        DB::connection('core')->table('settings')->where('product', 'portal')->where('setting_key', 'jira.sync_fields')->delete();
+        $before = count(Http::recorded());
+        $patch([$second, $first])->assertOk();
+        $this->assertCount($before, Http::recorded());
     }
 
     // Read back (2026-10-20, user): a work type changed in Jira changes the kind, and Fixed in stays without a fix version.
