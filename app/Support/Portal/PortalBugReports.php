@@ -54,6 +54,11 @@ use RuntimeException;
  * the epic one of the project's and the team one of the site's, both checked with Jira. A linked report's are the
  * issue's too, changed in Jira first like its kind and status; an unlinked one's stay here until it is sent.
  *
+ * Epics and sub-tasks (2026-10-22, user): an epic is a report too, which MIS plans from the page, and a report can
+ * sit under an epic or under another report, whose sub-task it is (PortalBugReportHierarchy). MIS files a report
+ * straight under another from the page, named, never anonymously. A linked report's place is its issue's too: a
+ * move within its level is an edit, and one that changes its level files the issue anew (moveIssue()).
+ *
  * Archive and delete (2026-10-21, user): an archived report is listed only when asked for, and stays as it was
  * until it is unarchived; a deleted one (PortalBugReportDeletion) is gone from the page into its deleter's
  * Recycle Bin. Either one moves an open linked report's issue to Cancelled first, and the report with it -- Jira
@@ -114,6 +119,9 @@ final class PortalBugReports
 
     public const KIND_FEEDBACK = 'feedback';
 
+    // Planned by MIS, with reports under it (2026-10-22, user); Jira's Epic.
+    public const KIND_EPIC = 'epic';
+
     /**
      * Each kind as the page labels it, as a sentence names one, as something is filed as it, the bell's
      * title for a new one, and what the bell says was done with it.
@@ -124,6 +132,7 @@ final class PortalBugReports
         self::KIND_BUG => ['label' => 'Bug', 'noun' => 'bug report', 'as' => 'a bug report', 'notice' => 'New bug report', 'verb' => 'reported'],
         self::KIND_FEATURE => ['label' => 'Feature request', 'noun' => 'feature request', 'as' => 'a feature request', 'notice' => 'New feature request', 'verb' => 'requested'],
         self::KIND_FEEDBACK => ['label' => 'Feedback', 'noun' => 'feedback', 'as' => 'feedback', 'notice' => 'New feedback', 'verb' => 'shared'],
+        self::KIND_EPIC => ['label' => 'Epic', 'noun' => 'epic', 'as' => 'an epic', 'notice' => 'New epic', 'verb' => 'planned'],
     ];
 
     /**
@@ -177,6 +186,15 @@ final class PortalBugReports
     {
         $reporterId = $this->namedSender($request, $sender);
         $kind = $this->validatedKind($request->input('kind'), self::KIND_BUG);
+        // An epic, or one straight under another, is planned by MIS from the page -- by name (2026-10-22, user).
+        $parentId = null;
+        if ($kind === self::KIND_EPIC || trim((string) $request->input('parentReportId', '')) !== '') {
+            if (! PortalRules::holds($sender, $request, self::RULE)) {
+                abort(403, 'Only who reads Issues & Requests plans an epic or files one under another.');
+            }
+            $parentId = $this->validatedParentReport(null, $kind, $request->input('parentReportId'));
+            $reporterId = (int) $sender->getKey();
+        }
         $title = $this->requiredText($request, 'title', self::MAX_TITLE, 'Give it a short title.', 'Keep the title under 160 characters.');
         $description = $this->requiredText($request, 'description', self::MAX_DESCRIPTION, 'Say what happened or what you need.', 'Keep the description under 5,000 characters.');
         $page = $this->optionalText($request, 'page', self::MAX_PAGE);
@@ -200,9 +218,10 @@ final class PortalBugReports
         // On its way to Jira as it comes in, unless MIS turned that off (2026-10-19).
         $toJira = $this->jira->shouldSendNew();
         $channel = $this->jira->channel();
-        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored, $toJira, $reporterId, $channel): int {
+        $id = DB::connection('portal')->transaction(function () use ($kind, $title, $description, $page, $stored, $toJira, $reporterId, $channel, $parentId): int {
             $id = (int) DB::connection('portal')->table('bug_reports')->insertGetId([
                 'kind' => $kind,
+                'parent_report_id' => $parentId,
                 'jira_state' => $toJira ? PortalBugReportsJira::STATE_PENDING : null,
                 'title' => $title,
                 'description' => $description,
@@ -271,8 +290,15 @@ final class PortalBugReports
             ->get()
             ->groupBy('bug_report_id');
         $others = PortalBugReportAssignees::othersOf($rows->pluck('id')->all());
+        $children = PortalBugReportHierarchy::childrenOf($rows->pluck('id')->map(fn ($id): int => (int) $id)->all());
+        $byId = $rows->keyBy(fn (object $row): int => (int) $row->id);
+        $parentIds = $rows->pluck('parent_report_id')->filter()->map(fn ($id): int => (int) $id)->unique()->all();
+        $parents = $byId->only($parentIds)->all() + $portal->table('bug_reports')->whereIn('id', array_diff($parentIds, $byId->keys()->all()))->whereNull('deleted_at')->get()
+            ->keyBy(fn (object $row): int => (int) $row->id)->all();
         foreach ($rows as $row) {
             $row->other_assignees = $others[(int) $row->id] ?? [];
+            $row->children = $children[(int) $row->id] ?? [];
+            $row->parent_report = $row->parent_report_id === null ? null : ($parents[(int) $row->parent_report_id] ?? null);
         }
         $names = $this->namesOf([...$rows->pluck('assignee_id')->all(), ...array_merge([], ...array_values($others)), ...$rows->pluck('reporter_id')->all(), ...$rows->pluck('archived_by')->all()]);
         $titles = $rows->mapWithKeys(fn (object $row): array => [(int) $row->id => (string) $row->title])->all();
@@ -321,7 +347,7 @@ final class PortalBugReports
                 && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status)
                     || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes)
                     || ($sync && (PortalBugReportsJira::planChanges($row, $changes) !== [] || PortalBugReportsJira::assigneeChanges($row, $changes)
-                        || PortalBugReportsJira::othersChange($row, $changes))));
+                        || PortalBugReportsJira::othersChange($row, $changes) || PortalBugReportsJira::placeChanges($row, $changes))));
             $fromJira = [];
             if ($toJira) {
                 if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
@@ -426,8 +452,25 @@ final class PortalBugReports
                 abort(422, 'It cannot start after it is due.');
             }
         }
+        $kind = $changes['kind'] ?? $this->kindOf($row);
+        if ($request->has('parentKey') && $request->has('parentReportId')
+            && trim((string) $request->input('parentKey', '')) !== '' && trim((string) $request->input('parentReportId', '')) !== '') {
+            abort(422, 'Put it under a report or an epic Jira has, not both.');
+        }
         if ($request->has('parentKey')) {
             $changes = [...$changes, ...$this->validatedParent($request->input('parentKey'))];
+            if ($changes['parent_key'] !== null) {
+                $changes['parent_report_id'] = null;
+            }
+        }
+        if ($request->has('parentReportId')) {
+            $changes['parent_report_id'] = $this->validatedParentReport($row, $kind, $request->input('parentReportId'));
+            if ($changes['parent_report_id'] !== null) {
+                $changes = [...$changes, 'parent_key' => null, 'parent_summary' => null];
+            }
+        }
+        if (isset($changes['kind']) || array_key_exists('parent_report_id', $changes) || array_key_exists('parent_key', $changes)) {
+            $this->checkLevel($row, $kind, $changes);
         }
         if ($request->has('teamId')) {
             $changes = [...$changes, ...$this->validatedTeam($request->input('teamId'))];
@@ -496,6 +539,63 @@ final class PortalBugReports
             }
         }
         abort(422, $key.' is not an epic in '.$this->jira->projectLabel().'.');
+    }
+
+    /**
+     * The report one sits under: one on the page or archived, not itself; an epic it becomes the child of, or
+     * another report it becomes the sub-task of -- which is no sub-task itself, while this one has none of its own.
+     * An epic sits under nothing.
+     */
+    private function validatedParentReport(?object $row, string $kind, mixed $value): ?int
+    {
+        $text = trim((string) $value);
+        if ($text === '') {
+            return null;
+        }
+        if (! ctype_digit($text)) {
+            abort(422, 'Choose the report it goes under.');
+        }
+        $id = (int) $text;
+        if ($row !== null && $id === (int) $row->id) {
+            abort(422, 'It cannot go under itself.');
+        }
+        if ($kind === self::KIND_EPIC) {
+            abort(422, 'An epic goes under nothing.');
+        }
+        $parent = PortalBugReportHierarchy::live($id);
+        if ($parent === null) {
+            abort(422, 'There is no #'.$id.' to go under.');
+        }
+        if ((string) $parent->kind !== self::KIND_EPIC) {
+            if (PortalBugReportHierarchy::isSubtask($parent)) {
+                abort(422, '#'.$id.' is a sub-task itself: put it under #'.$parent->parent_report_id.' instead.');
+            }
+            if ($row !== null && PortalBugReportHierarchy::hasChildren((int) $row->id)) {
+                abort(422, 'It has reports under it, so it cannot be a sub-task: move them off it first.');
+            }
+        }
+
+        return $id;
+    }
+
+    /**
+     * A save that moves a report to another level -- an epic, an issue, a sub-task -- with reports under it leaves
+     * them nowhere Jira has, so it is refused; and an epic goes under nothing.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    private function checkLevel(object $row, string $kind, array $changes): void
+    {
+        $parentId = array_key_exists('parent_report_id', $changes) ? $changes['parent_report_id'] : ($row->parent_report_id ?? null);
+        $parentKey = array_key_exists('parent_key', $changes) ? $changes['parent_key'] : ($row->parent_key ?? null);
+        if ($kind === self::KIND_EPIC && ($parentId !== null || $parentKey !== null)) {
+            abort(422, 'An epic goes under nothing: take it out from under its parent first.');
+        }
+        $before = PortalBugReportHierarchy::level($this->kindOf($row), PortalBugReportHierarchy::live($row->parent_report_id ?? null));
+        $after = PortalBugReportHierarchy::level($kind, PortalBugReportHierarchy::live($parentId));
+        if ($before !== $after && PortalBugReportHierarchy::hasChildren((int) $row->id)) {
+            abort(422, 'It has reports under it: move them off it first.');
+        }
     }
 
     /**
@@ -780,6 +880,8 @@ final class PortalBugReports
         $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->orderBy('id')->get()->all();
         $titles = $row->duplicate_of === null ? [] : [(int) $row->duplicate_of => DB::connection('portal')->table('bug_reports')->where('id', $row->duplicate_of)->value('title')];
         $row->other_assignees = PortalBugReportAssignees::othersOf([(int) $row->id])[(int) $row->id] ?? [];
+        $row->children = PortalBugReportHierarchy::childrenOf([(int) $row->id])[(int) $row->id] ?? [];
+        $row->parent_report = PortalBugReportHierarchy::live($row->parent_report_id ?? null);
 
         return $this->present($row, $images, $this->namesOf([$row->assignee_id, ...$row->other_assignees, $row->reporter_id, $row->archived_by]), array_filter($titles, fn ($title): bool => $title !== null));
     }
@@ -839,7 +941,7 @@ final class PortalBugReports
             return $default;
         }
         if (! array_key_exists($kind, self::KINDS)) {
-            abort(422, 'Choose Bug, Feature request or Feedback.');
+            abort(422, 'Choose Bug, Feature request, Feedback or Epic.');
         }
 
         return $kind;
@@ -973,6 +1075,14 @@ final class PortalBugReports
             'startOn' => ($row->start_on ?? null) === null ? null : substr((string) $row->start_on, 0, 10),
             'dueOn' => ($row->due_on ?? null) === null ? null : substr((string) $row->due_on, 0, 10),
             'parent' => ($row->parent_key ?? null) === null ? null : ['key' => (string) $row->parent_key, 'summary' => $row->parent_summary],
+            // The report it sits under, and whether that is in Jira for it to sit under there too (2026-10-22, user).
+            'parentReport' => ($row->parent_report ?? null) === null ? null : [
+                'id' => (string) $row->parent_report->id,
+                'title' => (string) $row->parent_report->title,
+                'kind' => (string) $row->parent_report->kind,
+                'inJira' => $this->jira->owns($row->parent_report),
+            ],
+            'children' => $row->children ?? [],
             'team' => ($row->team_id ?? null) === null ? null : ['id' => (string) $row->team_id, 'name' => $row->team_name],
             'images' => array_map(fn (object $image): array => [
                 'url' => (string) $image->file_url,

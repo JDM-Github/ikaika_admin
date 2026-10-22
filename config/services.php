@@ -72,11 +72,17 @@ return [
         // Triage (2026-10-21, user): a duplicate is labelled so, and linked to its original's issue by this type.
         'duplicate_label' => 'duplicate',
         'duplicate_link_type' => 'Duplicate',
-        // The issue type each kind is filed as, by name; a project without one falls back to Task.
+        // A report whose level changed is filed anew (2026-10-22, user); its old issue is closed with this label and
+        // linked to the new one by this type.
+        'moved_label' => 'moved',
+        'moved_link_type' => 'Relates',
+        // The issue type each kind is filed as, by name; a project without one falls back to Task -- but an epic,
+        // which is Epic or nothing (2026-10-22, user).
         'issue_types' => [
             'bug' => env('JIRA_ISSUE_TYPE_BUG', 'Bug'),
             'feature' => env('JIRA_ISSUE_TYPE_FEATURE', 'Story'),
             'feedback' => env('JIRA_ISSUE_TYPE_FEEDBACK', 'Task'),
+            'epic' => env('JIRA_ISSUE_TYPE_EPIC', 'Epic'),
         ],
         // A report's plan is the issue's too (2026-10-22, user). The site's Team and Start date fields, by id
         // (customfield_N), are found by their type and name unless set here.

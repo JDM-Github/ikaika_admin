@@ -454,13 +454,21 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         $this->info('Files as: '.$environment->channel().' - labels '.implode(', ', $environment->labels()).'; marked '.str_replace('#0', '#N', PortalJiraIssue::reportMark(0, $environment->label())));
         foreach (PortalBugReports::KINDS as $kind => $words) {
             $type = $jira->issueTypeFor($kind);
-            if ($type['id'] === null) {
+            // An epic is Epic or nothing (2026-10-22, user); a project without one only cannot have epics.
+            if ($type['id'] === null && $kind === PortalBugReports::KIND_EPIC) {
+                $this->warn('Epic: no issue type '.$type['wanted'].' in the project, so MIS cannot plan an epic. The project has: '.implode(', ', array_column($client->issueTypes(), 'name')).'.');
+            } elseif ($type['id'] === null) {
                 $failed = true;
                 $this->error($words['label'].': no issue type '.$type['wanted'].' or Task. The project has: '.implode(', ', array_column($client->issueTypes(), 'name')).'.');
             } else {
                 $this->info($words['label'].' -> '.$type['name'].($type['name'] === $type['wanted'] ? '' : ' (no '.$type['wanted'].' in the project)'));
             }
         }
+        // A report under another is its sub-task (2026-10-22, user).
+        $subtask = $client->subtaskType();
+        $subtask === null
+            ? $this->warn('Sub-task: none in the project, so a report under another stands on its own in Jira.')
+            : $this->info('A report under another -> '.$subtask['name']);
         // Triage (2026-10-21, user): a duplicate is linked to its original's issue, by a link type the site must have.
         $linkType = (string) config('services.jira.duplicate_link_type', 'Duplicate');
         $linkTypes = $client->issueLinkTypes();
@@ -470,6 +478,11 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         } else {
             $this->info('Duplicates are linked as: '.$linkType.' (the account needs Link issues)');
         }
+        // One filed anew at another level is linked to the issue it replaces (2026-10-22, user).
+        $movedType = (string) config('services.jira.moved_link_type', 'Relates');
+        in_array(strtolower($movedType), array_map('strtolower', $linkTypes), true)
+            ? $this->info('One moved to another level is linked to its old issue as: '.$movedType)
+            : $this->warn('No '.$movedType.' link type on the site, so an issue filed anew at another level is not linked to the one it replaces.');
         // A report's plan is the issue's too (2026-10-22, user): the site's two fields, the team new issues go
         // to, the epics, and what each kind's create screen leaves out -- which a new issue is then sent without.
         $ids = $client->fieldIds();

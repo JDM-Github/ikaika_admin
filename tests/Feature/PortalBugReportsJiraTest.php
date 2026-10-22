@@ -767,6 +767,157 @@ class PortalBugReportsJiraTest extends TestCase
         $this->assertCount($before, Http::recorded());
     }
 
+    // Epics and sub-tasks in Jira (2026-10-22, user): an epic is filed as Epic, a report under it as its child, and one
+    // under another report as that issue's sub-task -- while fields are kept in step; one under a report not in Jira
+    // yet stands on its own there.
+    public function test_epics_children_and_sub_tasks_are_filed_where_they_sit(): void
+    {
+        $this->syncFieldsOn();
+        $this->connectJira();
+        $epic = $this->report(['kind' => 'epic', 'title' => 'Payroll revamp', 'jira_state' => 'pending']);
+        $linkedEpic = $this->report(['kind' => 'epic', 'title' => 'Calendar', 'jira_issue_id' => '10001', 'jira_issue_key' => 'IKP-1', 'jira_state' => 'sent']);
+        $child = $this->report(['parent_report_id' => $linkedEpic, 'jira_state' => 'pending']);
+        $parent = $this->report(['title' => 'Payslips', 'jira_issue_id' => '10012', 'jira_issue_key' => 'IKP-12', 'jira_state' => 'sent']);
+        $subtask = $this->report(['kind' => 'feature', 'parent_report_id' => $parent, 'jira_state' => 'pending']);
+        $orphan = $this->report(['parent_report_id' => $epic, 'jira_state' => 'pending']);
+        $next = 10100;
+        Http::preventStrayRequests();
+        Http::fake([
+            ...$this->planStubs(),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => $this->hierarchyTypes()]),
+            self::SITE.'/rest/api/3/issue' => function () use (&$next) {
+                $next++;
+
+                return Http::response(['id' => (string) $next, 'key' => 'IKP-'.$next], 201);
+            },
+            self::SITE.'/rest/api/3/issue/101*' => function (Request $request) {
+                $issueId = Str::before(Str::after($request->url(), '/issue/'), '?');
+
+                return Http::response(['id' => $issueId, 'key' => 'IKP-'.$issueId, 'fields' => ['status' => self::TO_DO]]);
+            },
+        ]);
+        $headers = $this->headersFor($this->memberOf('MIS'));
+
+        // Its epic not in Jira yet, the first goes on its own, and the page says so.
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$orphan.'/jira')->assertOk()->assertJsonPath('data.parentReport.inJira', false);
+        foreach ([$epic, $child, $subtask] as $id) {
+            $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$id.'/jira')->assertOk();
+        }
+
+        $created = Http::recorded(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue')->map(fn (array $pair): array => $pair[0]['fields'])->values();
+        $this->assertSame(['10001', null], [$created[0]['issuetype']['id'], $created[0]['parent'] ?? null]);
+        $this->assertSame(['10000', null], [$created[1]['issuetype']['id'], $created[1]['parent'] ?? null]);
+        $this->assertSame(['10001', ['key' => 'IKP-1']], [$created[2]['issuetype']['id'], $created[2]['parent']]);
+        $this->assertSame(['10009', ['key' => 'IKP-12']], [$created[3]['issuetype']['id'], $created[3]['parent']]);
+    }
+
+    // A linked report moved to another level -- under a report, or made an epic -- is filed anew, as no edit can, and
+    // its old issue is labelled, linked to the new one and cancelled. Jira refusing the new one changes nothing.
+    public function test_a_linked_report_moved_to_another_level_is_filed_anew_and_its_old_issue_closed(): void
+    {
+        $this->syncFieldsOn();
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $parent = $this->report(['title' => 'Payslips', 'jira_issue_id' => '10007', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
+        $id = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent',
+            'jira_fields_synced_at' => '2026-10-22 01:00:00'], ['one.png' => 'image/png']);
+        $refuse = true;
+        Http::preventStrayRequests();
+        Http::fake([
+            ...$this->planStubs(),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => $this->hierarchyTypes()]),
+            self::SITE.'/rest/api/3/issue' => function () use (&$refuse) {
+                return $refuse ? Http::response(['errors' => ['parent' => 'Not now.']], 400) : Http::response(['id' => '10090', 'key' => 'IKP-40'], 201);
+            },
+            self::SITE.'/rest/api/3/issue/10090/attachments' => Http::response([['id' => '1']]),
+            self::SITE.'/rest/api/3/issue/10042/transitions' => Http::response(['transitions' => $this->boardMoves()]),
+            self::SITE.'/rest/api/3/issueLink' => Http::response(null, 201),
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-7', 'fields' => ['status' => self::TO_DO, 'issuetype' => ['name' => 'Bug', 'hierarchyLevel' => 0]]]),
+            self::SITE.'/rest/api/3/issue/10090*' => Http::response(['id' => '10090', 'key' => 'IKP-40', 'fields' => ['status' => self::TO_DO, 'issuetype' => ['name' => 'Sub-task', 'subtask' => true]]]),
+            self::SITE.'/rest/api/3/user/search*' => Http::response([]),
+            self::SHOT.'*' => Http::response('png-bytes'),
+        ]);
+        $move = fn () => $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['parentReportId' => (string) $parent]);
+
+        $move()->assertStatus(422)->assertJsonPath('message', 'Jira did not take the change: Jira HTTP 400: parent: Not now.');
+        $this->assertSame(['10042', null], [DB::connection('portal')->table('bug_reports')->where('id', $id)->value('jira_issue_id'),
+            DB::connection('portal')->table('bug_reports')->where('id', $id)->value('parent_report_id')]);
+
+        $refuse = false;
+        $move()->assertOk()->assertJsonPath('data.jira.key', 'IKP-40')->assertJsonPath('data.parentReport.id', (string) $parent);
+        $created = Http::recorded(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue')->last()[0]['fields'];
+        $this->assertSame(['10009', ['key' => 'IKP-3']], [$created['issuetype']['id'], $created['parent']]);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/10090/attachments'));
+        // The old one: labelled, linked to the new, then cancelled.
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT' && str_contains($request->url(), '/issue/10042') && $request->data() === ['update' => ['labels' => [['add' => 'moved']]]]);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issueLink')
+            && $request->data() === ['type' => ['name' => 'Relates'], 'inwardIssue' => ['id' => '10042'], 'outwardIssue' => ['id' => '10090']]);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && str_contains($request->url(), '/issue/10042/transitions') && ($request['transition'] ?? null) === ['id' => '51']);
+        $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $this->assertSame(['10090', 'IKP-40', 'sent', 1], [$row->jira_issue_id, $row->jira_issue_key, $row->jira_state, (int) $row->jira_attached]);
+    }
+
+    // Read back: under an issue this server follows, it sits under that report; under any other, an epic Jira alone
+    // has; under none, out from under the report Jira had it under -- but not from under one not in Jira yet.
+    public function test_where_jira_puts_a_report_comes_back_as_where_it_sits(): void
+    {
+        $this->syncFieldsOn();
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $stamp = ['jira_state' => 'sent', 'jira_fields_synced_at' => '2026-10-22 01:00:00'];
+        $first = $this->report(['kind' => 'epic', 'jira_issue_id' => '10001', 'jira_issue_key' => 'IKP-1', ...$stamp]);
+        $second = $this->report(['kind' => 'epic', 'jira_issue_id' => '10002', 'jira_issue_key' => 'IKP-2', ...$stamp]);
+        $pending = $this->report(['kind' => 'epic']);
+        $moved = $this->report(['parent_report_id' => $first, 'jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', ...$stamp]);
+        $toJiras = $this->report(['parent_report_id' => $first, 'jira_issue_id' => '10051', 'jira_issue_key' => 'IKP-21', ...$stamp]);
+        $out = $this->report(['parent_report_id' => $first, 'jira_issue_id' => '10052', 'jira_issue_key' => 'IKP-22', ...$stamp]);
+        $waiting = $this->report(['parent_report_id' => $pending, 'jira_issue_id' => '10053', 'jira_issue_key' => 'IKP-23', ...$stamp]);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+            ['id' => '10001', 'key' => 'IKP-1', 'fields' => ['status' => self::TO_DO]],
+            ['id' => '10002', 'key' => 'IKP-2', 'fields' => ['status' => self::TO_DO]],
+            ['id' => '10050', 'key' => 'IKP-20', 'fields' => ['status' => self::TO_DO, 'parent' => ['key' => 'IKP-2', 'fields' => ['summary' => 'Calendar']]]],
+            ['id' => '10051', 'key' => 'IKP-21', 'fields' => ['status' => self::TO_DO, 'parent' => ['key' => 'IKP-90', 'fields' => ['summary' => 'Jira only']]]],
+            ['id' => '10052', 'key' => 'IKP-22', 'fields' => ['status' => self::TO_DO]],
+            ['id' => '10053', 'key' => 'IKP-23', 'fields' => ['status' => self::TO_DO]],
+        ], 'issueErrors' => []])]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$moved, $toJiras, $out, $waiting])->get()->keyBy('id');
+        $place = fn (int $id): array => [$rows[$id]->parent_report_id === null ? null : (int) $rows[$id]->parent_report_id, $rows[$id]->parent_key];
+        $this->assertSame([$second, null], $place($moved));
+        $this->assertSame([null, 'IKP-90'], $place($toJiras));
+        $this->assertSame([null, null], $place($out));
+        $this->assertSame([$pending, null], $place($waiting));
+    }
+
+    public function test_a_linked_report_made_an_epic_is_filed_anew_as_one_even_with_the_field_sync_off(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $id = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => $this->hierarchyTypes()]),
+            self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10090', 'key' => 'IKP-40'], 201),
+            self::SITE.'/rest/api/3/issue/10042/transitions' => Http::response(['transitions' => $this->boardMoves()]),
+            self::SITE.'/rest/api/3/issueLink' => Http::response(null, 201),
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-7', 'fields' => ['status' => self::TO_DO, 'issuetype' => ['name' => 'Bug', 'hierarchyLevel' => 0]]]),
+            self::SITE.'/rest/api/3/issue/10090*' => Http::response(['id' => '10090', 'key' => 'IKP-40', 'fields' => ['status' => self::TO_DO, 'issuetype' => ['name' => 'Epic', 'hierarchyLevel' => 1]]]),
+        ]);
+
+        $this->withHeaders($this->headersFor($analyst))->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => 'epic'])
+            ->assertOk()->assertJsonPath('data.kind', 'epic')->assertJsonPath('data.jira.key', 'IKP-40');
+        $created = Http::recorded(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue')->first()[0]['fields'];
+        $this->assertSame('10000', $created['issuetype']['id']);
+        // With the field sync off it carries no assignee.
+        $this->assertArrayNotHasKey('assignee', $created);
+        // Jira's read-back of the Epic keeps it one.
+        $this->withHeaders($this->headersFor($analyst))->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+    }
+
     // Read back (2026-10-20, user): a work type changed in Jira changes the kind, and Fixed in stays without a fix version.
     public function test_jiras_work_type_comes_back_as_the_kind_and_the_portals_fixed_in_stays(): void
     {
@@ -826,6 +977,22 @@ class PortalBugReportsJiraTest extends TestCase
      *
      * @return list<array<string, mixed>>
      */
+    /**
+     * A project's types with its levels (2026-10-22): an Epic over Bug, Story and Task, and a Sub-task under them.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function hierarchyTypes(): array
+    {
+        return [
+            ['id' => '10000', 'name' => 'Epic', 'hierarchyLevel' => 1],
+            ['id' => '10001', 'name' => 'Bug', 'hierarchyLevel' => 0],
+            ['id' => '10002', 'name' => 'Story', 'hierarchyLevel' => 0],
+            ['id' => '10003', 'name' => 'Task', 'hierarchyLevel' => 0],
+            ['id' => '10009', 'name' => 'Sub-task', 'hierarchyLevel' => -1, 'subtask' => true],
+        ];
+    }
+
     private function boardMoves(): array
     {
         return [

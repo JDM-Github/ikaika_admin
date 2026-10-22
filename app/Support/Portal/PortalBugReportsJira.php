@@ -327,6 +327,12 @@ final class PortalBugReportsJira
     public function changeInJira(object $row, array $changes): array
     {
         $issueId = (string) $row->jira_issue_id;
+        // Where it sits (2026-10-22, user): a change of level files the issue anew, and one within it is an edit.
+        $sync = $this->syncFields();
+        $place = $this->placeIn($row, $changes, $sync);
+        if ($place !== null && $place['level'] !== PortalJiraIssue::levelOf($place['fields'])) {
+            return $this->moveIssue($row, $changes, $place['level'], $place['parentKey']);
+        }
         $status = $changes['status'] ?? (string) $row->status;
         $reason = array_key_exists('cancel_reason', $changes) ? $changes['cancel_reason'] : $row->cancel_reason;
         $original = array_key_exists('duplicate_of', $changes) ? $changes['duplicate_of'] : $row->duplicate_of;
@@ -340,13 +346,15 @@ final class PortalBugReportsJira
             ? $this->findMove($issueId, (string) $changes['status'], (string) $row->jira_issue_key)
             : null;
         // Its plan and assignee only while they are kept in step (2026-10-22, user).
-        $sync = $this->syncFields();
         $plan = $sync ? self::planChanges($row, $changes) : [];
+        if ($sync && $place !== null && (array_key_exists('parent_report_id', $changes) || array_key_exists('parent_key', $changes))) {
+            $plan['parent_key'] = $place['parentKey'];
+        }
         $assigning = $sync && self::assigneeChanges($row, $changes);
         $watching = $sync && self::othersChange($row, $changes);
         $account = $assigning ? $this->people->accountOf($changes['assignee_id'] === null ? null : (int) $changes['assignee_id']) : null;
         $unlinks = $oldTarget !== null && $oldTarget !== $newTarget;
-        $current = $unlinks || $plan !== [] || $assigning ? ($this->jira->issue($issueId)['fields'] ?? []) : [];
+        $current = $place['fields'] ?? ($unlinks || $plan !== [] || $assigning ? ($this->jira->issue($issueId)['fields'] ?? []) : []);
         $staleLinks = $unlinks ? PortalJiraIssue::duplicateLinkIds($current, $this->duplicateLinkType(), $oldTarget) : [];
         $planEdit = $plan === [] ? [] : $this->planEdit($plan, $current);
         // A member Jira has no account for leaves the issue unassigned there, rather than with whoever had it.
@@ -354,7 +362,9 @@ final class PortalBugReportsJira
             $planEdit['assignee'] = $account === null ? null : ['accountId' => $account];
         }
 
-        if (isset($changes['kind']) && $changes['kind'] !== $row->kind) {
+        // A sub-task stays Jira's Sub-task whatever its kind here: no other type stands at its level.
+        if (isset($changes['kind']) && $changes['kind'] !== $row->kind && (($row->parent_report_id ?? null) === null
+            || PortalJiraIssue::levelOf($current ?: ($this->jira->issue($issueId)['fields'] ?? [])) !== PortalBugReportHierarchy::SUBTASK)) {
             $this->jira->editIssue($issueId, ['issuetype' => ['id' => $this->issueTypeId((string) $changes['kind'])]]);
         }
         // The plan after the kind, whose work type decides the screen the fields are edited on.
@@ -409,6 +419,149 @@ final class PortalBugReportsJira
         $was = $row->assignee_id === null ? null : (int) $row->assignee_id;
 
         return $now !== $was || ($now === null && ($row->jira_assignee_id ?? null) !== null);
+    }
+
+    /**
+     * Whether a save puts it under another report, or none, which goes to Jira while fields are kept in step.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    public static function placeChanges(object $row, array $changes): bool
+    {
+        return array_key_exists('parent_report_id', $changes)
+            && $changes['parent_report_id'] !== (($row->parent_report_id ?? null) === null ? null : (int) $row->parent_report_id);
+    }
+
+    /**
+     * Where a save puts a linked report in Jira, when it moves it at all: the level its issue must stand at and the
+     * issue it goes under, with the issue as it is now. While fields are not kept in step only its kind moves it, so
+     * a sub-task there stays one; and one put under a report not in Jira yet stands on its own there until then.
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array{level: int, parentKey: ?string, fields: array<string, mixed>}|null
+     */
+    private function placeIn(object $row, array $changes, bool $sync): ?array
+    {
+        $kind = (string) ($changes['kind'] ?? $row->kind);
+        $moved = $kind !== (string) $row->kind && in_array(PortalBugReports::KIND_EPIC, [$kind, (string) $row->kind], true);
+        if (! $moved && ! ($sync && (array_key_exists('parent_report_id', $changes) || array_key_exists('parent_key', $changes)))) {
+            return null;
+        }
+        $fields = $this->jira->issue((string) $row->jira_issue_id)['fields'] ?? [];
+        if ($kind === PortalBugReports::KIND_EPIC) {
+            return ['level' => PortalBugReportHierarchy::EPIC, 'parentKey' => null, 'fields' => $fields];
+        }
+        if (! $sync) {
+            $level = PortalJiraIssue::levelOf($fields);
+
+            return ['level' => $level === PortalBugReportHierarchy::EPIC ? PortalBugReportHierarchy::ISSUE : $level, 'parentKey' => null, 'fields' => $fields];
+        }
+        $parentId = array_key_exists('parent_report_id', $changes) ? $changes['parent_report_id'] : ($row->parent_report_id ?? null);
+        $parent = PortalBugReportHierarchy::live($parentId);
+        $parentIssue = $parent !== null && $this->owns($parent) ? (string) $parent->jira_issue_key : null;
+        if ($parent !== null && (string) $parent->kind !== PortalBugReports::KIND_EPIC) {
+            return $parentIssue === null
+                ? ['level' => PortalBugReportHierarchy::ISSUE, 'parentKey' => null, 'fields' => $fields]
+                : ['level' => PortalBugReportHierarchy::SUBTASK, 'parentKey' => $parentIssue, 'fields' => $fields];
+        }
+        $parentKey = array_key_exists('parent_key', $changes) ? $changes['parent_key'] : ($row->parent_key ?? null);
+
+        return ['level' => PortalBugReportHierarchy::ISSUE, 'parentKey' => $parentIssue ?? $parentKey, 'fields' => $fields];
+    }
+
+    /**
+     * A linked report whose level changes in Jira -- to an epic or from one, under another report or from under it --
+     * which no edit can make (2026-10-22, user): its issue filed anew at that level with its content, plan and
+     * screenshots; the report pointed at it at once; then the old one labelled moved, linked to the new and
+     * cancelled, so its history stays. Jira first, or nothing: until the new issue is made the report keeps its old
+     * one. A screenshot refused leaves the send to try it again; an old issue Jira will not close says so in the log.
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array<string, mixed>
+     */
+    private function moveIssue(object $row, array $changes, int $level, ?string $parentKey): array
+    {
+        $next = (object) [...(array) $row, ...$changes, 'other_assignees' => $changes['other_assignees'] ?? ($row->other_assignees ?? [])];
+        if ($level === PortalBugReportHierarchy::SUBTASK) {
+            $subtask = $this->jira->subtaskType() ?? throw new RuntimeException('Jira has no sub-task type in '.$this->jira->projectKey().'.');
+            $typeId = $subtask['id'];
+        } else {
+            $typeId = $this->issueTypeId((string) $next->kind);
+        }
+        [$plan, , $account] = $this->planForCreate($next, $typeId, $parentKey);
+        $made = $this->jira->createIssue(PortalJiraIssue::fields(
+            $next, (string) $this->jira->projectKey(), $typeId, (string) config('services.jira.label', 'ikaika-portal'), $this->senderName($row), $this->environment->label(), $plan,
+        ));
+        $old = ['id' => (string) $row->jira_issue_id, 'key' => (string) $row->jira_issue_key];
+        $columns = [
+            'jira_issue_id' => $made['id'],
+            'jira_issue_key' => $made['key'],
+            'jira_state' => self::STATE_SENT,
+            'jira_error' => null,
+            'jira_status' => null,
+            'jira_attached' => 0,
+            'jira_assignee_id' => $account,
+            'jira_assignee_name' => null,
+            'jira_fields_synced_at' => $this->syncFields() ? now('UTC')->format('Y-m-d H:i:s') : null,
+        ];
+        DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update($columns);
+        Log::info('portal.jira.moved', ['report' => (int) $row->id, 'from' => $old['key'], 'to' => $made['key']]);
+
+        $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->orderBy('id')->get()->values();
+        foreach ($images as $index => $image) {
+            try {
+                $this->jira->attach($made['id'], PortalJiraIssue::attachmentName($index + 1, (string) $image->mime_type), $this->cloudinary->download((string) $image->file_url), (string) $image->mime_type);
+            } catch (RuntimeException $error) {
+                $columns = [...$columns, 'jira_state' => self::STATE_FAILED, 'jira_error' => mb_substr('Screenshot '.($index + 1).' could not be attached: '.$error->getMessage(), 0, 255)];
+                break;
+            }
+            $columns['jira_attached'] = $index + 1;
+        }
+        $status = (string) ($changes['status'] ?? $row->status);
+        try {
+            if ($status !== PortalBugReports::STATUS_NEW) {
+                $this->jira->transition($made['id'], $this->findMove($made['id'], $status, $made['key'])['id']);
+            }
+        } catch (RuntimeException $error) {
+            Log::warning('portal.jira.moved_status_refused', ['report' => (int) $row->id, 'status' => $error->getCode()]);
+        }
+        if ($this->syncFields()) {
+            $this->keepWatchers($made['id'], [], $next->other_assignees, $next->assignee_id === null ? null : (int) $next->assignee_id);
+        }
+        try {
+            $this->jira->changeLabels($old['id'], [(string) config('services.jira.moved_label', 'moved')]);
+            $this->jira->linkIssues((string) config('services.jira.moved_link_type', 'Relates'), $old['id'], $made['id']);
+            $this->jira->transition($old['id'], $this->findMove($old['id'], PortalBugReports::STATUS_CANCELLED, $old['key'])['id']);
+        } catch (RuntimeException $error) {
+            Log::warning('portal.jira.moved_issue_left_open', ['report' => (int) $row->id, 'issue' => $old['key'], 'status' => $error->getCode()]);
+        }
+        $issue = $this->jira->issue($made['id']);
+
+        return [...$columns, 'jira_status' => $issue === null ? null : PortalJiraIssue::statusName($issue['fields']), 'jira_synced_at' => now('UTC')->format('Y-m-d H:i:s')];
+    }
+
+    /**
+     * Jira's parent as the portal keeps it: a report this server follows is the one it sits under, and any other an
+     * epic Jira alone has. None takes it out from under a report Jira has, but not from under one not in Jira yet.
+     *
+     * @param  array<string, mixed>  $plan
+     * @return array<string, mixed>
+     */
+    private function placeFromJira(object $row, array $plan): array
+    {
+        if (! array_key_exists('parent_key', $plan)) {
+            return $plan;
+        }
+        $current = PortalBugReportHierarchy::live($row->parent_report_id ?? null);
+        if ($plan['parent_key'] === null) {
+            return $current !== null && $this->owns($current) ? [...$plan, 'parent_report_id' => null] : $plan;
+        }
+        $parent = $this->handled(DB::connection('portal')->table('bug_reports'))
+            ->where('jira_issue_key', $plan['parent_key'])->where('id', '!=', $row->id)->whereNull('deleted_at')->first();
+
+        return $parent !== null && $this->owns($parent)
+            ? [...$plan, 'parent_key' => null, 'parent_summary' => null, 'parent_report_id' => (int) $parent->id]
+            : [...$plan, 'parent_report_id' => null];
     }
 
     /**
@@ -684,8 +837,8 @@ final class PortalBugReportsJira
             $kind = array_key_exists((string) $row->kind, PortalBugReports::KINDS) ? (string) $row->kind : PortalBugReports::KIND_BUG;
             // Every read first -- the type, and the plan its screen takes -- so a refused one makes nothing, and
             // there is nothing for a retry to look for.
-            $typeId = $this->issueTypeId($kind);
-            [$plan, $default, $account] = $this->planForCreate($row, $typeId);
+            [$typeId, $parentKey] = $this->placeForCreate($row, $kind);
+            [$plan, $default, $account] = $this->planForCreate($row, $typeId, $parentKey);
             // Filed under the default team, the report names it too; its assignee is what the two sides agree on, and
             // filed while fields are kept in step, it is in step from the start.
             $made = [
@@ -722,7 +875,7 @@ final class PortalBugReportsJira
     {
         $types = $this->jira->issueTypes();
         $wanted = trim((string) config('services.jira.issue_types.'.$kind, self::FALLBACK_TYPE));
-        foreach ([$wanted, self::FALLBACK_TYPE] as $name) {
+        foreach ($kind === PortalBugReports::KIND_EPIC ? [$wanted] : [$wanted, self::FALLBACK_TYPE] as $name) {
             foreach ($types as $type) {
                 if (strcasecmp($type['name'], $name) === 0) {
                     return ['wanted' => $wanted, 'id' => $type['id'], 'name' => $type['name']];
@@ -816,7 +969,9 @@ final class PortalBugReportsJira
     {
         $type = $this->issueTypeFor($kind);
         if ($type['id'] === null) {
-            throw new RuntimeException('Jira has no issue type '.$type['wanted'].' or '.self::FALLBACK_TYPE.' in '.$this->jira->projectKey().'.');
+            throw new RuntimeException($kind === PortalBugReports::KIND_EPIC
+                ? 'Jira has no '.$type['wanted'].' type in '.$this->jira->projectKey().'.'
+                : 'Jira has no issue type '.$type['wanted'].' or '.self::FALLBACK_TYPE.' in '.$this->jira->projectKey().'.');
         }
 
         return $type['id'];
@@ -847,7 +1002,7 @@ final class PortalBugReportsJira
         // The fields come back only while they are kept in step, and the first time, each side fills what the other lacks.
         $sync = $this->syncFields();
         $kept = $sync && ($row->jira_fields_synced_at ?? null) !== null;
-        $plan = $kept ? PortalJiraIssue::planOf($issue['fields'], $this->jira->fieldIds()) : [];
+        $plan = $kept ? $this->placeFromJira($row, PortalJiraIssue::planOf($issue['fields'], $this->jira->fieldIds())) : [];
         $assignee = $kept && array_key_exists('assignee', $issue['fields']) ? $this->assigneeFrom($row, $issue['fields']) : [];
         $merged = $sync && ! $kept ? $this->firstFieldSync($row, $issue['fields']) : [];
         $changes = [
@@ -856,7 +1011,7 @@ final class PortalBugReportsJira
             'jira_synced_at' => now('UTC')->format('Y-m-d H:i:s'),
         ];
         $was = ($row->duplicate_of ?? null) === null ? null : (int) $row->duplicate_of;
-        $planMoved = self::planChanges($row, $plan) !== [] || ($plan['parent_summary'] ?? null) !== ($row->parent_summary ?? null)
+        $planMoved = self::planChanges($row, $plan) !== [] || self::placeChanges($row, $plan) || ($plan['parent_summary'] ?? null) !== ($row->parent_summary ?? null)
             || (array_key_exists('team_name', $plan) && $plan['team_name'] !== null && $plan['team_name'] !== ($row->team_name ?? null));
         if ($status !== $row->status || $fixedIn !== $row->fixed_in || $kind !== $row->kind || $reason !== ($row->cancel_reason ?? null) || $original !== $was || $planMoved || $assignee !== [] || $merged !== []) {
             $changes += [
@@ -1051,7 +1206,7 @@ final class PortalBugReportsJira
      *
      * @return array{0: array<string, mixed>, 1: array{id: string, name: string}|null, 2: ?string}
      */
-    private function planForCreate(object $row, string $issueTypeId): array
+    private function planForCreate(object $row, string $issueTypeId, ?string $parentKey = null): array
     {
         // Filed while fields are not kept in step, a new issue carries none of them, nor the default team.
         if (! $this->syncFields()) {
@@ -1076,7 +1231,7 @@ final class PortalBugReportsJira
         }
         $plan = array_filter([
             'assignee' => $account === null ? null : ['accountId' => $account],
-            'parent' => ($row->parent_key ?? null) === null ? null : ['key' => (string) $row->parent_key],
+            'parent' => ($parentKey ?? $row->parent_key ?? null) === null ? null : ['key' => (string) ($parentKey ?? $row->parent_key)],
             'duedate' => self::planValue('due_on', $row->due_on ?? null),
             ...($ids['startDate'] === null ? [] : [$ids['startDate'] => self::planValue('start_on', $row->start_on ?? null)]),
             ...($ids['team'] === null ? [] : [$ids['team'] => $team]),
@@ -1120,6 +1275,32 @@ final class PortalBugReportsJira
         }
 
         return $current;
+    }
+
+    /**
+     * The type a new issue is filed as and the issue it goes under (2026-10-22, user): under a report Jira has, a
+     * sub-task of its issue, and under an epic Jira has, its child -- while fields are kept in step. Otherwise, or
+     * with no sub-task type in the project, as its kind on its own.
+     *
+     * @return array{0: string, 1: ?string}
+     */
+    private function placeForCreate(object $row, string $kind): array
+    {
+        $parent = $kind === PortalBugReports::KIND_EPIC || ! $this->syncFields() ? null : PortalBugReportHierarchy::live($row->parent_report_id ?? null);
+        if ($parent === null || ! $this->owns($parent)) {
+            return [$this->issueTypeId($kind), null];
+        }
+        if ((string) $parent->kind === PortalBugReports::KIND_EPIC) {
+            return [$this->issueTypeId($kind), (string) $parent->jira_issue_key];
+        }
+        $subtask = $this->jira->subtaskType();
+        if ($subtask === null) {
+            Log::warning('portal.jira.no_subtask_type', ['report' => (int) $row->id]);
+
+            return [$this->issueTypeId($kind), null];
+        }
+
+        return [$subtask['id'], (string) $parent->jira_issue_key];
     }
 
     // The name of a sender who chose to be named, for the issue's description; null for an anonymous one.

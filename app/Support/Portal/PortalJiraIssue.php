@@ -170,6 +170,21 @@ final class PortalJiraIssue
     }
 
     /**
+     * The level an issue's type stands at (2026-10-22, user): 1 an epic, -1 a sub-task, 0 anything between.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    public static function levelOf(array $fields): int
+    {
+        $type = is_array($fields['issuetype'] ?? null) ? $fields['issuetype'] : [];
+        if (($type['subtask'] ?? false) === true) {
+            return PortalBugReportHierarchy::SUBTASK;
+        }
+
+        return max(PortalBugReportHierarchy::SUBTASK, min(PortalBugReportHierarchy::EPIC, (int) ($type['hierarchyLevel'] ?? 0)));
+    }
+
+    /**
      * The fields of a new issue for a report row, with what it carries of the report's plan (2026-10-22, user) --
      * already in Jira's terms, as planForCreate() has it.
      *

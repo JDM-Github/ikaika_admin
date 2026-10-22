@@ -1489,6 +1489,9 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     due_on         DATE         NULL,
     parent_key     VARCHAR(32)  NULL,
     parent_summary VARCHAR(255) NULL,
+    -- The report it sits under (2026-10-22): an epic, or another report whose sub-task it is. Existing databases:
+    -- add_portal_bug_report_parent_report.
+    parent_report_id INT UNSIGNED NULL,
     team_id        VARCHAR(64)  NULL,
     team_name      VARCHAR(255) NULL,
     -- Who sent it, only when they chose to be named (2026-10-20). Existing databases: add_portal_bug_report_reporter.
@@ -1526,6 +1529,7 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     jira_fields_synced_at TIMESTAMP NULL,
     INDEX bug_reports_status_reported_on_index (status, reported_on),
     INDEX bug_reports_duplicate_of_index (duplicate_of),
+    INDEX bug_reports_parent_report_id_index (parent_report_id),
     UNIQUE KEY bug_reports_jira_issue_id_unique (jira_issue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

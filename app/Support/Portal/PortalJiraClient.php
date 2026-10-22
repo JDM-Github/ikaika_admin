@@ -50,6 +50,8 @@ final class PortalJiraClient
     // v2 since each type keeps its level (2026-10-22), which says which of them are epics.
     private const ISSUE_TYPES_KEY = 'portal:jira:issue-types:v2:';
 
+    private const SUBTASK_TYPE_KEY = 'portal:jira:subtask-type:';
+
     private const PROJECT_KEYS_KEY = 'portal:jira:project-keys:';
 
     private const PLAN_FIELDS_KEY = 'portal:jira:plan-fields:';
@@ -390,6 +392,33 @@ final class PortalJiraClient
     public function forgetIssueTypes(): void
     {
         Cache::forget(self::ISSUE_TYPES_KEY.$this->projectKey());
+        Cache::forget(self::SUBTASK_TYPE_KEY.$this->projectKey());
+    }
+
+    /**
+     * The project's sub-task type (2026-10-22, user: a report under another is its sub-task), which issueTypes()
+     * leaves out: the first Jira marks a sub-task, or null when the project has none. Cached for a day.
+     *
+     * @return array{id: string, name: string}|null
+     */
+    public function subtaskType(): ?array
+    {
+        $key = self::SUBTASK_TYPE_KEY.$this->projectKey();
+        $cached = Cache::get($key);
+        if (is_array($cached)) {
+            return $cached['type'];
+        }
+        $body = $this->read('GET', '/rest/api/3/issue/createmeta/'.rawurlencode((string) $this->projectKey()).'/issuetypes', missingIsRefusal: true)->json();
+        $type = null;
+        foreach ($body['issueTypes'] ?? $body['values'] ?? [] as $listed) {
+            if (is_array($listed) && (($listed['subtask'] ?? false) === true || (int) ($listed['hierarchyLevel'] ?? 0) === -1) && isset($listed['id'], $listed['name'])) {
+                $type = ['id' => (string) $listed['id'], 'name' => (string) $listed['name']];
+                break;
+            }
+        }
+        Cache::put($key, ['type' => $type], now()->addDay());
+
+        return $type;
     }
 
     /**

@@ -70,7 +70,7 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame('development', $row->channel);
         $this->assertSame(
             ['id', 'kind', 'title', 'description', 'page', 'status', 'cancel_reason', 'duplicate_of', 'note', 'assignee_id', 'version_level', 'fixed_in',
-                'start_on', 'due_on', 'parent_key', 'parent_summary', 'team_id', 'team_name', 'reporter_id', 'channel', 'reported_on', 'updated_at',
+                'start_on', 'due_on', 'parent_key', 'parent_summary', 'parent_report_id', 'team_id', 'team_name', 'reporter_id', 'channel', 'reported_on', 'updated_at',
                 'archived_at', 'archived_by', 'deleted_at', 'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at', 'jira_create_started_at',
                 'jira_assignee_id', 'jira_assignee_name', 'jira_fields_synced_at'],
             Schema::connection('portal')->getColumnListing('bug_reports'),
@@ -157,7 +157,7 @@ class PortalBugReportsTest extends TestCase
         $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'description' => ''])
             ->assertStatus(422)->assertJsonPath('message', 'Say what happened or what you need.');
         $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'kind' => 'question'])
-            ->assertStatus(422)->assertJsonPath('message', 'Choose Bug, Feature request or Feedback.');
+            ->assertStatus(422)->assertJsonPath('message', 'Choose Bug, Feature request, Feedback or Epic.');
         $this->withHeaders($headers)->post(self::BASE.'bug-reports', [...$body, 'images' => array_map(
             fn (int $index): UploadedFile => UploadedFile::fake()->image("shot{$index}.png"),
             [1, 2, 3, 4],
@@ -191,7 +191,7 @@ class PortalBugReportsTest extends TestCase
         $engineering = $this->headersFor($this->memberOf('Engineering'));
 
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'assignees', 'reporter', 'versionLevel', 'fixedIn', 'startOn', 'dueOn', 'parent', 'team', 'images', 'jira', 'jiraHere', 'jiraElsewhere', 'jiraAssignee', 'cancelReason', 'duplicateOf', 'archivedAt', 'archivedBy'], array_keys($listed));
+        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'assignees', 'reporter', 'versionLevel', 'fixedIn', 'startOn', 'dueOn', 'parent', 'parentReport', 'children', 'team', 'images', 'jira', 'jiraHere', 'jiraElsewhere', 'jiraAssignee', 'cancelReason', 'duplicateOf', 'archivedAt', 'archivedBy'], array_keys($listed));
         $this->assertNull($listed['reporter']);
         $this->assertNull($listed['jira']);
         $this->assertSame('2026-10-12', $listed['reportedOn']);
@@ -314,7 +314,7 @@ class PortalBugReportsTest extends TestCase
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => 'feature'])
             ->assertOk()->assertJsonPath('data.kind', 'feature');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['kind' => ''])
-            ->assertStatus(422)->assertJsonPath('message', 'Choose Bug, Feature request or Feedback.');
+            ->assertStatus(422)->assertJsonPath('message', 'Choose Bug, Feature request, Feedback or Epic.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])->assertOk();
         // In review (2026-10-20, user): on staging, being tested.
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_review'])
@@ -413,6 +413,69 @@ class PortalBugReportsTest extends TestCase
         $patch(['assigneeIds' => [$eleven[0], ['nested']]])->assertJsonPath('message', 'Choose someone in MIS to handle it.');
         $patch(['assigneeIds' => $eleven])->assertJsonPath('message', 'Choose at most 10 people to handle it.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['assigneeIds' => array_slice($eleven, 0, 10)])->assertOk()->assertJsonCount(10, 'data.assignees');
+    }
+
+    // Epics and sub-tasks (2026-10-22, user): MIS plans an epic from the page and files reports under it and under
+    // each other, by name; the page lists what sits under each, and where each sits.
+    public function test_mis_plans_an_epic_and_files_reports_under_it_and_under_each_other(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $file = fn (array $body) => $this->withHeaders($mis)->postJson(self::BASE.'bug-reports', ['description' => 'Planned on the page.', ...$body]);
+
+        $epic = (int) $file(['title' => 'Payroll revamp', 'kind' => 'epic', 'anonymous' => true])->assertCreated()->json('data.id');
+        $child = (int) $file(['title' => 'Payslips in PDF', 'parentReportId' => (string) $epic])->assertCreated()->json('data.id');
+        $subtask = (int) $file(['title' => 'Name the file by month', 'kind' => 'feature', 'parentReportId' => (string) $child])->assertCreated()->json('data.id');
+
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$epic, $child, $subtask])->orderBy('id')->get();
+        $this->assertSame([['epic', null], ['bug', $epic], ['feature', $child]], $rows->map(fn (object $row): array => [$row->kind, $row->parent_report_id === null ? null : (int) $row->parent_report_id])->all());
+        // Planned by MIS, each is theirs by name, whatever it said.
+        $this->assertSame([(int) $analyst->getKey()], $rows->pluck('reporter_id')->map(fn ($id): int => (int) $id)->unique()->values()->all());
+
+        $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->keyBy('id');
+        $this->assertSame([['id' => (string) $child, 'title' => 'Payslips in PDF', 'kind' => 'bug', 'status' => 'new']], $listed[(string) $epic]['children']);
+        $this->assertSame(['id' => (string) $epic, 'title' => 'Payroll revamp', 'kind' => 'epic', 'inJira' => false], $listed[(string) $child]['parentReport']);
+        $this->assertSame((string) $child, $listed[(string) $subtask]['parentReport']['id']);
+        $this->assertNull($listed[(string) $epic]['parentReport']);
+
+        // Anyone else reports, but plans nothing and files nothing under another.
+        $engineering = $this->headersFor($this->memberOf('Engineering'));
+        foreach ([['kind' => 'epic'], ['parentReportId' => (string) $epic]] as $body) {
+            $this->withHeaders($engineering)->postJson(self::BASE.'bug-reports', ['title' => 'Mine', 'description' => 'Mine.', ...$body])
+                ->assertForbidden()->assertJsonPath('message', 'Only who reads Issues & Requests plans an epic or files one under another.');
+        }
+    }
+
+    // As Jira's levels go: an epic over an issue over a sub-task, and nothing deeper or looping.
+    public function test_a_report_goes_only_where_jiras_levels_allow(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $handled = ['assignee_id' => $analyst->getKey()];
+        $epic = $this->unlinked('Payroll revamp', ['kind' => 'epic', ...$handled]);
+        $issue = $this->unlinked('Payslips in PDF', ['parent_report_id' => $epic, ...$handled]);
+        $subtask = $this->unlinked('Name the file by month', ['parent_report_id' => $issue, ...$handled]);
+        $other = $this->unlinked('The month view jumps', $handled);
+        $patch = fn (int $id, array $body) => $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, $body)->assertStatus(422);
+
+        $this->withHeaders($mis)->postJson(self::BASE.'bug-reports', ['title' => 'Epic', 'description' => 'E.', 'kind' => 'epic', 'parentReportId' => (string) $epic])
+            ->assertStatus(422)->assertJsonPath('message', 'An epic goes under nothing.');
+        $patch($other, ['parentReportId' => (string) $subtask])->assertJsonPath('message', '#'.$subtask.' is a sub-task itself: put it under #'.$issue.' instead.');
+        $patch($issue, ['parentReportId' => (string) $other])->assertJsonPath('message', 'It has reports under it, so it cannot be a sub-task: move them off it first.');
+        $patch($subtask, ['kind' => 'epic'])->assertJsonPath('message', 'An epic goes under nothing: take it out from under its parent first.');
+        $patch($epic, ['kind' => 'bug'])->assertJsonPath('message', 'It has reports under it: move them off it first.');
+        $patch($issue, ['kind' => 'epic', 'parentReportId' => ''])->assertJsonPath('message', 'It has reports under it: move them off it first.');
+        $patch($other, ['parentReportId' => (string) $other])->assertJsonPath('message', 'It cannot go under itself.');
+        $patch($other, ['parentReportId' => '999999999'])->assertJsonPath('message', 'There is no #999999999 to go under.');
+        $patch($other, ['parentReportId' => 'Payroll'])->assertJsonPath('message', 'Choose the report it goes under.');
+        $patch($other, ['parentReportId' => (string) $epic, 'parentKey' => 'IKP-1'])->assertJsonPath('message', 'Put it under a report or an epic Jira has, not both.');
+
+        // Within its level it moves freely, and out from under one.
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$other, ['parentReportId' => (string) $issue])->assertOk()->assertJsonPath('data.parentReport.id', (string) $issue);
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$subtask, ['parentReportId' => ''])->assertOk()->assertJsonPath('data.parentReport', null);
+        // A parent in the Recycle Bin counts as none.
+        DB::connection('portal')->table('bug_reports')->where('id', $issue)->update(['deleted_at' => '2026-10-22 01:00:00']);
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$other, ['note' => 'Still here'])->assertOk()->assertJsonPath('data.parentReport', null);
     }
 
     // One cancelled as a duplicate before 2026-10-22 stays one while it stays cancelled, and moved to Fixed it stays one.

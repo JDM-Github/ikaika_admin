@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-22T19:34:17+08:00",
+  "generated": "2026-10-22T19:52:40+08:00",
   "current": "1.0.0+2",
   "releases": [
     {
@@ -30,7 +30,8 @@
         "A report in Issues & Requests has start and due dates and a parent epic and a team that change in Jira too and new issues go to the DEV team.",
         "Who works on a report in Issues & Requests is its Jira assignee too and a change on either side shows on both.",
         "MIS chooses when a report's assignee and dates and parent and team start following Jira and until then they stay in the portal.",
-        "Issues & Requests can assign a report to several people and the others watch its Jira issue."
+        "Issues & Requests can assign a report to several people and the others watch its Jira issue.",
+        "Issues & Requests has epics and sub-tasks that are Jira's too."
       ],
       "changed": [],
       "fixed": [

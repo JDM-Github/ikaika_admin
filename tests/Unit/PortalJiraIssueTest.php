@@ -166,6 +166,18 @@ class PortalJiraIssueTest extends TestCase
         ];
     }
 
+    // Jira's levels (2026-10-22, user): an epic over an issue over a sub-task, by the type's own word.
+    public function test_an_issues_level_is_its_types(): void
+    {
+        $this->assertSame(1, PortalJiraIssue::levelOf(['issuetype' => ['name' => 'Epic', 'hierarchyLevel' => 1]]));
+        $this->assertSame(0, PortalJiraIssue::levelOf(['issuetype' => ['name' => 'Bug', 'hierarchyLevel' => 0]]));
+        $this->assertSame(-1, PortalJiraIssue::levelOf(['issuetype' => ['name' => 'Sub-task', 'subtask' => true]]));
+        $this->assertSame(-1, PortalJiraIssue::levelOf(['issuetype' => ['name' => 'Sub-task', 'hierarchyLevel' => -1]]));
+        // Above an epic is an epic as far as a report goes, and a type that says nothing is an issue.
+        $this->assertSame(1, PortalJiraIssue::levelOf(['issuetype' => ['name' => 'Initiative', 'hierarchyLevel' => 2]]));
+        $this->assertSame(0, PortalJiraIssue::levelOf([]));
+    }
+
     public function test_fixed_in_is_the_highest_version_named_like_one(): void
     {
         $fields = ['fixVersions' => [['name' => '1.4.2'], ['name' => 'v1.10.0'], ['name' => '2.0'], ['name' => 'Sprint 3']]];
