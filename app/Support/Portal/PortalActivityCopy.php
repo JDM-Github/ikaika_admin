@@ -308,12 +308,16 @@ final class PortalActivityCopy
         return self::YOU.' turned keeping assignees, dates, parents and teams in step with Jira '.($on ? 'on' : 'off');
     }
 
-    // Triage (2026-10-21, user): cancelled as won't fix, or marked a duplicate of the report it names.
-    public static function cancelledBugReport(string $title, string $noun, ?string $original = null): string
+    // Triage (2026-10-21, user): cancelled as won't fix.
+    public static function cancelledBugReport(string $title, string $noun): string
     {
-        return $original === null
-            ? self::YOU.' cancelled the '.$noun.' '.$title." as won't fix"
-            : self::YOU.' marked the '.$noun.' '.$title.' a duplicate of '.$original;
+        return self::YOU.' cancelled the '.$noun.' '.$title." as won't fix";
+    }
+
+    // Marked a duplicate of the report it names, and fixed with it (2026-10-22, user) -- or, before then, cancelled.
+    public static function duplicateBugReport(string $title, string $noun, string $original, bool $fixed): string
+    {
+        return self::YOU.' marked the '.$noun.' '.$title.' a duplicate of '.$original.($fixed ? ' and fixed it' : '');
     }
 
     // MIS filing a report under another kind (2026-10-19): a bug that is really a feature request, say.

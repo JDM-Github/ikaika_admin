@@ -206,7 +206,7 @@ The preview shows one day's commits and saves nothing; the sync prints `<reposit
 
 Every issue or request people send from the portal's corner button becomes a Jira issue: as it comes in (MIS can turn that off on the Issues & Requests page), sent by hand, or with every report not in Jira yet at once (**Send to Jira** in the page's header). Its status and kind then go both ways: a change on the Jira board comes back by webhook, every fifteen minutes or on **Refresh**, and MIS changing them in the portal moves the card or changes its work type first. Fixed in stays the portal's unless the issue has a fix version.
 
-A cancelled report says why (2026-10-21): won't fix, or a duplicate of another report. Either way its issue moves to Cancelled; a duplicate is also labelled `duplicate` and linked to its original's issue ("IPS-8 duplicates IPS-3"), when the original is in Jira too. Reopened in the portal, the link and the label come off again; reopened on the board, they stay there for whoever moved it.
+A closed report says why (2026-10-21): a cancelled one won't be fixed, and its issue moves to Cancelled; a duplicate names the report it duplicates, and since 2026-10-22 it is Fixed with it, its issue moved to Done, labelled `duplicate` and linked to its original's issue ("IPS-8 duplicates IPS-3") when the original is in Jira too. A duplicate cancelled before then stays Cancelled. Reopened in the portal, the link and the label come off again; reopened on the board, they stay there for whoever moved it.
 
 A report can be archived out of the way or deleted to its deleter's Recycle Bin (2026-10-21). Either one moves an open report's issue to Cancelled first, and refuses when Jira does not take it; a Fixed or Cancelled one's issue stays as it is. Archived and deleted reports are not sent or read back until they are back on the page.
 
@@ -409,6 +409,6 @@ Run `deploy.ps1` here, then the portal's `deploy.ps1`.
 | `Jira HTTP 400` naming a field | The project requires a field the portal does not fill (a required custom field); make it optional for these issue types |
 | Assigning someone says `Jira HTTP 400` or `403` naming the assignee | The service account lacks **Assign issues**, or that person cannot be assigned in the project; `portal:jira-check` says what the account may do |
 | An MIS member is assigned in the portal but unassigned in Jira | Jira has no account under their work address (or the account lacks **Browse users and groups**); `portal:jira-check` names each member's account |
-| Cancelling a duplicate says `Jira HTTP 404` or `403` | The service account lacks **Link issues** on the project, or issue linking is off on the site; `portal:jira-check` says whether the Duplicate link type is there |
+| Marking a duplicate says `Jira HTTP 404` or `403` | The service account lacks **Link issues** on the project, or issue linking is off on the site; `portal:jira-check` says whether the Duplicate link type is there |
 | Cancelling a duplicate says `Jira HTTP 400` naming `labels` | The project's edit screen has no Labels field, so the issue cannot be labelled; add the field to the screen |
 | Jira webhook deliveries answer `401` | The webhook's secret and `JIRA_WEBHOOK_SECRET` differ, or the setting was not applied |

@@ -10,7 +10,7 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 
 - Every answer names the server version and channel that sent it.
 - Production and staging share one Jira project and each server follows only its own issues.
-- Issues & Requests can cancel a report as won't fix or as a duplicate and a duplicate is labelled and linked to its original in Jira.
+- Issues & Requests can cancel a report as won't fix or close it as a duplicate that is fixed with its original and labelled and linked to it in Jira.
 - Issues & Requests can be archived and deleted to the Recycle Bin.
 - A report in Issues & Requests has start and due dates and a parent epic and a team that change in Jira too and new issues go to the DEV team.
 - Who works on a report in Issues & Requests is its Jira assignee too and a change on either side shows on both.

@@ -335,8 +335,8 @@ final class PortalBugReportsJira
         $status = $changes['status'] ?? (string) $row->status;
         $reason = array_key_exists('cancel_reason', $changes) ? $changes['cancel_reason'] : $row->cancel_reason;
         $original = array_key_exists('duplicate_of', $changes) ? $changes['duplicate_of'] : $row->duplicate_of;
-        $wasDuplicate = $row->status === PortalBugReports::STATUS_CANCELLED && $row->cancel_reason === PortalBugReports::CANCEL_DUPLICATE;
-        $isDuplicate = $status === PortalBugReports::STATUS_CANCELLED && $reason === PortalBugReports::CANCEL_DUPLICATE;
+        $wasDuplicate = PortalBugReports::isDuplicate($row->status, $row->cancel_reason);
+        $isDuplicate = PortalBugReports::isDuplicate($status, $reason);
         $oldTarget = $wasDuplicate ? $this->duplicateTarget($row->duplicate_of) : null;
         $newTarget = $isDuplicate ? $this->duplicateTarget($original) : null;
 
@@ -1099,7 +1099,7 @@ final class PortalBugReportsJira
             ? null
             : $this->findMove($issueId, (string) $row->status, (string) $row->jira_issue_key);
         // A duplicate already, before it reached Jira (2026-10-21): labelled and linked there as triage does.
-        if ($row->status === PortalBugReports::STATUS_CANCELLED && ($row->cancel_reason ?? null) === PortalBugReports::CANCEL_DUPLICATE) {
+        if (PortalBugReports::isDuplicate($row->status, $row->cancel_reason ?? null)) {
             $this->jira->changeLabels($issueId, [$this->duplicateLabel()]);
             $target = $this->duplicateTarget($row->duplicate_of ?? null);
             if ($target !== null) {
@@ -1123,32 +1123,34 @@ final class PortalBugReportsJira
     }
 
     /**
-     * A cancelled one's reason and original as the issue now stands: the portal's own while Jira says Cancelled,
-     * worked out from the issue when Jira cancelled it on its own, and none once Jira moved it on -- the label and
-     * the link then stay in Jira, for whoever moved it to tidy.
+     * A closed one's reason and original as the issue now stands: the portal's own while Jira keeps it where the
+     * portal has it, worked out from the issue when Jira closed it on its own -- a duplicate by its resolution or the
+     * label, fixed since 2026-10-22 and cancelled before -- and none once Jira moved it on; the label and the link
+     * then stay in Jira, for whoever moved it to tidy.
      *
      * @param  array{id: string, key: string, fields: array<string, mixed>}  $issue
      * @return array{0: ?string, 1: ?int}
      */
     private function triageFrom(object $row, array $issue, string $status): array
     {
-        if ($status !== PortalBugReports::STATUS_CANCELLED) {
+        $fixed = $status === PortalBugReports::STATUS_FIXED;
+        if (! $fixed && $status !== PortalBugReports::STATUS_CANCELLED) {
             return [null, null];
         }
         $reason = $row->cancel_reason ?? null;
-        if ($row->status === PortalBugReports::STATUS_CANCELLED && $reason !== null) {
-            return [(string) $reason, $reason === PortalBugReports::CANCEL_DUPLICATE && ($row->duplicate_of ?? null) !== null ? (int) $row->duplicate_of : null];
+        if ($row->status === $status && ($reason !== null || $fixed)) {
+            return [$reason, PortalBugReports::isDuplicate($status, $reason) && ($row->duplicate_of ?? null) !== null ? (int) $row->duplicate_of : null];
         }
         $reason = PortalJiraIssue::cancelReason($issue['fields'], $this->duplicateLabel());
         if ($reason !== PortalBugReports::CANCEL_DUPLICATE) {
-            return [$reason, null];
+            return [$fixed ? null : $reason, null];
         }
         $duplicated = PortalJiraIssue::duplicatedIssueId($issue['fields'], $this->duplicateLinkType());
         $found = $duplicated === null ? null : $this->environment->scope(DB::connection('portal')->table('bug_reports'))
             ->where('jira_issue_id', $duplicated)
             ->where('id', '!=', $row->id)
             ->first(['id', 'status', 'cancel_reason']);
-        $isOriginal = $found !== null && ! ($found->status === PortalBugReports::STATUS_CANCELLED && $found->cancel_reason === PortalBugReports::CANCEL_DUPLICATE);
+        $isOriginal = $found !== null && ! PortalBugReports::isDuplicate($found->status, $found->cancel_reason);
 
         return [PortalBugReports::CANCEL_DUPLICATE, $isOriginal ? (int) $found->id : null];
     }

@@ -22,8 +22,9 @@ namespace App\Support\Portal;
  * IPS files Done under "in progress" and Cancelled under "done". A name not listed falls back to the
  * category. The fix version is the highest X.Y.Z among the issue's fix versions, "v" or not.
  *
- * Won't fix is shown as Cancelled since 2026-10-21 (the value stays wont_fix), and a cancelled one says why: a
- * duplicate when Jira's resolution or status says so or the issue carries the duplicate label, else won't fix; a
+ * Won't fix is shown as Cancelled since 2026-10-21 (the value stays wont_fix). A duplicate is Done since
+ * 2026-10-22 (user), so a resolution of Duplicate is Fixed rather than Cancelled: a closed issue is a duplicate when
+ * its resolution or status says so or it carries the duplicate label, and a cancelled one is otherwise won't fix. A
  * duplicate's own links name the issue it duplicates as their outward end.
  *
  * A report's plan is the issue's too (2026-10-22, user): its start and due dates, the epic it sits under and the
@@ -34,7 +35,7 @@ namespace App\Support\Portal;
 final class PortalJiraIssue
 {
     // Labels hold no spaces; a resolution is matched lowercased, with a curly apostrophe made straight.
-    private const NOT_DONE = ["won't do", "won't fix", 'declined', 'duplicate', 'cannot reproduce', "can't reproduce"];
+    private const NOT_DONE = ["won't do", "won't fix", 'declined', 'cannot reproduce', "can't reproduce"];
 
     // A status by its name, lowercased, a curly apostrophe made straight; 'done' still asks the resolution.
     private const BY_NAME = [
@@ -44,7 +45,7 @@ final class PortalJiraIssue
         'in qa' => 'review', 'qa' => 'review', 'on staging' => 'review', 'staging' => 'review',
         'done' => 'done', 'closed' => 'done', 'resolved' => 'done', 'fixed' => 'done',
         'cancelled' => 'not_done', 'canceled' => 'not_done', "won't do" => 'not_done', "won't fix" => 'not_done',
-        'declined' => 'not_done', 'rejected' => 'not_done', 'duplicate' => 'not_done',
+        'declined' => 'not_done', 'rejected' => 'not_done',
     ];
 
     private const SUMMARY_PREFIX = 'IP';
@@ -249,8 +250,8 @@ final class PortalJiraIssue
     }
 
     /**
-     * Why Jira cancelled an issue on its own: a duplicate when its resolution or status says so, or when it
-     * carries the duplicate label; else won't fix.
+     * Why Jira closed an issue on its own: a duplicate when its resolution or status says so, or when it carries the
+     * duplicate label; else won't fix, which only a cancelled one is.
      *
      * @param  array<string, mixed>  $fields
      */

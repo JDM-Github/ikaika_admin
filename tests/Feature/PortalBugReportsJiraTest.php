@@ -39,6 +39,8 @@ class PortalBugReportsJiraTest extends TestCase
 
     private const TO_DO = ['name' => 'To Do', 'statusCategory' => ['key' => 'new']];
 
+    private const DONE = ['name' => 'Done', 'statusCategory' => ['key' => 'indeterminate']];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -1101,28 +1103,30 @@ class PortalBugReportsJiraTest extends TestCase
         $this->assertSame(['fixed', 'To Do'], [$row->status, $row->jira_status]);
     }
 
-    // Triage (2026-10-21, user): a linked duplicate is labelled and linked to its original's issue, and cancelled last.
-    public function test_a_linked_duplicate_is_labelled_and_linked_to_its_originals_issue_before_it_is_cancelled(): void
+    // Triage (2026-10-21, user): a linked duplicate is labelled and linked to its original's issue, and moved last --
+    // to Done since 2026-10-22 (user), as what it reports is fixed under the original.
+    public function test_a_linked_duplicate_is_labelled_and_linked_to_its_originals_issue_before_it_is_fixed(): void
     {
         $this->connectJira();
         $analyst = $this->memberOf('MIS');
         $original = $this->report(['title' => 'Calendar skips Sunday', 'jira_issue_id' => '10007', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
         $id = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
-        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::CANCELLED]]]);
+        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::DONE]]]);
 
         $this->withHeaders($this->headersFor($analyst))
-            ->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])
+            ->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])
             ->assertOk()
+            ->assertJsonPath('data.status', 'fixed')
             ->assertJsonPath('data.cancelReason', 'duplicate')
             ->assertJsonPath('data.duplicateOf', ['id' => (string) $original, 'title' => 'Calendar skips Sunday'])
-            ->assertJsonPath('data.jira.status', 'Cancelled');
+            ->assertJsonPath('data.jira.status', 'Done');
 
         // The move found first and made last, so a delivery racing the save already sees a duplicate.
         $this->assertSame(['GET issue/10042/transitions', 'PUT issue/10042', 'POST issueLink', 'POST issue/10042/transitions', 'GET issue/10042'], $this->calls());
         Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT' && $request->data() === ['update' => ['labels' => [['add' => 'duplicate']]]]);
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issueLink')
             && $request->data() === ['type' => ['name' => 'Duplicate'], 'inwardIssue' => ['id' => '10042'], 'outwardIssue' => ['id' => '10007']]);
-        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && ($request['transition'] ?? null) === ['id' => '51']);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && ($request['transition'] ?? null) === ['id' => '41']);
     }
 
     // An original Jira lacks leaves nothing to link to; an app from before cancels as won't fix, with no label.
@@ -1134,9 +1138,9 @@ class PortalBugReportsJiraTest extends TestCase
         $original = $this->report(['title' => 'Calendar skips Sunday']);
         $duplicate = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
         $wontFix = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10043', 'jira_issue_key' => 'IKP-8', 'jira_state' => 'sent']);
-        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::CANCELLED]], '10043' => ['IKP-8', ['status' => self::CANCELLED]]]);
+        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::DONE]], '10043' => ['IKP-8', ['status' => self::CANCELLED]]]);
 
-        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$duplicate, ['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$duplicate, ['status' => 'fixed', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])
             ->assertOk()->assertJsonPath('data.duplicateOf.id', (string) $original);
         $this->assertSame(['GET issue/10042/transitions', 'PUT issue/10042', 'POST issue/10042/transitions', 'GET issue/10042'], $this->calls());
 
@@ -1154,10 +1158,10 @@ class PortalBugReportsJiraTest extends TestCase
         $first = $this->report(['title' => 'Calendar skips Sunday', 'jira_issue_id' => '10007', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
         $second = $this->report(['title' => 'Calendar skips weekends', 'jira_issue_id' => '10008', 'jira_issue_key' => 'IKP-4', 'jira_state' => 'sent']);
         $id = $this->report([
-            'assignee_id' => $analyst->getKey(), 'status' => 'wont_fix', 'cancel_reason' => 'duplicate', 'duplicate_of' => $first,
+            'assignee_id' => $analyst->getKey(), 'status' => 'fixed', 'cancel_reason' => 'duplicate', 'duplicate_of' => $first,
             'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent',
         ]);
-        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::CANCELLED, 'labels' => ['ikaika-portal', 'duplicate'], 'issuelinks' => [
+        $this->fakeBoard(['10042' => ['IKP-7', ['status' => self::DONE, 'labels' => ['ikaika-portal', 'duplicate'], 'issuelinks' => [
             ['id' => '30001', 'type' => ['name' => 'Duplicate'], 'outwardIssue' => ['id' => '10007']],
             ['id' => '30002', 'type' => ['name' => 'Duplicate'], 'outwardIssue' => ['id' => '10008']],
         ]]]]);
@@ -1177,7 +1181,8 @@ class PortalBugReportsJiraTest extends TestCase
         Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && ($request['transition'] ?? null) === ['id' => '21']);
     }
 
-    // Read back (2026-10-21, user): the portal's triage stands while Jira says Cancelled, Jira's own is worked out, a reopen clears it.
+    // Read back (2026-10-21, user): the portal's triage stands while Jira keeps the issue where it is, Jira's own is
+    // worked out, a reopen clears it. A duplicate is Done since 2026-10-22 (user); one cancelled before stays so.
     public function test_reading_back_keeps_the_portals_triage_works_out_jiras_own_and_clears_it_on_a_reopen(): void
     {
         $this->connectJira();
@@ -1189,6 +1194,10 @@ class PortalBugReportsJiraTest extends TestCase
         $byLabel = $this->report(['status' => 'in_review', 'jira_issue_id' => '10052', 'jira_issue_key' => 'IKP-22', 'jira_state' => 'sent']);
         $wontFix = $this->report(['jira_issue_id' => '10053', 'jira_issue_key' => 'IKP-23', 'jira_state' => 'sent']);
         $reopened = $this->report(['status' => 'wont_fix', 'cancel_reason' => 'duplicate', 'duplicate_of' => $original, 'jira_issue_id' => '10054', 'jira_issue_key' => 'IKP-24', 'jira_state' => 'sent']);
+        $fixedKept = $this->report(['status' => 'fixed', 'cancel_reason' => 'duplicate', 'duplicate_of' => $other, 'jira_issue_id' => '10055', 'jira_issue_key' => 'IKP-25', 'jira_state' => 'sent']);
+        $doneByResolution = $this->report(['status' => 'in_progress', 'jira_issue_id' => '10056', 'jira_issue_key' => 'IKP-26', 'jira_state' => 'sent']);
+        $doneByLabel = $this->report(['status' => 'in_review', 'jira_issue_id' => '10057', 'jira_issue_key' => 'IKP-27', 'jira_state' => 'sent']);
+        $done = $this->report(['status' => 'in_review', 'jira_issue_id' => '10058', 'jira_issue_key' => 'IKP-28', 'jira_state' => 'sent']);
         $toOriginal = ['id' => '30001', 'type' => ['name' => 'Duplicate'], 'outwardIssue' => ['id' => '10007']];
         Http::preventStrayRequests();
         Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
@@ -1200,11 +1209,15 @@ class PortalBugReportsJiraTest extends TestCase
             ]]],
             ['id' => '10053', 'key' => 'IKP-23', 'fields' => ['status' => self::CANCELLED, 'resolution' => ['name' => "Won't Do"]]],
             ['id' => '10054', 'key' => 'IKP-24', 'fields' => ['status' => self::TO_DO, 'labels' => ['ikaika-portal', 'duplicate'], 'issuelinks' => [$toOriginal]]],
+            ['id' => '10055', 'key' => 'IKP-25', 'fields' => ['status' => self::DONE, 'resolution' => ['name' => 'Done']]],
+            ['id' => '10056', 'key' => 'IKP-26', 'fields' => ['status' => self::DONE, 'resolution' => ['name' => 'Duplicate'], 'issuelinks' => [$toOriginal]]],
+            ['id' => '10057', 'key' => 'IKP-27', 'fields' => ['status' => self::DONE, 'labels' => ['ikaika-portal', 'duplicate']]],
+            ['id' => '10058', 'key' => 'IKP-28', 'fields' => ['status' => self::DONE, 'resolution' => ['name' => 'Done']]],
         ], 'issueErrors' => []])]);
 
         $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
 
-        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$kept, $byResolution, $byLabel, $wontFix, $reopened])->get()->keyBy('id');
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$kept, $byResolution, $byLabel, $wontFix, $reopened, $fixedKept, $doneByResolution, $doneByLabel, $done])->get()->keyBy('id');
         $triage = fn (int $id): array => [$rows[$id]->status, $rows[$id]->cancel_reason, $rows[$id]->duplicate_of === null ? null : (int) $rows[$id]->duplicate_of];
         // The portal said which, and Jira says only Cancelled.
         $this->assertSame(['wont_fix', 'duplicate', $other], $triage($kept));
@@ -1214,14 +1227,19 @@ class PortalBugReportsJiraTest extends TestCase
         $this->assertSame(['wont_fix', 'wont_fix', null], $triage($wontFix));
         // Moved on in Jira: cancelled no longer, with the label and the link left there for whoever moved it.
         $this->assertSame(['new', null, null], $triage($reopened));
+        // Done in Jira: the portal's duplicate stands, and Jira's own is one by its resolution or its label.
+        $this->assertSame(['fixed', 'duplicate', $other], $triage($fixedKept));
+        $this->assertSame(['fixed', 'duplicate', $original], $triage($doneByResolution));
+        $this->assertSame(['fixed', 'duplicate', null], $triage($doneByLabel));
+        $this->assertSame(['fixed', null, null], $triage($done));
     }
 
-    // Cancelled as a duplicate before it reached Jira (2026-10-21): its new issue is labelled, linked and cancelled too.
-    public function test_a_duplicate_sent_to_jira_lands_cancelled_labelled_and_linked(): void
+    // A duplicate before it reached Jira (2026-10-21): its new issue is labelled, linked and moved to Done too.
+    public function test_a_duplicate_sent_to_jira_lands_fixed_labelled_and_linked(): void
     {
         $this->connectJira();
         $original = $this->report(['title' => 'Calendar skips Sunday', 'jira_issue_id' => '10007', 'jira_issue_key' => 'IKP-3', 'jira_state' => 'sent']);
-        $id = $this->report(['status' => 'wont_fix', 'cancel_reason' => 'duplicate', 'duplicate_of' => $original, 'jira_state' => 'pending']);
+        $id = $this->report(['status' => 'fixed', 'cancel_reason' => 'duplicate', 'duplicate_of' => $original, 'jira_state' => 'pending']);
         $moved = false;
         Http::preventStrayRequests();
         Http::fake([
@@ -1240,16 +1258,16 @@ class PortalBugReportsJiraTest extends TestCase
             self::SITE.'/rest/api/3/issue/10080*' => function (Request $request) use (&$moved) {
                 return $request->method() === 'PUT'
                     ? Http::response(null, 204)
-                    : Http::response(['id' => '10080', 'key' => 'IKP-50', 'fields' => ['status' => $moved ? self::CANCELLED : self::TO_DO]]);
+                    : Http::response(['id' => '10080', 'key' => 'IKP-50', 'fields' => ['status' => $moved ? self::DONE : self::TO_DO]]);
             },
         ]);
 
         $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/'.$id.'/jira')
             ->assertOk()
-            ->assertJsonPath('data.status', 'wont_fix')
+            ->assertJsonPath('data.status', 'fixed')
             ->assertJsonPath('data.cancelReason', 'duplicate')
             ->assertJsonPath('data.duplicateOf.id', (string) $original)
-            ->assertJsonPath('data.jira.status', 'Cancelled');
+            ->assertJsonPath('data.jira.status', 'Done');
 
         $this->assertSame([
             'GET issue/createmeta/IKP/issuetypes', 'POST issue', 'GET issue/10080', 'GET issue/10080/transitions',

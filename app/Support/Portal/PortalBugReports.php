@@ -42,9 +42,11 @@ use RuntimeException;
  * sent on (2026-10-21, user: production and staging share one project), and only that server touches its issue.
  *
  * Triage (2026-10-21, user): Won't fix is shown as Cancelled -- the value stays wont_fix, which the apps from
- * before read strictly -- and a cancelled report says why: nothing will change, or it duplicates another report,
- * which it names. That one cannot be itself or a duplicate, so no chain or loop forms; any other status clears
- * both. On a linked report the issue moves to Cancelled too, and a duplicate is labelled and linked there.
+ * before read strictly. A duplicate names the report it duplicates, which cannot be itself or a duplicate, so no
+ * chain or loop forms; it is Fixed (2026-10-22, user: what it reports is handled under the original) and a
+ * cancelled one is won't fix, but a duplicate cancelled before then stays as it is. Any other status clears both.
+ * On a linked report the issue moves too, and a duplicate is labelled and linked there first. The columns keep
+ * their names, cancel_reason and duplicate_of, as the API keeps cancelReason and duplicateOf.
  *
  * A report's plan (2026-10-22, user): when it starts and is due, the epic it sits under and the team that owns it --
  * the epic one of the project's and the team one of the site's, both checked with Jira. A linked report's are the
@@ -85,7 +87,7 @@ final class PortalBugReports
     public const CANCEL_DUPLICATE = 'duplicate';
 
     /**
-     * Why a cancelled one was closed, as the page names it.
+     * Why a closed one was closed, as the page names it: a cancelled one won't be fixed, a fixed one may be a duplicate.
      *
      * @var array<string, string>
      */
@@ -93,6 +95,16 @@ final class PortalBugReports
         self::CANCEL_WONT_FIX => "Won't fix",
         self::CANCEL_DUPLICATE => 'Duplicate',
     ];
+
+    private const ONLY_FIXED_DUPLICATES = 'Only a fixed one can be a duplicate: set its status to Fixed too.';
+
+    private const ONLY_CANCELLED_WONT_FIX = "Only a cancelled one is won't fix: set its status to Cancelled too.";
+
+    // A duplicate, fixed as one since 2026-10-22 or cancelled as one before.
+    public static function isDuplicate(mixed $status, mixed $reason): bool
+    {
+        return in_array($status, [self::STATUS_FIXED, self::STATUS_CANCELLED], true) && $reason === self::CANCEL_DUPLICATE;
+    }
 
     public const KIND_BUG = 'bug';
 
@@ -760,13 +772,16 @@ final class PortalBugReports
         $title = (string) $row->title;
         $was = $this->kindOf($row);
         $noun = self::KINDS[$changes['kind'] ?? $was]['noun'];
-        // Cancelled now, or cancelled for another reason: why, and what it duplicates.
+        // Closed now, or closed for another reason: a duplicate names what it duplicates, a cancelled one says why.
         $triaged = (isset($changes['status']) && $changes['status'] !== $row->status) || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes);
-        if ($triaged && ($changes['status'] ?? $row->status) === self::STATUS_CANCELLED) {
-            $reason = array_key_exists('cancel_reason', $changes) ? $changes['cancel_reason'] : $row->cancel_reason;
-            $original = array_key_exists('duplicate_of', $changes) ? $changes['duplicate_of'] : $row->duplicate_of;
-
-            return PortalActivityCopy::cancelledBugReport($title, $noun, $reason === self::CANCEL_DUPLICATE && $original !== null ? $this->originalLabel((int) $original) : null);
+        $status = $changes['status'] ?? $row->status;
+        $reason = array_key_exists('cancel_reason', $changes) ? $changes['cancel_reason'] : $row->cancel_reason;
+        $original = array_key_exists('duplicate_of', $changes) ? $changes['duplicate_of'] : $row->duplicate_of;
+        if ($triaged && self::isDuplicate($status, $reason) && $original !== null) {
+            return PortalActivityCopy::duplicateBugReport($title, $noun, $this->originalLabel((int) $original), $status === self::STATUS_FIXED);
+        }
+        if ($triaged && $status === self::STATUS_CANCELLED) {
+            return PortalActivityCopy::cancelledBugReport($title, $noun);
         }
         if (isset($changes['status']) && $changes['status'] !== $row->status) {
             return PortalActivityCopy::updatedBugReport($title, self::STATUS_LABELS[$changes['status']], $noun);
@@ -918,8 +933,12 @@ final class PortalBugReports
             'jiraElsewhere' => $elsewhere,
             // Who has it in Jira while this server follows the issue (2026-10-22, user).
             'jiraAssignee' => $this->jiraAssignee($row, $elsewhere),
-            // Why a cancelled one was closed, and the report a duplicate names (2026-10-21, user).
-            'cancelReason' => $row->status === self::STATUS_CANCELLED ? ($row->cancel_reason ?? self::CANCEL_WONT_FIX) : null,
+            // Why a closed one was closed, and the report a duplicate names (2026-10-21, 2026-10-22, user).
+            'cancelReason' => match ((string) $row->status) {
+                self::STATUS_CANCELLED => $row->cancel_reason ?? self::CANCEL_WONT_FIX,
+                self::STATUS_FIXED => $row->cancel_reason === self::CANCEL_DUPLICATE ? self::CANCEL_DUPLICATE : null,
+                default => null,
+            },
             'duplicateOf' => $row->duplicate_of === null ? null : ['id' => (string) $row->duplicate_of, 'title' => $titles[(int) $row->duplicate_of] ?? null],
             // Archived out of the way, when and by whom (2026-10-21, user); null while on the page.
             'archivedAt' => $row->archived_at === null ? null : str_replace(' ', 'T', substr((string) $row->archived_at, 0, 19)).'Z',
@@ -928,9 +947,10 @@ final class PortalBugReports
     }
 
     /**
-     * What triage changes: a cancelled one's reason and, for a duplicate, the one it duplicates; any other status
-     * clears both. Only what differs from the row, so a save that touches neither changes neither -- and an older
-     * app that sends only a Cancelled status gets Won't fix.
+     * What triage changes: a fixed one may be a duplicate of the one it names, a cancelled one is won't fix, and any
+     * other status clears both. Only what differs from the row, so a save that touches neither changes neither -- an
+     * older app that sends only a Cancelled status gets Won't fix, a duplicate moved between Fixed and Cancelled stays
+     * one, and one cancelled as a duplicate before 2026-10-22 stays as it is.
      *
      * @param  array<string, mixed>  $changes
      * @param  array{cancel_reason?: ?string, duplicate_of?: ?int}  $triage
@@ -942,16 +962,34 @@ final class PortalBugReports
             return [];
         }
         $status = $changes['status'] ?? (string) $row->status;
+        $wasDuplicate = self::isDuplicate($row->status, $row->cancel_reason);
         $reason = null;
         $original = null;
-        if ($status !== self::STATUS_CANCELLED) {
-            if (($triage['cancel_reason'] ?? null) !== null || ($triage['duplicate_of'] ?? null) !== null) {
-                abort(422, 'Only a cancelled one has a reason: set its status to Cancelled too.');
+        if (! in_array($status, [self::STATUS_FIXED, self::STATUS_CANCELLED], true)) {
+            $asked = $triage['cancel_reason'] ?? null;
+            if ($asked === self::CANCEL_DUPLICATE || ($triage['duplicate_of'] ?? null) !== null) {
+                abort(422, self::ONLY_FIXED_DUPLICATES);
+            }
+            if ($asked === self::CANCEL_WONT_FIX) {
+                abort(422, self::ONLY_CANCELLED_WONT_FIX);
             }
         } else {
-            $saved = $row->status === self::STATUS_CANCELLED ? ($row->cancel_reason ?? self::CANCEL_WONT_FIX) : self::CANCEL_WONT_FIX;
-            $reason = array_key_exists('cancel_reason', $triage) ? ($triage['cancel_reason'] ?? self::CANCEL_WONT_FIX) : $saved;
-            $original = array_key_exists('duplicate_of', $triage) ? $triage['duplicate_of'] : ($row->duplicate_of === null ? null : (int) $row->duplicate_of);
+            $saved = match (true) {
+                $wasDuplicate && ($status === self::STATUS_FIXED || $row->status === $status) => self::CANCEL_DUPLICATE,
+                $status === self::STATUS_CANCELLED => $row->status === $status ? ($row->cancel_reason ?? self::CANCEL_WONT_FIX) : self::CANCEL_WONT_FIX,
+                default => null,
+            };
+            $reason = array_key_exists('cancel_reason', $triage) ? $triage['cancel_reason'] : $saved;
+            if ($status === self::STATUS_CANCELLED) {
+                $reason ??= self::CANCEL_WONT_FIX;
+                // A duplicate cancelled before 2026-10-22 stays one while it stays cancelled; a new one is fixed.
+                if ($reason === self::CANCEL_DUPLICATE && ! ($wasDuplicate && $row->status === $status)) {
+                    abort(422, self::ONLY_FIXED_DUPLICATES);
+                }
+            } elseif ($reason === self::CANCEL_WONT_FIX) {
+                abort(422, self::ONLY_CANCELLED_WONT_FIX);
+            }
+            $original = array_key_exists('duplicate_of', $triage) ? $triage['duplicate_of'] : ($wasDuplicate && $row->duplicate_of !== null ? (int) $row->duplicate_of : null);
             if ($reason === self::CANCEL_DUPLICATE && $original === null) {
                 abort(422, 'Choose the issue or request it duplicates.');
             }
@@ -987,7 +1025,7 @@ final class PortalBugReports
         if ($original === null) {
             abort(422, 'There is no #'.$id.' to be a duplicate of.');
         }
-        if ($original->status === self::STATUS_CANCELLED && $original->cancel_reason === self::CANCEL_DUPLICATE && $original->duplicate_of !== null) {
+        if (self::isDuplicate($original->status, $original->cancel_reason) && $original->duplicate_of !== null) {
             abort(422, '#'.$id.' is a duplicate itself: choose #'.$original->duplicate_of.', the one it duplicates.');
         }
 

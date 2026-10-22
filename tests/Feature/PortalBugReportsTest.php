@@ -327,8 +327,9 @@ class PortalBugReportsTest extends TestCase
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the feature request Dark mode for the calendar In review')));
     }
 
-    // Triage (2026-10-21, user): a cancelled one says why - won't fix, or a duplicate of the report it names.
-    public function test_mis_cancels_a_report_as_wont_fix_or_as_a_duplicate_and_the_log_says_which(): void
+    // Triage (2026-10-21, user): a cancelled one is won't fix, and a duplicate names the report it duplicates -- fixed
+    // with it since 2026-10-22 (user), and kept one when it moves between Fixed and Cancelled.
+    public function test_mis_cancels_a_report_as_wont_fix_or_fixes_it_as_a_duplicate_and_the_log_says_which(): void
     {
         $analyst = $this->memberOf('MIS');
         $mis = $this->headersFor($analyst);
@@ -338,12 +339,15 @@ class PortalBugReportsTest extends TestCase
         // An app from before sends only the status: it is cancelled as won't fix.
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'wont_fix'])
             ->assertOk()->assertJsonPath('data.status', 'wont_fix')->assertJsonPath('data.cancelReason', 'wont_fix')->assertJsonPath('data.duplicateOf', null);
-        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])
-            ->assertOk()->assertJsonPath('data.cancelReason', 'duplicate')
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])
+            ->assertOk()->assertJsonPath('data.status', 'fixed')->assertJsonPath('data.cancelReason', 'duplicate')
             ->assertJsonPath('data.duplicateOf', ['id' => (string) $original, 'title' => 'Calendar skips Sunday']);
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
         $this->assertSame(['id' => (string) $original, 'title' => 'Calendar skips Sunday'], $listed['duplicateOf']);
-        // Moved on, it is cancelled no longer and gives no reason.
+        // Fixed plainly, it is a duplicate no longer; a plain fixed one gives no reason.
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['cancelReason' => ''])
+            ->assertOk()->assertJsonPath('data.status', 'fixed')->assertJsonPath('data.cancelReason', null)->assertJsonPath('data.duplicateOf', null);
+        // Moved on, it is closed no longer and gives no reason.
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])
             ->assertOk()->assertJsonPath('data.cancelReason', null)->assertJsonPath('data.duplicateOf', null);
 
@@ -351,7 +355,27 @@ class PortalBugReportsTest extends TestCase
         $this->assertSame([null, null], [$row->cancel_reason, $row->duplicate_of]);
         $messages = PortalLog::query()->where('employee_id', $analyst->getKey())->where('resource', 'bug-reports')->where('record_id', (string) $id)->pluck('message');
         $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, "cancelled the bug report The month view jumps as won't fix")));
-        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the bug report The month view jumps a duplicate of #'.$original.' Calendar skips Sunday')));
+        $this->assertTrue($messages->contains(fn (string $message): bool => str_ends_with($message, 'marked the bug report The month view jumps a duplicate of #'.$original.' Calendar skips Sunday and fixed it')));
+    }
+
+    // One cancelled as a duplicate before 2026-10-22 stays one while it stays cancelled, and moved to Fixed it stays one.
+    public function test_a_duplicate_cancelled_before_stays_one_and_fixed_it_still_is(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $mis = $this->headersFor($analyst);
+        $first = $this->unlinked('Calendar skips Sunday');
+        $second = $this->unlinked('Calendar skips weekends');
+        $id = $this->unlinked('The month view jumps', ['assignee_id' => $analyst->getKey(), 'status' => 'wont_fix', 'cancel_reason' => 'duplicate', 'duplicate_of' => $first]);
+
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['duplicateOf' => (string) $second])
+            ->assertOk()->assertJsonPath('data.status', 'wont_fix')->assertJsonPath('data.cancelReason', 'duplicate')->assertJsonPath('data.duplicateOf.id', (string) $second);
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed'])
+            ->assertOk()->assertJsonPath('data.cancelReason', 'duplicate')->assertJsonPath('data.duplicateOf.id', (string) $second);
+        // Fixed, it is no longer the cancelled duplicate it was: back to Cancelled, it is won't fix.
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'wont_fix', 'cancelReason' => 'duplicate'])
+            ->assertStatus(422)->assertJsonPath('message', 'Only a fixed one can be a duplicate: set its status to Fixed too.');
+        $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'wont_fix'])
+            ->assertOk()->assertJsonPath('data.cancelReason', 'wont_fix')->assertJsonPath('data.duplicateOf', null);
     }
 
     public function test_triage_that_does_not_add_up_is_refused_and_changes_nothing(): void
@@ -363,17 +387,25 @@ class PortalBugReportsTest extends TestCase
         $id = $this->unlinked('The month view jumps', ['assignee_id' => $analyst->getKey()]);
         $patch = fn (array $body) => $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, $body)->assertStatus(422);
 
+        $fixedDuplicate = $this->unlinked('Calendar skips Sunday once more', ['status' => 'fixed', 'cancel_reason' => 'duplicate', 'duplicate_of' => $original]);
         $patch(['status' => 'wont_fix', 'cancelReason' => 'later'])->assertJsonPath('message', "Choose Won't fix or Duplicate.");
-        $patch(['cancelReason' => 'wont_fix'])->assertJsonPath('message', 'Only a cancelled one has a reason: set its status to Cancelled too.');
-        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate'])->assertJsonPath('message', 'Choose the issue or request it duplicates.');
-        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $id])->assertJsonPath('message', 'It cannot be a duplicate of itself.');
-        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => '999999999'])->assertJsonPath('message', 'There is no #999999999 to be a duplicate of.');
+        $patch(['cancelReason' => 'wont_fix'])->assertJsonPath('message', "Only a cancelled one is won't fix: set its status to Cancelled too.");
+        $patch(['status' => 'fixed', 'cancelReason' => 'wont_fix'])->assertJsonPath('message', "Only a cancelled one is won't fix: set its status to Cancelled too.");
+        $patch(['cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])->assertJsonPath('message', 'Only a fixed one can be a duplicate: set its status to Fixed too.');
+        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $original])->assertJsonPath('message', 'Only a fixed one can be a duplicate: set its status to Fixed too.');
+        $patch(['status' => 'fixed', 'cancelReason' => 'duplicate'])->assertJsonPath('message', 'Choose the issue or request it duplicates.');
+        $patch(['status' => 'fixed', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $id])->assertJsonPath('message', 'It cannot be a duplicate of itself.');
+        $patch(['status' => 'fixed', 'cancelReason' => 'duplicate', 'duplicateOf' => '999999999'])->assertJsonPath('message', 'There is no #999999999 to be a duplicate of.');
         // One in the Recycle Bin is not there to be duplicated.
         $binned = $this->unlinked('Calendar skips Monday', ['deleted_at' => '2026-10-21 01:00:00']);
-        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $binned])->assertJsonPath('message', 'There is no #'.$binned.' to be a duplicate of.');
-        $patch(['status' => 'wont_fix', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $duplicate])
-            ->assertJsonPath('message', '#'.$duplicate.' is a duplicate itself: choose #'.$original.', the one it duplicates.');
+        $patch(['status' => 'fixed', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $binned])->assertJsonPath('message', 'There is no #'.$binned.' to be a duplicate of.');
+        // A duplicate is one, fixed or cancelled before.
+        foreach ([$duplicate, $fixedDuplicate] as $chained) {
+            $patch(['status' => 'fixed', 'cancelReason' => 'duplicate', 'duplicateOf' => (string) $chained])
+                ->assertJsonPath('message', '#'.$chained.' is a duplicate itself: choose #'.$original.', the one it duplicates.');
+        }
         $patch(['status' => 'wont_fix', 'cancelReason' => 'wont_fix', 'duplicateOf' => (string) $original])->assertJsonPath('message', 'Only a duplicate names the one it duplicates.');
+        $patch(['status' => 'fixed', 'duplicateOf' => (string) $original])->assertJsonPath('message', 'Only a duplicate names the one it duplicates.');
 
         $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
         $this->assertSame(['new', null, null], [$row->status, $row->cancel_reason, $row->duplicate_of]);

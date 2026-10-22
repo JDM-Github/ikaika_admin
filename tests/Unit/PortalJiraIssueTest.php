@@ -150,7 +150,9 @@ class PortalJiraIssueTest extends TestCase
             "won't do" => [$done("Won't Do"), 'wont_fix'],
             "won't fix, curly" => [$done("Won\u{2019}t Fix"), 'wont_fix'],
             'declined' => [$done('Declined'), 'wont_fix'],
-            'duplicate' => [$done('Duplicate'), 'wont_fix'],
+            // A duplicate is fixed under its original (2026-10-22, user); one Jira cancelled is still cancelled.
+            'duplicate' => [$done('Duplicate'), 'fixed'],
+            'duplicate, cancelled' => [['status' => ['name' => 'Cancelled', 'statusCategory' => ['key' => 'done']], 'resolution' => ['name' => 'Duplicate']], 'wont_fix'],
             'cannot reproduce' => [$done('Cannot Reproduce'), 'wont_fix'],
             'no category' => [['status' => ['name' => 'Odd']], 'in_progress'],
             // IPS's own board (2026-10-19, user): the column's name wins over the category its owner left it in.
