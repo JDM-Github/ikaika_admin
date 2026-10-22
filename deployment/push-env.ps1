@@ -12,6 +12,8 @@ param(
         'JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_PROJECT_KEY', 'JIRA_CLOUD_ID', 'JIRA_WEBHOOK_SECRET',
         # Both servers file each kind as the same type in the shared project (2026-10-21).
         'JIRA_ISSUE_TYPE_BUG', 'JIRA_ISSUE_TYPE_FEATURE', 'JIRA_ISSUE_TYPE_FEEDBACK',
+        # And the team new issues go to and the site's plan fields (2026-10-22).
+        'JIRA_DEFAULT_TEAM', 'JIRA_FIELD_TEAM', 'JIRA_FIELD_START_DATE',
         'MAIL_RELAY_URL', 'MAIL_RELAY_KEY',
         'OLLAMA_API_KEY',
         'PORTAL_ID_LOGIN_PASSWORD'

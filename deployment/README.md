@@ -208,7 +208,7 @@ A report can be archived out of the way or deleted to its deleter's Recycle Bin 
 
 Production and the Test Server share one project (2026-10-21), because what production's people report is fixed on staging. Staging's issues carry a second label, `staging`, and say "(staging report #N)" where production's say "(report #N)"; each server follows only the reports sent on it.
 
-**1. A service account and its token.** In Atlassian, a dedicated user (not a Jira admin) with an API token (id.atlassian.com → Security → API tokens). On each project it needs **Browse projects**, **Create issues**, **Create attachments**, **Edit issues** (a kind changed in the portal changes the work type, and a duplicate is labelled), **Transition issues** (a status changed in the portal moves the card) and **Link issues** (a duplicate is linked to its original). The site needs issue linking on, with its standard **Duplicate** link type. Every issue the portal makes is reported by this account, so nobody's name is on an anonymous report.
+**1. A service account and its token.** In Atlassian, a dedicated user (not a Jira admin) with an API token (id.atlassian.com → Security → API tokens). On each project it needs **Browse projects**, **Create issues**, **Create attachments**, **Edit issues** (a kind changed in the portal changes the work type, and a duplicate is labelled), **Transition issues** (a status changed in the portal moves the card), **Link issues** (a duplicate is linked to its original) and **Assign issues** (who works on a report is its issue's assignee, 2026-10-22). On the site it needs **Browse users and groups**, which finds each MIS member's Jira account by their work address. The site needs issue linking on, with its standard **Duplicate** link type. Every issue the portal makes is reported by this account, so nobody's name is on an anonymous report.
 
 **2. The settings.** In your local `.env` (the Test Server's):
 
@@ -224,6 +224,8 @@ JIRA_WEBHOOK_SECRET=  any long random string, also typed into the webhook below
 **Classic or scoped token.** A classic token ("Create API token") works against the site as it is. A scoped one ("Create API token with scopes": `read:jira-user`, `read:jira-work`, `write:jira-work`) is refused there with a 401 and works only through Atlassian's gateway, which `JIRA_CLOUD_ID` turns on; the links people open stay on the site.
 
 Optional: `JIRA_ISSUE_TYPE_BUG`, `JIRA_ISSUE_TYPE_FEATURE`, `JIRA_ISSUE_TYPE_FEEDBACK` (default Bug, Story, Task; a type the project lacks falls back to Task). Both servers must file each kind as the same type, so push-env sends these too.
+
+A report's plan is the issue's too (2026-10-22): its start and due dates, the epic it sits under and the team that owns it, and who works on it, all both ways. `JIRA_DEFAULT_TEAM` (default `DEV`) is the team every new issue goes to, by name; blank, none. The site's Team and Start date fields are found by their type and name - `portal:jira-check` says which it found - and `JIRA_FIELD_TEAM` / `JIRA_FIELD_START_DATE` (`customfield_N`) name them only where it cannot. A new issue is sent only what its type's create screen has; the check lists what a screen lacks. An MIS member Jira has no account for by their work address can still be assigned in the portal, and their issues stay unassigned in Jira; the check names each member's account.
 
 `push-env.ps1` sends them to the Test Server with the rest. Production's come from `.ikaika_scripts_configs/production-settings.env` (`.\script.ps1 deploy/push-env -Target production`): the same site, account, token, project and issue types, and its own webhook secret.
 
@@ -401,6 +403,8 @@ Run `deploy.ps1` here, then the portal's `deploy.ps1`.
 | `Jira HTTP 403` or `404` on the project | The service account lacks Browse projects / Create issues / Create attachments on it, or `JIRA_PROJECT_KEY` names another project |
 | `portal:jira-check` says `JIRA_PROJECT_KEY is a key ... had before` | The project's key was changed in Jira. Jira still files under the old key and the server follows the issues either way; set `JIRA_PROJECT_KEY` to the new key, push it with `deploy/push-env`, and the next read-back finds the reports linked under the old one by their issues |
 | `Jira HTTP 400` naming a field | The project requires a field the portal does not fill (a required custom field); make it optional for these issue types |
+| Assigning someone says `Jira HTTP 400` or `403` naming the assignee | The service account lacks **Assign issues**, or that person cannot be assigned in the project; `portal:jira-check` says what the account may do |
+| An MIS member is assigned in the portal but unassigned in Jira | Jira has no account under their work address (or the account lacks **Browse users and groups**); `portal:jira-check` names each member's account |
 | Cancelling a duplicate says `Jira HTTP 404` or `403` | The service account lacks **Link issues** on the project, or issue linking is off on the site; `portal:jira-check` says whether the Duplicate link type is there |
 | Cancelling a duplicate says `Jira HTTP 400` naming `labels` | The project's edit screen has no Labels field, so the issue cannot be labelled; add the field to the screen |
 | Jira webhook deliveries answer `401` | The webhook's secret and `JIRA_WEBHOOK_SECRET` differ, or the setting was not applied |

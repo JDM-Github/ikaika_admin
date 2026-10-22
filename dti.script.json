@@ -61,6 +61,20 @@
             "default": ""
           },
           {
+            "flag": "FromTag",
+            "label": "-FromTag   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Rebuild this tag as it was, for staging: its sources in a worktree of their own.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/build-release FromTag",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh commands/build-release FromTag",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh commands/build-release FromTag -Preview"
+            }
+          },
+          {
             "flag": "Deploy",
             "label": "-Deploy   [SwitchParameter]",
             "type": "boolean",
@@ -107,6 +121,14 @@
             "default": ""
           },
           {
+            "flag": "AllowDirty",
+            "label": "-AllowDirty   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "With a -Bump, build over uncommitted changes, which the version's tag would then not hold.",
+            "default": ""
+          },
+          {
             "flag": "Gui",
             "label": "-Gui   [SwitchParameter]",
             "type": "boolean",
@@ -116,7 +138,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Bump ${build-release.args.Bump} -Tag ${build-release.args.Tag} -Deploy ${build-release.args.Deploy} -DryRun ${build-release.args.DryRun} -Clean ${build-release.args.Clean} -Keep ${build-release.args.Keep} -FixTarget ${build-release.args.FixTarget} -Gui ${build-release.args.Gui}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Bump ${build-release.args.Bump} -Tag ${build-release.args.Tag} -FromTag ${build-release.args.FromTag} -Deploy ${build-release.args.Deploy} -DryRun ${build-release.args.DryRun} -Clean ${build-release.args.Clean} -Keep ${build-release.args.Keep} -FixTarget ${build-release.args.FixTarget} -AllowDirty ${build-release.args.AllowDirty} -Gui ${build-release.args.Gui}"
         ]
       },
       "check-targets": {
@@ -211,6 +233,20 @@
             ]
           },
           {
+            "flag": "BuildFrom",
+            "label": "-BuildFrom   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Rebuild this tag as it was, for staging, as the form's build_from does.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/ci-local BuildFrom",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh commands/ci-local BuildFrom",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh commands/ci-local BuildFrom -Preview"
+            }
+          },
+          {
             "flag": "Upload",
             "label": "-Upload   [SwitchParameter]",
             "type": "boolean",
@@ -236,7 +272,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/ci-local -Target ${ci-local.args.Target} -ConfirmProduction ${ci-local.args.ConfirmProduction} -Version ${ci-local.args.Version} -Upload ${ci-local.args.Upload} -NoGitHub ${ci-local.args.NoGitHub} -PlanOnly ${ci-local.args.PlanOnly}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/ci-local -Target ${ci-local.args.Target} -ConfirmProduction ${ci-local.args.ConfirmProduction} -Version ${ci-local.args.Version} -BuildFrom ${ci-local.args.BuildFrom} -Upload ${ci-local.args.Upload} -NoGitHub ${ci-local.args.NoGitHub} -PlanOnly ${ci-local.args.PlanOnly}"
         ],
         "skipped": [
           "SecretsPath"
@@ -744,6 +780,21 @@
         "description": "Builds and deploys the admin API alone to the Test Server",
         "args": [
           {
+            "flag": "Bump",
+            "label": "-Bump   [String]",
+            "type": "string",
+            "required": false,
+            "description": "same installs this checkout untagged; keep (the next build number only), patch, minor or major release it first.",
+            "default": "same",
+            "allowed_values": [
+              "same",
+              "keep",
+              "patch",
+              "minor",
+              "major"
+            ]
+          },
+          {
             "flag": "SkipBuild",
             "label": "-SkipBuild   [SwitchParameter]",
             "type": "boolean",
@@ -753,7 +804,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 deploy/admin -SkipBuild ${admin.args.SkipBuild}"
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/admin -Bump ${admin.args.Bump} -SkipBuild ${admin.args.SkipBuild}"
         ]
       },
       "check-health": {
@@ -872,11 +923,25 @@
         "description": "Builds and deploys the admin API and the portal to production, portal.ikaikabim.com/v2",
         "args": [
           {
+            "flag": "Bump",
+            "label": "-Bump   [String]",
+            "type": "string",
+            "required": false,
+            "description": "What both repos release as: keep takes the next build number only; patch, minor and major bump the version.",
+            "default": "keep",
+            "allowed_values": [
+              "keep",
+              "patch",
+              "minor",
+              "major"
+            ]
+          },
+          {
             "flag": "SkipBuild",
             "label": "-SkipBuild   [SwitchParameter]",
             "type": "boolean",
             "required": false,
-            "description": "Deploy the last builds instead of building again.",
+            "description": "Deploy the released archives as they stand instead of releasing new ones.",
             "default": ""
           },
           {
@@ -889,7 +954,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 deploy/production -SkipBuild ${production.args.SkipBuild} -Yes ${production.args.Yes}"
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/production -Bump ${production.args.Bump} -SkipBuild ${production.args.SkipBuild} -Yes ${production.args.Yes}"
         ]
       },
       "push-env": {
@@ -929,6 +994,9 @@
               "JIRA_ISSUE_TYPE_BUG",
               "JIRA_ISSUE_TYPE_FEATURE",
               "JIRA_ISSUE_TYPE_FEEDBACK",
+              "JIRA_DEFAULT_TEAM",
+              "JIRA_FIELD_TEAM",
+              "JIRA_FIELD_START_DATE",
               "MAIL_RELAY_URL",
               "MAIL_RELAY_KEY",
               "OLLAMA_API_KEY",
@@ -972,6 +1040,21 @@
         "description": "Deploys the secret settings, the admin API and the portal to the Test Server from this PC",
         "args": [
           {
+            "flag": "Bump",
+            "label": "-Bump   [String]",
+            "type": "string",
+            "required": false,
+            "description": "same installs both checkouts untagged; keep (the next build number only), patch, minor or major release both first.",
+            "default": "same",
+            "allowed_values": [
+              "same",
+              "keep",
+              "patch",
+              "minor",
+              "major"
+            ]
+          },
+          {
             "flag": "SkipSettings",
             "label": "-SkipSettings   [SwitchParameter]",
             "type": "boolean",
@@ -1005,7 +1088,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 deploy/test-server -SkipSettings ${test-server.args.SkipSettings} -SkipBuild ${test-server.args.SkipBuild} -ResetDatabases ${test-server.args.ResetDatabases} -Yes ${test-server.args.Yes}"
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/test-server -Bump ${test-server.args.Bump} -SkipSettings ${test-server.args.SkipSettings} -SkipBuild ${test-server.args.SkipBuild} -ResetDatabases ${test-server.args.ResetDatabases} -Yes ${test-server.args.Yes}"
         ]
       }
     },
