@@ -268,15 +268,61 @@ final class PortalBugReports
     }
 
     /**
-     * MIS moves a report along: its kind, status, note, who handles it or its version. Only the fields sent change.
+     * MIS moves a report along: its kind, status, note, who handles it or its version. Only the fields sent change,
+     * under the lock a send takes (2026-10-22), so a change for Jira and a send under way never cross.
      *
      * @return array{section: string, resource: string, data: array<string, mixed>}
      */
     public function update(Employee $actor, int $id, Request $request): array
     {
         $portal = DB::connection('portal');
-        $row = $this->changeableRow($id);
+        $row = null;
+        $changes = [];
+        $held = $this->jira->withReportLock($id, function () use ($actor, $id, $request, $portal, &$row, &$changes): void {
+            $row = $this->changeableRow($id);
+            $changes = $this->validatedChanges($row, $request);
+            $handler = array_key_exists('assignee_id', $changes) ? $changes['assignee_id'] : $row->assignee_id;
+            if ($handler === null && array_diff(array_keys($changes), ['assignee_id']) !== []) {
+                abort(422, 'Assign someone to handle it before changing it.');
+            }
+            // A linked report's kind and status are the issue's too (2026-10-20, user): Jira changes first, or nothing does.
+            $toJira = $this->jira->owns($row)
+                && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status)
+                    || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes));
+            if ($toJira) {
+                if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
+                    abort(403, 'Its kind and status change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
+                }
+                if (! $this->jira->isConfigured()) {
+                    abort(503, 'Jira is not connected yet.');
+                }
+                try {
+                    $this->jira->changeInJira($row, $changes);
+                } catch (RuntimeException $error) {
+                    abort(422, 'Jira did not take the change: '.$error->getMessage());
+                }
+            }
 
+            $portal->table('bug_reports')->where('id', $id)->update([...$changes, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
+        });
+        if (! $held) {
+            abort(409, self::BEING_SENT);
+        }
+
+        $saved = $portal->table('bug_reports')->where('id', $id)->first();
+        $names = $this->namesOf([$saved->assignee_id]);
+        $this->audit->record($actor, PortalLogAction::PATCH, 'bug-reports', $this->logMessage($actor, $row, $changes, $names), (string) $id, $request, $changes);
+
+        return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($saved)];
+    }
+
+    /**
+     * The fields a save sends, as the columns they change; nothing sent is refused.
+     *
+     * @return array<string, mixed>
+     */
+    private function validatedChanges(object $row, Request $request): array
+    {
         $changes = [];
         if ($request->has('kind')) {
             $changes['kind'] = $this->validatedKind($request->input('kind'), null);
@@ -324,35 +370,8 @@ final class PortalBugReports
         if ($changes === []) {
             abort(422, 'Change its kind, status, note, who handles it or its version.');
         }
-        $handler = array_key_exists('assignee_id', $changes) ? $changes['assignee_id'] : $row->assignee_id;
-        if ($handler === null && array_diff(array_keys($changes), ['assignee_id']) !== []) {
-            abort(422, 'Assign someone to handle it before changing it.');
-        }
-        // A linked report's kind and status are the issue's too (2026-10-20, user): Jira changes first, or nothing does.
-        $toJira = $this->jira->owns($row)
-            && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status)
-                || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes));
-        if ($toJira) {
-            if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
-                abort(403, 'Its kind and status change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
-            }
-            if (! $this->jira->isConfigured()) {
-                abort(503, 'Jira is not connected yet.');
-            }
-            try {
-                $this->jira->changeInJira($row, $changes);
-            } catch (RuntimeException $error) {
-                abort(422, 'Jira did not take the change: '.$error->getMessage());
-            }
-        }
 
-        $portal->table('bug_reports')->where('id', $id)->update([...$changes, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
-
-        $saved = $portal->table('bug_reports')->where('id', $id)->first();
-        $names = $this->namesOf([$saved->assignee_id]);
-        $this->audit->record($actor, PortalLogAction::PATCH, 'bug-reports', $this->logMessage($actor, $row, $changes, $names), (string) $id, $request, $changes);
-
-        return ['section' => 'bug-reports', 'resource' => 'bug-reports', 'data' => $this->item($saved)];
+        return $changes;
     }
 
     /**

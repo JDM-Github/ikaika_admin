@@ -968,15 +968,18 @@ class PortalBugReportsJiraTest extends TestCase
         $this->assertFalse(Recycle::query()->where('product', 'portal')->where('recycle_key', 'bug-report-'.$done)->firstOrFail()->payload['issue']['jiraCancelled']);
     }
 
-    // A send holds the report: archiving or deleting it waits rather than crossing it.
-    public function test_archiving_or_deleting_one_being_sent_waits(): void
+    // A send holds the report: saving, archiving or deleting it waits rather than crossing it (saving: 2026-10-22).
+    public function test_saving_archiving_or_deleting_one_being_sent_waits(): void
     {
         $this->connectJira();
-        $headers = $this->headersFor($this->memberOf('MIS'));
-        $id = $this->report(['jira_state' => 'pending']);
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $id = $this->report(['assignee_id' => $analyst->getKey(), 'jira_state' => 'pending']);
         $lock = Cache::lock('portal-jira-push:'.$id, 120);
         $this->assertTrue($lock->get());
         try {
+            $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])
+                ->assertStatus(409)->assertJsonPath('message', 'It is being sent to Jira right now. Try again in a moment.');
             $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id.'/archive', ['archived' => true])
                 ->assertStatus(409)->assertJsonPath('message', 'It is being sent to Jira right now. Try again in a moment.');
             $this->withHeaders($headers)->deleteJson(self::BASE.'bug-reports/'.$id)
@@ -986,7 +989,9 @@ class PortalBugReportsJiraTest extends TestCase
         }
 
         $row = DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
-        $this->assertSame([null, null], [$row->archived_at, $row->deleted_at]);
+        $this->assertSame(['new', null, null], [$row->status, $row->archived_at, $row->deleted_at]);
+        // Once the send lets go, the same save goes through.
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_progress'])->assertOk()->assertJsonPath('data.status', 'in_progress');
     }
 
     // Out of the way is out of Jira's way: an archived or deleted one is never queued or sent, even by a job from before.
