@@ -297,7 +297,7 @@ final class PortalBudgetLedger
      * Writes one ledger row and its links, its description only the note it was given: who recorded it
      * is created_by's to say.
      *
-     * @param  array{envelopeId?: ?int, accountId?: ?int, budgetCodeId?: ?int, transferSourceId?: ?int, transferDestinationId?: ?int, payorPayee?: ?string}  $links
+     * @param  array{envelopeId?: ?int, accountId?: ?int, budgetCodeId?: ?int, transferSourceId?: ?int, transferDestinationId?: ?int, payorPayee?: ?string, sourceKey?: ?string}  $links
      */
     public function record(Employee $actor, string $name, string $type, int $cents, string $date, ?string $notes, array $links = []): int
     {
@@ -315,6 +315,7 @@ final class PortalBudgetLedger
             'created_by' => $actorName,
             'created_at' => $now,
             'updated_at' => $now,
+            'source_key' => $links['sourceKey'] ?? null,
         ]);
         $joins = [
             'transactions_envelopes' => ['envelope_id', $links['envelopeId'] ?? null],

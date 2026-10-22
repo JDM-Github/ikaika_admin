@@ -495,6 +495,65 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertSame(0, $tracker->table('transactions_budget_codes')->where('transaction_id', $stray)->count());
     }
 
+    // The reported ask (2026-10-22): one expense split over envelopes under different budget codes, each share a line of its own.
+    public function test_a_split_spreads_one_expense_over_envelopes_each_under_its_own_code(): void
+    {
+        $tracker = DB::connection('tracker');
+        $account = $this->account('Seeded Split Account', 'split.seeded@example.test', 0.00);
+        $transport = $this->envelope('Seeded Split Transport', 5000.00, $account);
+        $groceries = $this->envelope('Seeded Split Groceries', 1000.00, $account);
+        $codes = [];
+        foreach ([$transport => 'SEED-SPLIT-T', $groceries => 'SEED-SPLIT-G'] as $envelope => $codeName) {
+            $codes[$envelope] = (int) $tracker->table('budget_codes')->insertGetId(['name' => $codeName]);
+            $credit = (int) $tracker->table('transactions_envelopes')->where('envelope_id', $envelope)->value('transaction_id');
+            $tracker->table('transactions_budget_codes')->insert(['transaction_id' => $credit, 'budget_code_id' => $codes[$envelope]]);
+        }
+        $admin = $this->admin();
+        $split = fn (array $shares) => $this->postJson(self::BASE.'budget-transactions', [
+            'type' => 'Expense', 'name' => 'Site supplies', 'amount' => 3500, 'occurredOn' => '2026-10-07',
+            'accountId' => $account, 'payorPayee' => 'Lazada', 'splits' => $shares,
+        ], $admin);
+
+        // The shares must add up to the amount, cover two envelopes or more, and name each envelope once.
+        $split([['envelopeId' => $transport, 'amount' => 3000], ['envelopeId' => $groceries, 'amount' => 400]])->assertStatus(422)
+            ->assertJsonPath('message', 'The split adds up to ₱3,400.00, but the amount is ₱3,500.00. Make the shares match it.');
+        $split([['envelopeId' => $transport, 'amount' => 3500]])->assertStatus(422)
+            ->assertJsonPath('message', 'A split needs at least two envelopes.');
+        $split([['envelopeId' => $transport, 'amount' => 3000], ['envelopeId' => $transport, 'amount' => 500]])->assertStatus(422)
+            ->assertJsonPath('message', 'Each envelope can take only one share of a split.');
+        // Each share is checked against its own envelope, and a refusal writes no share at all.
+        $split([['envelopeId' => $transport, 'amount' => 2000], ['envelopeId' => $groceries, 'amount' => 1500]])->assertStatus(422)
+            ->assertJsonPath('message', 'Seeded Split Groceries has only ₱1,000.00 left. Confirm to go past it.');
+        $this->assertEqualsWithDelta(5000.00, $this->envelopeRemaining($transport), 0.001);
+
+        $split([
+            ['envelopeId' => $transport, 'budgetCodeId' => $codes[$transport], 'amount' => 3000],
+            ['envelopeId' => $groceries, 'budgetCodeId' => $codes[$groceries], 'amount' => 500],
+        ])->assertCreated()->assertJsonPath('data.amount', 3500);
+
+        $this->assertEqualsWithDelta(2000.00, $this->envelopeRemaining($transport), 0.001);
+        $this->assertEqualsWithDelta(500.00, $this->envelopeRemaining($groceries), 0.001);
+        $lines = $tracker->table('transactions')->where('transaction_name', 'Site supplies')->orderBy('id')->get();
+        $this->assertSame(['3000.00', '500.00'], $lines->pluck('amount')->all());
+        foreach ([$transport, $groceries] as $index => $envelope) {
+            $lineId = (int) $lines[$index]->id;
+            $this->assertSame($envelope, (int) $tracker->table('transactions_envelopes')->where('transaction_id', $lineId)->value('envelope_id'));
+            $this->assertSame($codes[$envelope], (int) $tracker->table('transactions_budget_codes')->where('transaction_id', $lineId)->value('budget_code_id'));
+            $this->assertSame('Lazada', $lines[$index]->payor_payee);
+        }
+        $this->assertTrue($this->logged('manage.budget-transactions', 'added the expense Site supplies of ₱3,500.00 on Seeded Split Transport, Seeded Split Groceries'));
+
+        // On the ledger both lines name the same split, and each is edited on its own.
+        Cache::flush();
+        $listed = collect($this->getJson(self::BASE.'budget-transactions', $admin)->assertOk()->json('data'))
+            ->whereIn('id', $lines->pluck('id')->map(fn ($id): string => (string) $id)->all())
+            ->values();
+        $this->assertCount(2, $listed);
+        $this->assertNotNull($listed[0]['splitKey']);
+        $this->assertSame($listed[0]['splitKey'], $listed[1]['splitKey']);
+        $this->assertTrue($listed[0]['isEditable']);
+    }
+
     public function test_a_member_reaches_none_of_the_money_routes(): void
     {
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($this->activeMember())];
@@ -587,6 +646,71 @@ class PortalBudgetMovementsTest extends TestCase
         $this->postJson(self::BASE.'budget-transactions/receipts', [], $this->admin())
             ->assertStatus(422)
             ->assertJsonPath('message', 'Choose an image or PDF receipt.');
+    }
+
+    // The reported ask (2026-10-22): several receipt photos go with one transaction, onto every share of a split.
+    public function test_several_receipt_photos_land_on_each_line_and_an_edit_adds_or_takes_one_off(): void
+    {
+        Http::preventStrayRequests();
+        $uploaded = fn (string $name): array => ['secure_url' => 'https://res.cloudinary.com/test-cloud/image/upload/v1/ikaika-portal/transactions/'.$name, 'original_filename' => $name, 'bytes' => 100];
+        Http::fake([
+            'https://api.cloudinary.com/v1_1/test-cloud/auto/upload' => Http::sequence()
+                ->push($uploaded('one.jpg'), 200)
+                ->push($uploaded('two.jpg'), 200)
+                ->push($uploaded('three.jpg'), 200),
+        ]);
+        $tracker = DB::connection('tracker');
+        $account = $this->account('Seeded Receipts Account', 'receipts.seeded@example.test', 0.00);
+        $first = $this->envelope('Seeded Receipts First', 500.00, $account);
+        $second = $this->envelope('Seeded Receipts Second', 500.00, $account);
+        $upload = fn (string $name): string => (string) $this->post(self::BASE.'budget-transactions/receipts', ['file' => UploadedFile::fake()->create($name, 9, 'image/jpeg')], $this->admin())
+            ->assertCreated()
+            ->json('data.receiptId');
+        $receiptsOf = fn (int $id): array => array_map('basename', $tracker->table('attachments')
+            ->where(['table_name' => 'transactions', 'record_id' => $id, 'field_name' => 'receipt'])
+            ->orderBy('id')
+            ->pluck('file_url')
+            ->all());
+        $one = $upload('one.jpg');
+        $two = $upload('two.jpg');
+
+        $this->addTransaction([
+            'type' => 'Expense', 'name' => 'Site supplies', 'amount' => 300, 'accountId' => $account, 'receiptIds' => [$one, $two],
+            'splits' => [['envelopeId' => $first, 'amount' => 100], ['envelopeId' => $second, 'amount' => 200]],
+        ])->assertCreated();
+        $lines = array_map('intval', $tracker->table('transactions')->where('transaction_name', 'Site supplies')->orderBy('id')->pluck('id')->all());
+        $this->assertCount(2, $lines);
+        $this->assertSame(['one.jpg', 'two.jpg'], $receiptsOf($lines[0]));
+        $this->assertSame(['one.jpg', 'two.jpg'], $receiptsOf($lines[1]));
+
+        // An edit takes one off by the id the ledger sends with it, and adds a new one beside the rest.
+        Cache::flush();
+        $listed = collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->assertOk()->json('data'))->firstWhere('id', (string) $lines[0]);
+        $three = $upload('three.jpg');
+        $this->patchJson(self::BASE.'budget-transactions/'.$lines[0], [
+            'name' => 'Site supplies', 'occurredOn' => '2026-10-07', 'receiptIds' => [$three], 'removedReceiptIds' => [$listed['receipts'][0]['id']],
+        ], $this->admin())->assertOk();
+        $this->assertSame(['two.jpg', 'three.jpg'], $receiptsOf($lines[0]));
+        $this->assertSame(['one.jpg', 'two.jpg'], $receiptsOf($lines[1]));
+
+        // Another line's receipt id takes nothing off it.
+        $elsewhere = $tracker->table('attachments')->where(['table_name' => 'transactions', 'record_id' => $lines[1]])->value('id');
+        $this->patchJson(self::BASE.'budget-transactions/'.$lines[0], ['name' => 'Site supplies', 'occurredOn' => '2026-10-07', 'removedReceiptIds' => [$elsewhere]], $this->admin())
+            ->assertOk();
+        $this->assertSame(['one.jpg', 'two.jpg'], $receiptsOf($lines[1]));
+
+        // More than ten, or a list in the wrong shape, is refused before anything is written.
+        $eleven = array_map(fn (int $n): string => sprintf('00000000-0000-4000-8000-%012d', $n), range(1, 11));
+        $this->addTransaction(['type' => 'Expense', 'name' => 'Too many', 'amount' => 10, 'envelopeId' => $first, 'accountId' => $account, 'receiptIds' => $eleven])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'A transaction can keep up to 10 receipts.');
+        $this->addTransaction(['type' => 'Expense', 'name' => 'Odd', 'amount' => 10, 'envelopeId' => $first, 'accountId' => $account, 'receiptIds' => 'abc'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'The receipts are not in the right shape.');
+        $this->patchJson(self::BASE.'budget-transactions/'.$lines[0], ['name' => 'Site supplies', 'occurredOn' => '2026-10-07', 'removedReceiptIds' => ['x']], $this->admin())
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'That receipt was not found.');
+        $this->assertSame(0, $tracker->table('transactions')->whereIn('transaction_name', ['Too many', 'Odd'])->count());
     }
 
     // The reported ask (2026-10-13): Edit changes a transaction's details, receipt and amount, never where it went.

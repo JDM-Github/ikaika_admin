@@ -19,7 +19,8 @@ use Illuminate\Support\Str;
  *
  * A receipt photo is optional (2026-10-07). It is uploaded first, held for an hour under the uploader,
  * and named by receiptId when the transaction is added; it is kept in the tracker's attachments table
- * as the receipts migrated from Airtable are.
+ * as the receipts migrated from Airtable are. Several can go with one transaction (2026-10-22, user),
+ * named by receiptIds; an edit adds new ones and takes off the ones removedReceiptIds names.
  *
  * Edit transactions (2026-10-13, user) changes a transaction's name, date, payor or payee, notes,
  * receipt and amount. Its type, envelope and account stay. A new amount moves its envelope by the
@@ -27,6 +28,12 @@ use Illuminate\Support\Str;
  * owes the new amount; one already completed keeps the amount where it is. A line a transfer, an
  * allocation, funds received or an approval wrote is changed where it was made, since the ledger reads
  * those by their own names.
+ *
+ * A split (2026-10-22, user) spreads one transaction over several envelopes, each with its own share and
+ * budget code. An envelope link carries no amount, so each share is a line of its own, linked to its
+ * envelope; the lines share the source key portal:split:{group}:{n}, so the ledger can show them as one.
+ * The shares must add up to the amount, each is checked against its own envelope, and each is edited
+ * later on its own.
  */
 final class PortalBudgetTransactions
 {
@@ -41,6 +48,8 @@ final class PortalBudgetTransactions
     private const RECEIPT_FOLDER = 'ikaika-portal/transactions';
 
     private const RECEIPT_CACHE_TTL_SECONDS = 3600;
+
+    private const MAX_RECEIPTS = 10;
 
     /*
      * The lines the ledger writes as linked pairs, read back by these names; Edit leaves them alone. Funds
@@ -58,6 +67,11 @@ final class PortalBudgetTransactions
 
     // A reimbursement approval charges the tracker under this source key; its line is changed on the request.
     private const CHARGE_SOURCE_PREFIX = 'portal:reimbursement-claim:';
+
+    // Each share of a split carries portal:split:{group}:{n}: unique per line, and the group ties them.
+    public const SPLIT_SOURCE_PREFIX = 'portal:split:';
+
+    private const MAX_SPLIT_PARTS = 10;
 
     public function __construct(
         private readonly PortalBudgetLedger $ledger,
@@ -123,80 +137,72 @@ final class PortalBudgetTransactions
         $payorPayee = $this->input->validatedText($request, 'payorPayee', 'The payor or payee', PortalBudgetInput::MAX_NAME);
         $notes = $this->input->validatedText($request, 'notes', 'The notes');
         $isConfirmed = $this->input->confirmed($request, 'allowOverspend');
+        $splits = $this->validatedSplits($request);
         // Every transaction goes through an envelope (2026-10-09); an account is funded from Accounts instead.
-        if ($envelopeId === null) {
+        if ($splits === [] && $envelopeId === null) {
             abort(422, 'Choose the envelope this transaction comes out of or goes into.');
         }
-        $receiptKey = $this->receiptKeyFrom($actor, $request);
-        $receipt = $receiptKey === null ? null : Cache::get($receiptKey);
-        if ($receiptKey !== null && ! is_array($receipt)) {
-            abort(422, 'That receipt upload has expired. Choose the photo again.');
+        $shared = array_sum(array_column($splits, 'cents'));
+        if ($splits !== [] && $shared !== $cents) {
+            abort(422, 'The split adds up to '.$this->input->peso($shared).', but the amount is '.$this->input->peso($cents).'. Make the shares match it.');
         }
+        $parts = $splits !== [] ? $splits : [['envelopeId' => (int) $envelopeId, 'codeId' => $codeId, 'cents' => $cents]];
+        $group = $splits !== [] ? (string) Str::uuid() : null;
+        $receiptKeys = $this->receiptKeysFrom($actor, $request);
+        $receipts = $this->heldReceipts($receiptKeys);
         $type = $kind === self::INCOME ? PortalBudgetLedger::TYPE_CREDIT : PortalBudgetLedger::TYPE_EXPENSE;
 
-        [$id, $envelopeName, $pending] = $this->ledger->transaction(function () use ($actor, $type, $name, $cents, $occurredOn, $envelopeId, $accountId, $codeId, $payorPayee, $notes, $isConfirmed, $receipt): array {
-            $envelope = $this->ledger->lockEnvelope($envelopeId);
+        [$ids, $envelopeNames, $owed] = $this->ledger->transaction(function () use ($actor, $type, $name, $parts, $group, $occurredOn, $accountId, $payorPayee, $notes, $isConfirmed, $receipts): array {
             $account = $accountId === null ? null : $this->ledger->lockAccount($accountId);
-            $this->ledger->assertOpenEnvelope($envelope, 'adding a transaction to it');
-            // The code chosen first on the form is kept when the envelope is under it or was credited under it
-            // (2026-10-21, user); any other code, or none, leaves the line under the one its envelope sits under.
-            $codeId = $codeId !== null && in_array($codeId, $this->ledger->codeIdsOf((int) $envelope->id), true)
-                ? $codeId
-                : $this->ledger->codeIdOf((int) $envelope->id);
             if ($account !== null) {
                 $this->ledger->assertOpenAccount($account);
             }
-            $this->ledger->assertBudgetCode($codeId);
-            $isExpense = $type === PortalBudgetLedger::TYPE_EXPENSE;
-            if ($isExpense) {
-                $this->ledger->assertCovers($this->ledger->envelopeRemainingCents($envelopeId), $cents, $this->ledger->envelopeName($envelope), $isConfirmed);
-            }
-
-            $id = $this->ledger->record($actor, $name, $type, $cents, $occurredOn, $notes, [
-                'envelopeId' => $envelopeId,
-                'accountId' => $accountId,
-                'budgetCodeId' => $codeId,
-                'payorPayee' => $payorPayee,
-            ]);
-            if (is_array($receipt)) {
-                $this->ledger->connection()->table('attachments')->insert([
-                    'table_name' => self::RECEIPT_TABLE,
-                    'record_id' => $id,
-                    'field_name' => self::RECEIPT_FIELD,
-                    'file_url' => $receipt['fileUrl'],
-                    'file_name' => $receipt['fileName'],
-                    'file_size_bytes' => $receipt['sizeBytes'],
-                    'mime_type' => $receipt['mimeType'],
+            $ids = [];
+            $names = [];
+            $owed = [];
+            foreach ($parts as $index => $part) {
+                [$id, $envelopeName, $pending] = $this->recordLine($actor, $type, $name, $part, $occurredOn, $account, [
+                    'payorPayee' => $payorPayee,
+                    'notes' => $notes,
+                    'isConfirmed' => $isConfirmed,
+                    'receipts' => $receipts,
+                    'sourceKey' => $group === null ? null : self::SPLIT_SOURCE_PREFIX.$group.':'.($index + 1),
                 ]);
+                $ids[] = $id;
+                $names[] = $envelopeName;
+                if ($pending !== null) {
+                    $owed[] = $pending;
+                }
             }
 
-            $owner = $isExpense && $account !== null ? $this->ledger->ownerOf($envelopeId) : null;
-            $pending = null;
-            if ($owner !== null && (int) $owner->id !== $accountId) {
-                $reason = 'Cross-account envelope expense on '.$this->ledger->envelopeName($envelope).': '.$name;
-                $pending = [
-                    'id' => (string) $this->transfers->owe($actor, (int) $owner->id, (int) $accountId, $cents, $reason, $id),
-                    'sourceName' => $this->ledger->accountName($owner),
-                    'destinationName' => $this->ledger->accountName($account),
-                    'amount' => (float) $this->input->amount($cents),
-                ];
-            }
-
-            return [$id, $this->ledger->envelopeName($envelope), $pending];
+            return [$ids, $names, $owed];
         });
+        $id = $ids[0];
+        $pending = $owed[0] ?? null;
 
-        if ($receiptKey !== null) {
-            Cache::forget($receiptKey);
-        }
+        $this->forgetReceipts($receiptKeys);
 
         $this->audit->record(
             $actor,
             PortalLogAction::POST,
             'manage.budget-transactions',
-            PortalActivityCopy::addedTransaction($kind, $name, $this->input->peso($cents), $envelopeName),
+            PortalActivityCopy::addedTransaction($kind, $name, $this->input->peso($cents), implode(', ', $envelopeNames)),
             (string) $id,
             $request,
-            ['type' => $type, 'amount' => $this->input->amount($cents), 'envelopeId' => $envelopeId, 'accountId' => $accountId, 'pendingTransferId' => $pending['id'] ?? null, 'receipt' => is_array($receipt) ? $receipt['fileUrl'] : null],
+            [
+                'type' => $type,
+                'amount' => $this->input->amount($cents),
+                'envelopeId' => $parts[0]['envelopeId'],
+                'accountId' => $accountId,
+                'pendingTransferId' => $pending['id'] ?? null,
+                'receipts' => array_column($receipts, 'fileUrl'),
+                'split' => $group === null ? null : array_map(fn (array $part, int $lineId): array => [
+                    'transactionId' => $lineId,
+                    'envelopeId' => $part['envelopeId'],
+                    'amount' => $this->input->amount($part['cents']),
+                ], $parts, $ids),
+                'pendingTransferIds' => array_column($owed, 'id'),
+            ],
         );
 
         return [
@@ -210,6 +216,111 @@ final class PortalBudgetTransactions
                 'pendingTransfer' => $pending,
             ],
         ];
+    }
+
+    /**
+     * One line of a transaction, or one share of a split, through its envelope: the code kept, the envelope
+     * checked, the row written, and a transfer left owed when the envelope's money is another account's.
+     *
+     * @param  array{envelopeId: int, codeId: ?int, cents: int}  $part
+     * @param  array{payorPayee: ?string, notes: ?string, isConfirmed: bool, receipts: list<array<string, mixed>>, sourceKey: ?string}  $details
+     * @return array{0: int, 1: string, 2: array{id: string, sourceName: string, destinationName: string, amount: float}|null}
+     */
+    private function recordLine(Employee $actor, string $type, string $name, array $part, string $occurredOn, ?object $account, array $details): array
+    {
+        $envelopeId = $part['envelopeId'];
+        $cents = $part['cents'];
+        $envelope = $this->ledger->lockEnvelope($envelopeId);
+        $this->ledger->assertOpenEnvelope($envelope, 'adding a transaction to it');
+        // The code chosen first on the form is kept when the envelope is under it or was credited under it
+        // (2026-10-21, user); any other code, or none, leaves the line under the one its envelope sits under.
+        $codeId = $part['codeId'] !== null && in_array($part['codeId'], $this->ledger->codeIdsOf((int) $envelope->id), true)
+            ? $part['codeId']
+            : $this->ledger->codeIdOf((int) $envelope->id);
+        $this->ledger->assertBudgetCode($codeId);
+        $isExpense = $type === PortalBudgetLedger::TYPE_EXPENSE;
+        if ($isExpense) {
+            $this->ledger->assertCovers($this->ledger->envelopeRemainingCents($envelopeId), $cents, $this->ledger->envelopeName($envelope), $details['isConfirmed']);
+        }
+
+        $accountId = $account === null ? null : (int) $account->id;
+        $id = $this->ledger->record($actor, $name, $type, $cents, $occurredOn, $details['notes'], [
+            'envelopeId' => $envelopeId,
+            'accountId' => $accountId,
+            'budgetCodeId' => $codeId,
+            'payorPayee' => $details['payorPayee'],
+            'sourceKey' => $details['sourceKey'],
+        ]);
+        $this->attachReceipts($id, $details['receipts']);
+
+        $owner = $isExpense && $account !== null ? $this->ledger->ownerOf($envelopeId) : null;
+        $pending = null;
+        if ($owner !== null && (int) $owner->id !== $accountId) {
+            $reason = 'Cross-account envelope expense on '.$this->ledger->envelopeName($envelope).': '.$name;
+            $pending = [
+                'id' => (string) $this->transfers->owe($actor, (int) $owner->id, (int) $accountId, $cents, $reason, $id),
+                'sourceName' => $this->ledger->accountName($owner),
+                'destinationName' => $this->ledger->accountName($account),
+                'amount' => (float) $this->input->amount($cents),
+            ];
+        }
+
+        return [$id, $this->ledger->envelopeName($envelope), $pending];
+    }
+
+    /**
+     * The shares of a split, each an envelope, an optional budget code and its amount; none when the line
+     * is not split. Two to ten envelopes, each once.
+     *
+     * @return list<array{envelopeId: int, codeId: ?int, cents: int}>
+     */
+    private function validatedSplits(Request $request): array
+    {
+        $raw = $request->input('splits');
+        if ($raw === null || $raw === []) {
+            return [];
+        }
+        if (! is_array($raw) || ! array_is_list($raw)) {
+            abort(422, 'The split is not in the right shape.');
+        }
+        if (count($raw) < 2) {
+            abort(422, 'A split needs at least two envelopes.');
+        }
+        if (count($raw) > self::MAX_SPLIT_PARTS) {
+            abort(422, 'A split can cover at most '.self::MAX_SPLIT_PARTS.' envelopes.');
+        }
+
+        $parts = [];
+        foreach ($raw as $share) {
+            if (! is_array($share)) {
+                abort(422, 'The split is not in the right shape.');
+            }
+            $line = new Request($share);
+            $envelopeId = $this->input->validatedId($line, 'envelopeId', 'That budget envelope does not exist.')
+                ?? abort(422, 'Choose the envelope for each share of the split.');
+            if (in_array($envelopeId, array_column($parts, 'envelopeId'), true)) {
+                abort(422, 'Each envelope can take only one share of a split.');
+            }
+            $parts[] = [
+                'envelopeId' => $envelopeId,
+                'codeId' => $this->input->validatedId($line, 'budgetCodeId', 'That budget code does not exist.'),
+                'cents' => $this->input->movedAmount($line, 'Enter each envelope\'s share of the split.'),
+            ];
+        }
+
+        return $parts;
+    }
+
+    // The split a line is a share of, by its source key; null for a line that is not split.
+    public static function splitKeyOf(mixed $sourceKey): ?string
+    {
+        $key = (string) ($sourceKey ?? '');
+        if (! str_starts_with($key, self::SPLIT_SOURCE_PREFIX)) {
+            return null;
+        }
+        $group = strstr(substr($key, strlen(self::SPLIT_SOURCE_PREFIX)), ':', true);
+
+        return is_string($group) && $group !== '' ? $group : null;
     }
 
     // Whether Edit may change a line: one entered by hand or funds received, not a pair or an approval's charge.
@@ -258,14 +369,13 @@ final class PortalBudgetTransactions
             abort(422, 'The amount must be more than zero.');
         }
         $isConfirmed = $this->input->confirmed($request, 'allowOverspend');
-        $receiptKey = $isFundsReceived ? null : $this->receiptKeyFrom($actor, $request);
-        $receipt = $receiptKey === null ? null : Cache::get($receiptKey);
-        if ($receiptKey !== null && ! is_array($receipt)) {
-            abort(422, 'That receipt upload has expired. Choose the photo again.');
-        }
-        $isRemovingReceipt = ! $isFundsReceived && $request->boolean('removeReceipt');
+        $receiptKeys = $isFundsReceived ? [] : $this->receiptKeysFrom($actor, $request);
+        $receipts = $this->heldReceipts($receiptKeys);
+        // removeReceipt, or the one receiptId an older portal sends, still replaces every receipt the line had.
+        $isRemovingReceipt = ! $isFundsReceived && ($request->boolean('removeReceipt') || $request->filled('receiptId'));
+        $removedIds = $isFundsReceived ? [] : $this->removedReceiptIds($request);
 
-        $wasCents = $this->ledger->transaction(function () use ($id, $name, $occurredOn, $payorPayee, $notes, $receipt, $isRemovingReceipt, $cents, $isConfirmed): int {
+        $wasCents = $this->ledger->transaction(function () use ($id, $name, $occurredOn, $payorPayee, $notes, $receipts, $isRemovingReceipt, $removedIds, $cents, $isConfirmed): int {
             $before = $this->ledger->connection()->table('transactions')->where('id', $id)->lockForUpdate()->first(['amount', 'type']);
             $wasCents = $this->input->cents($before?->amount);
             if ($cents !== null && $cents !== $wasCents) {
@@ -278,31 +388,21 @@ final class PortalBudgetTransactions
                 'description' => $notes,
                 'updated_at' => now('UTC')->format('Y-m-d H:i:s'),
             ]);
-            if (is_array($receipt) || $isRemovingReceipt) {
-                $this->ledger->connection()->table('attachments')
-                    ->where('table_name', self::RECEIPT_TABLE)
-                    ->where('field_name', self::RECEIPT_FIELD)
-                    ->where('record_id', $id)
-                    ->delete();
+            $attached = $this->ledger->connection()->table('attachments')
+                ->where('table_name', self::RECEIPT_TABLE)
+                ->where('field_name', self::RECEIPT_FIELD)
+                ->where('record_id', $id);
+            if ($isRemovingReceipt) {
+                $attached->delete();
+            } elseif ($removedIds !== []) {
+                $attached->whereIn('id', $removedIds)->delete();
             }
-            if (is_array($receipt)) {
-                $this->ledger->connection()->table('attachments')->insert([
-                    'table_name' => self::RECEIPT_TABLE,
-                    'record_id' => $id,
-                    'field_name' => self::RECEIPT_FIELD,
-                    'file_url' => $receipt['fileUrl'],
-                    'file_name' => $receipt['fileName'],
-                    'file_size_bytes' => $receipt['sizeBytes'],
-                    'mime_type' => $receipt['mimeType'],
-                ]);
-            }
+            $this->attachReceipts($id, $receipts);
 
             return $wasCents;
         });
 
-        if ($receiptKey !== null) {
-            Cache::forget($receiptKey);
-        }
+        $this->forgetReceipts($receiptKeys);
         $amountCents = $cents ?? $wasCents;
         $isAmountChanged = $amountCents !== $wasCents;
 
@@ -322,7 +422,8 @@ final class PortalBudgetTransactions
                 'occurredOn' => $occurredOn,
                 'amount' => $this->input->amount($amountCents),
                 'previousAmount' => $isAmountChanged ? $this->input->amount($wasCents) : null,
-                'receipt' => is_array($receipt) ? $receipt['fileUrl'] : ($isRemovingReceipt ? null : 'kept'),
+                'receiptsAdded' => array_column($receipts, 'fileUrl'),
+                'receiptsRemoved' => $isRemovingReceipt ? 'all' : $removedIds,
             ],
         );
 
@@ -368,18 +469,93 @@ final class PortalBudgetTransactions
         $this->ledger->connection()->table('transactions')->where('id', $id)->update(['amount' => $this->input->decimal($cents)]);
     }
 
-    // The upload a request names, as the uploader's own: another person's receiptId finds nothing.
-    private function receiptKeyFrom(Employee $actor, Request $request): ?string
+    /**
+     * The uploads a request names, each as the uploader's own: another person's receiptId finds nothing.
+     * receiptIds names several; receiptId, the one an older portal sends, is read beside them.
+     *
+     * @return list<string>
+     */
+    private function receiptKeysFrom(Employee $actor, Request $request): array
     {
-        $receiptId = trim((string) $request->input('receiptId', ''));
-        if ($receiptId === '') {
-            return null;
+        $named = $request->input('receiptIds') ?? [];
+        if (! is_array($named) || ! array_is_list($named)) {
+            abort(422, 'The receipts are not in the right shape.');
         }
-        if (! Str::isUuid($receiptId)) {
-            abort(422, 'That receipt upload has expired. Choose the photo again.');
+        $keys = [];
+        foreach ([...$named, $request->input('receiptId')] as $value) {
+            $receiptId = trim(is_scalar($value) ? (string) $value : '');
+            if ($receiptId === '') {
+                continue;
+            }
+            if (! Str::isUuid($receiptId)) {
+                abort(422, 'That receipt upload has expired. Choose the photo again.');
+            }
+            $keys[$receiptId] = $this->receiptKey($actor, $receiptId);
+        }
+        if (count($keys) > self::MAX_RECEIPTS) {
+            abort(422, 'A transaction can keep up to '.self::MAX_RECEIPTS.' receipts.');
         }
 
-        return $this->receiptKey($actor, $receiptId);
+        return array_values($keys);
+    }
+
+    /**
+     * The uploads held under those keys; one that has expired stops the whole write.
+     *
+     * @param  list<string>  $keys
+     * @return list<array<string, mixed>>
+     */
+    private function heldReceipts(array $keys): array
+    {
+        return array_map(function (string $key): array {
+            $receipt = Cache::get($key);
+
+            return is_array($receipt) ? $receipt : abort(422, 'That receipt upload has expired. Choose the photo again.');
+        }, $keys);
+    }
+
+    /** @param  list<string>  $keys */
+    private function forgetReceipts(array $keys): void
+    {
+        foreach ($keys as $key) {
+            Cache::forget($key);
+        }
+    }
+
+    /** @param  list<array<string, mixed>>  $receipts */
+    private function attachReceipts(int $id, array $receipts): void
+    {
+        if ($receipts === []) {
+            return;
+        }
+        $this->ledger->connection()->table('attachments')->insert(array_map(fn (array $receipt): array => [
+            'table_name' => self::RECEIPT_TABLE,
+            'record_id' => $id,
+            'field_name' => self::RECEIPT_FIELD,
+            'file_url' => $receipt['fileUrl'],
+            'file_name' => $receipt['fileName'],
+            'file_size_bytes' => $receipt['sizeBytes'],
+            'mime_type' => $receipt['mimeType'],
+        ], $receipts));
+    }
+
+    /**
+     * The receipts an edit takes off, by the attachment ids the ledger sends with them.
+     *
+     * @return list<int>
+     */
+    private function removedReceiptIds(Request $request): array
+    {
+        $named = $request->input('removedReceiptIds') ?? [];
+        if (! is_array($named) || ! array_is_list($named)) {
+            abort(422, 'The receipts are not in the right shape.');
+        }
+
+        return array_values(array_unique(array_map(function (mixed $value): int {
+            $id = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+            return is_int($id) ? $id : abort(422, 'That receipt was not found.');
+        }, $named)));
     }
 
     private function receiptKey(Employee $actor, string $receiptId): string
