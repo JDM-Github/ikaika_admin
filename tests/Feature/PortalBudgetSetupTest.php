@@ -64,6 +64,7 @@ class PortalBudgetSetupTest extends TestCase
         $this->assertNotNull($log);
         $this->assertSame('INSERT', $log->action);
         $this->assertStringEndsWith('added the budget code SEED-SETUP-001-20310301', (string) $log->message);
+        $this->assertTrackerAction('tracker.budget_codes', (string) $id, 'add');
     }
 
     // The reported ask (2026-10-08): a name and a quotation are needed; the rest can follow later.
@@ -167,6 +168,7 @@ class PortalBudgetSetupTest extends TestCase
         $this->assertNotNull($log);
         $this->assertSame('INSERT', $log->action);
         $this->assertStringEndsWith('added the envelope Seeded Setup Pantry under SEED-SETUP-005-20310501', (string) $log->message);
+        $this->assertTrackerAction('tracker.envelopes', (string) $id, 'add');
     }
 
     public function test_an_envelope_with_no_budget_code_is_listed_under_none(): void
@@ -307,6 +309,7 @@ class PortalBudgetSetupTest extends TestCase
         $log = PortalLog::query()->where('resource', 'manage.budget-codes')->where('record_id', (string) $id)->latest('id')->first();
         $this->assertSame('PATCH', $log?->action);
         $this->assertStringEndsWith('updated the budget code SEED-SETUP-011-20301223', (string) $log?->message);
+        $this->assertTrackerAction('tracker.budget_codes', (string) $id, 'edit');
     }
 
     public function test_a_budget_code_keeps_its_own_name_but_cannot_take_another(): void
@@ -384,6 +387,7 @@ class PortalBudgetSetupTest extends TestCase
         $this->assertSame('2500.00', $row->budget_amount);
         $this->assertSame('Before', $row->budget_notes);
         $this->assertStringEndsWith('updated the envelope Seeded Setup Renamed', $this->lastEnvelopeLog($envelope));
+        $this->assertTrackerAction('tracker.envelopes', (string) $envelope, 'edit');
 
         $this->editEnvelope($envelope, ['name' => 'seeded setup other'])
             ->assertStatus(422)
@@ -784,5 +788,15 @@ class PortalBudgetSetupTest extends TestCase
         $this->assertNotNull($employee);
 
         return $employee;
+    }
+
+    private function assertTrackerAction(string $resource, string $recordId, string $type): void
+    {
+        $this->assertTrue(DB::connection('core')->table('actions')
+            ->where('product', 'transaction-tracker')
+            ->where('resource', $resource)
+            ->where('record_id', $recordId)
+            ->where('action_type', $type)
+            ->exists(), $resource.' '.$type.' was not ledgered.');
     }
 }

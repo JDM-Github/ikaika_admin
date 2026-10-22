@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
 use Closure;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
@@ -49,7 +50,42 @@ final class PortalBudgetLedger
     public function __construct(
         private readonly PortalBudgetEnvelopes $envelopes,
         private readonly PortalBudgetInput $input,
+        private readonly CoreLedger $core,
     ) {}
+
+    /**
+     * The transaction tracker is a product in the core ledger too, so its rows reach Airtable.
+     */
+    public function trackerAdd(string $resource, string $table, int $id, Employee $actor): void
+    {
+        $this->core->recordAdd(
+            CoreLedger::PRODUCT_TRANSACTION_TRACKER,
+            $table.':'.$id,
+            'tracker.'.$table,
+            ['id' => (string) $id],
+            $resource,
+            (string) $id,
+            (int) $actor->getKey(),
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $parameters
+     */
+    public function trackerEdit(string $resource, string $table, int $id, Employee $actor, array $parameters = []): void
+    {
+        $this->core->recordEdit(
+            CoreLedger::PRODUCT_TRANSACTION_TRACKER,
+            'tracker.'.$table,
+            ['id' => (string) $id] + $parameters,
+            $resource,
+            (string) $id,
+            null,
+            (int) $actor->getKey(),
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
+    }
 
     public function assertAvailable(): void
     {
@@ -328,6 +364,7 @@ final class PortalBudgetLedger
                 $this->connection()->table($table)->insert(['transaction_id' => $id, $column => $linkedId]);
             }
         }
+        $this->trackerAdd('tracker.transactions', 'transactions', $id, $actor);
 
         return $id;
     }

@@ -754,7 +754,7 @@ class PortalManageRequestsTest extends TestCase
         ])->assertStatus(422);
     }
 
-    public function test_unflagging_takes_a_member_off_review_and_keeps_the_record(): void
+    public function test_unflagging_takes_a_member_off_review_and_deletes_the_record(): void
     {
         [$member] = $this->membersInBothDepartments();
         $this->clearFlags($member);
@@ -763,6 +763,9 @@ class PortalManageRequestsTest extends TestCase
             'employeeId' => $member->getKey(),
             'reason' => 'Review for a week.',
         ])->assertCreated();
+        $warningId = (int) DB::connection('portal')->table('employees_warnings')->join('warnings', 'warnings.id', '=', 'employees_warnings.warning_id')
+            ->where('employees_warnings.employee_id', $member->getKey())->where('warnings.description', 'Review for a week.')->value('warnings.id');
+        $this->assertGreaterThan(0, $warningId);
 
         $response = $this->withToken($token)
             ->deleteJson('/api/development/portal/manage/flagged-members/'.$member->getKey())
@@ -770,16 +773,9 @@ class PortalManageRequestsTest extends TestCase
 
         $this->assertNotContains((string) $member->getKey(), array_column($response->json('data'), 'employeeId'));
         $this->assertContains((string) $member->getKey(), array_column($response->json('candidates'), 'employeeId'));
-        $statuses = DB::connection('portal')->table('employees_warnings')
-            ->join('warnings', 'warnings.id', '=', 'employees_warnings.warning_id')
-            ->where('employees_warnings.employee_id', $member->getKey())
-            ->where('warnings.description', 'Review for a week.')
-            ->pluck('warnings.status')
-            ->all();
-        $this->assertSame(['Inactive'], $statuses);
-        $warningId = DB::connection('portal')->table('employees_warnings')->join('warnings', 'warnings.id', '=', 'employees_warnings.warning_id')
-            ->where('employees_warnings.employee_id', $member->getKey())->where('warnings.description', 'Review for a week.')->value('warnings.id');
-        $this->assertTrue(Action::query()->where('resource', 'warnings')->where('action_type', 'edit')->where('record_id', (string) $warningId)->exists());
+        $this->assertFalse(DB::connection('portal')->table('warnings')->where('id', $warningId)->exists());
+        $this->assertFalse(DB::connection('portal')->table('employees_warnings')->where('warning_id', $warningId)->exists());
+        $this->assertTrue(Action::query()->where('resource', 'warnings')->where('action_type', 'delete')->where('record_id', (string) $warningId)->exists());
 
         $this->withToken($token)
             ->deleteJson('/api/development/portal/manage/flagged-members/'.$member->getKey())

@@ -1,5 +1,20 @@
 <?php
 
+// AIRTABLE_ENV=prod selects the _PROD base ids, so one .env can hold both sets. Every other value,
+// including unset, is the TEST set. The live round trip refuses every PROD id.
+$airtableProd = env('AIRTABLE_ENV', 'test') === 'prod';
+$airtableBases = [
+    'main' => env($airtableProd ? 'AIRTABLE_BASE_ID_PROD' : 'AIRTABLE_BASE_ID'),
+    'calendar' => env($airtableProd ? 'AIRTABLE_CALENDAR_PROD' : 'AIRTABLE_CALENDAR'),
+    'clients' => env($airtableProd ? 'AIRTABLE_CLIENT_INFORMATION_PROD' : 'AIRTABLE_CLIENT_INFORMATION'),
+    'tracker' => env($airtableProd ? 'AIRTABLE_TRANSACTION_TRACKER_PROD' : 'AIRTABLE_TRANSACTION_TRACKER'),
+];
+// The local .env may hold both tokens: TEST in AIRTABLE_TOKEN, PROD in AIRTABLE_TOKEN_PROD. Production
+// itself keeps its token in AIRTABLE_TOKEN, so the _PROD name falls back to it there.
+$airtableToken = $airtableProd
+    ? env('AIRTABLE_TOKEN_PROD', env('AIRTABLE_TOKEN'))
+    : env('AIRTABLE_TOKEN');
+
 return [
 
     /*
@@ -35,11 +50,20 @@ return [
         ],
     ],
 
-    // The local .env holds a token scoped to the TEST base only; production sets its own PROD token and base
-    // (deployment/AIRTABLE-SYNC.md). `scheduled` turns the minute sync on, once the first send was read.
+    // One PAT may hold all four bases; a per-base token can override it. `base` stays the main
+    // Users & Projects base for the existing tests and callers. `scheduled` turns the minute sync on,
+    // once the first send was read (deployment/AIRTABLE-SYNC.md).
     'airtable' => [
-        'token' => env('AIRTABLE_TOKEN'),
-        'base' => env('AIRTABLE_BASE_ID'),
+        'env' => $airtableProd ? 'prod' : 'test',
+        'token' => $airtableToken,
+        'tokens' => [
+            'main' => $airtableToken,
+            'calendar' => env('AIRTABLE_CALENDAR_TOKEN', $airtableToken),
+            'clients' => env('AIRTABLE_CLIENT_INFORMATION_TOKEN', $airtableToken),
+            'tracker' => env('AIRTABLE_TRANSACTION_TRACKER_TOKEN', $airtableToken),
+        ],
+        'base' => $airtableBases['main'],
+        'bases' => $airtableBases,
         'scheduled' => (bool) env('AIRTABLE_SYNC_SCHEDULED', false),
     ],
 

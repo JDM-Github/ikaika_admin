@@ -6,6 +6,7 @@ use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalEarnCodes;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
@@ -458,6 +459,37 @@ class PortalOvertimeRequestsTest extends TestCase
                 'elementChange' => 1,
             ]],
         ])->assertStatus(404);
+    }
+
+    // A new overtime request names the activity its entry picked and the day's overtime code (2026-10-22).
+    public function test_overtime_links_its_activity_and_earn_code(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $date = $this->reportedDate($actor, 2, $project, 8, false);
+        $activity = DB::connection('portal')->table('activity_codes')->orderBy('id')->first();
+        $this->assertNotNull($activity);
+
+        $response = $this->withToken($this->loginToken($actor))->postJson('/api/development/portal/requests/overtime', [
+            'requests' => [[
+                'requestDate' => $date,
+                'reason' => 'Rush deliverable',
+                'entries' => [[
+                    'projectLabel' => $this->projectLabel($project),
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name, $activity->id_no),
+                    'hoursRendered' => 2,
+                    'elementChange' => 0,
+                ]],
+            ]],
+        ])->assertCreated();
+
+        $requestId = (int) $response->json('data.0.id');
+        $this->assertTrue(DB::connection('portal')->table('requests_activity_codes')
+            ->where('request_id', $requestId)->where('activity_code_id', $activity->id)->exists());
+        $earnId = (new PortalEarnCodes)->overtimeIdFor($date);
+        $this->assertNotNull($earnId);
+        $this->assertTrue(DB::connection('portal')->table('requests_earn_codes')
+            ->where('request_id', $requestId)->where('earn_code_id', $earnId)->exists());
     }
 
     /**

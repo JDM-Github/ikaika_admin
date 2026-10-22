@@ -214,7 +214,8 @@ final class PortalProjectEditor
 
         $counters = $this->usedCounters($this->year());
         $clients = [];
-        foreach ($this->connection()->table('clients')->orderBy('name')->get(['id', 'name', 'client_id']) as $row) {
+        // A client the User & Projects synced copy has not received yet cannot link a project.
+        foreach ($this->connection()->table('clients')->whereNotNull('airtable_record_id')->orderBy('name')->get(['id', 'name', 'client_id']) as $row) {
             $name = $this->text($row->name);
             if ($name !== null) {
                 $code = self::clientCode($row->client_id);
@@ -311,7 +312,7 @@ final class PortalProjectEditor
             $this->replaceClient($projectId, $fields['clientId']);
             $this->writeScopes($projectId, $scopeCodes);
             if ($request->has('scopeAssignees')) {
-                $this->scopeWork->replaceAssignees($projectId, $request->input('scopeAssignees'), $scopeCodes, [...$fields['memberIds'], ...$fields['supportMemberIds']]);
+                $this->scopeWork->replaceAssignees($projectId, $request->input('scopeAssignees'), $scopeCodes, [...$fields['memberIds'], ...$fields['supportMemberIds']], $actor);
             }
             $this->activities->replace($projectId, $removedActivities);
             $this->repositories->replace($projectId, $fields['repositories']);
@@ -392,7 +393,7 @@ final class PortalProjectEditor
 
         $this->ledger->within($this->connection(), function () use ($fields, $columns, $projectId, $actor, $changes, $request, $isResubmitted, $closing, $removedActivities, $row): void {
             $this->assertNameFree($fields['name'], $fields['columns']['department'], $projectId);
-            $changed = $this->changedFields($columns, $projectId, $fields['memberIds'], $fields['supportMemberIds'], $fields['clientId']);
+            $changed = $this->changedFields($columns, $projectId, $fields['memberIds'], $fields['supportMemberIds'], $fields['clientId'], $removedActivities);
             $this->connection()->table('projects')->where('id', $projectId)->update($columns);
             if ($removedActivities !== null) {
                 $this->activities->replace($projectId, $removedActivities);
@@ -400,7 +401,7 @@ final class PortalProjectEditor
             $this->replacePeople($projectId, self::MEMBER_ROLE, $fields['memberIds']);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $fields['supportMemberIds']);
             // Someone off the project is off its scopes too.
-            $this->scopeWork->prune($projectId, $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->pluck('wbs_code')->all(), $this->peopleIds($projectId));
+            $this->scopeWork->prune($projectId, $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->pluck('wbs_code')->all(), $this->peopleIds($projectId), $actor);
             $this->replaceClient($projectId, $fields['clientId']);
             $this->repositories->replace($projectId, $fields['repositories']);
 
@@ -482,7 +483,7 @@ final class PortalProjectEditor
             $this->replacePeople($projectId, self::MEMBER_ROLE, $memberIds);
             $this->replacePeople($projectId, self::SUPPORT_ROLE, $supportMemberIds);
             // Someone off the project is off its scopes too.
-            $this->scopeWork->prune($projectId, $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->pluck('wbs_code')->all(), $this->peopleIds($projectId));
+            $this->scopeWork->prune($projectId, $this->connection()->table('projects_wbs_scopes')->where('project_id', $projectId)->pluck('wbs_code')->all(), $this->peopleIds($projectId), $actor);
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,
                 self::CORE_TARGET,
@@ -611,9 +612,9 @@ final class PortalProjectEditor
             // Assignees ride with the scopes; a scope taken off takes its assignees along.
             $people = $this->peopleIds($projectId);
             if ($request->has('scopeAssignees')) {
-                $this->scopeWork->replaceAssignees($projectId, $request->input('scopeAssignees'), $scopeCodes, $people);
+                $this->scopeWork->replaceAssignees($projectId, $request->input('scopeAssignees'), $scopeCodes, $people, $actor);
             } else {
-                $this->scopeWork->prune($projectId, $scopeCodes, $people);
+                $this->scopeWork->prune($projectId, $scopeCodes, $people, $actor);
             }
             if ($isResubmitted) {
                 $this->connection()->table('projects')->where('id', $projectId)->update(self::PENDING_AGAIN);
@@ -705,8 +706,8 @@ final class PortalProjectEditor
         }
         $leadEmail = $this->validatedLeadEmail((int) $data['leadId'], $projectId, $department);
         $clientId = (int) $data['clientId'];
-        if (! $this->connection()->table('clients')->where('id', $clientId)->exists()) {
-            abort(422, 'Choose a client from the list.');
+        if (! $this->connection()->table('clients')->where('id', $clientId)->whereNotNull('airtable_record_id')->exists()) {
+            abort(422, 'Choose a client from the list. A client added just now waits for the next Airtable sync.');
         }
         $type = $this->text($data['type'] ?? null);
         if ($type !== null && ! in_array($type, $this->jobTypes(), true)) {
@@ -863,9 +864,10 @@ final class PortalProjectEditor
      * @param  array<string, mixed>  $columns
      * @param  list<int>|null  $memberIds
      * @param  list<int>|null  $supportMemberIds
+     * @param  list<string>|null  $removedActivities
      * @return array<string, mixed>
      */
-    private function changedFields(array $columns, int $projectId, ?array $memberIds, ?array $supportMemberIds, ?int $clientId): array
+    private function changedFields(array $columns, int $projectId, ?array $memberIds, ?array $supportMemberIds, ?int $clientId, ?array $removedActivities = null): array
     {
         // The whole row, under a lock: liveProjectOrFail reads only a few columns.
         $row = $columns === [] ? null : $this->connection()->table('projects')->where('id', $projectId)->lockForUpdate()->first();
@@ -892,8 +894,28 @@ final class PortalProjectEditor
         if ($clientId !== null && (int) $this->connection()->table('projects_clients')->where('project_id', $projectId)->value('client_id') !== $clientId) {
             $changed['clientId'] = $clientId;
         }
+        if ($row !== null) {
+            $oldCodes = $this->activityCodes($row->department ?? null, $this->text($row->type_of_job ?? null), $this->activities->removedFor($projectId));
+            $newCodes = $this->activityCodes($columns['department'] ?? null, $this->text($columns['type_of_job'] ?? null), $removedActivities ?? $this->activities->removedFor($projectId));
+            sort($oldCodes);
+            sort($newCodes);
+            if ($oldCodes !== $newCodes) {
+                $changed['activityIds'] = $newCodes;
+            }
+        }
 
         return $changed;
+    }
+
+    /**
+     * The activity codes a project keeps: its type's list for its department, less its removals.
+     *
+     * @param  list<string>|null  $removed
+     * @return list<string>
+     */
+    private function activityCodes(mixed $department, ?string $jobType, ?array $removed = null): array
+    {
+        return array_values(array_diff($this->activities->allowedFor($department, $jobType), $removed ?? []));
     }
 
     private function peopleChanges(int $projectId, array $memberIds, array $supportMemberIds): array

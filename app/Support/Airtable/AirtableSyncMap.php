@@ -24,7 +24,8 @@ final class AirtableSyncMap
 
     // One list per mirrored table, shared by the portal's own resource and the admin grid's bare
     // table name, so the two never drift apart (2026-10-14).
-    private const CLIENT_FIELDS = ['name' => 'Name', 'client_id' => 'ClientID', 'notes' => 'Notes', 'status' => 'Status'];
+    // Client Information has Name and Notes; the two-digit code is the portal's project-number key.
+    private const CLIENT_FIELDS = ['name' => 'Name', 'notes' => 'Notes'];
 
     private const ACTIVITY_CODE_FIELDS = ['name' => 'Name', 'id_no' => 'IdNo', 'department' => 'Department'];
 
@@ -115,9 +116,11 @@ final class AirtableSyncMap
     // The admin grid edits a row in place: only the columns it changed, only on a record Airtable has.
     private const GRID = ['changed_only' => ['columns', 'fields', 'changes']];
 
-    // Airtable links a request to its projects; SQL keeps that in the projects_requests junction.
-    private const REQUEST_PROJECTS = [
+    // Airtable links a request to its projects, activities and earn code; SQL keeps them in one junction each.
+    private const REQUEST_LINKS = [
         'Project' => ['junction' => 'projects_requests', 'local' => 'request_id', 'foreign' => 'project_id', 'table' => 'projects'],
+        'Activity Scope' => ['junction' => 'requests_activity_codes', 'local' => 'request_id', 'foreign' => 'activity_code_id', 'table' => 'activity_codes'],
+        'Earn Code' => ['junction' => 'requests_earn_codes', 'local' => 'request_id', 'foreign' => 'earn_code_id', 'table' => 'earn_codes'],
     ];
 
     /**
@@ -130,7 +133,7 @@ final class AirtableSyncMap
      * keys listing an action's changed columns; only those are sent. `deleted_id` is the payload
      * key a single-row delete keeps its Airtable id under.
      *
-     * @var array<string, array{sql_table: string, airtable_table: string, fields: array<string, string>, discard_when?: array{column: string, value: string}, sample?: array{column: string, value: string}, links?: array<string, array{junction: string, local: string, foreign: string, table: string}>, attachments?: array<string, array{table_name: string, field_name: string, payload_key?: string}>, aliases?: array<string, array<string, string>>, rows?: array{lines: string, removed: string, deleted: string}, changed_only?: list<string>, deleted_id?: string}>
+     * @var array<string, array{sql_table: string, airtable_table: string, base?: string, product?: string, connection?: string, record_id_column?: string, fields: array<string, string>, discard_when?: array{column: string, value: string}, sample?: array{column: string, value: string}, links?: array<string, array{junction?: string, local?: string, foreign?: string, table: string, where?: array<string, string>, matches?: string, from?: string, from_actor?: bool, query?: string, column?: string, id_column?: string}>, attachments?: array<string, array{table_name: string, field_name: string, payload_key?: string}>, aliases?: array<string, array<string, string>>, rows?: array{lines: string, removed: string, deleted: string}, changed_only?: list<string>, deleted_id?: string}>
      */
     private const RESOURCES = [
         // Airtable's Request table stores the member as plain text, so leave needs no linked record.
@@ -143,6 +146,7 @@ final class AirtableSyncMap
             // Maternity request goes without its Category rather than being held back forever.
             'lenient' => ['Category'],
             'fields' => [...self::REQUEST_FIELDS, 'category' => 'Category'],
+            'links' => ['Earn Code' => self::REQUEST_LINKS['Earn Code']],
         ],
         'requests.overtime' => [
             'sql_table' => 'requests',
@@ -150,7 +154,7 @@ final class AirtableSyncMap
             'airtable_table' => 'Request',
             'discard_when' => self::WITHDRAWN,
             'fields' => [...self::REQUEST_FIELDS, 'no_of_hours' => 'No. of Hours'],
-            'links' => self::REQUEST_PROJECTS,
+            'links' => self::REQUEST_LINKS,
         ],
         'requests.offset' => [
             'sql_table' => 'requests',
@@ -164,7 +168,7 @@ final class AirtableSyncMap
                 'offset_work_day' => 'Offset Work Day',
                 'offset_hrs' => 'Offset Hrs',
             ],
-            'links' => self::REQUEST_PROJECTS,
+            'links' => self::REQUEST_LINKS,
         ],
         'requests.reimbursement' => [
             'sql_table' => 'reimbursements',
@@ -203,12 +207,14 @@ final class AirtableSyncMap
             'sql_table' => 'user_reports',
             'airtable_table' => 'User Reports',
             'rows' => ['lines' => 'lineIds', 'removed' => 'removedAirtableIds', 'deleted' => 'lines'],
-            // Only what the report form writes. IsSupport, Actual Work Date, End date, Duration and
-            // Approver Remarks are Airtable's to keep: the form never sets them, so sending the empty
-            // SQL value would erase them from a record an edit reuses. Late-submission approval is the
-            // form's (Pending when filed, back to Pending on an edit), so it goes (2026-10-14).
+            // Only what the report form writes. IsSupport, End date, Duration and Approver Remarks are
+            // Airtable's to keep: the form never sets them, so sending the empty SQL value would erase
+            // them from a record an edit reuses. Actual Work Date is the report's own day (2026-10-22,
+            // user), and Late-submission approval is the form's (Pending when filed, back to Pending on
+            // an edit), so they go (2026-10-14).
             'fields' => [
                 'report_date' => 'Date',
+                'actual_work_date' => 'Actual Work Date',
                 'hours_rendered' => 'Hours Rendered',
                 'change_in_elements' => 'Change in Elements (+/-)',
                 'remarks' => 'Remarks',
@@ -234,6 +240,7 @@ final class AirtableSyncMap
             'fields' => [
                 'late_submission_approval' => 'LateSubmission Approval',
                 'approver_remarks' => 'Approver Remarks',
+                'actual_work_date' => 'Actual Work Date',
             ],
         ],
         // The portal's own Add/Edit Project screens. A project the portal adds is created from every
@@ -289,6 +296,27 @@ final class AirtableSyncMap
                 // One junction, three fields: the role on it is what tells members from support.
                 'Project Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'member'], 'column' => 'memberIds'],
                 'Support Members' => ['junction' => 'employees_projects', 'local' => 'project_id', 'foreign' => 'employee_id', 'table' => 'employees', 'where' => ['role_on_project' => 'support'], 'column' => 'supportMemberIds'],
+                // The portal's creator and the actor of every project action (2026-10-22, user).
+                'createdBy' => ['table' => 'employees', 'matches' => 'id', 'from' => 'requested_by', 'column' => 'createdBy'],
+                'lastModifiedBy' => ['table' => 'employees', 'from_actor' => true],
+                // The type's allowed activity codes, less the ones this project took out.
+                'Activity Scope' => ['table' => 'activity_codes', 'query' => 'activity_scope', 'column' => 'activityIds'],
+            ],
+        ],
+        // One record per assigned scope task (2026-10-22, user): the portal owns these, so an
+        // assignment that goes takes its Airtable record with it.
+        'projects.scopes' => [
+            'sql_table' => 'project_scopes',
+            'airtable_table' => 'Project Scopes',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => ['progress_pct' => 'Progress'],
+            'links' => [
+                'Project' => ['junction' => 'projects_project_scopes', 'local' => 'project_scope_id', 'foreign' => 'project_id', 'table' => 'projects', 'column' => 'projectIds'],
+                'Scope - T3 Activities' => ['junction' => 'project_scopes_t3_activities', 'local' => 'project_scope_id', 'foreign' => 't3_activity_id', 'table' => 'project_scope_t3_activities', 'column' => 't3ActivityIds'],
+                'Scope - T4 Tasks' => ['junction' => 'project_scopes_t4_tasks', 'local' => 'project_scope_id', 'foreign' => 't4_task_id', 'table' => 'project_scope_t4_tasks', 'column' => 't4TaskIds'],
+                'AssignedTo' => ['junction' => 'project_scopes_assigned_to', 'local' => 'project_scope_id', 'foreign' => 'employee_id', 'table' => 'employees', 'column' => 'assigneeIds'],
             ],
         ],
         // The admin grid ledgers an edit under the bare table name. Only the columns it changed are
@@ -421,6 +449,8 @@ final class AirtableSyncMap
             'airtable_table' => 'Warnings',
             'changed_only' => ['fields', 'changes'],
             'create_full' => true,
+            // Taking a flag off deletes the warning (2026-10-22, user), not leaves it Inactive.
+            'deleted_id' => 'airtableRecordId',
             'fields' => self::WARNING_FIELDS,
             'links' => [
                 'Employee' => ['junction' => 'employees_warnings', 'local' => 'warning_id', 'foreign' => 'employee_id', 'table' => 'employees', 'column' => 'employeeIds'],
@@ -428,13 +458,16 @@ final class AirtableSyncMap
         ],
         // Manage / References (2026-10-14, user): a client or an activity code the portal adds is
         // created whole, an edit sends what it changed, and a removal deletes Airtable's record.
+        // Clients are writable in Client Information (2026-10-22, user); Users & Projects holds a
+        // read-only synced copy, whose ids stay in airtable_record_id for project Client links.
         'references.clients' => [
             'sql_table' => 'clients',
             'airtable_table' => 'Clients',
+            'base' => 'clients',
+            'record_id_column' => 'client_info_airtable_record_id',
             'changed_only' => ['fields', 'changes'],
             'create_full' => true,
             'deleted_id' => 'airtableRecordId',
-            'lenient' => ['Status'],
             'fields' => self::CLIENT_FIELDS,
         ],
         'references.activity_codes' => [
@@ -444,6 +477,18 @@ final class AirtableSyncMap
             'create_full' => true,
             'deleted_id' => 'airtableRecordId',
             'fields' => self::ACTIVITY_CODE_FIELDS,
+        ],
+        // Earn Codes are editable in the Calendar base (2026-10-22, user); Users & Projects holds a
+        // read-only synced copy, whose ids stay in airtable_record_id for report/request links.
+        'references.earn_codes' => [
+            'sql_table' => 'earn_codes',
+            'airtable_table' => 'Earn Codes',
+            'base' => 'calendar',
+            'record_id_column' => 'calendar_airtable_record_id',
+            'changed_only' => ['fields', 'changes'],
+            'create_full' => true,
+            'deleted_id' => 'airtableRecordId',
+            'fields' => self::EARN_CODE_FIELDS,
         ],
         // The scope tree, one Airtable table per tier (2026-10-14, user); the portal writes only the
         // code, the name and (above tasks) the department.
@@ -495,8 +540,128 @@ final class AirtableSyncMap
         'onboarding.employee_data' => [
             'sql_table' => 'new_employee_data',
             'airtable_table' => 'New Employee Data',
+            'deleted_id' => 'airtableRecordId',
             'lenient' => self::NEW_EMPLOYEE_LENIENT,
             'fields' => self::NEW_EMPLOYEE_FIELDS,
+        ],
+        // A project's closing writes one "Project Closed" row (2026-10-22, user). Only ever created.
+        'projects.achievement' => [
+            'sql_table' => 'achievements_milestones',
+            'airtable_table' => 'Achievements and Milestones',
+            'fields' => self::ACHIEVEMENT_FIELDS,
+        ],
+        // A member-created event goes to the Calendar base (2026-10-22, user), with the nine fields
+        // whose values the portal already has.
+        'calendar.events' => [
+            'sql_table' => 'calendar_events',
+            'airtable_table' => 'Events',
+            'base' => 'calendar',
+            'fields' => [
+                'title' => 'Name',
+                'details' => 'Details',
+                'starts_at_full' => 'Start Date',
+                'ends_at_full' => 'End Date',
+                'category' => 'Type',
+                'author' => 'Author',
+                'audience' => 'Attendees',
+                'employee_names' => 'Employee Names',
+                'departments' => 'Dept',
+            ],
+            'aliases' => [
+                'Type' => ['company_event' => 'Company Event', 'project' => 'Project'],
+                'Attendees' => ['everyone' => 'Everyone', 'department' => 'Department', 'members' => 'Specific Members'],
+            ],
+            // The base offers Engineering, MIS, Purchasing, Executives and HR; another department is
+            // left out with a note rather than blocking the event.
+            'lenient' => ['Dept'],
+        ],
+        // Finance writes the transaction tracker itself (2026-10-22, user), so its four tables mirror
+        // the rows the portal adds or edits. Money fields are sent as their SQL values; balances and
+        // rollups stay Airtable's. Links name the ends the portal joined, and only those tables'
+        // records are written -- never the reverse links Airtable fills in.
+        'tracker.transactions' => [
+            'sql_table' => 'transactions',
+            'airtable_table' => 'Transactions',
+            'base' => 'tracker',
+            'connection' => 'tracker',
+            'product' => 'transaction-tracker',
+            // The tracker's SQL holds every link, imported ones included, so an empty one is real.
+            'full_links' => true,
+            'fields' => [
+                'transaction_name' => 'Transaction Name',
+                'transaction_date' => 'Date',
+                'amount' => 'Amount',
+                'type' => 'Type',
+                'payor_payee' => 'Payor/Payee',
+                'description' => 'Description',
+                'approval_date' => 'Approval Date',
+                'created_by' => 'Created By',
+            ],
+            'links' => [
+                'Account' => ['junction' => 'transactions_accounts', 'local' => 'transaction_id', 'foreign' => 'account_id', 'table' => 'accounts'],
+                'Envelope' => ['junction' => 'transactions_envelopes', 'local' => 'transaction_id', 'foreign' => 'envelope_id', 'table' => 'envelopes_budget'],
+                'Budget Code' => ['junction' => 'transactions_budget_codes', 'local' => 'transaction_id', 'foreign' => 'budget_code_id', 'table' => 'budget_codes'],
+                'Transfer Source Account' => ['junction' => 'transactions_transfer_source_accounts', 'local' => 'transaction_id', 'foreign' => 'account_id', 'table' => 'accounts'],
+                'Transfer Destination Account' => ['junction' => 'transactions_transfer_destination_accounts', 'local' => 'transaction_id', 'foreign' => 'account_id', 'table' => 'accounts'],
+            ],
+            'attachments' => [
+                'Receipt' => ['table_name' => 'transactions', 'field_name' => 'receipt', 'payload_key' => 'receipt'],
+            ],
+        ],
+        'tracker.accounts' => [
+            'sql_table' => 'accounts',
+            'airtable_table' => 'Accounts',
+            'base' => 'tracker',
+            'connection' => 'tracker',
+            'product' => 'transaction-tracker',
+            'fields' => [
+                'account_name' => 'Account Name',
+                'account_type' => 'Account Type',
+                'email' => 'Email',
+                'institution' => 'Institution',
+                'active' => 'Active',
+            ],
+            // The portal takes a free-text type; Airtable's list is a select. Leave an unlisted one out.
+            'lenient' => ['Account Type'],
+            'attachments' => [
+                'QRCode' => ['table_name' => 'accounts', 'field_name' => 'qrcode'],
+            ],
+        ],
+        'tracker.envelopes' => [
+            'sql_table' => 'envelopes_budget',
+            'airtable_table' => 'Envelopes - Budget',
+            'base' => 'tracker',
+            'connection' => 'tracker',
+            'product' => 'transaction-tracker',
+            'full_links' => true,
+            'fields' => [
+                'envelope_name' => 'Envelope Name',
+                'budget_amount' => 'Budget Amount',
+                'group_name' => 'Group',
+                'time_period' => 'Time Period',
+                'active' => 'Active',
+                'budget_notes' => 'Budget Notes',
+            ],
+            'links' => [
+                'Account' => ['junction' => 'envelopes_accounts', 'local' => 'envelope_id', 'foreign' => 'account_id', 'table' => 'accounts'],
+                'Budget Code' => ['junction' => 'envelopes_budget_codes', 'local' => 'envelope_id', 'foreign' => 'budget_code_id', 'table' => 'budget_codes'],
+            ],
+        ],
+        'tracker.budget_codes' => [
+            'sql_table' => 'budget_codes',
+            'airtable_table' => 'Budget Code',
+            'base' => 'tracker',
+            'connection' => 'tracker',
+            'product' => 'transaction-tracker',
+            'fields' => [
+                'name' => 'Name',
+                'description' => 'Desc',
+                'transfer_date_received' => 'Transfer Date (Received)',
+                'expected_amount_quotation' => 'Expected Amount (Quotation)',
+            ],
+            'attachments' => [
+                'Attachments' => ['table_name' => 'budget_codes', 'field_name' => 'attachments'],
+            ],
         ],
         // Every Trail history row the portal writes (2026-10-14, user), linked to its project. Only ever created.
         'projects.trail' => [
@@ -506,7 +671,7 @@ final class AirtableSyncMap
             'links' => self::TRAIL_PROJECT,
         ],
         // The admin grid's bare table names for every other mirrored table it can edit (2026-10-14, user).
-        'clients' => [...self::GRID, 'sql_table' => 'clients', 'airtable_table' => 'Clients', 'fields' => self::CLIENT_FIELDS],
+        'clients' => [...self::GRID, 'sql_table' => 'clients', 'airtable_table' => 'Clients', 'base' => 'clients', 'record_id_column' => 'client_info_airtable_record_id', 'deleted_id' => 'airtableRecordId', 'fields' => self::CLIENT_FIELDS],
         'activity_codes' => [...self::GRID, 'sql_table' => 'activity_codes', 'airtable_table' => 'Activity Code/s', 'fields' => self::ACTIVITY_CODE_FIELDS],
         'job_type_allowed_activities' => [...self::GRID, 'sql_table' => 'job_type_allowed_activities', 'airtable_table' => 'Job Type Allowed Activities', 'bracketed' => ['job_type' => 'department'], 'fields' => self::ALLOWED_FIELDS],
         'new_employee_data' => [...self::GRID, 'sql_table' => 'new_employee_data', 'airtable_table' => 'New Employee Data', 'lenient' => self::NEW_EMPLOYEE_LENIENT, 'fields' => self::NEW_EMPLOYEE_FIELDS],
@@ -515,7 +680,7 @@ final class AirtableSyncMap
         'project_scope_t2_procedures' => [...self::GRID, 'sql_table' => 'project_scope_t2_procedures', 'airtable_table' => 'Project Scope Source - T2 Procedures', 'fields' => self::T2_FIELDS],
         'project_scope_t3_activities' => [...self::GRID, 'sql_table' => 'project_scope_t3_activities', 'airtable_table' => 'Project Scope Source - T3 Activities', 'fields' => self::T3_FIELDS],
         'project_scope_t4_tasks' => [...self::GRID, 'sql_table' => 'project_scope_t4_tasks', 'airtable_table' => 'Project Scope Source - T4 Tasks', 'fields' => self::T4_FIELDS],
-        'earn_codes' => [...self::GRID, 'sql_table' => 'earn_codes', 'airtable_table' => 'Earn Codes', 'fields' => self::EARN_CODE_FIELDS],
+        'earn_codes' => [...self::GRID, 'sql_table' => 'earn_codes', 'airtable_table' => 'Earn Codes', 'base' => 'calendar', 'record_id_column' => 'calendar_airtable_record_id', 'deleted_id' => 'airtableRecordId', 'fields' => self::EARN_CODE_FIELDS],
         'achievements_milestones' => [...self::GRID, 'sql_table' => 'achievements_milestones', 'airtable_table' => 'Achievements and Milestones', 'fields' => self::ACHIEVEMENT_FIELDS],
         'bim_form' => [...self::GRID, 'sql_table' => 'bim_form', 'airtable_table' => 'BIM Form', 'fields' => self::BIM_FORM_FIELDS],
     ];
@@ -534,7 +699,49 @@ final class AirtableSyncMap
     }
 
     /**
-     * @return array{sql_table: string, airtable_table: string, fields: array<string, string>, discard_when?: array{column: string, value: string}, sample?: array{column: string, value: string}, links?: array<string, array{junction: string, local: string, foreign: string, table: string}>, attachments?: array<string, array{table_name: string, field_name: string, payload_key?: string}>, aliases?: array<string, array<string, string>>, rows?: array{lines: string, removed: string, deleted: string}, changed_only?: list<string>, deleted_id?: string}|null
+     * The Airtable base a resource lives in. `main` is Users & Projects; the others are configured
+     * in `services.airtable.bases`.
+     *
+     * @param  array<string, mixed>|null  $map
+     */
+    public static function base(?array $map): string
+    {
+        return is_string($map['base'] ?? null) ? $map['base'] : 'main';
+    }
+
+    /**
+     * The product whose ledger actions this resource accepts.
+     *
+     * @param  array<string, mixed>|null  $map
+     */
+    public static function product(?array $map): string
+    {
+        return is_string($map['product'] ?? null) ? $map['product'] : 'portal';
+    }
+
+    /**
+     * The SQL connection the mapped table lives on.
+     *
+     * @param  array<string, mixed>|null  $map
+     */
+    public static function connection(?array $map): string
+    {
+        return is_string($map['connection'] ?? null) ? $map['connection'] : 'portal';
+    }
+
+    /**
+     * The column holding this resource's Airtable record id. A row mirrored into a second base uses
+     * its own column for that base.
+     *
+     * @param  array<string, mixed>|null  $map
+     */
+    public static function recordIdColumn(?array $map): string
+    {
+        return is_string($map['record_id_column'] ?? null) ? $map['record_id_column'] : 'airtable_record_id';
+    }
+
+    /**
+     * @return array{sql_table: string, airtable_table: string, base?: string, product?: string, connection?: string, record_id_column?: string, fields: array<string, string>, discard_when?: array{column: string, value: string}, sample?: array{column: string, value: string}, links?: array<string, array{junction?: string, local?: string, foreign?: string, table: string, where?: array<string, string>, matches?: string, from?: string, from_actor?: bool, query?: string, column?: string, id_column?: string}>, attachments?: array<string, array{table_name: string, field_name: string, payload_key?: string}>, aliases?: array<string, array<string, string>>, rows?: array{lines: string, removed: string, deleted: string}, changed_only?: list<string>, deleted_id?: string}|null
      */
     public static function for(?string $resource): ?array
     {

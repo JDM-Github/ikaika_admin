@@ -265,7 +265,7 @@ final class PortalBudgetTransactions
         }
         $isRemovingReceipt = ! $isFundsReceived && $request->boolean('removeReceipt');
 
-        $wasCents = $this->ledger->transaction(function () use ($id, $name, $occurredOn, $payorPayee, $notes, $receipt, $isRemovingReceipt, $cents, $isConfirmed): int {
+        $wasCents = $this->ledger->transaction(function () use ($id, $name, $occurredOn, $payorPayee, $notes, $receipt, $isRemovingReceipt, $cents, $isConfirmed, $actor): int {
             $before = $this->ledger->connection()->table('transactions')->where('id', $id)->lockForUpdate()->first(['amount', 'type']);
             $wasCents = $this->input->cents($before?->amount);
             if ($cents !== null && $cents !== $wasCents) {
@@ -296,6 +296,13 @@ final class PortalBudgetTransactions
                     'mime_type' => $receipt['mimeType'],
                 ]);
             }
+            $trackerParameters = [];
+            if (is_array($receipt)) {
+                $trackerParameters['receipt'] = $receipt['fileUrl'];
+            } elseif ($isRemovingReceipt) {
+                $trackerParameters['receipt'] = null;
+            }
+            $this->ledger->trackerEdit('tracker.transactions', 'transactions', $id, $actor, $trackerParameters);
 
             return $wasCents;
         });

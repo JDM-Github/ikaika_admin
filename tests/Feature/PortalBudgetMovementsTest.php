@@ -530,6 +530,12 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertSame('Savings', $row->account_type);
         $this->assertSame('BDO', $row->institution);
         $this->assertTrue($this->logged('manage.budget-accounts', 'added the account Seeded New Account'));
+        $this->assertTrue(DB::connection('core')->table('actions')
+            ->where('product', 'transaction-tracker')
+            ->where('resource', 'tracker.accounts')
+            ->where('record_id', (string) $id)
+            ->where('action_type', 'add')
+            ->exists());
 
         $page = $this->getJson(self::BASE.'budget-accounts', $this->admin())->assertOk();
         $listed = collect($page->json('data'))->firstWhere('id', (string) $id);
@@ -631,6 +637,12 @@ class PortalBudgetMovementsTest extends TestCase
         Cache::flush();
         $listed = collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->assertOk()->json('data'))->keyBy('id');
         $this->assertTrue($listed[(string) $row->id]['isEditable']);
+        $this->assertTrue(DB::connection('core')->table('actions')
+            ->where('product', 'transaction-tracker')
+            ->where('resource', 'tracker.transactions')
+            ->where('record_id', (string) $row->id)
+            ->where('action_type', 'edit')
+            ->exists());
 
         // The receipt can come off too, and the name stay.
         $this->patchJson(self::BASE.'budget-transactions/'.$row->id, ['name' => 'Taxi to Makati', 'occurredOn' => '2026-10-06', 'removeReceipt' => true], $this->admin())->assertOk();

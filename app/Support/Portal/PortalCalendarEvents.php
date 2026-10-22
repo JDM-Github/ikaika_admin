@@ -5,6 +5,7 @@ namespace App\Support\Portal;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\LeaveRequest;
 use App\Modules\Portal\Models\Reimbursement;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -60,6 +61,7 @@ final class PortalCalendarEvents
         private readonly PortalHolidays $holidays,
         private readonly PortalTimezone $timezone,
         private readonly PortalAudit $audit,
+        private readonly CoreLedger $ledger,
     ) {}
 
     /**
@@ -112,7 +114,11 @@ final class PortalCalendarEvents
                 is_string($holiday['date'] ?? null) ? $holiday['date'] : $from,
                 'holiday',
                 null,
-                $type === 'regular' ? 'Regular holiday' : 'Special holiday',
+                match ($type) {
+                    'regular' => 'Regular holiday',
+                    'double' => 'Double holiday',
+                    default => 'Special holiday',
+                },
             );
         }
 
@@ -435,20 +441,34 @@ final class PortalCalendarEvents
 
         $createdAt = $this->timezone->now();
         $employeeId = (int) $actor->getKey();
+        $startsAtFull = $startsOn.' '.($startsAt ?? '00:00:00');
+        $endsAtFull = ($endsOn !== $startsOn || $endsAt !== null) ? $endsOn.' '.($endsAt ?? '00:00:00') : null;
+        $author = PortalSubmittedReportPresenter::memberName(
+            is_string($actor->first_name ?? null) ? $actor->first_name : null,
+            is_string($actor->last_name ?? null) ? $actor->last_name : null,
+        );
+        $employeeNames = $this->memberNames($memberIds);
+        $departmentNames = $departments === [] ? null : implode(', ', $departments);
 
-        $id = (int) $this->connection()->transaction(function () use (
+        $id = (int) $this->ledger->within($this->connection(), function () use (
             $title,
             $details,
             $startsOn,
             $startsAt,
             $endsOn,
             $endsAt,
+            $startsAtFull,
+            $endsAtFull,
             $category,
             $audience,
+            $author,
+            $employeeNames,
+            $departmentNames,
             $departments,
             $memberIds,
             $createdAt,
             $employeeId,
+            $actor,
         ): int {
             $eventId = (int) $this->connection()->table('calendar_events')->insertGetId([
                 'title' => $title,
@@ -457,8 +477,13 @@ final class PortalCalendarEvents
                 'starts_at' => $startsAt,
                 'ends_on' => $endsOn === $startsOn ? null : $endsOn,
                 'ends_at' => $endsAt,
+                'starts_at_full' => $startsAtFull,
+                'ends_at_full' => $endsAtFull,
                 'category' => $category,
                 'audience' => $audience,
+                'author' => $author,
+                'employee_names' => $employeeNames,
+                'departments' => $departmentNames,
                 'created_by' => $employeeId,
                 'date_created' => $createdAt->toDateTimeString(),
             ]);
@@ -475,6 +500,17 @@ final class PortalCalendarEvents
                     'employee_id' => $memberId,
                 ]);
             }
+
+            $this->ledger->recordAdd(
+                CoreLedger::PRODUCT_PORTAL,
+                'calendar_events:'.$eventId,
+                'portal.calendar_events',
+                ['id' => (string) $eventId],
+                self::CORE_RESOURCE,
+                (string) $eventId,
+                $employeeId,
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
 
             return $eventId;
         });
@@ -955,6 +991,35 @@ final class PortalCalendarEvents
         }
 
         return array_values($ids);
+    }
+
+    /**
+     * The specific members' full names, in the order they were chosen, for the Calendar Events text.
+     *
+     * @param  list<int>  $memberIds
+     */
+    private function memberNames(array $memberIds): ?string
+    {
+        if ($memberIds === []) {
+            return null;
+        }
+        $people = $this->connection()->table('employees')
+            ->whereIn('id', $memberIds)
+            ->get(['id', 'first_name', 'last_name'])
+            ->keyBy('id');
+        $names = [];
+        foreach ($memberIds as $id) {
+            $person = $people->get($id);
+            if ($person === null) {
+                continue;
+            }
+            $names[] = PortalSubmittedReportPresenter::memberName(
+                is_string($person->first_name ?? null) ? $person->first_name : null,
+                is_string($person->last_name ?? null) ? $person->last_name : null,
+            );
+        }
+
+        return $names === [] ? null : implode(', ', $names);
     }
 
     /**

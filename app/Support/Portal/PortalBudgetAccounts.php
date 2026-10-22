@@ -147,7 +147,7 @@ final class PortalBudgetAccounts
             abort(422, $holderName.' has no email address, so the account cannot be tied to them.');
         }
 
-        $id = $this->ledger->transaction(function () use ($name, $email, $holderName, $accountType, $institution): int {
+        $id = $this->ledger->transaction(function () use ($name, $email, $holderName, $accountType, $institution, $actor): int {
             $tracker = $this->ledger->connection();
             if ($tracker->table('accounts')->whereRaw('LOWER(TRIM(account_name)) = ?', [mb_strtolower($name)])->lockForUpdate()->exists()) {
                 abort(422, 'An account named '.$name.' already exists.');
@@ -160,7 +160,7 @@ final class PortalBudgetAccounts
             }
             $now = now('UTC')->format('Y-m-d H:i:s');
 
-            return (int) $tracker->table('accounts')->insertGetId([
+            $id = (int) $tracker->table('accounts')->insertGetId([
                 'account_name' => $name,
                 'account_type' => $accountType,
                 'email' => $email,
@@ -170,6 +170,9 @@ final class PortalBudgetAccounts
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
+            $this->ledger->trackerAdd('tracker.accounts', 'accounts', $id, $actor);
+
+            return $id;
         });
 
         $this->audit->record(

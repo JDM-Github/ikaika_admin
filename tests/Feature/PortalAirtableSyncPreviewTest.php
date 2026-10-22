@@ -31,6 +31,10 @@ class PortalAirtableSyncPreviewTest extends TestCase
 
     private const URL = '/api/development/portal/administration/actions/sync-preview';
 
+    private const CHECK_URL = '/api/development/portal/administration/actions/sync-check';
+
+    private const SEND_URL = '/api/development/portal/administration/actions/sync-send';
+
     private Employee $developer;
 
     protected function setUp(): void
@@ -87,6 +91,48 @@ class PortalAirtableSyncPreviewTest extends TestCase
         $this->assertSame($unsynced, Action::query()->whereNull('synced_at')->count());
         $this->assertStringStartsWith('{UserName|You} previewed the Airtable sync', (string) DB::connection('portal')->table('logs')
             ->where('employee_id', $this->developer->getKey())->where('resource', 'administration.actions.sync')->orderByDesc('id')->value('message'));
+    }
+
+    public function test_the_check_reads_the_mappings_without_writing(): void
+    {
+        Http::fake(['api.airtable.com/v0/meta/*' => Http::response(['tables' => []])]);
+        $this->setPassword('correct-horse-battery');
+        $unsynced = Action::query()->whereNull('synced_at')->count();
+
+        $response = $this->withToken($this->developerToken())->postJson(self::CHECK_URL, ['password' => 'correct-horse-battery'])
+            ->assertOk()
+            ->assertJsonPath('resource', 'airtable-sync-check');
+
+        $this->assertIsArray($response->json('data.counts'));
+        $this->assertNotEmpty($response->json('data.items'));
+        Http::assertNotSent(fn (HttpRequest $request): bool => $request->method() !== 'GET');
+        $this->assertSame($unsynced, Action::query()->whereNull('synced_at')->count());
+        $this->assertStringStartsWith('{UserName|You} checked the Airtable mappings', (string) DB::connection('portal')->table('logs')
+            ->where('employee_id', $this->developer->getKey())->where('resource', 'administration.actions.sync')->orderByDesc('id')->value('message'));
+    }
+
+    public function test_the_send_is_refused_for_the_prod_profile_outside_production(): void
+    {
+        $this->setPassword('correct-horse-battery');
+        config(['services.airtable.env' => 'prod']);
+
+        $this->withToken($this->developerToken())->postJson(self::SEND_URL, ['password' => 'correct-horse-battery'])
+            ->assertForbidden()
+            ->assertJsonPath('message', 'Refused: AIRTABLE_ENV=prod from a non-production app.');
+    }
+
+    public function test_the_send_refuses_while_another_send_holds_the_lock(): void
+    {
+        $this->setPassword('correct-horse-battery');
+        $lock = Cache::lock('portal:airtable-sync', 60);
+        $this->assertTrue($lock->get());
+        try {
+            $this->withToken($this->developerToken())->postJson(self::SEND_URL, ['password' => 'correct-horse-battery'])
+                ->assertStatus(409)
+                ->assertJsonPath('message', 'Another Airtable send is already running; nothing was sent.');
+        } finally {
+            $lock->release();
+        }
     }
 
     public function test_a_wrong_password_previews_nothing(): void

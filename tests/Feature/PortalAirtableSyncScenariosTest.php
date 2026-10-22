@@ -6,7 +6,10 @@ use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Airtable\AirtableSyncMap;
 use App\Support\Airtable\PortalAirtableSync;
+use App\Support\Core\CoreLedger;
+use App\Support\Portal\PortalEarnCodes;
 use App\Support\Portal\PortalProjectApproval;
+use App\Support\Portal\PortalScopeWork;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Carbon\CarbonInterval;
 use Closure;
@@ -61,6 +64,7 @@ class PortalAirtableSyncScenariosTest extends TestCase
             'Type' => 'singleLineText', 'Approver Remarks' => 'multilineText',
             'Category' => ['Regular Overtime', 'Rest Day Overtime', 'Holiday Overtime', 'Special Holiday Overtime', 'Sick Leave', 'Vacation Leave'],
             'No. of Hours' => 'number', 'Project' => '@Project/s', 'Original Work Day' => 'date', 'Offset Work Day' => 'date', 'Offset Hrs' => 'number',
+            'Activity Scope' => '@Activity Code/s', 'Earn Code' => '@Earn Codes',
         ],
         'Reimbursements' => [
             'Date' => 'date', 'Item' => 'singleLineText', 'Cost' => 'currency', 'QTY' => 'number', 'Purpose' => 'multilineText',
@@ -105,7 +109,14 @@ class PortalAirtableSyncScenariosTest extends TestCase
             'Is the project ledger (MS Teams Planner) moved and updated to For Submission (completed status)?' => 'checkbox',
             'Are the details in the project ledger (MS Teams Planner) updated?' => 'checkbox',
             'PM ID' => '@Employees', 'Client' => '@Clients', 'Project Members' => '@Employees', 'Support Members' => '@Employees',
+            'createdBy' => '@Employees', 'lastModifiedBy' => '@Employees', 'Activity Scope' => '@Activity Code/s',
         ],
+        'Project Scopes' => [
+            'Progress' => 'percent', 'Project' => '@Project/s', 'Scope - T3 Activities' => '@Project Scope Source - T3 Activities',
+            'Scope - T4 Tasks' => '@Project Scope Source - T4 Tasks', 'AssignedTo' => '@Employees',
+        ],
+        'Project Scope Source - T3 Activities' => ['WBS Code' => 'singleLineText', 'Name' => 'singleLineText', 'Department' => ['Engineering', 'MIS']],
+        'Project Scope Source - T4 Tasks' => ['WBS Code' => 'singleLineText', 'Task Name' => 'singleLineText'],
         'New Employee Data' => [
             'ID No.' => 'singleLineText', 'First Name' => 'singleLineText', 'Middle Name' => 'singleLineText', 'Last Name' => 'singleLineText',
             'Nickname' => 'multilineText', 'Email' => 'singleLineText',
@@ -121,6 +132,26 @@ class PortalAirtableSyncScenariosTest extends TestCase
         'Activity Code/s' => ['Name' => 'singleLineText', 'IdNo' => 'singleLineText', 'Department' => ['Admin', 'MIS', 'Engineering', 'General', 'HR']],
         'Earn Codes' => ['Description' => 'multilineText', 'Did Not Work' => 'number', 'Did Work' => 'number'],
         'Clients' => ['Name' => 'singleLineText', 'ClientID' => 'singleLineText', 'Notes' => 'multilineText', 'Status' => ['Todo', 'In progress', 'Done']],
+        'Earn Codes' => ['Description' => 'multilineText', 'Did Not Work' => 'number', 'Did Work' => 'number'],
+        'Transactions' => [
+            'Transaction Name' => 'singleLineText', 'Date' => 'dateTime', 'Amount' => 'currency', 'Type' => ['Expense', 'Credit', 'Transfer'],
+            'Account' => '@Accounts', 'Envelope' => '@Envelopes - Budget', 'Payor/Payee' => 'singleLineText', 'Receipt' => 'multipleAttachments',
+            'Description' => 'multilineText', 'Approval Date' => 'dateTime', 'Created By' => 'singleLineText', 'Attachments' => 'multipleAttachments',
+            'Transfer Source Account' => '@Accounts', 'Transfer Destination Account' => '@Accounts', 'Budget Code' => '@Budget Code',
+        ],
+        'Accounts' => [
+            'Account Name' => 'singleLineText', 'Account Type' => ['Bank', 'Cash', 'Checking'], 'Email' => 'email',
+            'QRCode' => 'multipleAttachments', 'Institution' => 'singleLineText', 'Active' => 'checkbox',
+        ],
+        'Envelopes - Budget' => [
+            'Envelope Name' => 'singleLineText', 'Budget Amount' => 'currency', 'Group' => ['Maintenance', 'Capital Expenditure'],
+            'Time Period' => ['Monthly', 'Quarterly', 'Yearly', 'One-time'], 'Active' => 'checkbox', 'Budget Notes' => 'multilineText',
+            'Account' => '@Accounts', 'Budget Code' => '@Budget Code',
+        ],
+        'Budget Code' => [
+            'Name' => 'singleLineText', 'Desc' => 'multilineText', 'Transfer Date (Received)' => 'date',
+            'Expected Amount (Quotation)' => 'number', 'Attachments' => 'multipleAttachments',
+        ],
         'Warnings' => ['Date' => 'date', 'Description' => 'richText', 'Status' => ['Active', 'Inactive'], 'Violation Type' => ['N/A', 'Attendance', 'Report'], 'Employee' => '@Employees'],
         'Project Action History' => ['ActionName' => 'singleLineText', 'CreatedBy' => 'singleLineText', 'Remarks' => 'singleLineText', 'Project' => '@Project/s'],
     ];
@@ -192,11 +223,14 @@ class PortalAirtableSyncScenariosTest extends TestCase
         $droppedRecord = $this->airtableId('user_reports', $droppedLine);
         $first = $this->record('User Reports', $keptRecord);
         $this->assertSame($date, $first['Date']);
+        $this->assertSame($date, $first['Actual Work Date']);
         $this->assertEquals(3, $first['Hours Rendered']);
         $this->assertSame([$member->airtable_record_id], $first['Employee No.']);
         $this->assertSame([$this->linkedRecord('projects_user_reports', 'project_id', 'projects', $keptLine)], $first['Project']);
         $this->assertSame([$kept->airtable_record_id], $first['Activity']);
         $this->assertSame([$this->linkedRecord('user_reports_earn_codes', 'earn_code_id', 'earn_codes', $keptLine)], $first['Earn Code']);
+        $regularEarn = DB::connection('portal')->table('earn_codes')->where('id', (new PortalEarnCodes)->regularWorkingDayId())->value('airtable_record_id');
+        $this->assertSame([$regularEarn], $first['Earn Code']);
         $this->assertSame([$dropped->airtable_record_id], $this->record('User Reports', $droppedRecord)['Activity']);
 
         // The first line's hours change, the second line goes, a third comes.
@@ -209,6 +243,7 @@ class PortalAirtableSyncScenariosTest extends TestCase
         $this->assertSame([3, 1, 1], [$this->writes('POST'), $this->writes('PATCH'), $this->writes('DELETE')]);
         $this->assertSame($keptRecord, $this->airtableId('user_reports', $keptAgain));
         $this->assertEquals(4, $this->record('User Reports', $keptRecord)['Hours Rendered']);
+        $this->assertSame($date, $this->record('User Reports', $keptRecord)['Actual Work Date']);
         $this->assertSame('Edited', $this->record('User Reports', $keptRecord)['Remarks']);
         $this->assertArrayNotHasKey((string) $droppedRecord, $this->base['User Reports']);
         $addedRecord = $this->airtableId('user_reports', $addedLine);
@@ -242,8 +277,10 @@ class PortalAirtableSyncScenariosTest extends TestCase
 
         $this->assertSame([], $this->unsent());
         $recordId = $this->airtableId('requests', $requestId);
+        $vacationEarn = DB::connection('portal')->table('earn_codes')->where('id', (new PortalEarnCodes)->id('01 Vacation Leave'))->value('airtable_record_id');
         $this->assertEquals([
             'Date' => $day, 'Name' => $this->nameOf($member), 'Reason' => 'Family trip', 'Status' => 'Pending', 'Type' => 'Leave', 'Category' => 'Vacation Leave',
+            'Earn Code' => [$vacationEarn],
         ], $this->record('Request', $recordId));
 
         $this->patchJson(self::LEAVE.'/'.$requestId, ['leaveType' => '02 Sick Leave', 'requestDate' => $day, 'reason' => 'Down with the flu'], $headers)->assertOk();
@@ -253,6 +290,8 @@ class PortalAirtableSyncScenariosTest extends TestCase
         $this->assertSame([1, 1], [$this->writes('POST'), $this->writes('PATCH')]);
         $this->assertSame($recordId, $this->airtableId('requests', $requestId));
         $this->assertSame('Sick Leave', $this->record('Request', $recordId)['Category']);
+        $sickEarn = DB::connection('portal')->table('earn_codes')->where('id', (new PortalEarnCodes)->id('02 Sick Leave'))->value('airtable_record_id');
+        $this->assertSame([$sickEarn], $this->record('Request', $recordId)['Earn Code']);
         $this->assertSame('Down with the flu', $this->record('Request', $recordId)['Reason']);
 
         $this->postJson(self::LEAVE.'/'.$requestId.'/cancel', [], $headers)->assertOk();
@@ -390,6 +429,9 @@ class PortalAirtableSyncScenariosTest extends TestCase
         $this->assertSame([$member->airtable_record_id], $created['Project Members']);
         $this->assertSame([$support->airtable_record_id], $created['Support Members']);
         $this->assertSame([$client->airtable_record_id], $created['Client']);
+        $this->assertSame([$admin->airtable_record_id], $created['createdBy']);
+        $this->assertSame([$admin->airtable_record_id], $created['lastModifiedBy']);
+        $this->assertNotEmpty($created['Activity Scope']);
         $this->assertSame(['Started', 'Pending', 'Engineering', 'Scan-to-BIM'], [$created['Status'], $created['ProjectCreationStatus'], $created['Department'], $created['Type of Job']]);
         $this->assertEquals(1250, $created['Area (in S.F.)']);
 
@@ -399,7 +441,7 @@ class PortalAirtableSyncScenariosTest extends TestCase
         app(PortalAirtableSync::class)->run(true);
 
         $this->assertSame([], $this->unsent());
-        $this->assertSame([['Project/s', $recordId, ['Project Name' => $renamed]]], $this->sent('PATCH'));
+        $this->assertSame([['Project/s', $recordId, ['Project Name' => $renamed, 'lastModifiedBy' => [$admin->airtable_record_id]]]], $this->sent('PATCH'));
         $this->assertSame($renamed, $this->record('Project/s', $recordId)['Project Name']);
 
         $this->patchJson('/api/development/portal/manage/projects/'.$projectId, ['decision' => 'approve'], $headers)->assertOk();
@@ -408,10 +450,70 @@ class PortalAirtableSyncScenariosTest extends TestCase
         $this->assertSame([], $this->unsent());
         $approval = $this->sent('PATCH')[1];
         $this->assertSame(['Project/s', $recordId], [$approval[0], $approval[1]]);
-        $this->assertSame(['ProjectCreationStatus', 'ProjectCreationApprover', 'Project Approver Email', 'ProjectCreationApproverRemarks'], array_keys($approval[2]));
+        $this->assertSame(['ProjectCreationStatus', 'ProjectCreationApprover', 'Project Approver Email', 'ProjectCreationApproverRemarks', 'lastModifiedBy'], array_keys($approval[2]));
         $this->assertCount(2, $this->sent('PATCH'));
         $this->assertSame('Approved', $this->record('Project/s', $recordId)['ProjectCreationStatus']);
         $this->assertSame($admin->email, $this->record('Project/s', $recordId)['Project Approver Email']);
+    }
+
+    // An assigned scope becomes one Project Scopes record linked to its project, T3 activity, T4 task and
+    // assignee; a reported figure lands as a fraction, and removing the assignment deletes the record.
+    public function test_a_scope_assignment_lands_with_its_links_then_its_progress_and_removal(): void
+    {
+        $this->fakeAirtable();
+        $project = DB::connection('portal')->table('projects')->whereNotNull('airtable_record_id')->orderBy('id')->first(['id', 'airtable_record_id']);
+        $admin = $this->person("LOWER(COALESCE(role, '')) = 'admin' AND LOWER(COALESCE(role_level, '')) != 'executive' AND email IS NOT NULL AND email != ''");
+        $task = DB::connection('portal')->table('project_scope_t4_tasks')->whereNotNull('airtable_record_id')->where('wbs_code', 'not like', '%-')->orderBy('id')->first(['wbs_code', 'airtable_record_id']);
+        $code = trim((string) $task->wbs_code);
+        $parent = substr($code, 0, (int) strrpos($code, '-'));
+        $activity = DB::connection('portal')->table('project_scope_t3_activities')->whereRaw('TRIM(wbs_code) = ?', [$parent])->whereNotNull('airtable_record_id')->first(['airtable_record_id']);
+        $this->assertNotNull($activity, 'The first T4 task has no T3 activity above it.');
+        $this->assignScope($project->id, $code, $admin);
+        app(PortalAirtableSync::class)->run(true);
+
+        $this->assertSame([], $this->unsent());
+        $scope = DB::connection('portal')->table('projects_project_scopes as link')
+            ->join('project_scopes as scope', 'scope.id', '=', 'link.project_scope_id')
+            ->where('link.project_id', $project->id)
+            ->first(['scope.id', 'scope.airtable_record_id']);
+        $this->assertNotNull($scope);
+        $record = $this->record('Project Scopes', $scope->airtable_record_id);
+        $this->assertSame([$project->airtable_record_id], $record['Project']);
+        $this->assertSame([$activity->airtable_record_id], $record['Scope - T3 Activities']);
+        $this->assertSame([$task->airtable_record_id], $record['Scope - T4 Tasks']);
+        $this->assertSame([$admin->airtable_record_id], $record['AssignedTo']);
+
+        DB::connection('portal')->table('projects_scope_progress')->insert([
+            'project_id' => $project->id, 'wbs_code' => $code, 'employee_id' => $admin->getKey(),
+            'report_date' => '2026-10-19', 'percent' => 40,
+        ]);
+        $this->reconcileScope($project->id, $admin);
+        app(PortalAirtableSync::class)->run(true);
+
+        $this->assertSame([], $this->unsent());
+        $this->assertSame(0.4, (float) $this->record('Project Scopes', $scope->airtable_record_id)['Progress']);
+
+        DB::connection('portal')->table('projects_scope_assignees')->where('project_id', $project->id)->where('wbs_code', $code)->delete();
+        $this->reconcileScope($project->id, $admin);
+        app(PortalAirtableSync::class)->run(true);
+
+        $this->assertSame([], $this->unsent());
+        $this->assertArrayNotHasKey($scope->airtable_record_id, $this->base['Project Scopes']);
+    }
+
+    private function assignScope(int $projectId, string $code, Employee $person): void
+    {
+        DB::connection('portal')->table('projects_scope_assignees')->insert([
+            'project_id' => $projectId, 'wbs_code' => $code, 'employee_id' => $person->getKey(),
+        ]);
+        $this->reconcileScope($projectId, $person);
+    }
+
+    private function reconcileScope(int $projectId, Employee $actor): void
+    {
+        app(CoreLedger::class)->within(DB::connection('portal'), function () use ($projectId, $actor): void {
+            app(PortalScopeWork::class)->reconcileProjects([$projectId], $actor);
+        });
     }
 
     // A 503 fails the action once and the next run lands it; a 429 waits out Airtable's 30 s lockout and retries.
@@ -625,16 +727,26 @@ class PortalAirtableSyncScenariosTest extends TestCase
     {
         $this->base = array_fill_keys(array_keys(self::BASE), []);
         if ($holdsTheDatabase) {
-            $tables = [];
             foreach (AirtableSyncMap::resources() as $resource) {
                 $map = AirtableSyncMap::for($resource);
-                if ($map !== null && isset(self::BASE[$map['airtable_table']])) {
-                    $tables[$map['sql_table']] = $map['airtable_table'];
+                if ($map === null || ! isset(self::BASE[$map['airtable_table']])) {
+                    continue;
+                }
+                $column = AirtableSyncMap::recordIdColumn($map);
+                foreach (DB::connection(AirtableSyncMap::connection($map))->table($map['sql_table'])->whereNotNull($column)->pluck($column) as $id) {
+                    $this->base[$map['airtable_table']][(string) $id] = [];
                 }
             }
-            foreach ($tables as $sqlTable => $airtableTable) {
-                foreach (DB::connection('portal')->table($sqlTable)->whereNotNull('airtable_record_id')->pluck('airtable_record_id') as $id) {
-                    $this->base[$airtableTable][(string) $id] = [];
+            // Earn Codes and Clients live in two bases: the source and the Users & Projects synced
+            // copy. The one fake base stands in for both, so seed both id columns.
+            foreach (['airtable_record_id', 'calendar_airtable_record_id'] as $column) {
+                foreach (DB::connection('portal')->table('earn_codes')->whereNotNull($column)->pluck($column) as $id) {
+                    $this->base['Earn Codes'][(string) $id] = [];
+                }
+            }
+            foreach (['airtable_record_id', 'client_info_airtable_record_id'] as $column) {
+                foreach (DB::connection('portal')->table('clients')->whereNotNull($column)->pluck($column) as $id) {
+                    $this->base['Clients'][(string) $id] = [];
                 }
             }
         }
@@ -743,7 +855,7 @@ class PortalAirtableSyncScenariosTest extends TestCase
                     && array_filter($value, fn (mixed $link): bool => ! is_string($link) || ! isset($this->base[substr($type, 1)][$link])) === [],
                 $type === 'multipleAttachments' => is_array($value) && array_is_list($value)
                     && array_filter($value, static fn (mixed $file): bool => ! is_array($file) || ! is_string($file['url'] ?? null) || ! str_starts_with($file['url'], 'https://')) === [],
-                in_array($type, ['number', 'currency'], true) => is_int($value) || is_float($value),
+                in_array($type, ['number', 'currency', 'percent'], true) => is_int($value) || is_float($value),
                 $type === 'checkbox' => is_bool($value),
                 $type === 'date' => is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1,
                 default => is_string($value),

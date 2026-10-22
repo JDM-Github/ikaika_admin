@@ -2,6 +2,7 @@
 
 use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\EmailMessage;
+use App\Support\Airtable\AirtableClient;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\ApiPath;
 use App\Support\Portal\PortalBitbucketPreview;
@@ -9,18 +10,22 @@ use App\Support\Portal\PortalBitbucketSync;
 use App\Support\Portal\PortalBudgetEnvelopes;
 use App\Support\Portal\PortalBugReports;
 use App\Support\Portal\PortalBugReportsJira;
+use App\Support\Portal\PortalCache;
 use App\Support\Portal\PortalEmailAttachments;
 use App\Support\Portal\PortalEmailMessages;
 use App\Support\Portal\PortalEmployeeDocuments;
+use App\Support\Portal\PortalHolidays;
 use App\Support\Portal\PortalHomeLocations;
 use App\Support\Portal\PortalJiraClient;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
 use App\Support\Portal\PortalPlaces;
+use App\Support\Portal\PortalReportLineRepairs;
 use App\Support\Portal\PortalReportReminders;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schedule;
@@ -39,6 +44,13 @@ Artisan::command('portal:airtable-sync
     $send = (bool) $this->option('send');
     $check = (bool) $this->option('check');
     $backoff = (bool) $this->option('backoff');
+
+    // A local/Test Server run must never write the PROD bases just because the profile was left on.
+    if ($send && config('services.airtable.env') === 'prod' && ! app()->environment('production')) {
+        $this->error('Refused: AIRTABLE_ENV=prod from a non-production app. Set AIRTABLE_ENV=test here.');
+
+        return 1;
+    }
 
     $through = $this->option('skip-through');
     if ($through !== null) {
@@ -136,6 +148,283 @@ Artisan::command('portal:airtable-sync
 
     return $counts['failed'] > 0 ? 1 : 0;
 })->purpose('Replay unsynced portal ledger rows into Airtable (dry run unless --send)');
+
+// One-off repair for lines the portal filed before its earn-code picker was fixed (2026-10-22, user).
+// Only lines a reports.submitted ledger action names; imported Airtable lines are never touched.
+Artisan::command('portal:fix-report-lines
+    {--apply : Write the repairs and ledger them for the Airtable sync}', function (PortalReportLineRepairs $repairs): int {
+    $pending = $repairs->pending();
+    if ($pending === []) {
+        $this->info('Nothing to repair.');
+
+        return 0;
+    }
+
+    foreach ($pending as $line) {
+        $this->line(sprintf(
+            '#%d  %s  earn: %s%s  actual work date: %s',
+            $line['lineId'],
+            $line['reportDate'] ?? '-',
+            $line['currentEarn'] ?? '-',
+            $line['needsEarn'] ? ' -> '.$line['targetEarn'] : ' (unchanged)',
+            $line['needsDate'] ? 'empty -> '.($line['reportDate'] ?? '-') : ($line['actualWorkDate'] ?? '-'),
+        ));
+    }
+
+    if (! $this->option('apply')) {
+        $this->warn(count($pending).' line(s) would be repaired. Run with --apply to write and ledger them.');
+
+        return 0;
+    }
+
+    $this->info($repairs->apply($pending).' line(s) repaired and ledgered for the Airtable sync.');
+
+    return 0;
+})->purpose('Repair portal-filed report lines: wrong earn code and empty Actual Work Date (dry run unless --apply)');
+
+// The Calendar base is the source of holidays now; the estimator calendar is no longer read (Phase 2).
+Artisan::command('portal:sync-calendar
+    {--dry-run : Show what would change; write nothing}', function (AirtableClient $airtable, PortalHolidays $holidays): int {
+    try {
+        $earnRecords = $airtable->records('Earn Codes', 'calendar');
+        $holidayRecords = $airtable->records('Holidays', 'calendar');
+    } catch (Throwable $error) {
+        $this->error('Calendar pull stopped: '.$error->getMessage());
+
+        return 1;
+    }
+
+    $descriptions = [];
+    foreach ($earnRecords as $record) {
+        $description = $record['fields']['Description'] ?? null;
+        if (is_string($description) && trim($description) !== '') {
+            $descriptions[$record['id']] = $description;
+        }
+    }
+
+    $desired = [];
+    $skipped = 0;
+    foreach ($holidayRecords as $record) {
+        $date = $record['fields']['Date'] ?? null;
+        if (! is_string($date) || preg_match('/^\d{4}-\d{2}-\d{2}/', $date) !== 1) {
+            $skipped++;
+
+            continue;
+        }
+        $date = substr($date, 0, 10);
+        $name = $record['fields']['Name'] ?? null;
+        $name = is_string($name) ? trim($name) : '';
+        $links = $record['fields']['Earn Code'] ?? null;
+        $earnId = is_array($links) && is_string($links[0] ?? null) ? $links[0] : null;
+        $desired[$record['id']] = [
+            'airtable_record_id' => $record['id'],
+            'holiday_date' => $date,
+            'name' => $name === '' ? null : $name,
+            'type' => PortalHolidays::classifyDescription($earnId === null ? null : ($descriptions[$earnId] ?? null)),
+        ];
+    }
+
+    $existing = DB::connection('portal')->table('calendar_holidays')->get()->keyBy('airtable_record_id');
+    $inserts = [];
+    $updates = [];
+    foreach ($desired as $id => $row) {
+        $current = $existing[$id] ?? null;
+        if ($current === null) {
+            $inserts[$id] = $row;
+
+            continue;
+        }
+        if (substr((string) $current->holiday_date, 0, 10) !== $row['holiday_date']
+            || (string) ($current->name ?? '') !== (string) ($row['name'] ?? '')
+            || (string) $current->type !== $row['type']) {
+            $updates[$id] = $row;
+        }
+    }
+    $deletes = [];
+    foreach ($existing as $id => $row) {
+        if ($id !== '' && ! isset($desired[$id])) {
+            $deletes[] = $id;
+        }
+    }
+
+    $this->line(sprintf(
+        '%d holiday(s) in Calendar: %d new, %d changed, %d gone%s.',
+        count($desired),
+        count($inserts),
+        count($updates),
+        count($deletes),
+        $skipped > 0 ? ', '.$skipped.' without a date skipped' : '',
+    ));
+    if ($this->option('dry-run')) {
+        $this->warn('Dry run: nothing written.');
+
+        return 0;
+    }
+
+    $now = now();
+    DB::connection('portal')->transaction(function () use ($inserts, $updates, $deletes, $now): void {
+        foreach ($inserts as $row) {
+            DB::connection('portal')->table('calendar_holidays')->insert([...$row, 'created_at' => $now, 'updated_at' => $now]);
+        }
+        foreach ($updates as $id => $row) {
+            DB::connection('portal')->table('calendar_holidays')->where('airtable_record_id', $id)->update([
+                'holiday_date' => $row['holiday_date'],
+                'name' => $row['name'],
+                'type' => $row['type'],
+                'updated_at' => $now,
+            ]);
+        }
+        if ($deletes !== []) {
+            DB::connection('portal')->table('calendar_holidays')->whereIn('airtable_record_id', $deletes)->delete();
+        }
+    });
+    $holidays->bumpCache();
+    PortalCache::bump();
+    $this->info('Calendar holidays synced: '.count($inserts).' added, '.count($updates).' updated, '.count($deletes).' removed.');
+
+    return 0;
+})->purpose('Pull the Calendar base holidays into the portal mirror (Airtable is read only)');
+
+// The Calendar Earn Codes are the source; Users & Projects holds a read-only synced copy. Match the
+// local rows to both record ids by description, only filling ids that are missing (2026-10-22, user).
+Artisan::command('portal:map-earn-codes
+    {--dry-run : Show what would be mapped; write nothing}', function (AirtableClient $airtable): int {
+    try {
+        $calendarRecords = $airtable->records('Earn Codes', 'calendar');
+        $mainRecords = $airtable->records('Earn Codes', 'main');
+    } catch (Throwable $error) {
+        $this->error('Earn code mapping stopped: '.$error->getMessage());
+
+        return 1;
+    }
+
+    $byDescription = static function (array $records): array {
+        $ids = [];
+        foreach ($records as $record) {
+            $description = $record['fields']['Description'] ?? null;
+            if (! is_string($description) || trim($description) === '') {
+                continue;
+            }
+            $key = strtolower((string) preg_replace('/\s+/u', ' ', trim($description)));
+            $ids[$key] ??= $record['id'];
+        }
+
+        return $ids;
+    };
+    $calendarIds = $byDescription($calendarRecords);
+    $mainIds = $byDescription($mainRecords);
+
+    $calendarUpdates = [];
+    $mainUpdates = [];
+    $unmatched = [];
+    foreach (DB::connection('portal')->table('earn_codes')->orderBy('id')->get(['id', 'description', 'airtable_record_id', 'calendar_airtable_record_id']) as $row) {
+        $key = strtolower((string) preg_replace('/\s+/u', ' ', trim((string) $row->description)));
+        $calendarId = $calendarIds[$key] ?? null;
+        $mainId = $mainIds[$key] ?? null;
+        if ($calendarId !== null && (string) ($row->calendar_airtable_record_id ?? '') === '') {
+            $calendarUpdates[(int) $row->id] = $calendarId;
+        }
+        if ($mainId !== null && (string) ($row->airtable_record_id ?? '') === '') {
+            $mainUpdates[(int) $row->id] = $mainId;
+        }
+        if ($calendarId === null || $mainId === null) {
+            $unmatched[] = '#'.$row->id.' '.trim((string) $row->description);
+        }
+    }
+
+    $this->line(count($calendarUpdates).' Calendar id(s) and '.count($mainUpdates).' Users & Projects id(s) to map.');
+    foreach ($unmatched as $line) {
+        $this->warn('  no match: '.$line);
+    }
+    if ($this->option('dry-run')) {
+        $this->warn('Dry run: nothing written.');
+
+        return 0;
+    }
+
+    DB::connection('portal')->transaction(function () use ($calendarUpdates, $mainUpdates): void {
+        foreach ($calendarUpdates as $id => $recordId) {
+            DB::connection('portal')->table('earn_codes')->where('id', $id)->update(['calendar_airtable_record_id' => $recordId]);
+        }
+        foreach ($mainUpdates as $id => $recordId) {
+            DB::connection('portal')->table('earn_codes')->where('id', $id)->update(['airtable_record_id' => $recordId]);
+        }
+    });
+    $this->info('Earn code ids mapped: '.count($calendarUpdates).' Calendar, '.count($mainUpdates).' Users & Projects.');
+
+    return 0;
+})->purpose('Match portal earn codes to their Calendar and Users & Projects record ids by description');
+
+// The Client Information base is the source; Users & Projects holds a read-only synced copy. Match
+// the local clients to both record ids by name, filling only the ids that are missing.
+Artisan::command('portal:map-clients
+    {--dry-run : Show what would be mapped; write nothing}', function (AirtableClient $airtable): int {
+    try {
+        $clientRecords = $airtable->records('Clients', 'clients');
+        $mainRecords = $airtable->records('Clients', 'main');
+    } catch (Throwable $error) {
+        $this->error('Client mapping stopped: '.$error->getMessage());
+
+        return 1;
+    }
+
+    $byName = static function (array $records): array {
+        $ids = [];
+        foreach ($records as $record) {
+            $name = $record['fields']['Name'] ?? null;
+            if (! is_string($name) || trim($name) === '') {
+                continue;
+            }
+            $key = strtolower((string) preg_replace('/\s+/u', ' ', trim($name)));
+            $ids[$key] ??= $record['id'];
+        }
+
+        return $ids;
+    };
+    $clientIds = $byName($clientRecords);
+    $mainIds = $byName($mainRecords);
+
+    $clientUpdates = [];
+    $mainUpdates = [];
+    $unmatched = [];
+    foreach (DB::connection('portal')->table('clients')->orderBy('id')->get(['id', 'name', 'airtable_record_id', 'client_info_airtable_record_id']) as $row) {
+        $key = strtolower((string) preg_replace('/\s+/u', ' ', trim((string) $row->name)));
+        $clientId = $clientIds[$key] ?? null;
+        $mainId = $mainIds[$key] ?? null;
+        if ($clientId !== null && (string) ($row->client_info_airtable_record_id ?? '') === '') {
+            $clientUpdates[(int) $row->id] = $clientId;
+        }
+        if ($mainId !== null && (string) ($row->airtable_record_id ?? '') === '') {
+            $mainUpdates[(int) $row->id] = $mainId;
+        }
+        if ($clientId === null || $mainId === null) {
+            $unmatched[] = '#'.$row->id.' '.trim((string) $row->name);
+        }
+    }
+
+    $this->line(count($clientUpdates).' Client Information id(s) and '.count($mainUpdates).' Users & Projects id(s) to map.');
+    foreach ($unmatched as $line) {
+        $this->warn('  no match: '.$line);
+    }
+    if ($this->option('dry-run')) {
+        $this->warn('Dry run: nothing written.');
+
+        return 0;
+    }
+
+    DB::connection('portal')->transaction(function () use ($clientUpdates, $mainUpdates): void {
+        foreach ($clientUpdates as $id => $recordId) {
+            DB::connection('portal')->table('clients')->where('id', $id)->update(['client_info_airtable_record_id' => $recordId]);
+        }
+        foreach ($mainUpdates as $id => $recordId) {
+            DB::connection('portal')->table('clients')->where('id', $id)->update(['airtable_record_id' => $recordId]);
+        }
+    });
+    $this->info('Client ids mapped: '.count($clientUpdates).' Client Information, '.count($mainUpdates).' Users & Projects.');
+
+    return 0;
+})->purpose('Match portal clients to their Client Information and Users & Projects record ids by name');
+
 /*
  * Books the reimbursement charges the portal recorded before a charge carried the claimant's team
  * account, so they come off that team's balance too. Safe to run again: a booked charge is skipped.
@@ -464,6 +753,15 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
 })->purpose('Check the Jira account, project and issue types, and print the webhook to register');
 
 Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
+// Holidays now come from the Calendar base; pull them into the portal mirror every hour (Phase 2).
+Schedule::command('portal:sync-calendar')->hourly()->withoutOverlapping()
+    ->when(fn (): bool => is_string(config('services.airtable.bases.calendar')) && config('services.airtable.bases.calendar') !== '');
+// New Calendar codes reach Users & Projects through Airtable's synced table; this catches their ids.
+Schedule::command('portal:map-earn-codes')->hourly()->withoutOverlapping()
+    ->when(fn (): bool => is_string(config('services.airtable.bases.calendar')) && config('services.airtable.bases.calendar') !== '');
+// New Client Information records reach Users & Projects through Airtable's synced table.
+Schedule::command('portal:map-clients')->hourly()->withoutOverlapping()
+    ->when(fn (): bool => is_string(config('services.airtable.bases.clients')) && config('services.airtable.bases.clients') !== '');
 // Jira's backstop: what failed or waits is sent again, and every linked issue is read back, if a delivery was lost.
 Schedule::command('portal:jira-sync')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();

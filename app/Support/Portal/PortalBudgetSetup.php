@@ -51,17 +51,20 @@ final class PortalBudgetSetup
         $receivedOn = $this->input->validatedDate($request, 'receivedOn');
         $expectedCents = $this->requiredQuotation($request);
 
-        $id = (int) $this->connection()->transaction(function () use ($name, $description, $receivedOn, $expectedCents): int {
+        $id = (int) $this->connection()->transaction(function () use ($name, $description, $receivedOn, $expectedCents, $actor): int {
             if ($this->nameIsTaken('budget_codes', 'name', $name)) {
                 abort(422, 'A budget code named '.$name.' already exists.');
             }
 
-            return (int) $this->connection()->table('budget_codes')->insertGetId([
+            $id = (int) $this->connection()->table('budget_codes')->insertGetId([
                 'name' => $name,
                 'description' => $description,
                 'transfer_date_received' => $receivedOn,
                 'expected_amount_quotation' => $this->input->decimal($expectedCents),
             ]);
+            $this->ledger->trackerAdd('tracker.budget_codes', 'budget_codes', $id, $actor);
+
+            return $id;
         });
 
         $this->audit->record(
@@ -145,6 +148,7 @@ final class PortalBudgetSetup
                 ]);
             }
             $this->ledger->setOwner($id, $ownerId);
+            $this->ledger->trackerAdd('tracker.envelopes', 'envelopes_budget', $id, $actor);
 
             $fundsId = null;
             if ($fundsOn !== null && $fundsCents !== null) {
@@ -219,7 +223,7 @@ final class PortalBudgetSetup
             $changes['expected_amount_quotation'] = $this->input->decimal($this->requiredQuotation($request));
         }
 
-        $name = (string) $this->connection()->transaction(function () use ($id, $changes): string {
+        $name = (string) $this->connection()->transaction(function () use ($id, $changes, $actor): string {
             $code = $this->connection()->table('budget_codes')->where('id', $id)->lockForUpdate()->first(['id', 'name']);
             if ($code === null) {
                 abort(404, 'That budget code does not exist.');
@@ -229,6 +233,7 @@ final class PortalBudgetSetup
             }
             if ($changes !== []) {
                 $this->connection()->table('budget_codes')->where('id', $id)->update($changes);
+                $this->ledger->trackerEdit('tracker.budget_codes', 'budget_codes', $id, $actor);
             }
 
             return $changes['name'] ?? $this->input->nameOr($code->name, 'Budget code '.$id);
@@ -282,7 +287,7 @@ final class PortalBudgetSetup
         $reowns = $request->has('ownerAccountId');
         $ownerId = $reowns ? $this->validatedAccountId($request, 'ownerAccountId') : null;
 
-        [$name, $wasActive] = $this->connection()->transaction(function () use ($id, $changes, $relinks, $codeId, $reowns, $ownerId): array {
+        [$name, $wasActive] = $this->connection()->transaction(function () use ($id, $changes, $relinks, $codeId, $reowns, $ownerId, $actor): array {
             $envelope = $this->connection()->table('envelopes_budget')->where('id', $id)->lockForUpdate()->first(['id', 'envelope_name', 'active']);
             if ($envelope === null) {
                 abort(404, 'That budget envelope does not exist.');
@@ -305,6 +310,9 @@ final class PortalBudgetSetup
             if ($reowns) {
                 $this->assertOwner($ownerId);
                 $this->ledger->setOwner($id, $ownerId);
+            }
+            if ($changes !== [] || $relinks || $reowns) {
+                $this->ledger->trackerEdit('tracker.envelopes', 'envelopes_budget', $id, $actor);
             }
 
             return [$changes['envelope_name'] ?? $this->input->nameOr($envelope->envelope_name, 'Envelope '.$id), (bool) $envelope->active];

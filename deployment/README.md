@@ -8,7 +8,7 @@ Target: the **Test Server** WordPress site on Bluehost. The API and the portal l
 | Health check | `https://test.ikaikabim.com/central-api/api/staging/portal/health` |
 | Portal (deployed from `ikaika-portal`) | `https://test.ikaikabim.com/portal` |
 
-Turning on the Airtable sync in production, and what it does when something fails: [AIRTABLE-SYNC.md](AIRTABLE-SYNC.md).
+Turning on the Airtable sync on the Test Server (TEST bases only), and what it does when something fails: [AIRTABLE-SYNC.md](AIRTABLE-SYNC.md).
 
 ## Day to day
 
@@ -105,18 +105,18 @@ ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
 
 **Email** goes through the WordPress bridge on ikaikabim.com (`MAIL_MAILER=wprelay`), the same as local. That route arrives in Outlook without the "can't verify sender" banner.
 
-**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_CLOUD_ID`, `JIRA_WEBHOOK_SECRET`, `JIRA_ISSUE_TYPE_BUG`, `JIRA_ISSUE_TYPE_FEATURE`, `JIRA_ISSUE_TYPE_FEEDBACK`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`, `OLLAMA_API_KEY`, `PORTAL_ID_LOGIN_PASSWORD`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
+**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_CLOUD_ID`, `JIRA_WEBHOOK_SECRET`, `JIRA_ISSUE_TYPE_BUG`, `JIRA_ISSUE_TYPE_FEATURE`, `JIRA_ISSUE_TYPE_FEEDBACK`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`, `OLLAMA_API_KEY`, `PORTAL_ID_LOGIN_PASSWORD`, `AIRTABLE_ENV`, `AIRTABLE_TOKEN`, `AIRTABLE_BASE_ID`, `AIRTABLE_TRANSACTION_TRACKER`, `AIRTABLE_CALENDAR`, `AIRTABLE_CLIENT_INFORMATION`, `AIRTABLE_SYNC_SCHEDULED`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`. The Airtable keys (`AIRTABLE_ENV`, `AIRTABLE_TOKEN`, the TEST base ids and `AIRTABLE_SYNC_SCHEDULED`) are now in that default list too; they only ever go to the Test Server, while `-Prod` still requires explicit `-Keys` (see [AIRTABLE-SYNC.md](AIRTABLE-SYNC.md)).
 
-Production: `push-env.ps1 -Prod -Keys KEY1,KEY2` sends only the keys you name to `~/apps/portal-prod` (it refuses without `-Keys`, because the default list holds the Test Server's Jira sandbox). To edit production's `.env` by hand and apply it: `ssh -t bluehost "nano ~/apps/portal-prod/.env"`, then `ssh bluehost "ROOT=~/apps/portal-prod bash ~/apps/portal-prod/scripts/apply-env.sh"`.
+Production: `push-env.ps1 -Prod -Keys KEY1,KEY2` sends only the keys you name to `~/apps/portal-prod` (it refuses without `-Keys`, because the default list holds the Test Server's Jira sandbox). For Airtable, put the production token in the local `.env` as `AIRTABLE_TOKEN_PROD` and run `deployment/setup-prod-airtable.ps1`; it sends `APP_ENV`/`AIRTABLE_*` (never the TEST token), including `AIRTABLE_BASE_ID_PROD`, refuses TEST ids, and calls production's `apply-env.sh`. For other new non-local keys, `deployment/push-missing-prod-env.ps1` reads the local `.env`, lists only the keys production does not have yet (values hidden), and pushes those after confirmation; it never overwrites existing production keys or copies database/app identity keys. The file-driven `push-prod-airtable.ps1 -EnvFile .env.production` remains available. To edit production's `.env` by hand and apply it: `ssh -t bluehost "nano ~/apps/portal-prod/.env"`, then `ssh bluehost "ROOT=~/apps/portal-prod bash ~/apps/portal-prod/scripts/apply-env.sh"`.
 
 - Cloudinary (email images, reimbursement receipts): until its keys are on the server, uploads answer "Image upload is not configured." / "Receipt upload is not configured.".
 - ID-number sign-in (Settings > Advanced switch) also needs `PORTAL_ID_LOGIN_PASSWORD`; until it is on the server, every ID sign-in is refused.
-- Airtable stays empty on the Test Server so test data is never synced into the real base.
+- Airtable on the Test Server uses the **TEST** bases only; PROD keys stay off it (`AIRTABLE_ENV=test`).
 
 To see which settings the server has (names only, no values):
 
 ```powershell
-ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET JIRA_BASE_URL JIRA_EMAIL JIRA_API_TOKEN JIRA_PROJECT_KEY JIRA_CLOUD_ID JIRA_WEBHOOK_SECRET MAIL_RELAY_URL MAIL_RELAY_KEY PORTAL_ID_LOGIN_PASSWORD; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
+ssh bluehost 'for k in CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET BITBUCKET_TOKEN BITBUCKET_WEBHOOK_SECRET JIRA_BASE_URL JIRA_EMAIL JIRA_API_TOKEN JIRA_PROJECT_KEY JIRA_CLOUD_ID JIRA_WEBHOOK_SECRET MAIL_RELAY_URL MAIL_RELAY_KEY PORTAL_ID_LOGIN_PASSWORD AIRTABLE_ENV AIRTABLE_TOKEN AIRTABLE_BASE_ID AIRTABLE_TRANSACTION_TRACKER AIRTABLE_CALENDAR AIRTABLE_CLIENT_INFORMATION AIRTABLE_SYNC_SCHEDULED; do grep -q "^$k=." ~/apps/test-server/.env && echo "$k set" || echo "$k EMPTY"; done'
 ```
 
 **Tracker tables** (e.g. Finance / Accounts' `account_fund_transfers`): the tracker database is the transaction tracker's own, so no Laravel migration reaches it. Its changes live in `sql/transaction_tracker/patches/` and every admin deploy runs each one, so they must be safe to rerun (`CREATE TABLE IF NOT EXISTS`, ...). A new one: add a dated file there; fresh installs also need it in `schema.sql`. A missing table shows as "We could not load the accounts." or a similar load error.

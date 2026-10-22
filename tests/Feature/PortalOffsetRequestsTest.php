@@ -6,6 +6,7 @@ use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
+use App\Support\Portal\PortalEarnCodes;
 use App\Support\Portal\PortalOffsetRequests;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -559,6 +560,37 @@ class PortalOffsetRequestsTest extends TestCase
                 'elementChange' => 0,
             ]],
         ];
+    }
+
+    // A new offset request names the activity its entry picked and the regular working day (2026-10-22).
+    public function test_offset_links_its_activity_and_earn_code(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $work = $this->freeDate($actor, 2);
+        $dayOff = $this->freeDayOff($actor, $work, 1);
+        $activity = DB::connection('portal')->table('activity_codes')->orderBy('id')->first();
+        $this->assertNotNull($activity);
+
+        $response = $this->withToken($this->loginToken($actor))->postJson('/api/development/portal/requests/offset', [
+            'requests' => [[
+                'workDate' => $work,
+                'dayOffDate' => $dayOff,
+                'reason' => 'Saturday coverage',
+                'entries' => [[
+                    'projectLabel' => $this->projectLabel($project),
+                    'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name, $activity->id_no),
+                    'hoursRendered' => 8,
+                    'elementChange' => 0,
+                ]],
+            ]],
+        ])->assertCreated();
+
+        $requestId = (int) $response->json('data.0.id');
+        $this->assertTrue(DB::connection('portal')->table('requests_activity_codes')
+            ->where('request_id', $requestId)->where('activity_code_id', $activity->id)->exists());
+        $this->assertTrue(DB::connection('portal')->table('requests_earn_codes')
+            ->where('request_id', $requestId)->where('earn_code_id', (new PortalEarnCodes)->regularWorkingDayId())->exists());
     }
 
     private function insertOffset(Employee $actor, string $work, string $dayOff, string $status): int

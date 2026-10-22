@@ -137,6 +137,24 @@ final class PortalReferences
             ];
         }
 
+        // How many report lines and request lines name each earn code, so the tab can narrow to what is
+        // in use, and removal is refused while anything uses it (2026-10-22, user).
+        $earnReportUsage = $this->connection()->table('user_reports_earn_codes')
+            ->groupBy('earn_code_id')->selectRaw('earn_code_id, COUNT(*) as total')->pluck('total', 'earn_code_id');
+        $earnRequestUsage = $this->connection()->table('requests_earn_codes')
+            ->groupBy('earn_code_id')->selectRaw('earn_code_id, COUNT(*) as total')->pluck('total', 'earn_code_id');
+        $earnCodes = [];
+        foreach ($this->connection()->table('earn_codes')->orderBy('id')->get(['id', 'description', 'did_not_work', 'did_work']) as $row) {
+            $id = (int) $row->id;
+            $earnCodes[] = [
+                'id' => (string) $id,
+                'description' => trim((string) $row->description),
+                'didNotWork' => is_numeric($row->did_not_work) ? (float) $row->did_not_work : null,
+                'didWork' => is_numeric($row->did_work) ? (float) $row->did_work : null,
+                'usages' => (int) ($earnReportUsage[$id] ?? 0) + (int) ($earnRequestUsage[$id] ?? 0),
+            ];
+        }
+
         return [
             'section' => 'manage',
             'resource' => 'references',
@@ -148,6 +166,7 @@ final class PortalReferences
                 'teams' => $teams,
                 'departments' => $departments,
                 'clients' => $clients,
+                'earnCodes' => $earnCodes,
                 'nextClientCode' => $this->nextClientCode(),
             ],
         ];
@@ -201,9 +220,88 @@ final class PortalReferences
             abort(422, 'This client has projects, so it stays on the list.');
         }
 
-        $this->ledgeredDelete($actor, 'references.clients', 'clients', $row);
+        $this->ledgeredDelete($actor, 'references.clients', 'clients', $row, 'client_info_airtable_record_id');
         $this->bump();
         $this->audit->record($actor, PortalLogAction::DELETE, 'projects.references.client', '{UserName|You} removed the client '.trim((string) $row->name), (string) $id, $request);
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function addEarnCode(Employee $actor, Request $request): array
+    {
+        [$description, $didNotWork, $didWork] = $this->validatedEarnCode($request, null);
+        $columns = ['description' => $description, 'did_not_work' => $didNotWork, 'did_work' => $didWork];
+        $this->ledgered(
+            $actor,
+            'references.earn_codes',
+            'earn_codes',
+            null,
+            fn (): int => (int) $this->connection()->table('earn_codes')->insertGetId($columns),
+            $columns,
+        );
+        $this->bump();
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function updateEarnCode(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('earn_codes')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That earn code was not found.');
+        }
+        [$description, $didNotWork, $didWork] = $this->validatedEarnCode($request, $id);
+        $columns = ['description' => $description, 'did_not_work' => $didNotWork, 'did_work' => $didWork];
+        $this->ledgered(
+            $actor,
+            'references.earn_codes',
+            'earn_codes',
+            $row,
+            fn (): int => $this->connection()->table('earn_codes')->where('id', $id)->update($columns),
+            $columns,
+        );
+        $this->bump();
+
+        return $this->index();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function removeEarnCode(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->connection()->table('earn_codes')->where('id', $id)->first();
+        if ($row === null) {
+            abort(404, 'That earn code was not found.');
+        }
+        $used = $this->connection()->table('user_reports_earn_codes')->where('earn_code_id', $id)->count()
+            + $this->connection()->table('requests_earn_codes')->where('earn_code_id', $id)->count();
+        if ($used > 0) {
+            abort(422, 'That earn code is used by '.$used.' report or request line(s), so it stays.');
+        }
+
+        $this->ledger->within($this->connection(), function () use ($row, $actor): void {
+            $this->connection()->table('earn_codes')->where('id', $row->id)->delete();
+            $calendarId = is_string($row->calendar_airtable_record_id ?? null) && $row->calendar_airtable_record_id !== ''
+                ? $row->calendar_airtable_record_id
+                : null;
+            $this->ledger->recordDelete(
+                CoreLedger::PRODUCT_PORTAL,
+                CoreLedger::PRODUCT_PORTAL.'.earn_codes',
+                ['id' => (string) $row->id, 'airtableRecordId' => $calendarId],
+                'references.earn_codes',
+                (string) $row->id,
+                (int) $actor->getKey(),
+                is_string($actor->id_no) ? $actor->id_no : null,
+            );
+        });
+        $this->bump();
 
         return $this->index();
     }
@@ -634,6 +732,35 @@ final class PortalReferences
      *
      * @return array{0: string, 1: string}
      */
+    /**
+     * A Calendar Earn Code row: one Description (its leading number is part of it, like
+     * "01 Regular Working Day") and the two multipliers.
+     *
+     * @return array{0: string, 1: ?float, 2: ?float}
+     */
+    private function validatedEarnCode(Request $request, ?int $exceptId): array
+    {
+        $data = $request->validate([
+            'description' => ['required', 'string', 'max:255'],
+            'didNotWork' => ['nullable', 'numeric', 'min:0', 'max:999'],
+            'didWork' => ['nullable', 'numeric', 'min:0', 'max:999'],
+        ], [], [
+            'description' => 'description',
+            'didNotWork' => 'did not work multiplier',
+            'didWork' => 'did work multiplier',
+        ]);
+        $description = trim((string) preg_replace('/\s+/u', ' ', (string) $data['description']));
+        if ($description === '') {
+            abort(422, 'Give the earn code a description.');
+        }
+        if ($this->taken('earn_codes', 'description', $description, $exceptId)) {
+            abort(422, 'That earn code is already on the list.');
+        }
+        $number = static fn (mixed $value): ?float => is_numeric($value) ? round((float) $value, 3) : null;
+
+        return [$description, $number($data['didNotWork'] ?? null), $number($data['didWork'] ?? null)];
+    }
+
     private function validatedClient(Request $request, ?int $exceptId): array
     {
         $data = $request->validate([
@@ -818,7 +945,17 @@ final class PortalReferences
         return $this->ledger->within($this->connection(), function () use ($actor, $resource, $table, $before, $write, $columns): int {
             $result = $write();
             $id = $before === null ? $result : (int) $before->id;
-            $changed = array_filter($columns, static fn (mixed $value, string $column): bool => $before === null || (string) ($before->{$column} ?? '') !== (string) ($value ?? ''), ARRAY_FILTER_USE_BOTH);
+            $changed = array_filter($columns, static function (mixed $value, string $column) use ($before): bool {
+                if ($before === null) {
+                    return true;
+                }
+                $old = $before->{$column} ?? null;
+                if (is_numeric($old) && is_numeric($value)) {
+                    return (float) $old !== (float) $value;
+                }
+
+                return (string) ($old ?? '') !== (string) ($value ?? '');
+            }, ARRAY_FILTER_USE_BOTH);
             $parameters = ['id' => (string) $id, 'fields' => $changed];
             $before === null
                 ? $this->ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, $table.':'.$id, CoreLedger::PRODUCT_PORTAL.'.'.$table, $parameters, $resource, (string) $id, (int) $actor->getKey(), is_string($actor->id_no) ? $actor->id_no : null)
@@ -859,14 +996,14 @@ final class PortalReferences
     }
 
     // A References row removed for good, ledgered with the Airtable id the sync deletes there.
-    private function ledgeredDelete(Employee $actor, string $resource, string $table, object $row): void
+    private function ledgeredDelete(Employee $actor, string $resource, string $table, object $row, string $idColumn = 'airtable_record_id'): void
     {
-        $this->ledger->within($this->connection(), function () use ($actor, $resource, $table, $row): void {
+        $this->ledger->within($this->connection(), function () use ($actor, $resource, $table, $row, $idColumn): void {
             $this->connection()->table($table)->where('id', $row->id)->delete();
             $this->ledger->recordDelete(
                 CoreLedger::PRODUCT_PORTAL,
                 CoreLedger::PRODUCT_PORTAL.'.'.$table,
-                ['id' => (string) $row->id, 'airtableRecordId' => is_string($row->airtable_record_id ?? null) && $row->airtable_record_id !== '' ? $row->airtable_record_id : null],
+                ['id' => (string) $row->id, 'airtableRecordId' => is_string($row->{$idColumn} ?? null) && $row->{$idColumn} !== '' ? $row->{$idColumn} : null],
                 $resource,
                 (string) $row->id,
                 (int) $actor->getKey(),

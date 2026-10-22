@@ -12,13 +12,28 @@ class AirtableSyncController extends Controller
 {
     public function __construct(private readonly PortalAirtableSyncPreview $preview) {}
 
+    public function check(Request $request): JsonResponse
+    {
+        return response()->json($this->preview->check($this->actor($request), $request));
+    }
+
     public function preview(Request $request): JsonResponse
+    {
+        return response()->json($this->preview->preview($this->actor($request), $request));
+    }
+
+    public function send(Request $request): JsonResponse
+    {
+        return response()->json($this->preview->send($this->actor($request), $request));
+    }
+
+    private function actor(Request $request): Employee
     {
         $actor = $request->attributes->get('portalEmployee');
         if (! $actor instanceof Employee) {
             abort(401, 'Authentication is required.');
         }
 
-        return response()->json($this->preview->preview($actor, $request));
+        return $actor;
     }
 }

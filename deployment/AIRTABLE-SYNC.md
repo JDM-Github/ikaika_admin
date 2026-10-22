@@ -1,69 +1,131 @@
-# Airtable sync on production
+# Airtable sync on the Test Server (TEST bases only)
 
-How to turn the portal-to-Airtable sync on safely, and what it does when something fails.
-Only the tables in `sql/portal/schema.sql` (the ones mirrored from Airtable) are synced. Tables from
+How to turn the portal-to-Airtable sync on safely against the **TEST** bases, and what it does when
+something fails. Only tables in `sql/portal/schema.sql` (mirrored from Airtable) are synced; tables from
 `sql/portal/separate.sql` are portal-only and never sent.
 
-## Where things stand (2026-10-20)
+**Nothing in this workflow writes PROD.** A production turn-on is a separate decision at the bottom.
 
-- **Code:** ready and verified. Committed in the admin repo; production gets it with the next
-  `deploy-all-prod.ps1`. The deploy also runs one new migration: `actions.attempted_at` in the core database.
-- **Proof so far:**
-  - every mapped field exists in the PROD base with the same type;
-  - every value in every mapped column fits PROD's options;
-  - 450 feature tests, plus 12 end-to-end scenarios against a strict fake Airtable;
-  - a real round trip against the **TEST** base: creates, links, attachments, updates and deletes, read
-    back and cleaned up.
-- **Production (`~/apps/portal-prod`):** not configured yet.
-  - `AIRTABLE_TOKEN` and `AIRTABLE_BASE_ID` are empty.
-  - The schedule switch is off.
-  - The crontab runs the scheduler every 17 minutes.
-- **Bases:**
-  - Production's data came from the **PROD** base `app8jGTzRDQt4yPIa`.
-  - Your local `.env` points at the **TEST** base `app8DvnFZErPZT5Az`, and its token cannot read PROD.
-  - Never copy the local Airtable keys to production, and do not add them to `push-env.ps1`. If the wrong
-    base is ever set, the sync refuses to send ("names another base").
+## Where things stand (2026-10-22)
 
-## Turn it on safely
+- **Code:** the four-base sync is built and verified locally: main/Calendar/Client Information/Transaction
+  Tracker maps, the tracker product, per-base guards, and `--check` against all four **TEST** bases.
+- **Proof so far:** the normal Airtable suite, strict fake-base scenarios, and a live round trip across all
+  four TEST bases (main records, Calendar event, Client Information client create/edit/delete, tracker
+  transaction create/edit). The live test refuses `AIRTABLE_ENV=prod` and every PROD id, and cleans up
+  after itself (100 assertions, 0 leftovers).
+- **Test Server (`~/apps/test-server`):** configured 2026-10-22 with the four TEST bases and
+  `AIRTABLE_SYNC_SCHEDULED=true`; the first manual send synced 3 recent creates and the next dry run was
+  empty. The scheduler cron runs every 18 minutes, so the sync follows that cadence.
+- **Production (`~/apps/portal-prod`):** not configured, and not touched by this workflow.
 
-Every step after the first runs on the server: `ssh bluehost` from PowerShell.
+### Bases
 
-1. **Make a token.** In Airtable, create a personal access token with the scopes `data.records:read`,
-   `data.records:write` and `schema.bases:read`, with access to the base **Users & Projects**
-   (`app8jGTzRDQt4yPIa`).
-2. **Deploy the admin** from your PC: `.\deployment\deploy-all-prod.ps1`.
-3. **Set the keys.** Run `nano ~/apps/portal-prod/.env` and set these three lines:
+| Base | TEST | PROD (never use here) |
+|---|---|---|
+| Users & Projects | `app8DvnFZErPZT5Az` | `app8jGTzRDQt4yPIa` |
+| Calendar | `appCoObE52yP1guFP` | `appxjrrZc99jJlpli` |
+| Client Information | `appSNMGACG48i3XFX` | `appLBcQ7leQQnJ7Pj` |
+| Transaction Tracker | `appYwnzEVZVXwH1hB` | `appp5MogesHN2eVvG` |
+
+`AIRTABLE_ENV=test` selects the TEST column. The `_PROD` ids are ignored in this workflow; leave them
+empty on the Test Server. If a base id is wrong, the sync refuses to send ("names another base").
+
+## The `.env` keys
+
+Use one Airtable PAT with `data.records:read`, `data.records:write` and `schema.bases:read` on all four
+**TEST** bases. Put these in the local `.env` (the Test Server gets them in the next step):
+
+```
+AIRTABLE_ENV=test
+AIRTABLE_TOKEN=<TEST PAT>
+AIRTABLE_BASE_ID=app8DvnFZErPZT5Az
+AIRTABLE_TRANSACTION_TRACKER=appYwnzEVZVXwH1hB
+AIRTABLE_CALENDAR=appCoObE52yP1guFP
+AIRTABLE_CLIENT_INFORMATION=appSNMGACG48i3XFX
+AIRTABLE_SYNC_SCHEDULED=false
+```
+
+The per-base token overrides (`AIRTABLE_CALENDAR_TOKEN`, `AIRTABLE_CLIENT_INFORMATION_TOKEN`,
+`AIRTABLE_TRANSACTION_TRACKER_TOKEN`) are optional; each falls back to `AIRTABLE_TOKEN`. Keep
+`AIRTABLE_SYNC_SCHEDULED=false` until the first manual send was checked.
+
+To stage a new base, leave its id empty until its turn. Actions for an unconfigured base are `skipped`
+and wait; nothing is lost.
+
+## Deploy to the Test Server
+
+1. **Check locally first:** `php artisan portal:airtable-sync --check`. It writes nothing and must exit 0
+   with no `!` lines.
+2. **The settings step carries them.** `deploy-all.ps1` now pushes the Airtable keys from the local
+   `.env` to the Test Server. To push only those keys by hand, run:
+   ```powershell
+   .\deployment\push-env.ps1 -Keys AIRTABLE_ENV,AIRTABLE_TOKEN,AIRTABLE_BASE_ID,AIRTABLE_TRANSACTION_TRACKER,AIRTABLE_CALENDAR,AIRTABLE_CLIENT_INFORMATION,AIRTABLE_SYNC_SCHEDULED
    ```
-   AIRTABLE_TOKEN=<the token from step 1>
-   AIRTABLE_BASE_ID=app8jGTzRDQt4yPIa
-   AIRTABLE_SYNC_SCHEDULED=false
+3. **Deploy as usual:**
+   ```powershell
+   cd C:\IKAIKA\ikaika_admin\deployment
+   .\deploy-all.ps1
    ```
-   Then apply them: `ROOT=~/apps/portal-prod bash ~/apps/portal-prod/scripts/apply-env.sh`
-4. **Check the mappings:** `cd ~/apps/portal-prod/app && php artisan portal:airtable-sync --check`
-   - It must not say `AIRTABLE_BASE_ID names another base`.
-   - Every line should read `UPDATE`. `SKIPPED requests.leave` is fine when no leave was ever filed.
-   - Stop if any line starts with `!`, other than "No SQL row to check".
-5. **Dry run:** `php artisan portal:airtable-sync`. It writes nothing anywhere. Each line shows the action's
-   number (`#123`) and when it was recorded, in Manila time.
-   - **Anything recorded before the 2026-10-19 import must not be sent.** It names rows the import has
-     since renumbered. Settle those without sending them, replacing `123` with the last such number:
-     `php artisan portal:airtable-sync --skip-through=123`
-     Then run the dry run again.
-   - `DELETE` lines remove records from Airtable. Make sure each one is a report or claim someone really
-     deleted.
-   - A large `CREATE` count is expected: rows the portal made since the import.
-6. **First send, by hand:** `php artisan portal:airtable-sync --send`. Then open a few of the records it
-   names in the PROD base and check them.
-   - A send stops itself after 10 minutes ("run it again to send the rest"). Run it again until the last
-     line shows no `create`, `update` or `delete`.
-7. **Switch the schedule on:** set `AIRTABLE_SYNC_SCHEDULED=true` in `~/apps/portal-prod/.env`, then rerun the
-   `apply-env.sh` line from step 3.
-8. **Scheduler cadence (optional).** Ask first whether the `*/17` cron was set on purpose. If every minute is
-   allowed, run `crontab -l > ~/crontab-backup.txt`, then `crontab -e`, and change the `portal-prod` line from
-   `*/17 * * * *` to `* * * * *`. Either way works: the sync follows whatever cadence the cron has.
+   Do **not** use `-ResetDatabases`. The deploy backs up the default/core, portal and tracker databases
+   before swapping, then runs additive migrations and the safe-to-rerun tracker patches. No reset, no
+   backfill.
+4. **Check the server's mappings:**
+   ```bash
+   ssh bluehost
+   cd ~/apps/test-server/app
+   php artisan portal:airtable-sync --check
+   ```
+   Every line should be `UPDATE`; `SKIPPED requests.leave` is fine when no leave exists. Stop on any `!`
+   line. Unconfigured bases are `SKIPPED`.
+5. **Dry run:** `php artisan portal:airtable-sync`. It writes nothing. Each line shows the action number
+   (`#123`) and when it was recorded, in Manila time.
+   - Rows recorded before the 2026-10-19 import must not be sent; settle them with
+     `php artisan portal:airtable-sync --skip-through=123`, then dry-run again.
+   - A `DELETE` removes an Airtable record; confirm it is a report/claim someone really deleted.
+6. **First send, by hand:** `php artisan portal:airtable-sync --send`. Check a few named records in the
+   **TEST** bases. Run it again until no `create`/`update`/`delete` remains (a send stops after 10 minutes).
+7. **Turn the schedule on** only after that send is clean (already on for this Test Server): set
+   `AIRTABLE_SYNC_SCHEDULED=true` in the local `.env`, rerun the `push-env.ps1` command from step 2, then
+   rerun `deploy-all.ps1` or edit the server's `.env` and apply it:
+   ```bash
+   ROOT=~/apps/test-server bash ~/apps/test-server/scripts/apply-env.sh
+   ```
+8. **Enable the extra bases one at a time** (optional): leave Calendar/Client Information/Tracker ids
+   empty at first, then add one id, push that key, `--check`, dry-run and send. This keeps the first send
+   to Users & Projects only.
 
-To stop it at any time, set `AIRTABLE_SYNC_SCHEDULED=false` and rerun `apply-env.sh`. Nothing is lost: the
-portal keeps recording every change, and the next run sends them.
+To stop it at any time, set `AIRTABLE_SYNC_SCHEDULED=false` and re-apply the environment. The portal keeps
+recording every change; the next run sends them.
+
+## Production later (separate decision)
+
+Production is not part of this Test Server workflow. When it is approved:
+
+- Use production's own PAT for the four PROD bases, never the TEST token.
+- Confirm `APP_ENV=production` on `~/apps/portal-prod` first. The command refuses `AIRTABLE_ENV=prod`
+  outside the production app, so a server still set to `APP_ENV=staging` will refuse every `--send`
+  (including the scheduled one).
+- Put the production token in your local `.env` as `AIRTABLE_TOKEN_PROD` (the TEST token stays in
+  `AIRTABLE_TOKEN`), then run:
+  ```powershell
+  .\deployment\setup-prod-airtable.ps1
+  ```
+  It uses `AIRTABLE_TOKEN_PROD` when present (otherwise asks for it hidden), writes a temporary
+  production env file, refuses TEST ids, sends only `APP_ENV`/`AIRTABLE_*` over SSH without printing
+  them, runs production's `apply-env.sh`, and optionally runs `deploy-all-prod.ps1`.
+  For a file-driven/manual push, use `deployment/push-prod-airtable.ps1 -EnvFile ...` with
+  `deployment/prod-airtable.env.example` as the template.
+- With `AIRTABLE_ENV=prod`, the main base is read from `AIRTABLE_BASE_ID_PROD` (not
+  `AIRTABLE_BASE_ID`). Leave `AIRTABLE_CALENDAR_PROD` and `AIRTABLE_CLIENT_INFORMATION_PROD` empty for
+  the first Users & Projects send.
+- **Transaction Tracker sync is off for now** (2026-10-22, supervisor): leave
+  `AIRTABLE_TRANSACTION_TRACKER_PROD` empty. `setup-prod-airtable.ps1 -AllBases` deliberately does not
+  enable it; use `-Tracker` only when the tracker is approved for syncing.
+- Redeploy with `deployment\deploy-all-prod.ps1`, then run `--check` and a dry run on the server before
+  the first manual `--send`.
+- `--send` refuses `AIRTABLE_ENV=prod` outside the production app, so a local/Test Server run cannot
+  write PROD by accident.
 
 ## When something fails
 
@@ -88,11 +150,11 @@ API allowance.
 | A change sent while the portal is still saving the row | Changes younger than 10 s wait for the next run. A row still missing is retried; missing for 10 minutes means a later edit replaced it, so it settles. | Nothing. |
 | A create whose answer never came back (timeout, a 502/504 from Airtable's gateway, or a send killed mid-call) | That row's create is **held**: neither this change nor any later one on the same row creates it again, because Airtable may already have it. | Look in Airtable. Delete any duplicate, then run `php artisan portal:airtable-sync --send --retry-creates`. |
 | Airtable refuses a value (a field or option it lacks) | Retried with the waits above; the refusal is in `last_error`. | Fix the field or option in Airtable. The next retry lands it. |
-| A dropdown value the base lacks on a lenient field: project Department or Type of Job, claim Team, employee Department, Location, Job Title, Blood Type or Bank Name, leave Category, any New Employee Data pick | That field is left out; the rest of the row is sent, and a note is kept. If nothing else changed, there is nothing to send. | Add the option in Airtable if you want the value there. |
+| A dropdown value the base lacks on a lenient field: project Department or Type of Job, claim Team, employee Department, Location, Job Title, Blood Type or Bank Name, leave Category, any New Employee Data pick, tracker Account Type | That field is left out; the rest of the row is sent, and a note is kept. If nothing else changed, there is nothing to send. | Add the option in Airtable if you want the value there. |
 | A dropdown value the base lacks on any other field | The row is **blocked** and retried with the waits above, with the reason kept. | Add the option in Airtable. |
 | A link to a record Airtable does not have yet, such as a report by someone not yet created there | Blocked until that record exists. Changes go oldest first, so this usually clears in the same run or the next. | Nothing, unless the linked record itself is failing. |
 | A record deleted in Airtable while the portal still has the row | Requests, claims and reports are created again (the portal's row is the truth). Employees, projects and grid edits fail with a reason, since only changed columns are sent and the record cannot be rebuilt; they back off. | Decide whether the record should come back. |
-| The wrong base in `AIRTABLE_BASE_ID` | Refuses to send anything ("names another base"). | Fix `AIRTABLE_BASE_ID`. |
+| A wrong base id (`AIRTABLE_BASE_ID`, `AIRTABLE_CALENDAR`, `AIRTABLE_CLIENT_INFORMATION` or `AIRTABLE_TRANSACTION_TRACKER`) | Refuses to send anything ("names another base"). | Fix that base's id. |
 | Two sends at once | The second one refuses; only one send runs at a time. A killed send frees the lock within 15 minutes. | Nothing. |
 | A cancelled or withdrawn request | Never sent. A copy already in Airtable is deleted. A grid typo fix on a cancelled row never deletes anything. | Nothing. |
 
@@ -100,16 +162,17 @@ API allowance.
 - The dry run (`php artisan portal:airtable-sync`) lists every waiting change with its outcome and reason.
 - A scheduled send that did not land everything writes `portal.airtable_sync.not_landed` to
   `~/apps/portal-prod/app/storage/logs/laravel.log`.
-- The portal's Administration > All Actions page has a Sync to Airtable button (Developer mode) that shows
-  the dry run.
+- The portal's Administration > All Actions page has a Sync to Airtable button (Developer mode): it checks
+  the mappings, previews the next send, and after a second confirmation sends with the same engine and lock
+  as `--send`. The check and preview write nothing.
 
 ## Not synced, by design
 
 - Portal-only tables (`separate.sql`), such as rules, logs, email and onboarding registrations.
 - **Project deletes:** the portal moves the project to its recycle bin, and the Airtable record is kept. The
   action settles at once, with a note.
-- Project scope assignees and scope progress: these live in portal-only tables. Airtable's "Project Scopes"
-  and "User Reports - Project Scope Progress" receive nothing.
+- **User Reports - Project Scope Progress:** the per-report progress rows stay portal-only. A scope's latest
+  reported figure reaches Airtable's Project Scopes "Progress" field (as a fraction); the report table does not.
 
 ## Checks you can run any time
 

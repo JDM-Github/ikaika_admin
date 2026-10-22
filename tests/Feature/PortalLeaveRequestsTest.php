@@ -55,6 +55,8 @@ class PortalLeaveRequestsTest extends TestCase
             ->whereIn('id', array_map('intval', $response->json('data.*.id')))
             ->get();
         $this->assertCount(3, $rows);
+        $sickEarn = DB::connection('portal')->table('earn_codes')->where('description', '02 Sick Leave')->value('id');
+        $this->assertNotNull($sickEarn);
         foreach ($rows as $row) {
             $this->assertSame('Leave', $row->type);
             // The table has no leave-type column of its own; category is where it lands.
@@ -62,6 +64,8 @@ class PortalLeaveRequestsTest extends TestCase
             $this->assertSame('Down with the flu', $row->reason);
             $this->assertSame($this->memberName($actor), $row->name);
             $this->assertNull($row->no_of_hours);
+            $this->assertTrue(DB::connection('portal')->table('requests_earn_codes')
+                ->where('request_id', $row->id)->where('earn_code_id', $sickEarn)->exists());
             $this->assertTrue(Action::query()
                 ->where('resource', 'requests.leave')
                 ->where('record_id', (string) $row->id)

@@ -84,9 +84,19 @@ final class PortalActivityCopy
         return self::YOU.' deleted a '.self::reportKind($kind).' for '.self::date($date);
     }
 
+    public static function checkedAirtableSync(int $count): string
+    {
+        return self::YOU.' checked the Airtable mappings: '.$count.' '.($count === 1 ? 'mapping' : 'mappings');
+    }
+
     public static function previewedAirtableSync(int $count): string
     {
         return self::YOU.' previewed the Airtable sync: '.$count.' '.($count === 1 ? 'change' : 'changes').' waiting';
+    }
+
+    public static function sentAirtableSync(int $sent, int $failed): string
+    {
+        return self::YOU.' sent the Airtable sync: '.$sent.' landed'.($failed > 0 ? ', '.$failed.' failed' : '');
     }
 
     public static function notifyProjectRequested(string $who, string $name, bool $isResubmitted): string

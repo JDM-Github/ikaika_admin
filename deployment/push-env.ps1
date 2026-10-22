@@ -12,7 +12,11 @@ param(
         'JIRA_ISSUE_TYPE_BUG', 'JIRA_ISSUE_TYPE_FEATURE', 'JIRA_ISSUE_TYPE_FEEDBACK',
         'MAIL_RELAY_URL', 'MAIL_RELAY_KEY',
         'OLLAMA_API_KEY',
-        'PORTAL_ID_LOGIN_PASSWORD'
+        'PORTAL_ID_LOGIN_PASSWORD',
+        # Test Server keeps these TEST ids; -Prod still needs -Keys, so this default never reaches production.
+        'AIRTABLE_ENV', 'AIRTABLE_TOKEN', 'AIRTABLE_BASE_ID',
+        'AIRTABLE_TRANSACTION_TRACKER', 'AIRTABLE_CALENDAR', 'AIRTABLE_CLIENT_INFORMATION',
+        'AIRTABLE_SYNC_SCHEDULED'
     ),
     [string]$SshHost = 'bluehost',
     # The target's home-relative work folder (its .env and scripts/). Test Server by default.

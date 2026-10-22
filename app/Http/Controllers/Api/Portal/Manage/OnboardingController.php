@@ -56,6 +56,11 @@ class OnboardingController extends Controller
         return response()->json(['data' => $this->registrations->revoke($this->actor($request), $request, $id)]);
     }
 
+    public function destroyEntry(Request $request, int $id): JsonResponse
+    {
+        return response()->json(['data' => $this->registrations->deleteEntry($this->actor($request), $request, $id)]);
+    }
+
     public function regenerate(Request $request, int $id): JsonResponse
     {
         return response()->json(['data' => $this->registrations->regenerate($this->actor($request), $request, $id)]);

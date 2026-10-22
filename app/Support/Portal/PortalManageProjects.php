@@ -9,6 +9,7 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 
 /**
@@ -160,9 +161,10 @@ final class PortalManageProjects
         $name = $this->text($row->project_name ?? null) ?? 'Project';
         $decision = $isReopened ? 'pending' : ($isApproved ? 'approved' : 'rejected');
 
-        $trail = (($row->status ?? null) === 'Closed' ? self::CLOSING_TRAILS : self::TRAILS)[$status];
+        $isClosing = ($row->status ?? null) === 'Closed';
+        $trail = ($isClosing ? self::CLOSING_TRAILS : self::TRAILS)[$status];
 
-        $this->ledger->within($this->connection(), function () use ($actor, $request, $projectId, $status, $isReopened, $decision, $remarks, $name, $trail): void {
+        $this->ledger->within($this->connection(), function () use ($actor, $request, $projectId, $status, $isReopened, $isClosing, $isApproved, $decision, $remarks, $name, $trail): void {
             // Back to waiting clears who decided, as a project that was never decided has no approver.
             $written = [
                 'project_creation_status' => $status,
@@ -184,6 +186,9 @@ final class PortalManageProjects
                 is_string($actor->id_no) ? $actor->id_no : null,
             );
             $this->trail->record($projectId, $trail, $actor, $request, $remarks);
+            if ($isApproved && $isClosing) {
+                $this->recordClosureAchievement($name, $actor);
+            }
         });
 
         $this->audit->record(
@@ -229,6 +234,35 @@ final class PortalManageProjects
             'resource' => 'projects',
             'data' => $this->items($fresh === null ? [] : [$fresh])[0] ?? [],
         ];
+    }
+
+    /**
+     * One "Project Closed" row per project, added when its closing is approved (2026-10-22, user).
+     */
+    private function recordClosureAchievement(string $name, Employee $actor): void
+    {
+        if ($this->connection()->table('achievements_milestones')
+            ->where('project_name', $name)
+            ->where('description', 'Project Closed')
+            ->exists()) {
+            return;
+        }
+
+        $id = (int) $this->connection()->table('achievements_milestones')->insertGetId([
+            'achievement_date' => Carbon::now('Asia/Manila')->toDateString(),
+            'project_name' => $name,
+            'description' => 'Project Closed',
+        ]);
+        $this->ledger->recordAdd(
+            CoreLedger::PRODUCT_PORTAL,
+            'achievements_milestones:'.$id,
+            'portal.achievements_milestones',
+            ['id' => (string) $id],
+            'projects.achievement',
+            (string) $id,
+            (int) $actor->getKey(),
+            is_string($actor->id_no) ? $actor->id_no : null,
+        );
     }
 
     /**

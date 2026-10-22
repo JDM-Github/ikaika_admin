@@ -7,10 +7,16 @@ use App\Modules\Portal\Models\Employee;
 use App\Support\Airtable\AirtableClient;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\Core\CoreLedger;
+use App\Support\Portal\PortalBudgetLedger;
+use App\Support\Portal\PortalCalendarEvents;
 use App\Support\Portal\PortalManageUsers;
+use App\Support\Portal\PortalReferences;
+use App\Support\Portal\PortalScopeWork;
 use Composer\CaBundle\CaBundle;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Events\ResponseReceived;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
@@ -30,16 +36,32 @@ class PortalAirtableLiveRoundTripTest extends TestCase
     /**
      * @var list<string>
      */
-    protected array $connectionsToTransact = ['core', 'portal'];
+    protected array $connectionsToTransact = ['core', 'portal', 'tracker'];
 
     private const TEST_BASE = 'app8DvnFZErPZT5Az';
 
     private const PROD_BASE = 'app8jGTzRDQt4yPIa';
 
+    /** @var list<string> */
+    private const TEST_BASES = [
+        self::TEST_BASE,
+        'appCoObE52yP1guFP', // Calendar
+        'appSNMGACG48i3XFX', // Client Information
+        'appYwnzEVZVXwH1hB', // Transaction Tracker
+    ];
+
+    /** @var list<string> */
+    private const PROD_BASES = [
+        self::PROD_BASE,
+        'appxjrrZc99jJlpli', // Calendar
+        'appLBcQ7leQQnJ7Pj', // Client Information
+        'appp5MogesHN2eVvG', // Transaction Tracker
+    ];
+
     /**
-     * Every record a POST made, by table, so each is deleted again whatever the test does.
+     * Every record a POST made, by base and table, so each is deleted again whatever the test does.
      *
-     * @var array<string, list<string>>
+     * @var list<array{base: string, table: string, id: string}>
      */
     private array $made = [];
 
@@ -49,10 +71,19 @@ class PortalAirtableLiveRoundTripTest extends TestCase
         if (getenv('AIRTABLE_LIVE_WRITES') !== '1') {
             $this->markTestSkipped('Writes to the TEST Airtable base; run with AIRTABLE_LIVE_WRITES=1.');
         }
-        // Never production: the PROD base is refused outright, and nothing but the TEST base is accepted.
+        // Never production: the profile and every active base must be the TEST ones.
+        if (config('services.airtable.env') !== 'test') {
+            $this->fail('Refused: AIRTABLE_ENV must be test for the live round trip.');
+        }
         $base = (string) config('services.airtable.base');
-        if ($base === self::PROD_BASE || $base !== self::TEST_BASE) {
+        if ($base !== self::TEST_BASE) {
             $this->fail('Refused: AIRTABLE_BASE_ID must be the TEST base '.self::TEST_BASE.', not '.$base.'.');
+        }
+        foreach (['calendar', 'clients', 'tracker'] as $key) {
+            $extra = (string) config('services.airtable.bases.'.$key);
+            if ($extra !== '' && (in_array($extra, self::PROD_BASES, true) || ! in_array($extra, self::TEST_BASES, true))) {
+                $this->fail('Refused: '.$key.' names '.$extra.', not a TEST base. Nothing was sent.');
+            }
         }
         Action::query()->whereNull('synced_at')->update(['synced_at' => now()]);
         Event::listen(ResponseReceived::class, function (ResponseReceived $event): void {
@@ -60,8 +91,14 @@ class PortalAirtableLiveRoundTripTest extends TestCase
                 return;
             }
             $path = (string) parse_url($event->request->url(), PHP_URL_PATH);
-            $this->assertStringStartsWith('/v0/'.self::TEST_BASE.'/', $path);
-            $this->made[rawurldecode(substr($path, strlen('/v0/'.self::TEST_BASE.'/')))][] = (string) $event->response->json('id');
+            $segments = array_values(array_filter(explode('/', $path)));
+            $baseId = (string) ($segments[1] ?? '');
+            $this->assertContains($baseId, self::TEST_BASES, 'A write left a TEST base: '.$path);
+            $this->made[] = [
+                'base' => self::baseKeyFor($baseId),
+                'table' => rawurldecode((string) ($segments[2] ?? '')),
+                'id' => (string) $event->response->json('id'),
+            ];
         });
     }
 
@@ -99,7 +136,7 @@ class PortalAirtableLiveRoundTripTest extends TestCase
         $lines = [];
         foreach ([4, 2] as $hours) {
             $line = (int) $portal->table('user_reports')->insertGetId([
-                'report_date' => '2026-10-19', 'hours_rendered' => $hours, 'change_in_elements' => 1,
+                'report_date' => '2026-10-19', 'actual_work_date' => '2026-10-19', 'hours_rendered' => $hours, 'change_in_elements' => 1,
                 'remarks' => 'SYNC TEST line', 'late_submission' => 'NO', 'late_submission_approval' => 'N/A', 'approval' => 'Pending',
             ]);
             $portal->table('employees_user_reports')->insert(['employee_id' => $personId, 'user_report_id' => $line]);
@@ -111,9 +148,16 @@ class PortalAirtableLiveRoundTripTest extends TestCase
         $report = $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, $personId.':2026-10-19-daily', 'portal.user_reports', ['id' => '2026-10-19-daily', 'lineIds' => $lines], 'reports.submitted', '2026-10-19-daily', $personId, null);
 
         $leave = $this->request(['type' => 'Leave', 'category' => '01 Vacation Leave', 'request_date' => '2026-10-21']);
+        $vacationEarn = $portal->table('earn_codes')->where('description', '01 Vacation Leave')->first(['id']);
+        $this->assertNotNull($vacationEarn);
+        $portal->table('requests_earn_codes')->insert(['request_id' => $leave, 'earn_code_id' => $vacationEarn->id]);
         $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, $personId.':2026-10-21-leave', 'portal.requests', ['id' => (string) $leave], 'requests.leave', (string) $leave, $personId, null);
         $overtime = $this->request(['type' => 'Overtime', 'no_of_hours' => 2, 'request_date' => '2026-10-19']);
+        $overtimeEarn = $portal->table('earn_codes')->where('description', '02 Regular Overtime')->first(['id']);
+        $this->assertNotNull($overtimeEarn);
         $portal->table('projects_requests')->insert(['project_id' => $project->id, 'request_id' => $overtime]);
+        $portal->table('requests_activity_codes')->insert(['request_id' => $overtime, 'activity_code_id' => $activity->id]);
+        $portal->table('requests_earn_codes')->insert(['request_id' => $overtime, 'earn_code_id' => $overtimeEarn->id]);
         $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, $personId.':2026-10-19-overtime', 'portal.requests', ['id' => (string) $overtime], 'requests.overtime', (string) $overtime, $personId, null);
 
         $claim = (int) $portal->table('reimbursements')->insertGetId([
@@ -131,10 +175,62 @@ class PortalAirtableLiveRoundTripTest extends TestCase
             'project_number' => '999999', 'project_name' => 'SYNC TEST Project', 'department' => 'MIS', 'type_of_job' => 'Software Development',
             'status' => 'Started', 'area_sqft' => 120.5, 'project_lead_email' => $lead->email, 'project_creation_status' => 'Approved',
             'msteams_project_link' => 'https://teams.microsoft.com/sync-test', 'is_ledger_details_updated' => 1,
+            'requested_by' => $personId,
         ]);
         $portal->table('projects_clients')->insert(['project_id' => $newProject, 'client_id' => $client->id]);
         $portal->table('employees_projects')->insert(['project_id' => $newProject, 'employee_id' => $personId, 'role_on_project' => 'member']);
         $ledger->recordAdd(CoreLedger::PRODUCT_PORTAL, 'projects:'.$newProject, 'portal.projects', ['id' => (string) $newProject], 'projects', (string) $newProject, $personId, null);
+
+        // One assigned scope with a reported figure: its own Project Scopes record, linked and fractioned.
+        $task = $portal->table('project_scope_t4_tasks')->whereNotNull('airtable_record_id')->where('wbs_code', 'not like', '%-')->orderBy('id')->first(['wbs_code', 'airtable_record_id']);
+        $scopeCode = trim((string) $task->wbs_code);
+        $portal->table('projects_scope_assignees')->insert(['project_id' => $newProject, 'wbs_code' => $scopeCode, 'employee_id' => $personId]);
+        $portal->table('projects_scope_progress')->insert(['project_id' => $newProject, 'wbs_code' => $scopeCode, 'employee_id' => $personId, 'report_date' => '2026-10-19', 'percent' => 40]);
+        $ledger->within($portal, static fn () => app(PortalScopeWork::class)->reconcileProjects([$newProject], Employee::query()->findOrFail($personId)));
+
+        app(PortalCalendarEvents::class)->create($actor, Request::create('/api/development/portal/calendar/events', 'POST', [
+            'title' => 'SYNC TEST Event',
+            'details' => 'Round trip event',
+            'startsOn' => '2026-10-19',
+            'startsAt' => '09:00',
+            'endsOn' => '2026-10-19',
+            'endsAt' => '10:00',
+            'category' => 'company_event',
+            'audience' => 'everyone',
+        ]));
+
+        // Finance writes the tracker itself: one transaction linked to an account and an envelope
+        // already in the base.
+        config(['products.catalog.transaction-tracker.enabled' => true]);
+        $trackerAccount = DB::connection('tracker')->table('accounts')->whereNotNull('airtable_record_id')->where('active', true)->orderByDesc('id')->first();
+        $trackerEnvelope = DB::connection('tracker')->table('envelopes_budget')->whereNotNull('airtable_record_id')->where('active', true)->orderByDesc('id')->first();
+        $this->assertNotNull($trackerAccount, 'The tracker needs an open account with an Airtable id.');
+        $this->assertNotNull($trackerEnvelope, 'The tracker needs an open envelope with an Airtable id.');
+        $trackerTransaction = app(PortalBudgetLedger::class)->record(
+            $actor,
+            'SYNC TEST Transaction',
+            PortalBudgetLedger::TYPE_EXPENSE,
+            100,
+            '2026-10-19',
+            'Round trip transaction',
+            ['accountId' => (int) $trackerAccount->id, 'envelopeId' => (int) $trackerEnvelope->id],
+        );
+
+        // Client Information is its own base; the Users & Projects Client copy is only for links.
+        $clientCode = null;
+        foreach (range(90, 99) as $number) {
+            $code = str_pad((string) $number, 2, '0', STR_PAD_LEFT);
+            if (! $portal->table('clients')->where('client_id', $code)->exists()) {
+                $clientCode = $code;
+                break;
+            }
+        }
+        $this->assertNotNull($clientCode, 'Client Information needs a free two-digit code.');
+        app(PortalReferences::class)->addClient($actor, Request::create('/api/development/portal/manage/references/clients', 'POST', [
+            'name' => 'SYNC TEST Client',
+            'code' => $clientCode,
+        ]));
+        $newClient = (int) $portal->table('clients')->where('name', 'SYNC TEST Client')->value('id');
 
         $warning = (int) $portal->table('warnings')->insertGetId([
             'warning_date' => '2026-10-19', 'description' => 'SYNC TEST warning', 'status' => 'Active', 'violation_type' => 'Report',
@@ -151,10 +247,17 @@ class PortalAirtableLiveRoundTripTest extends TestCase
         $line = $this->read('User Reports', $id('user_reports', $lines[0]));
         $this->assertSame(4, (int) $line['Hours Rendered']);
         $this->assertSame('2026-10-19', $line['Date']);
+        $this->assertSame('2026-10-19', $line['Actual Work Date']);
+        $this->assertSame([$earnCode->airtable_record_id], $line['Earn Code']);
         $this->assertSame([$id('employees', $personId)], $line['Employee No.']);
         $this->assertSame([$project->airtable_record_id], $line['Project']);
-        $this->assertSame('Vacation Leave', $this->read('Request', $id('requests', $leave))['Category']);
-        $this->assertSame([$project->airtable_record_id], $this->read('Request', $id('requests', $overtime))['Project']);
+        $leaveRecord = $this->read('Request', $id('requests', $leave));
+        $this->assertSame('Vacation Leave', $leaveRecord['Category']);
+        $this->assertSame([$portal->table('earn_codes')->where('id', $vacationEarn->id)->value('airtable_record_id')], $leaveRecord['Earn Code']);
+        $overtimeRecord = $this->read('Request', $id('requests', $overtime));
+        $this->assertSame([$project->airtable_record_id], $overtimeRecord['Project']);
+        $this->assertSame([$activity->airtable_record_id], $overtimeRecord['Activity Scope']);
+        $this->assertSame([$portal->table('earn_codes')->where('id', $overtimeEarn->id)->value('airtable_record_id')], $overtimeRecord['Earn Code']);
         $claimRecord = $this->read('Reimbursements', $id('reimbursements', $claim));
         $this->assertEquals(12.5, $claimRecord['Cost']);
         $this->assertSame('Angeles Pampanga Office', $claimRecord['Team']);
@@ -163,8 +266,36 @@ class PortalAirtableLiveRoundTripTest extends TestCase
         $this->assertSame([$lead->airtable_record_id], $projectRecord['PM ID']);
         $this->assertSame([$client->airtable_record_id], $projectRecord['Client']);
         $this->assertSame([$id('employees', $personId)], $projectRecord['Project Members']);
+        $this->assertSame([$id('employees', $personId)], $projectRecord['createdBy']);
+        $this->assertSame([$id('employees', $personId)], $projectRecord['lastModifiedBy']);
+        $this->assertNotEmpty($projectRecord['Activity Scope']);
         $this->assertTrue($projectRecord['Are the details in the project ledger (MS Teams Planner) updated?']);
+        $scopeId = (int) $portal->table('projects_project_scopes')->where('project_id', $newProject)->value('project_scope_id');
+        $this->assertGreaterThan(0, $scopeId);
+        $scopeRecord = $this->read('Project Scopes', $id('project_scopes', $scopeId));
+        $this->assertSame([$id('projects', $newProject)], $scopeRecord['Project']);
+        $this->assertSame([$id('employees', $personId)], $scopeRecord['AssignedTo']);
+        $this->assertSame([$task->airtable_record_id], $scopeRecord['Scope - T4 Tasks']);
+        $this->assertSame(0.4, (float) $scopeRecord['Progress']);
         $this->assertSame([$id('employees', $personId)], $this->read('Warnings', $id('warnings', $warning))['Employee']);
+        $eventRecord = collect(app(AirtableClient::class)->records('Events', 'calendar'))
+            ->firstWhere(fn (array $record): bool => ($record['fields']['Name'] ?? null) === 'SYNC TEST Event');
+        $this->assertNotNull($eventRecord);
+        $this->assertSame('Round trip event', $eventRecord['fields']['Details']);
+        $this->assertSame('Company Event', $eventRecord['fields']['Type']);
+        $this->assertSame('Everyone', $eventRecord['fields']['Attendees']);
+        $this->assertSame('2026-10-19 09:00:00', Carbon::parse($eventRecord['fields']['Start Date'])->timezone('Asia/Manila')->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-10-19 10:00:00', Carbon::parse($eventRecord['fields']['End Date'])->timezone('Asia/Manila')->format('Y-m-d H:i:s'));
+        $this->assertSame(trim($actor->first_name.' '.$actor->last_name), $eventRecord['fields']['Author']);
+        $trackerRecordId = (string) DB::connection('tracker')->table('transactions')->where('id', $trackerTransaction)->value('airtable_record_id');
+        $transactionRecord = $this->read('Transactions', $trackerRecordId, 'tracker');
+        $this->assertSame('SYNC TEST Transaction', $transactionRecord['Transaction Name']);
+        $this->assertEquals(1.0, $transactionRecord['Amount']);
+        $this->assertSame([$trackerAccount->airtable_record_id], $transactionRecord['Account']);
+        $this->assertSame([$trackerEnvelope->airtable_record_id], $transactionRecord['Envelope']);
+        $clientInfoId = (string) $portal->table('clients')->where('id', $newClient)->value('client_info_airtable_record_id');
+        $this->assertStringStartsWith('rec', $clientInfoId);
+        $this->assertSame('SYNC TEST Client', $this->read('Clients', $clientInfoId, 'clients')['Name']);
 
         // 2. Updates: a decision, an edited line, a renamed project, a changed phone, an approved claim.
         $portal->table('requests')->where('id', $leave)->update(['status' => 'Approved', 'approver_remarks' => 'SYNC TEST ok']);
@@ -177,6 +308,12 @@ class PortalAirtableLiveRoundTripTest extends TestCase
         $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.employees', ['columns' => ['phone_number']], 'employees', (string) $personId, null, $personId, null);
         $portal->table('reimbursements')->where('id', $claim)->update(['status' => 'Approved']);
         $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.reimbursements', ['id' => (string) $claim, 'receipt' => true], 'requests.reimbursement', (string) $claim, null, $personId, null);
+        DB::connection('tracker')->table('transactions')->where('id', $trackerTransaction)->update(['transaction_name' => 'SYNC TEST Transaction renamed']);
+        app(PortalBudgetLedger::class)->trackerEdit('tracker.transactions', 'transactions', $trackerTransaction, $actor);
+        app(PortalReferences::class)->updateClient($actor, Request::create('/api/development/portal/manage/references/clients/'.$newClient, 'PATCH', [
+            'name' => 'SYNC TEST Client renamed',
+            'code' => $clientCode,
+        ]), $newClient);
         $this->assertLanded($sync->run(true));
         $leaveRecord = $this->read('Request', $id('requests', $leave));
         $this->assertSame('Approved', $leaveRecord['Status']);
@@ -187,6 +324,8 @@ class PortalAirtableLiveRoundTripTest extends TestCase
         $this->assertSame([$client->airtable_record_id], $renamed['Client']);
         $this->assertSame('09171111111', $this->read('Employees', $id('employees', $personId))['Phone Number']);
         $this->assertSame('Completed', $this->read('Reimbursements', $id('reimbursements', $claim))['Status']);
+        $this->assertSame('SYNC TEST Transaction renamed', $this->read('Transactions', $trackerRecordId, 'tracker')['Transaction Name']);
+        $this->assertSame('SYNC TEST Client renamed', $this->read('Clients', $clientInfoId, 'clients')['Name']);
 
         // 3. Deletes: a cancelled request leaves Airtable, and so does a line an edit dropped.
         $overtimeRecord = $id('requests', $overtime);
@@ -195,16 +334,22 @@ class PortalAirtableLiveRoundTripTest extends TestCase
         $droppedRecord = $id('user_reports', $lines[1]);
         $portal->table('user_reports')->where('id', $lines[1])->delete();
         $ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, 'portal.user_reports', ['id' => '2026-10-19-daily', 'lineIds' => [$lines[0]], 'removedAirtableIds' => [$droppedRecord]], 'reports.submitted', '2026-10-19-daily', $personId.':2026-10-19-daily', $personId, null);
+        app(PortalReferences::class)->removeClient($actor, Request::create('/api/development/portal/manage/references/clients/'.$newClient, 'DELETE'), $newClient);
         $this->assertLanded($sync->run(true));
         $client = app(AirtableClient::class);
         $this->assertFalse($client->exists('Request', $overtimeRecord));
         $this->assertFalse($client->exists('User Reports', $droppedRecord));
+        $this->assertFalse($client->exists('Clients', $clientInfoId, 'clients'));
 
         // 4. Nothing is left to send: a second run writes nothing.
         $this->assertSame([], array_filter($sync->run(true)['items'], static fn (array $item): bool => in_array($item['outcome'], ['create', 'update', 'delete', 'discard', 'failed', 'blocked'], true)));
         $this->assertNotNull(Action::query()->find($report)?->synced_at);
 
         // 5. Clean up and prove the TEST base holds none of them any more.
+        $this->made = array_values(array_filter(
+            $this->made,
+            static fn (array $entry): bool => ! ($entry['base'] === 'clients' && $entry['id'] === $clientInfoId),
+        ));
         $this->deleteMade();
         foreach ([$id('employees', $personId) => 'Employees', $id('user_reports', $lines[0]) => 'User Reports', $id('requests', $leave) => 'Request', $id('reimbursements', $claim) => 'Reimbursements', $id('projects', $newProject) => 'Project/s', $id('warnings', $warning) => 'Warnings'] as $record => $table) {
             $this->assertFalse($client->exists($table, (string) $record), $table.' '.$record.' was left in the TEST base.');
@@ -248,28 +393,38 @@ class PortalAirtableLiveRoundTripTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    private function read(string $table, string $recordId): array
+    private function read(string $table, string $recordId, string $base = 'main'): array
     {
         $this->assertStringStartsWith('rec', $recordId);
-        $fields = Http::withToken((string) config('services.airtable.token'))
+        $baseId = $base === 'main' ? self::TEST_BASE : (string) config('services.airtable.bases.'.$base);
+        $token = $base === 'main' ? config('services.airtable.token') : config('services.airtable.tokens.'.$base, config('services.airtable.token'));
+        $fields = Http::withToken((string) $token)
             ->withOptions(['verify' => CaBundle::getSystemCaRootBundlePath()])
-            ->get('https://api.airtable.com/v0/'.self::TEST_BASE.'/'.rawurlencode($table).'/'.$recordId)
+            ->get('https://api.airtable.com/v0/'.$baseId.'/'.rawurlencode($table).'/'.$recordId)
             ->throw()
             ->json('fields');
 
         return is_array($fields) ? $fields : [];
     }
 
+    private static function baseKeyFor(string $baseId): string
+    {
+        return match ($baseId) {
+            'appCoObE52yP1guFP' => 'calendar',
+            'appSNMGACG48i3XFX' => 'clients',
+            'appYwnzEVZVXwH1hB' => 'tracker',
+            default => 'main',
+        };
+    }
+
     private function deleteMade(): void
     {
         $client = app(AirtableClient::class);
-        foreach ($this->made as $table => $ids) {
-            foreach ($ids as $recordId) {
-                try {
-                    $client->delete($table, $recordId);
-                } catch (Throwable $error) {
-                    fwrite(STDERR, 'Could not delete '.$table.' '.$recordId.': '.$error->getMessage().PHP_EOL);
-                }
+        foreach ($this->made as $entry) {
+            try {
+                $client->delete($entry['table'], $entry['id'], $entry['base']);
+            } catch (Throwable $error) {
+                fwrite(STDERR, 'Could not delete '.$entry['table'].' '.$entry['id'].': '.$error->getMessage().PHP_EOL);
             }
         }
         $this->made = [];

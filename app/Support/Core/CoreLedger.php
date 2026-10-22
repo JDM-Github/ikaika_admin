@@ -14,14 +14,16 @@ use JsonException;
 /**
  * Core.actions + core.recycle. Every product database write goes through here.
  *
- * `product` is the catalog key (portal, project-estimator). Recycle uniqueness
- * is (product, recycle_key), so the same date key can exist in both bins.
+ * `product` is the catalog key (portal, project-estimator, transaction-tracker). Recycle uniqueness
+ * is (product, recycle_key), so the same date key can exist in more than one bin.
  */
 final class CoreLedger
 {
     public const PRODUCT_PORTAL = 'portal';
 
     public const PRODUCT_ESTIMATOR = 'project-estimator';
+
+    public const PRODUCT_TRANSACTION_TRACKER = 'transaction-tracker';
 
     public const DEFAULT_RETAIN_DAYS = 30;
 
@@ -293,7 +295,7 @@ final class CoreLedger
 
     private function assertProduct(string $product): void
     {
-        $known = [self::PRODUCT_PORTAL, self::PRODUCT_ESTIMATOR];
+        $known = [self::PRODUCT_PORTAL, self::PRODUCT_ESTIMATOR, self::PRODUCT_TRANSACTION_TRACKER];
         if (! in_array($product, $known, true)) {
             throw new InvalidArgumentException('Unknown core product ['.$product.'].');
         }

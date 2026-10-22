@@ -547,10 +547,13 @@ final class PortalSubmittedReports
             }
             // The day's figures are replaced with what the edit carries; each keeps the day's first
             // line on its project, as a filing does.
-            $this->scopeWork->clearDay($employeeId, $date);
+            $affected = $this->scopeWork->clearDay($employeeId, $date);
             foreach ($progress as $entry) {
                 $this->scopeWork->record($employeeId, $lineByProject[$entry['project_id']] ?? null, $date, [$entry]);
+                $affected[] = (int) $entry['project_id'];
             }
+            // One mirrored update per project, not one per scope line.
+            $this->scopeWork->reconcileProjects($affected, $actor);
             // Old lines no new line took over were dropped; their Airtable records are the sync's to delete.
             $taken = array_map(static fn (object $line): int => (int) $line->id, array_filter($matched));
             $droppedAirtableIds = [];
@@ -744,9 +747,12 @@ final class PortalSubmittedReports
                 }
 
                 // Each progress keeps the day's first line on its project, so View Reports shows it with the day.
+                $affected = [];
                 foreach ($progress[$index] as $entry) {
                     $this->scopeWork->record($employeeId, $lineByProject[$entry['project_id']] ?? null, $group['date'], [$entry]);
+                    $affected[] = (int) $entry['project_id'];
                 }
+                $this->scopeWork->reconcileProjects($affected, $actor);
                 $reviewIds[$group['date']] = (string) min($lineIds);
 
                 // One report is one user_reports row per line; lineIds lets the sync address each.
@@ -2261,22 +2267,7 @@ final class PortalSubmittedReports
 
     private function regularEarnCodeId(): ?int
     {
-        $row = $this->connection()
-            ->table('earn_codes')
-            ->select(['id', 'description'])
-            ->orderBy('id')
-            ->get();
-
-        foreach ($row as $candidate) {
-            $label = strtolower(PortalSubmittedReportPresenter::earnCodeLabel($candidate->description ?? null));
-            if (str_contains($label, 'regular')) {
-                return (int) $candidate->id;
-            }
-        }
-
-        $first = $row->first();
-
-        return $first === null ? null : (int) $first->id;
+        return (new PortalEarnCodes)->regularWorkingDayId();
     }
 
     /**
@@ -2293,6 +2284,7 @@ final class PortalSubmittedReports
         $reportDate = $this->calendarDate($line['report_date'] ?? null) ?? $date;
         $id = (int) $this->connection()->table('user_reports')->insertGetId([
             'report_date' => $reportDate,
+            'actual_work_date' => $this->calendarDate($line['actual_work_date'] ?? null) ?? $reportDate,
             'hours_rendered' => is_numeric($line['hours_rendered'] ?? null) ? $line['hours_rendered'] : 0,
             'change_in_elements' => is_numeric($line['change_in_elements'] ?? null) ? $line['change_in_elements'] : 0,
             'remarks' => $line['remarks'] ?? null,
@@ -2461,6 +2453,7 @@ final class PortalSubmittedReports
         $id = (int) $this->connection()->table('user_reports')->insertGetId([
             ...$carried,
             'report_date' => $date,
+            'actual_work_date' => $carried['actual_work_date'] ?? $date,
             'hours_rendered' => $entry['hoursRendered'],
             'change_in_elements' => $entry['elementChange'],
             'remarks' => $remarks,

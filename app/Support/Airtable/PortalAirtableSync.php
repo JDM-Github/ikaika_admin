@@ -5,6 +5,7 @@ namespace App\Support\Airtable;
 use App\Modules\Core\Models\Action;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreLedger;
+use App\Support\Portal\PortalProjectActivities;
 use GuzzleHttp\Exception\ConnectException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Carbon;
@@ -14,7 +15,7 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Replays unsynced portal ledger rows into Airtable, oldest first.
+ * Replays unsynced ledger rows from the synced products into Airtable, oldest first.
  *
  * Each action becomes one or more units: a row to create or patch, or a record to delete. Most
  * actions are one row; a report is one row per line plus a delete for every line an edit dropped.
@@ -40,6 +41,12 @@ final class PortalAirtableSync
     // attempts is a SMALLINT UNSIGNED; an action failing forever must never overflow it and stop every run.
     private const MAX_ATTEMPTS = 65000;
 
+    // The products this command replays. A product without a ledgered action costs nothing.
+    private const PRODUCTS = [CoreLedger::PRODUCT_PORTAL, CoreLedger::PRODUCT_TRANSACTION_TRACKER];
+
+    /** @var array<string, array<string, array{type: string, choices: list<string>|null}>> */
+    private array $schemas = [];
+
     private bool $retryCreates = false;
 
     public function __construct(private readonly AirtableClient $airtable) {}
@@ -55,7 +62,6 @@ final class PortalAirtableSync
     public function run(bool $send, int $settleSeconds = 0, bool $retryCreates = false, ?int $afterId = null, bool $backoff = false, ?int $budgetSeconds = null): array
     {
         $this->retryCreates = $retryCreates;
-        $schema = $this->airtable->tables();
         $counts = array_fill_keys(['create', 'update', 'delete', 'discard', 'synced', 'covered', 'superseded', 'nothing', 'blocked', 'failed', 'skipped'], 0);
         $items = [];
         // The first unit on a row pushes that row's current state, which already holds every later one.
@@ -64,19 +70,27 @@ final class PortalAirtableSync
         // carries on, and a run never outlives the lock that keeps two sends apart.
         $deadline = $budgetSeconds === null ? null : Carbon::now()->addSeconds($budgetSeconds);
         $stopped = false;
+        $actions = $this->pending($settleSeconds, $afterId, $backoff);
+        // An empty manual dry run still proves the token/base are usable, as it always did.
+        if ($actions->isEmpty()) {
+            $this->schema('main');
+        }
 
-        foreach ($this->pending($settleSeconds, $afterId, $backoff) as $action) {
+        foreach ($actions as $action) {
             if ($deadline !== null && Carbon::now()->gte($deadline)) {
                 $stopped = true;
                 break;
             }
+            $map = AirtableSyncMap::for($action->resource);
+            $base = AirtableSyncMap::base($map);
+            $schema = $map !== null && $this->configured($base) ? $this->schema($base) : [];
             $units = [];
             foreach ($this->units($action, $schema, $firstByRow) as $unit) {
                 if ($send && in_array($unit['outcome'], ['create', 'update', 'delete', 'discard'], true)) {
                     $unit = $this->push($action, $unit);
                 }
                 if (str_contains((string) $unit['recordId'], '#') && ! isset(AirtableSyncMap::for($unit['resource'])['changed_only'])) {
-                    $firstByRow[(string) $unit['recordId']] ??= $unit;
+                    $firstByRow[(string) $action->product.'#'.(string) $unit['recordId']] ??= $unit;
                 }
                 $units[] = $unit;
             }
@@ -109,7 +123,7 @@ final class PortalAirtableSync
     public function skipThrough(int $actionId): int
     {
         return Action::query()
-            ->where('product', CoreLedger::PRODUCT_PORTAL)
+            ->whereIn('product', self::PRODUCTS)
             ->whereNull('synced_at')
             ->where('id', '<=', $actionId)
             ->update(['synced_at' => Carbon::now(), 'last_error' => 'Not sent: settled by --skip-through='.$actionId.'.']);
@@ -122,7 +136,7 @@ final class PortalAirtableSync
     {
         // ponytail: loads every unsynced action at once; page it with lazyById if a backlog ever runs to tens of thousands.
         return Action::query()
-            ->where('product', CoreLedger::PRODUCT_PORTAL)
+            ->whereIn('product', self::PRODUCTS)
             ->whereNull('synced_at')
             // The ledger commits a moment before the portal row does; a fresh action waits a run.
             ->when($settleSeconds > 0, fn ($query) => $query->where('created_at', '<=', Carbon::now()->subSeconds($settleSeconds)))
@@ -158,42 +172,84 @@ final class PortalAirtableSync
      */
     public function wrongBase(): ?string
     {
-        $tables = [];
+        $byBase = [];
         foreach (AirtableSyncMap::resources() as $resource) {
             $map = AirtableSyncMap::for($resource);
-            if ($map !== null) {
-                $tables[$map['sql_table']] ??= $map['airtable_table'];
-            }
-        }
-
-        $asked = 0;
-        foreach ($tables as $sqlTable => $airtableTable) {
-            $recordId = DB::connection('portal')->table($sqlTable)->whereNotNull('airtable_record_id')->orderByDesc('id')->value('airtable_record_id');
-            if (! is_string($recordId) || $recordId === '') {
+            if ($map === null) {
                 continue;
             }
-            if ($this->airtable->exists($airtableTable, $recordId)) {
-                return null;
+            $base = AirtableSyncMap::base($map);
+            if (! $this->configured($base)) {
+                continue;
             }
-            if (++$asked === 5) {
-                break;
+            $key = AirtableSyncMap::connection($map).'|'.$map['sql_table'].'|'.AirtableSyncMap::recordIdColumn($map);
+            $byBase[$base][$key] = [
+                'connection' => AirtableSyncMap::connection($map),
+                'sql_table' => $map['sql_table'],
+                'airtable_table' => $map['airtable_table'],
+                'column' => AirtableSyncMap::recordIdColumn($map),
+            ];
+        }
+
+        foreach ($byBase as $base => $tables) {
+            $asked = 0;
+            foreach ($tables as $table) {
+                $recordId = DB::connection($table['connection'])->table($table['sql_table'])
+                    ->whereNotNull($table['column'])->orderByDesc('id')->value($table['column']);
+                if (! is_string($recordId) || $recordId === '') {
+                    continue;
+                }
+                if ($this->airtable->exists($table['airtable_table'], $recordId, $base)) {
+                    continue 2;
+                }
+                if (++$asked === 5) {
+                    break;
+                }
+            }
+            if ($asked > 0) {
+                return 'The Airtable base "'.$base.'" holds none of the '.$asked.' records this database points at, so '
+                    .$this->baseEnv($base).' names another base. Nothing was sent.';
             }
         }
 
-        return $asked === 0
-            ? null
-            : 'The Airtable base holds none of the '.$asked.' records this database points at, so AIRTABLE_BASE_ID names another base. Nothing was sent.';
+        return null;
+    }
+
+    private function configured(string $base): bool
+    {
+        $value = $base === 'main'
+            ? config('services.airtable.base')
+            : config('services.airtable.bases.'.$base);
+
+        return is_string($value) && $value !== '';
+    }
+
+    private function baseEnv(string $base): string
+    {
+        return match ($base) {
+            'calendar' => 'AIRTABLE_CALENDAR',
+            'clients' => 'AIRTABLE_CLIENT_INFORMATION',
+            'tracker' => 'AIRTABLE_TRANSACTION_TRACKER',
+            default => 'AIRTABLE_BASE_ID',
+        };
     }
 
     /**
-     * Plans the newest real row of every mapped resource against the live base, writing nothing,
+     * @return array<string, array<string, array{type: string, choices: list<string>|null}>>
+     */
+    private function schema(string $base): array
+    {
+        return $this->schemas[$base] ??= $this->airtable->tables($base);
+    }
+
+    /**
+     * Plans the newest real row of every mapped resource against its live base, writing nothing,
      * so a mapping is proven before any member has produced an action for it.
      *
      * @return list<array{actionId: int, resource: ?string, actionType: string, recordId: ?string, outcome: string, table: ?string, airtableId: ?string, fields: array<string, mixed>, problems: list<string>}>
      */
     public function check(): array
     {
-        $schema = $this->airtable->tables();
         $items = [];
 
         foreach (AirtableSyncMap::resources() as $resource) {
@@ -201,24 +257,37 @@ final class PortalAirtableSync
             if ($map === null) {
                 continue;
             }
-            $query = DB::connection('portal')->table($map['sql_table'])->orderByDesc('id');
+            $base = AirtableSyncMap::base($map);
+            $probe = (new Action)->forceFill([
+                'product' => AirtableSyncMap::product($map),
+                'resource' => $resource,
+                'action_type' => 'check',
+                'record_id' => null,
+            ]);
+            if (! $this->configured($base)) {
+                $items[] = $this->unit($probe, $map['airtable_table'], null, 'skipped', ['The Airtable base "'.$base.'" ('.$this->baseEnv($base).') is not configured.']);
+
+                continue;
+            }
+            $column = AirtableSyncMap::recordIdColumn($map);
+            $query = DB::connection(AirtableSyncMap::connection($map))->table($map['sql_table'])->orderByDesc('id');
             if (isset($map['sample'])) {
                 $query->where($map['sample']['column'], $map['sample']['value']);
             }
             if (isset($map['changed_only'])) {
                 // Changed-only resources only ever update, so the check samples a row Airtable has.
-                $query->whereNotNull('airtable_record_id');
+                $query->whereNotNull($column);
             }
             if (isset($map['discard_when'])) {
-                $column = $map['discard_when']['column'];
-                $query->where(fn ($where) => $where->whereNull($column)->orWhere($column, '!=', $map['discard_when']['value']));
+                $discard = $map['discard_when']['column'];
+                $query->where(fn ($where) => $where->whereNull($discard)->orWhere($discard, '!=', $map['discard_when']['value']));
             }
             $id = $query->value('id');
-            $probe = (new Action)->forceFill(['resource' => $resource, 'action_type' => 'check', 'record_id' => (string) $id]);
+            $probe->record_id = (string) $id;
 
             $items[] = $id === null
                 ? $this->unit($probe, $map['airtable_table'], null, 'skipped', ['No SQL row to check this mapping against.'])
-                : $this->row($probe, $map, (int) $id, $schema, false, true);
+                : $this->row($probe, $map, (int) $id, $this->schema($base), false, true);
         }
 
         return $items;
@@ -239,6 +308,12 @@ final class PortalAirtableSync
         $map = AirtableSyncMap::for($action->resource);
         if ($map === null) {
             return [$this->unit($action, null, $action->record_id, 'skipped', ['Not mapped to an Airtable table yet; left for a later run.'])];
+        }
+        if (AirtableSyncMap::product($map) !== (string) $action->product) {
+            return [$this->unit($action, $map['airtable_table'], $action->record_id, 'skipped', ['This resource is mapped for another product; left for a later run.'])];
+        }
+        if (! $this->configured(AirtableSyncMap::base($map))) {
+            return [$this->unit($action, $map['airtable_table'], $action->record_id, 'skipped', ['The Airtable base "'.AirtableSyncMap::base($map).'" ('.$this->baseEnv(AirtableSyncMap::base($map)).') is not configured.'])];
         }
 
         $rows = $map['rows'] ?? null;
@@ -319,7 +394,7 @@ final class PortalAirtableSync
     private function rowOrCovered(Action $action, array $map, int $rowId, array $schema, array $firstByRow, bool $multiRow): array
     {
         $key = $map['sql_table'].'#'.$rowId;
-        $first = isset($map['changed_only']) ? null : ($firstByRow[$key] ?? null);
+        $first = isset($map['changed_only']) ? null : ($firstByRow[(string) $action->product.'#'.$key] ?? null);
         if ($first === null) {
             return $this->row($action, $map, $rowId, $schema, $multiRow);
         }
@@ -348,7 +423,7 @@ final class PortalAirtableSync
     private function row(Action $action, array $map, int $rowId, array $schema, bool $multiRow, bool $probe = false): array
     {
         $key = $map['sql_table'].'#'.$rowId;
-        $row = DB::connection('portal')->table($map['sql_table'])->where('id', $rowId)->first();
+        $row = DB::connection(AirtableSyncMap::connection($map))->table($map['sql_table'])->where('id', $rowId)->first();
         if ($row === null) {
             // A create whose answer was lost may have landed for this line: that waits for a person and
             // --retry-creates, never a silent supersede that would leave a duplicate behind (2026-10-20).
@@ -360,7 +435,7 @@ final class PortalAirtableSync
             // it may be a line whose report has not finished committing yet.
             $scope = $multiRow ? $action->recycle_key : (string) $rowId;
             $explained = $action->getKey() !== null && $scope !== null && Action::query()
-                ->where('product', CoreLedger::PRODUCT_PORTAL)
+                ->where('product', $action->product)
                 ->where('resource', $action->resource)
                 ->where('id', '>', $action->getKey())
                 ->where($multiRow ? 'recycle_key' : 'record_id', $scope)
@@ -373,7 +448,9 @@ final class PortalAirtableSync
                 : $this->unit($action, $map['airtable_table'], $key, 'failed', ['The SQL row '.$key.' is not there, and no later action explains why.']);
         }
 
-        $airtableId = is_string($row->airtable_record_id ?? null) && $row->airtable_record_id !== '' ? $row->airtable_record_id : null;
+        $idColumn = AirtableSyncMap::recordIdColumn($map);
+        $recordId = $row->{$idColumn} ?? null;
+        $airtableId = is_string($recordId) && $recordId !== '' ? $recordId : null;
 
         // In the Recycle Bin: a record Airtable has stays Airtable's, and one it never had is not sent.
         if (($row->deleted_at ?? null) !== null && ! $probe) {
@@ -411,7 +488,7 @@ final class PortalAirtableSync
             $columns = array_intersect_key($columns, array_flip($changed));
         }
 
-        [$links, $linkProblems] = $this->links($map, $row, $changed);
+        [$links, $linkProblems] = $this->links($map, $row, $changed, $action->actor_id === null ? null : (int) $action->actor_id);
         $files = $this->attachments($map, $row, $action, $creating);
         if ($changed !== null && $columns === [] && $links === [] && $linkProblems === [] && $files === []) {
             return $this->unit($action, $map['airtable_table'], $key, 'nothing', ['None of the changed columns are synced to Airtable.'], $airtableId);
@@ -426,9 +503,23 @@ final class PortalAirtableSync
         $notes = [];
         foreach ($map['lenient'] ?? [] as $field) {
             $choices = $schema[$map['airtable_table']][$field]['choices'] ?? null;
-            if ($choices !== null && is_string($fields[$field] ?? null) && ! in_array($fields[$field], $choices, true)) {
+            if ($choices === null) {
+                continue;
+            }
+            if (is_string($fields[$field] ?? null) && ! in_array($fields[$field], $choices, true)) {
                 $notes[] = '"'.$field.'" left out: Airtable has no option "'.$fields[$field].'".';
                 unset($fields[$field]);
+            } elseif (is_array($fields[$field] ?? null)) {
+                $missing = array_values(array_diff($fields[$field], $choices));
+                $kept = array_values(array_intersect($fields[$field], $choices));
+                if ($missing !== []) {
+                    $notes[] = '"'.$field.'" left out: Airtable has no option "'.implode('", "', $missing).'".';
+                    if ($kept === []) {
+                        unset($fields[$field]);
+                    } else {
+                        $fields[$field] = $kept;
+                    }
+                }
             }
         }
         $problems = [...$linkProblems, ...$this->problems($map['airtable_table'], $fields, $schema)];
@@ -469,19 +560,22 @@ final class PortalAirtableSync
         if ($map === null || $unit['table'] === null) {
             return $unit;
         }
+        $base = AirtableSyncMap::base($map);
+        $connection = DB::connection(AirtableSyncMap::connection($map));
+        $idColumn = AirtableSyncMap::recordIdColumn($map);
         [, $rowId] = array_pad(explode('#', (string) $unit['recordId'], 2), 2, null);
 
         try {
             if ($unit['outcome'] === 'delete') {
-                $this->airtable->delete($unit['table'], (string) $unit['airtableId']);
+                $this->airtable->delete($unit['table'], (string) $unit['airtableId'], $base);
 
                 return [...$unit, 'outcome' => 'deleted'];
             }
 
             if ($unit['outcome'] === 'discard') {
                 if ($unit['airtableId'] !== null) {
-                    $this->airtable->delete($unit['table'], $unit['airtableId']);
-                    DB::connection('portal')->table($map['sql_table'])->where('id', $rowId)->update(['airtable_record_id' => null]);
+                    $this->airtable->delete($unit['table'], $unit['airtableId'], $base);
+                    $connection->table($map['sql_table'])->where('id', $rowId)->update([$idColumn => null]);
                 }
 
                 return [...$unit, 'outcome' => 'discarded'];
@@ -489,7 +583,7 @@ final class PortalAirtableSync
 
             if ($unit['airtableId'] !== null) {
                 try {
-                    $this->airtable->update($unit['table'], $unit['airtableId'], $unit['fields']);
+                    $this->airtable->update($unit['table'], $unit['airtableId'], $unit['fields'], $base);
 
                     return [...$unit, 'outcome' => 'synced'];
                 } catch (AirtableRecordGone) {
@@ -498,10 +592,10 @@ final class PortalAirtableSync
                     if (isset($map['changed_only'])) {
                         return [...$unit, 'outcome' => 'failed', 'problems' => [...$unit['problems'], 'Its Airtable record was deleted there; only changes are synced for this table, so it cannot be rebuilt.']];
                     }
-                    DB::connection('portal')->table($map['sql_table'])
+                    $connection->table($map['sql_table'])
                         ->where('id', $rowId)
-                        ->where('airtable_record_id', $unit['airtableId'])
-                        ->update(['airtable_record_id' => null]);
+                        ->where($idColumn, $unit['airtableId'])
+                        ->update([$idColumn => null]);
                     $unit['fields'] = array_filter($unit['fields'], static fn (mixed $value): bool => $value !== null);
                 }
             }
@@ -515,7 +609,7 @@ final class PortalAirtableSync
                 Action::query()->whereKey($action->getKey())->update(['last_error' => self::UNCERTAIN_CREATE]);
             }
             try {
-                $created = $this->airtable->create($unit['table'], $unit['fields']);
+                $created = $this->airtable->create($unit['table'], $unit['fields'], $base);
             } catch (ConnectionException $error) {
                 return [...$unit, 'outcome' => 'failed', 'problems' => [...$unit['problems'], self::neverSent($error) ? $error->getMessage() : self::UNCERTAIN_CREATE]];
             }
@@ -523,14 +617,14 @@ final class PortalAirtableSync
             // delete, another run) must not end up pointing at a second record.
             $written = 0;
             try {
-                $written = DB::connection('portal')->table($map['sql_table'])
+                $written = $connection->table($map['sql_table'])
                     ->where('id', $rowId)
-                    ->whereNull('airtable_record_id')
-                    ->update(['airtable_record_id' => $created]);
+                    ->whereNull($idColumn)
+                    ->update([$idColumn => $created]);
             } finally {
                 if ($written !== 1) {
                     // An id SQL never kept would make the retry create a second record, so undo this one.
-                    $this->airtable->delete($unit['table'], $created);
+                    $this->airtable->delete($unit['table'], $created, $base);
                 }
             }
             if ($written !== 1) {
@@ -594,11 +688,12 @@ final class PortalAirtableSync
     {
         $resources = array_values(array_filter(
             AirtableSyncMap::resources(),
-            static fn (string $resource): bool => (AirtableSyncMap::for($resource)['sql_table'] ?? null) === $map['sql_table'],
+            static fn (string $resource): bool => (AirtableSyncMap::for($resource)['sql_table'] ?? null) === $map['sql_table']
+                && AirtableSyncMap::product(AirtableSyncMap::for($resource)) === (string) $action->product,
         ));
 
         return Action::query()
-            ->where('product', CoreLedger::PRODUCT_PORTAL)
+            ->where('product', $action->product)
             ->whereNull('synced_at')
             ->when($action->getKey() !== null, fn ($query) => $query->whereKeyNot($action->getKey()))
             ->where('last_error', 'like', '%'.self::UNCERTAIN_CREATE.'%')
@@ -693,61 +788,115 @@ final class PortalAirtableSync
      *
      * On a changed-only update ($changed names what the action changed) only a link the action
      * changed is sent, and then even empty, since the portal itself removed it. Otherwise every link
-     * goes, and never empty: SQL's junctions may not hold every link Airtable has.
+     * goes, and never empty: SQL's junctions may not hold every link Airtable has. A `full_links`
+     * map owns every link itself (the tracker tables), so an empty one is sent too, clearing it. A
+     * link sourced from the action's actor goes on every create and update; a blank actor sends
+     * nothing.
      *
-     * @param  array{links?: array<string, array{junction?: string, local?: string, foreign?: string, table: string, where?: array<string, string>, matches?: string, from?: string, column?: string}>}  $map
+     * @param  array{links?: array<string, array{junction?: string, local?: string, foreign?: string, table: string, where?: array<string, string>, matches?: string, from?: string, from_actor?: bool, query?: string, column?: string, id_column?: string}>, connection?: string, full_links?: bool}  $map
      * @param  list<string>|null  $changed
      * @return array{0: array<string, list<string>>, 1: list<string>}
      */
-    private function links(array $map, object $row, ?array $changed = null): array
+    private function links(array $map, object $row, ?array $changed = null, ?int $actorId = null): array
     {
         $fields = [];
         $problems = [];
+        $connection = DB::connection(AirtableSyncMap::connection($map));
         foreach ($map['links'] ?? [] as $field => $link) {
+            $targetColumn = $link['id_column'] ?? 'airtable_record_id';
+            $fromActor = ($link['from_actor'] ?? false) === true;
             $column = $link['column'] ?? $link['from'] ?? null;
-            if ($changed !== null && ($column === null || ! in_array($column, $changed, true))) {
+            if (! $fromActor && $changed !== null && ($column === null || ! in_array($column, $changed, true))) {
                 continue;
             }
-            $from = $link['from'] ?? null;
-            if ($from !== null) {
+            if ($fromActor) {
+                if ($actorId === null) {
+                    continue;
+                }
+                $linked = $connection
+                    ->table($link['table'])
+                    ->where('id', $actorId)
+                    ->get([$link['table'].'.id', $link['table'].'.'.$targetColumn]);
+            } elseif (isset($link['query'])) {
+                $linked = $this->queryLink((string) $link['query'], $row);
+            } elseif (($from = $link['from'] ?? null) !== null) {
                 $source = $row->{$from} ?? null;
                 // Nothing named, nothing to link; an empty value must never match a blank column.
-                if (! is_string($source) || trim($source) === '') {
+                if (! is_scalar($source) || trim((string) $source) === '') {
                     if ($changed !== null) {
                         $fields[$field] = [];
                     }
 
                     continue;
                 }
-                $linked = DB::connection('portal')
+                $linked = $connection
                     ->table($link['table'])
-                    ->where((string) $link['matches'], $source)
-                    ->get([$link['table'].'.id', $link['table'].'.airtable_record_id']);
+                    ->where((string) $link['matches'], (string) $source)
+                    ->get([$link['table'].'.id', $link['table'].'.'.$targetColumn]);
             } else {
-                $linked = DB::connection('portal')
+                $linked = $connection
                     ->table((string) $link['junction'])
                     ->join($link['table'], $link['table'].'.id', '=', (string) $link['junction'].'.'.$link['foreign'])
                     ->where((string) $link['junction'].'.'.$link['local'], $row->id)
                     ->when(isset($link['where']), fn ($query) => $query->where($link['where']))
                     ->orderBy($link['table'].'.id')
-                    ->get([$link['table'].'.id', $link['table'].'.airtable_record_id']);
+                    ->get([$link['table'].'.id', $link['table'].'.'.$targetColumn]);
             }
 
             $ids = [];
             foreach ($linked as $target) {
-                if (! is_string($target->airtable_record_id) || $target->airtable_record_id === '') {
+                $targetId = $target->{$targetColumn} ?? null;
+                if (! is_string($targetId) || $targetId === '') {
                     $problems[] = '"'.$field.'" links '.$link['table'].'#'.$target->id.', which Airtable does not have yet.';
 
                     continue;
                 }
-                $ids[] = $target->airtable_record_id;
+                $ids[] = $targetId;
             }
-            if ($ids !== [] || $changed !== null) {
+            if ($ids !== [] || $changed !== null || ($map['full_links'] ?? false) === true) {
                 $fields[$field] = $ids;
             }
         }
 
         return [$fields, $problems];
+    }
+
+    /**
+     * A link whose targets come from a named query rather than a junction.
+     *
+     * @return Collection<int, object>
+     */
+    private function queryLink(string $query, object $row): Collection
+    {
+        return match ($query) {
+            'activity_scope' => $this->activityScope($row),
+            default => collect(),
+        };
+    }
+
+    /**
+     * The activity codes a project keeps: its type's allowed list for its department, less the
+     * activities the project took out (2026-10-22, user).
+     *
+     * @return Collection<int, object>
+     */
+    private function activityScope(object $row): Collection
+    {
+        $activities = new PortalProjectActivities;
+        $type = is_string($row->type_of_job ?? null) ? $row->type_of_job : null;
+        $codes = array_values(array_diff(
+            $activities->allowedFor($row->department ?? null, $type),
+            $activities->removedFor((int) $row->id),
+        ));
+        if ($codes === []) {
+            return collect();
+        }
+
+        return DB::connection('portal')
+            ->table('activity_codes')
+            ->whereIn('id_no', $codes)
+            ->orderBy('id')
+            ->get(['id', 'airtable_record_id']);
     }
 
     /**
@@ -770,7 +919,7 @@ final class PortalAirtableSync
             if (! $creating && ! $changedHere) {
                 continue;
             }
-            $files = DB::connection('portal')
+            $files = DB::connection(AirtableSyncMap::connection($map))
                 ->table('attachments')
                 ->where('table_name', $source['table_name'])
                 ->where('field_name', $source['field_name'])
@@ -809,7 +958,7 @@ final class PortalAirtableSync
     {
         $keys = array_fill_keys(array_keys($this->payload($action)), true);
         $pending = Action::query()
-            ->where('product', CoreLedger::PRODUCT_PORTAL)
+            ->where('product', $action->product)
             ->where('resource', $action->resource)
             ->where('record_id', (string) $rowId)
             ->whereNull('synced_at')
@@ -830,7 +979,7 @@ final class PortalAirtableSync
         $seen = false;
         $latest = null;
         $history = Action::query()
-            ->where('product', CoreLedger::PRODUCT_PORTAL)
+            ->where('product', $action->product)
             ->where('resource', $action->resource)
             ->where('record_id', (string) $rowId)
             ->orderBy('id')
@@ -864,10 +1013,16 @@ final class PortalAirtableSync
             // A blank is no value: Airtable refuses '' for a number, date or choice, and clears on null.
             if ($value === '' && in_array($type, ['number', 'currency', 'percent', 'date', 'singleSelect', 'multipleSelects', 'phoneNumber', 'email', 'url'], true)) {
                 $fields[$name] = null;
-            } elseif (in_array($type, ['number', 'currency', 'percent'], true) && is_numeric($value)) {
+            } elseif ($type === 'percent' && is_numeric($value)) {
+                // SQL keeps a percent 0-100; Airtable's percent field reads a fraction 0-1.
+                $fields[$name] = ($value + 0) / 100;
+            } elseif (in_array($type, ['number', 'currency'], true) && is_numeric($value)) {
                 $fields[$name] = $value + 0;
             } elseif ($type === 'date' && is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}/', $value) === 1) {
                 $fields[$name] = substr($value, 0, 10);
+            } elseif ($type === 'dateTime' && is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/', $value) === 1) {
+                $dateTime = str_replace(' ', 'T', substr($value, 0, 19));
+                $fields[$name] = preg_match('/T\d{2}:\d{2}$/', $dateTime) === 1 ? $dateTime.':00' : $dateTime;
             } elseif ($type === 'checkbox') {
                 $fields[$name] = in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'y'], true);
             } elseif ($type === 'multipleSelects' && is_string($value)) {

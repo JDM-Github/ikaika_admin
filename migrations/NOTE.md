@@ -4,7 +4,7 @@ This file summarizes a claude.ai planning session so Claude Code can pick up
 without re-deriving everything from scratch. Point Claude Code at this file
 first (e.g. "read MIGRATION_NOTES.md before we continue").
 
-## The four Airtable bases involved
+## The Airtable bases involved
 
 | Base | Base ID | Notes |
 |---|---|---|
@@ -13,10 +13,18 @@ first (e.g. "read MIGRATION_NOTES.md before we continue").
 | Project Estimator | `appgh0Mki2uHDLAQY` | Completely different schema — a separate tool, not a copy of Users & Projects |
 | Transaction Tracker (PROD) | `appp5MogesHN2eVvG` | Migrated — `sql/transaction_tracker/schema.sql` + `migrations/generate/generate_sql_transaction_tracker.py`. See dedicated section below. |
 | Transaction Tracker (TEST) | `appYwnzEVZVXwH1hB` | Sandbox app for trying Finance; same schema and generator as PROD (`-Target transaction-tracker-test`). |
+| Calendar (TEST) | `appCoObE52yP1guFP` | Holidays, Earn Codes, Events. Source of the portal's holidays/Earn Codes. |
+| Calendar (PRODUCTION) | `appxjrrZc99jJlpli` | Same schema as the TEST Calendar. |
+| Client Information (TEST) | `appSNMGACG48i3XFX` | Clients. The writable source; Users & Projects Clients is a synced copy of it. |
+| Client Information (PRODUCTION) | `appLBcQ7leQQnJ7Pj` | Same schema as the TEST Client Information. |
+
+**Users & Projects Clients and Earn Codes are read-only synced copies** of Client Information Clients
+and Calendar Earn Codes. The portal writes the source bases; the Users & Projects ids remain the link
+targets for projects/reports. Never write Clients/Earn Codes in Users & Projects.
 
 **Users & Projects TEST vs PRODUCTION share identical table/field IDs** — same
-schema works for both. Project Estimator and Transaction Tracker don't share
-anything with the other bases or each other; each has its own schema
+schema works for both. Project Estimator, Transaction Tracker, Calendar and Client Information don't
+share anything with the other bases or each other; each has its own schema
 entirely.
 
 ## Deliverables already produced (in claude.ai, attached as files in that

@@ -8,7 +8,9 @@ use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreRecycleKey;
+use App\Support\Portal\PortalEarnCodes;
 use App\Support\Portal\PortalProjectApproval;
+use App\Support\Portal\PortalReportLineRepairs;
 use App\Support\Portal\PortalScopeWork;
 use App\Support\Portal\PortalSubmittedReportPresenter;
 use App\Support\Portal\PortalTimezone;
@@ -553,6 +555,108 @@ class PortalSubmittedReportsTest extends TestCase
         $this->assertSame($projectLabel, $log->payload['entries'][0]['projectLabel']);
         $this->assertSame($activityLabel, $log->payload['entries'][0]['activityLabel']);
         $this->assertSame(5.5, $log->payload['entries'][0]['hoursRendered']);
+    }
+
+    // The bug (2026-10-22): the first code containing "regular" won, which is not 01 on the imported ids.
+    public function test_a_new_report_gets_the_regular_working_day_earn_code_and_its_own_work_date(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $target = (new PortalEarnCodes)->regularWorkingDayId();
+        $this->assertNotNull($target);
+        $wrong = DB::connection('portal')->table('earn_codes')
+            ->where('id', '<', $target)->where('description', 'like', '%regular%')->orderBy('id')->first();
+        $this->assertNotNull($wrong, 'The seeded catalogue no longer holds a lower-id code containing "Regular".');
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+
+        $entry = fn (): array => [
+            'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+            'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name ?? null, $activity->id_no ?? null),
+            'hoursRendered' => 8,
+            'elementChange' => 0,
+        ];
+        $day = $this->freeDate($actor, 0);
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [['reportDate' => $day, 'entries' => [$entry()]]],
+        ], $headers)->assertCreated();
+
+        $lateDay = $this->freeDate($actor, 40);
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'late',
+            'reports' => [['reportDate' => $lateDay, 'entries' => [$entry()]]],
+        ], $headers)->assertCreated();
+
+        foreach ([[$day, 'daily'], [$lateDay, 'late']] as [$date, $kind]) {
+            $lineId = (int) DB::connection('portal')->table('user_reports')
+                ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+                ->where('employees_user_reports.employee_id', $actor->getKey())
+                ->where('user_reports.report_date', $date)->value('user_reports.id');
+            $this->assertGreaterThan(0, $lineId);
+            $this->assertSame($target, (int) DB::connection('portal')->table('user_reports_earn_codes')->where('user_report_id', $lineId)->value('earn_code_id'));
+            $this->assertSame($date, substr((string) DB::connection('portal')->table('user_reports')->where('id', $lineId)->value('actual_work_date'), 0, 10), $kind);
+        }
+    }
+
+    // The one-off command repairs only the lines the portal itself filed, never an imported one.
+    public function test_the_repair_command_fixes_only_portal_filed_lines(): void
+    {
+        $actor = $this->activeMember();
+        $project = $this->firstOwnProject($actor);
+        $activity = $this->firstActivity();
+        $day = $this->freeDate($actor, 0);
+        $headers = ['Authorization' => 'Bearer '.$this->loginToken($actor)];
+        $this->postJson('/api/development/portal/reports/submitted', [
+            'kind' => 'daily',
+            'reports' => [['reportDate' => $day, 'entries' => [[
+                'projectLabel' => PortalSubmittedReportPresenter::projectLabel($project->project_number ?? null, $project->project_name ?? null),
+                'activityLabel' => PortalSubmittedReportPresenter::activityLabel($activity->name ?? null, $activity->id_no ?? null),
+                'hoursRendered' => 8,
+                'elementChange' => 0,
+            ]]]],
+        ], $headers)->assertCreated();
+        $portalLine = (int) DB::connection('portal')->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->where('user_reports.report_date', $day)->value('user_reports.id');
+
+        $target = (new PortalEarnCodes)->regularWorkingDayId();
+        $wrong = app(PortalReportLineRepairs::class)->buggyEarnCodeId();
+        $this->assertNotNull($target);
+        $this->assertNotNull($wrong);
+        $this->assertNotSame($target, $wrong);
+
+        $imported = $this->insertLine($actor, [
+            'report_date' => Carbon::parse($day)->subDay()->toDateString(),
+            'airtable_record_id' => 'recIMPORT00000001',
+        ], $project, $activity, $this->firstEarnCode());
+        foreach ([$portalLine, $imported] as $lineId) {
+            DB::connection('portal')->table('user_reports')->where('id', $lineId)->update(['actual_work_date' => null]);
+            DB::connection('portal')->table('user_reports_earn_codes')->where('user_report_id', $lineId)->delete();
+            DB::connection('portal')->table('user_reports_earn_codes')->insert(['user_report_id' => $lineId, 'earn_code_id' => $wrong]);
+        }
+        $edits = Action::query()->where('resource', 'reports.submitted')->where('action_type', CoreActionType::EDIT)->count();
+
+        $this->artisan('portal:fix-report-lines')
+            ->expectsOutputToContain('would be repaired')
+            ->assertExitCode(0);
+
+        $this->assertSame($wrong, (int) DB::connection('portal')->table('user_reports_earn_codes')->where('user_report_id', $portalLine)->value('earn_code_id'));
+        $this->assertNull(DB::connection('portal')->table('user_reports')->where('id', $portalLine)->value('actual_work_date'));
+        $this->assertSame($edits, Action::query()->where('resource', 'reports.submitted')->where('action_type', CoreActionType::EDIT)->count());
+
+        $this->artisan('portal:fix-report-lines', ['--apply' => true])->assertExitCode(0);
+
+        $this->assertSame($target, (int) DB::connection('portal')->table('user_reports_earn_codes')->where('user_report_id', $portalLine)->value('earn_code_id'));
+        $this->assertSame($day, substr((string) DB::connection('portal')->table('user_reports')->where('id', $portalLine)->value('actual_work_date'), 0, 10));
+        $this->assertSame($wrong, (int) DB::connection('portal')->table('user_reports_earn_codes')->where('user_report_id', $imported)->value('earn_code_id'));
+        $this->assertNull(DB::connection('portal')->table('user_reports')->where('id', $imported)->value('actual_work_date'));
+
+        $ledgered = Action::query()->where('resource', 'reports.submitted')->where('action_type', CoreActionType::EDIT)
+            ->where('record_id', (string) $portalLine)->first();
+        $this->assertNotNull($ledgered);
+        $this->assertSame([$portalLine], $ledgered->parameters['parameters']['lineIds']);
     }
 
     // The reported ask: a member assigned to a scope reports its progress with the day; View Reports shows it.

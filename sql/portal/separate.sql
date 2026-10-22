@@ -61,17 +61,23 @@ CREATE TABLE notifications (
 -- ============================================================================
 
 CREATE TABLE calendar_events (
-    id           INT AUTO_INCREMENT PRIMARY KEY,
-    title        VARCHAR(255) NOT NULL,
-    details      TEXT         NULL,
-    starts_on    DATE         NOT NULL,
-    starts_at    TIME         NULL,
-    ends_on      DATE         NULL,
-    ends_at      TIME         NULL,
-    category     VARCHAR(32)  NOT NULL,
-    audience     VARCHAR(32)  NOT NULL,
-    created_by   INT          NOT NULL,
-    date_created DATETIME     NULL,
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    airtable_record_id  VARCHAR(20) NULL UNIQUE,
+    title               VARCHAR(255) NOT NULL,
+    details             TEXT         NULL,
+    starts_on           DATE         NOT NULL,
+    starts_at           TIME         NULL,
+    ends_on             DATE         NULL,
+    ends_at             TIME         NULL,
+    starts_at_full      DATETIME     NULL,
+    ends_at_full        DATETIME     NULL,
+    category            VARCHAR(32)  NOT NULL,
+    audience            VARCHAR(32)  NOT NULL,
+    author              VARCHAR(255) NULL,
+    employee_names      TEXT         NULL,
+    departments         TEXT         NULL,
+    created_by          INT          NOT NULL,
+    date_created        DATETIME     NULL,
     INDEX idx_calendar_events_starts_on (starts_on),
     INDEX idx_calendar_events_created_by (created_by),
     FOREIGN KEY (created_by) REFERENCES employees(id) ON DELETE CASCADE
@@ -92,6 +98,37 @@ CREATE TABLE calendar_event_members (
     FOREIGN KEY (event_id)    REFERENCES calendar_events(id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id)      ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ============================================================================
+-- CALENDAR HOLIDAYS — the portal mirror of the Calendar base's Holidays table
+-- Written by portal:sync-calendar; read by PortalHolidays. type is regular,
+-- special or double, derived from the linked Calendar Earn Code. Existing
+-- databases: create_portal_calendar_holidays.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS calendar_holidays (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    airtable_record_id  VARCHAR(20) NULL UNIQUE,
+    holiday_date        DATE        NOT NULL,
+    name                VARCHAR(255) NULL,
+    type                VARCHAR(20) NOT NULL DEFAULT 'special',
+    created_at          TIMESTAMP   NULL,
+    updated_at          TIMESTAMP   NULL,
+    INDEX calendar_holidays_date (holiday_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The Calendar (source) record id of an earn code (2026-10-22, user). airtable_record_id remains the
+-- Users & Projects synced-copy id used by report/request links. Existing databases:
+-- add_calendar_record_id_to_earn_codes.
+ALTER TABLE earn_codes
+    ADD COLUMN calendar_airtable_record_id VARCHAR(20) NULL UNIQUE;
+
+-- The Client Information (source) record id of a client (2026-10-22, user). airtable_record_id remains
+-- the Users & Projects synced-copy id used by project Client links. Existing databases:
+-- add_client_info_record_id_to_clients.
+ALTER TABLE clients
+    ADD COLUMN client_info_airtable_record_id VARCHAR(20) NULL UNIQUE;
 
 
 -- ============================================================================
@@ -1700,3 +1737,42 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
     ('member', 'user.profile', NULL, 0),
     ('admin', 'user.profile', NULL, 0),
     ('developer', 'user.profile', NULL, 0);
+
+-- ============================================================================
+-- CLASHFLOW PER-RECORD WORKFLOW (2026-10-21, P2)
+-- Groups and batches are individual rows with optimistic versions; the project
+-- row holds package/run/level-map data. Every applied write gets an audit row.
+-- Existing databases: create_portal_clashflow_workflow.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS clashflow_records (
+    id                   BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    clashflow_project_id INT UNSIGNED NOT NULL,
+    record_type          VARCHAR(20)  NOT NULL,
+    record_key           VARCHAR(100) NOT NULL,
+    payload              LONGTEXT     NOT NULL,
+    version              INT UNSIGNED NOT NULL DEFAULT 1,
+    updated_by           INT          NULL,
+    updated_at           DATETIME     NOT NULL,
+    UNIQUE KEY clashflow_records_unique (clashflow_project_id, record_type, record_key),
+    FOREIGN KEY (clashflow_project_id) REFERENCES clashflow_projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (updated_by) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS clashflow_audit (
+    id                   BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    clashflow_project_id INT UNSIGNED NOT NULL,
+    actor_employee_id    INT          NULL,
+    action               VARCHAR(20)  NOT NULL,
+    record_type          VARCHAR(20)  NOT NULL,
+    record_key           VARCHAR(100) NOT NULL,
+    old_version          INT UNSIGNED NOT NULL DEFAULT 0,
+    new_version          INT UNSIGNED NOT NULL,
+    before_payload       LONGTEXT     NULL,
+    after_payload        LONGTEXT     NULL,
+    text                 VARCHAR(255) NOT NULL,
+    created_at           DATETIME     NOT NULL,
+    FOREIGN KEY (clashflow_project_id) REFERENCES clashflow_projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_employee_id) REFERENCES employees(id) ON DELETE SET NULL,
+    KEY clashflow_audit_project_created (clashflow_project_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

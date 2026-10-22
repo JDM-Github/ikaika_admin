@@ -246,6 +246,21 @@ final class PortalOvertimeRequests
                     'request_id' => (int) $row->id,
                 ]);
             }
+            $this->connection()->table('requests_activity_codes')->where('request_id', (int) $row->id)->delete();
+            foreach ($this->resolveActivities($group['entries']) as $activityId) {
+                $this->connection()->table('requests_activity_codes')->insert([
+                    'request_id' => (int) $row->id,
+                    'activity_code_id' => $activityId,
+                ]);
+            }
+            $this->connection()->table('requests_earn_codes')->where('request_id', (int) $row->id)->delete();
+            $earnCodeId = (new PortalEarnCodes)->overtimeIdFor($group['date']);
+            if ($earnCodeId !== null) {
+                $this->connection()->table('requests_earn_codes')->insert([
+                    'request_id' => (int) $row->id,
+                    'earn_code_id' => $earnCodeId,
+                ]);
+            }
 
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,
@@ -454,6 +469,19 @@ final class PortalOvertimeRequests
                 'request_id' => $id,
             ]);
         }
+        foreach ($this->resolveActivities($group['entries']) as $activityId) {
+            $this->connection()->table('requests_activity_codes')->insert([
+                'request_id' => $id,
+                'activity_code_id' => $activityId,
+            ]);
+        }
+        $earnCodeId = (new PortalEarnCodes)->overtimeIdFor($group['date']);
+        if ($earnCodeId !== null) {
+            $this->connection()->table('requests_earn_codes')->insert([
+                'request_id' => $id,
+                'earn_code_id' => $earnCodeId,
+            ]);
+        }
 
         return $id;
     }
@@ -510,6 +538,26 @@ final class PortalOvertimeRequests
             }
             if (! in_array($projectId, $ids, true)) {
                 $ids[] = $projectId;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * The activity ids the entries' labels name; a label the catalogue does not hold is skipped.
+     *
+     * @param  list<array{activityLabel: string}>  $entries
+     * @return list<int>
+     */
+    private function resolveActivities(array $entries): array
+    {
+        $catalog = PortalActivityScopes::idsByLabel();
+        $ids = [];
+        foreach ($entries as $entry) {
+            $id = $catalog[$this->lookupKey((string) ($entry['activityLabel'] ?? ''))] ?? null;
+            if ($id !== null && ! in_array($id, $ids, true)) {
+                $ids[] = $id;
             }
         }
 

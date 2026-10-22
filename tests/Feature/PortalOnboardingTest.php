@@ -237,6 +237,44 @@ class PortalOnboardingTest extends TestCase
         $this->withToken($token)->getJson(self::BASE)->assertOk();
         $this->withToken($token)->postJson(self::BASE, $this->payload())->assertForbidden();
         $this->withToken($token)->postJson(self::BASE.'/1/password')->assertForbidden();
+        $this->withToken($token)->deleteJson(self::BASE.'/1/entry')->assertForbidden();
+    }
+
+    // Delete is a hard delete, unlike Revoke: the link, the submitted data and its Airtable record go.
+    public function test_deleting_an_onboarding_entry_removes_its_data_and_ledgers_the_airtable_delete(): void
+    {
+        $admin = $this->adminToken();
+        $registration = $this->createRegistration($admin, ['slug' => 'liza'])['registration'];
+        $id = (int) $registration['id'];
+        $dataId = (int) DB::connection('portal')->table('new_employee_data')->insertGetId([
+            'airtable_record_id' => 'recONBRD00000001',
+            'first_name' => 'Liza',
+            'last_name' => 'Reyes',
+            'data_approval' => 'Pending',
+        ]);
+        DB::connection('portal')->table('registrations')->where('id', $id)->update(['employee_data_id' => $dataId]);
+        DB::connection('portal')->table('register_documents')->insert([
+            'registration_id' => $id,
+            'kind' => 'tin',
+            'name' => 'tin.pdf',
+            'mime' => 'application/pdf',
+            'size_bytes' => 10,
+            'path' => 'registrations/'.$id.'/tin.pdf',
+            'uploaded_at' => now(),
+        ]);
+
+        $this->withToken($admin)->deleteJson(self::BASE.'/'.$id.'/entry')
+            ->assertOk()
+            ->assertJsonPath('data.deleted', true);
+
+        $this->assertNull(DB::connection('portal')->table('registrations')->where('id', $id)->first());
+        $this->assertNull(DB::connection('portal')->table('new_employee_data')->where('id', $dataId)->first());
+        $this->assertSame(0, DB::connection('portal')->table('register_documents')->where('registration_id', $id)->count());
+
+        $action = Action::query()->where('resource', 'onboarding.employee_data')->where('action_type', 'delete')->first();
+        $this->assertNotNull($action);
+        $this->assertSame((string) $dataId, $action->record_id);
+        $this->assertSame('recONBRD00000001', $action->parameters['parameters']['airtableRecordId'] ?? null);
     }
 
     public function test_a_registration_is_created_with_its_password_kept(): void

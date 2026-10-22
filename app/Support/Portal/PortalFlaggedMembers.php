@@ -14,7 +14,8 @@ use Illuminate\Support\Carbon;
  *
  * A flag is a `warnings` row in status Active, linked through `employees_warnings` -- the same record
  * Airtable's warnings arrive as, and the one PortalSubmittedReports reads when it marks a filing for
- * review. Taking a flag off sets it Inactive rather than deleting it, so the history stays.
+ * review. Taking a flag off deletes it, here and in Airtable: an Inactive warning read like an
+ * ex-employee (2026-10-22, user). The approver's log keeps the act.
  *
  * The flagged person is never told: there is no notice to them and no line in their own log. Only the
  * approver's act is logged, under the approver. Flagging is Flag users on Daily Reports, a power of its
@@ -30,8 +31,6 @@ final class PortalFlaggedMembers
     public const RESOURCE = 'manage.flagged-members';
 
     private const ACTIVE = 'Active';
-
-    private const INACTIVE = 'Inactive';
 
     // What Airtable's own warnings carry: a flag is a review hold, not a recorded violation.
     private const VIOLATION_TYPE = 'N/A';
@@ -148,9 +147,18 @@ final class PortalFlaggedMembers
         }
 
         $this->ledger->within($this->connection(), function () use ($warningIds, $actor): void {
-            $this->connection()->table('warnings')->whereIn('id', $warningIds)->update(['status' => self::INACTIVE]);
             foreach ($warningIds as $warningId) {
-                $this->ledger->recordEdit(CoreLedger::PRODUCT_PORTAL, CoreLedger::PRODUCT_PORTAL.'.warnings', ['id' => (string) $warningId, 'fields' => ['status' => self::INACTIVE]], 'warnings', (string) $warningId, null, (int) $actor->getKey(), is_string($actor->id_no) ? $actor->id_no : null);
+                $airtableId = $this->connection()->table('warnings')->where('id', $warningId)->value('airtable_record_id');
+                $this->connection()->table('warnings')->where('id', $warningId)->delete();
+                $this->ledger->recordDelete(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreLedger::PRODUCT_PORTAL.'.warnings',
+                    ['id' => (string) $warningId, 'airtableRecordId' => is_string($airtableId) && $airtableId !== '' ? $airtableId : null],
+                    'warnings',
+                    (string) $warningId,
+                    (int) $actor->getKey(),
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
             }
         });
 

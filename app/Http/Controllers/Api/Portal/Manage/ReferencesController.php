@@ -107,6 +107,21 @@ class ReferencesController extends Controller
         return response()->json($this->settings->removeDepartment($this->editor($request), $request, $id));
     }
 
+    public function storeEarnCode(Request $request): JsonResponse
+    {
+        return response()->json($this->settings->addEarnCode($this->editor($request), $request));
+    }
+
+    public function updateEarnCode(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->updateEarnCode($this->editor($request), $request, $id));
+    }
+
+    public function destroyEarnCode(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->settings->removeEarnCode($this->editor($request), $request, $id));
+    }
+
     public function storeClient(Request $request): JsonResponse
     {
         return response()->json($this->settings->addClient($this->editor($request), $request));

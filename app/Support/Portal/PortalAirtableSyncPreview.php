@@ -5,20 +5,21 @@ namespace App\Support\Portal;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Airtable\PortalAirtableSync;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 /**
- * Sync to Airtable from All Actions, as a dry run only (decided 2026-10-01): it shows what the next
- * send would do and writes nothing to Airtable or the ledger. Sending stays the
- * `portal:airtable-sync --send` command.
- *
- * Confirming it is them comes first (docs/power/location-and-accountability-plan.md, step 4): the
- * person types their Developer mode password, checked here, never logged. The preview reads the live
- * base's schema, so a failure there reads as a plain reason, never the token.
+ * Sync to Airtable from All Actions, in three steps: confirm it is you, read the mapping check and
+ * the dry run (both write nothing), then send. The password is checked per request and never logged.
+ * Sending is the same engine and lock as `portal:airtable-sync --send`.
  */
 final class PortalAirtableSyncPreview
 {
     private const RESOURCE = 'administration.actions.sync';
+
+    private const LOCK_SECONDS = 900;
+
+    private const RUN_SECONDS = 600;
 
     public function __construct(
         private readonly PortalAirtableSync $sync,
@@ -29,10 +30,33 @@ final class PortalAirtableSyncPreview
     /**
      * @return array{section: string, resource: string, data: array{counts: array<string, int>, items: list<array<string, mixed>>}}
      */
+    public function check(Employee $actor, Request $request): array
+    {
+        $this->confirm($actor, $request);
+
+        try {
+            $items = $this->sync->check();
+        } catch (Throwable $error) {
+            abort(502, 'Airtable could not be read: '.$error->getMessage());
+        }
+
+        $counts = array_fill_keys(['create', 'update', 'delete', 'discard', 'synced', 'covered', 'superseded', 'nothing', 'blocked', 'failed', 'skipped'], 0);
+        foreach ($items as $item) {
+            $counts[$item['outcome']] = ($counts[$item['outcome']] ?? 0) + 1;
+        }
+        $data = ['counts' => $counts, 'items' => $this->items($items)];
+
+        $this->audit->record($actor, PortalLogAction::POST, self::RESOURCE, PortalActivityCopy::checkedAirtableSync(count($items)), null, $request, ['counts' => $counts]);
+
+        return ['section' => 'administration', 'resource' => 'airtable-sync-check', 'data' => $data];
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array{counts: array<string, int>, items: list<array<string, mixed>>}}
+     */
     public function preview(Employee $actor, Request $request): array
     {
-        $validated = $request->validate(['password' => ['required', 'string', 'max:255']]);
-        $this->developerMode->confirm($actor, $validated['password']);
+        $this->confirm($actor, $request);
 
         try {
             $report = $this->sync->run(false);
@@ -40,34 +64,67 @@ final class PortalAirtableSyncPreview
             abort(502, 'Airtable could not be read: '.$error->getMessage());
         }
 
-        $items = [];
-        foreach ($report['items'] as $item) {
-            // Field values stay out: the preview says what would happen, All Actions already shows the change.
-            $items[] = [
-                'actionId' => (string) $item['actionId'],
-                'resource' => $item['resource'],
-                'actionType' => $item['actionType'],
-                'recordId' => $item['recordId'],
-                'outcome' => $item['outcome'],
-                'table' => $item['table'],
-                'problems' => $item['problems'],
-            ];
+        $data = ['counts' => $report['counts'], 'items' => $this->items($report['items'])];
+
+        $this->audit->record($actor, PortalLogAction::POST, self::RESOURCE, PortalActivityCopy::previewedAirtableSync(count($data['items'])), null, $request, ['counts' => $report['counts']]);
+
+        return ['section' => 'administration', 'resource' => 'airtable-sync-preview', 'data' => $data];
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: array{counts: array<string, int>, items: list<array<string, mixed>>, stopped: bool}}
+     */
+    public function send(Employee $actor, Request $request): array
+    {
+        $this->confirm($actor, $request);
+
+        if (config('services.airtable.env') === 'prod' && ! app()->environment('production')) {
+            abort(403, 'Refused: AIRTABLE_ENV=prod from a non-production app.');
         }
 
-        $this->audit->record(
-            $actor,
-            PortalLogAction::POST,
-            self::RESOURCE,
-            PortalActivityCopy::previewedAirtableSync(count($items)),
-            null,
-            $request,
-            ['counts' => $report['counts']],
-        );
+        $lock = Cache::lock('portal:airtable-sync', self::LOCK_SECONDS);
+        if (! $lock->get()) {
+            abort(409, 'Another Airtable send is already running; nothing was sent.');
+        }
 
-        return [
-            'section' => 'administration',
-            'resource' => 'airtable-sync-preview',
-            'data' => ['counts' => $report['counts'], 'items' => $items],
+        try {
+            $report = $this->sync->run(true, 10, false, null, false, self::RUN_SECONDS);
+        } catch (Throwable $error) {
+            abort(502, 'Airtable sync stopped: '.$error->getMessage());
+        } finally {
+            $lock->release();
+        }
+
+        $data = [
+            'counts' => $report['counts'],
+            'items' => $this->items($report['items']),
+            'stopped' => (bool) ($report['stopped'] ?? false),
         ];
+        $this->audit->record($actor, PortalLogAction::POST, self::RESOURCE, PortalActivityCopy::sentAirtableSync((int) $report['counts']['synced'], (int) $report['counts']['failed']), null, $request, ['counts' => $report['counts']]);
+
+        return ['section' => 'administration', 'resource' => 'airtable-sync-sent', 'data' => $data];
+    }
+
+    private function confirm(Employee $actor, Request $request): void
+    {
+        $validated = $request->validate(['password' => ['required', 'string', 'max:255']]);
+        $this->developerMode->confirm($actor, $validated['password']);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $items
+     * @return list<array<string, mixed>>
+     */
+    private function items(array $items): array
+    {
+        return array_map(static fn (array $item): array => [
+            'actionId' => (string) $item['actionId'],
+            'resource' => $item['resource'],
+            'actionType' => $item['actionType'],
+            'recordId' => $item['recordId'],
+            'outcome' => $item['outcome'],
+            'table' => $item['table'],
+            'problems' => $item['problems'],
+        ], $items);
     }
 }

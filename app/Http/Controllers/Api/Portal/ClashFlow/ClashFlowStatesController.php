@@ -5,13 +5,15 @@ namespace App\Http\Controllers\Api\Portal\ClashFlow;
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalClashFlowStates;
+use App\Support\Portal\PortalClashFlowWorkflow;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
 class ClashFlowStatesController extends Controller
 {
-    public function __construct(private readonly PortalClashFlowStates $states) {}
+    public function __construct(private readonly PortalClashFlowStates $states,
+        private readonly PortalClashFlowWorkflow $workflow) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -29,7 +31,9 @@ class ClashFlowStatesController extends Controller
 
     public function destroy(Request $request): Response
     {
-        $this->states->reset($this->actor($request));
+        $actor = $this->actor($request);
+        $this->workflow->reset($actor);
+        $this->states->reset($actor);
 
         return response()->noContent();
     }

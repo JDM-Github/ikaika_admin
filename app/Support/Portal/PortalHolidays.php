@@ -2,23 +2,20 @@
 
 namespace App\Support\Portal;
 
-use App\Modules\ProjectEstimator\Models\Holiday;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 /**
- * Calendar / Holidays: the company holiday calendar, read from the estimator product.
+ * Calendar / Holidays: the company holiday calendar, read from the portal mirror of the Calendar
+ * base (2026-10-22, user). portal:sync-calendar fills calendar_holidays; the estimator calendar is
+ * no longer read.
  *
- * The table is owned by the estimator, which schedules against it. The portal only reads it, so
- * this is a projection and never a write. Crossing products is done through the Holiday model's
- * own connection rather than a cross-schema JOIN, because sql/portal/schema.sql opens with
- * DROP DATABASE and anything reaching between the two schemas by key would not survive a reseed.
- *
- * A failure here returns an empty list rather than an error. The portal calendar degrades to what
- * it showed before holidays existed, and a product that is disabled or mid-migration must not be
- * able to take a member's own report history down with it.
+ * A missing mirror or a read failure returns an empty list rather than an error, so a migration or a
+ * disabled Airtable cannot take a member's own report history down with it.
  */
 final class PortalHolidays
 {
@@ -33,6 +30,8 @@ final class PortalHolidays
     private const TYPE_REGULAR = 'regular';
 
     private const TYPE_SPECIAL = 'special';
+
+    private const TYPE_DOUBLE = 'double';
 
     /**
      * @return array{
@@ -62,6 +61,19 @@ final class PortalHolidays
     }
 
     /**
+     * A day's holiday type from the estimator's calendar: double, regular or special; null on a workday.
+     */
+    public function typeForDate(string $date): ?string
+    {
+        $row = $this->rows($date, $date)[0] ?? null;
+        if ($row === null) {
+            return null;
+        }
+
+        return is_string($row->type ?? null) ? $row->type : self::TYPE_SPECIAL;
+    }
+
+    /**
      * @return array{
      *     section: string,
      *     resource: string,
@@ -78,9 +90,12 @@ final class PortalHolidays
         $regular = 0;
         $special = 0;
         foreach ($rows as $row) {
-            $type = $this->classify($row->base_earn_code ?? null);
+            $type = is_string($row->type ?? null) ? $row->type : self::TYPE_SPECIAL;
+            $id = is_string($row->airtable_record_id ?? null) && $row->airtable_record_id !== ''
+                ? $row->airtable_record_id
+                : (string) $row->id;
             $data[] = PortalHolidayPresenter::holiday(
-                (string) $row->id,
+                $id,
                 (string) $row->holiday_date,
                 is_string($row->name) ? $row->name : null,
                 $type,
@@ -106,35 +121,24 @@ final class PortalHolidays
     }
 
     /**
-     * The null-dated legend rows are excluded here rather than by the caller, so no reader of this
-     * class has to know the source table doubles as its own key.
+     * The portal mirror written by portal:sync-calendar. A local table keeps the calendar readable
+     * when Airtable is down, and a missing table is an empty calendar, never an error.
      *
      * @return list<object>
      */
     private function rows(string $from, string $to): array
     {
         try {
-            return Holiday::query()
-                ->toBase()
-                ->select([
-                    'holidays.id',
-                    'holidays.holiday_date',
-                    'holidays.name',
-                    'earn_codes_v2.description as base_earn_code',
-                ])
-                ->leftJoin('holidays_earn_codes_v2', function ($join): void {
-                    $join->on('holidays_earn_codes_v2.holiday_id', '=', 'holidays.id')
-                        ->where('holidays_earn_codes_v2.variant', '=', 'base');
-                })
-                ->leftJoin(
-                    'earn_codes_v2',
-                    'earn_codes_v2.id',
-                    '=',
-                    'holidays_earn_codes_v2.earn_code_v2_id',
-                )
-                ->whereNotNull('holidays.holiday_date')
-                ->whereBetween('holidays.holiday_date', [$from, $to])
-                ->orderBy('holidays.holiday_date')
+            if (! Schema::connection('portal')->hasTable('calendar_holidays')) {
+                return [];
+            }
+
+            return DB::connection('portal')
+                ->table('calendar_holidays')
+                ->select(['id', 'airtable_record_id', 'holiday_date', 'name', 'type'])
+                ->whereNotNull('holiday_date')
+                ->whereBetween('holiday_date', [$from, $to])
+                ->orderBy('holiday_date')
                 ->get()
                 ->all();
         } catch (Throwable) {
@@ -143,12 +147,15 @@ final class PortalHolidays
     }
 
     /**
-     * Regular and Special are the two the pay multiplier turns on, and the label is the only place
-     * the source records it. Anything unrecognised is treated as special, the lesser of the two.
+     * Regular, Special and Double are what the pay multiplier turns on, and the Calendar Earn Code
+     * description is where the source records it. Anything unrecognised is special.
      */
-    private function classify(mixed $description): string
+    public static function classifyDescription(mixed $description): string
     {
         $value = strtolower(trim((string) $description));
+        if (str_contains($value, 'double')) {
+            return self::TYPE_DOUBLE;
+        }
 
         return str_contains($value, 'regular holiday') ? self::TYPE_REGULAR : self::TYPE_SPECIAL;
     }

@@ -326,6 +326,12 @@ class PortalReferencesTest extends TestCase
         $this->assertTrue(DB::connection('core')->table('actions')->where('resource', 'references.clients')->where('action_type', 'add')
             ->where('record_id', (string) $added['id'])->exists());
 
+        // A client waits for the Users & Projects synced copy before the project form offers it.
+        $offered = collect($this->withToken($token)->getJson('/api/development/portal/projects/options')->assertOk()->json('data.clients'))->firstWhere('id', $added['id']);
+        $this->assertNull($offered);
+
+        DB::connection('portal')->table('clients')->where('id', $added['id'])->update(['airtable_record_id' => 'recCLIENT0000001']);
+
         // Add Project numbers the new client's first project with its code.
         $option = collect($this->withToken($token)->getJson('/api/development/portal/projects/options')->assertOk()->json('data.clients'))->firstWhere('id', $added['id']);
         $this->assertSame(now('Asia/Manila')->format('y').$next.'01', $option['nextNumber']);

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Core\CoreActionType;
 use App\Support\Portal\PortalActivityScopes;
@@ -9,6 +10,7 @@ use App\Support\Portal\PortalEmployeePresenter;
 use App\Support\Portal\PortalProjectActivities;
 use App\Support\Portal\PortalProjectPowers;
 use App\Support\Portal\PortalReportProjects;
+use App\Support\Portal\PortalScopeTree;
 use App\Support\Portal\PortalViewProjectPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Routing\Middleware\ThrottleRequests;
@@ -609,6 +611,19 @@ class PortalProjectEditorTest extends TestCase
         $this->assertSame('Project Closing Approved', DB::connection('portal')->table('projects_action_history')
             ->join('project_action_history', 'project_action_history.id', '=', 'projects_action_history.project_action_id')
             ->where('projects_action_history.project_id', $id)->orderByDesc('project_action_history.id')->value('project_action_history.action_name'));
+        $projectName = DB::connection('portal')->table('projects')->where('id', $id)->value('project_name');
+        $achievement = DB::connection('portal')->table('achievements_milestones')
+            ->where('project_name', $projectName)->where('description', 'Project Closed')->first();
+        $this->assertNotNull($achievement);
+        $this->assertSame(now('Asia/Manila')->toDateString(), substr((string) $achievement->achievement_date, 0, 10));
+        $this->assertTrue(Action::query()->where('resource', 'projects.achievement')->where('action_type', CoreActionType::ADD)
+            ->where('record_id', (string) $achievement->id)->exists());
+        // Reopening and closing again keeps one achievement row.
+        $headToken = $this->token($head);
+        $this->withToken($headToken)->patchJson('/api/development/portal/manage/projects/'.$id, ['decision' => 'pending'])->assertOk();
+        $this->withToken($headToken)->patchJson('/api/development/portal/manage/projects/'.$id, ['decision' => 'approve'])->assertOk();
+        $this->assertSame(1, DB::connection('portal')->table('achievements_milestones')
+            ->where('project_name', $projectName)->where('description', 'Project Closed')->count());
 
         // Another department confirms once.
         $mis = $this->payload(['name' => 'Closing Tool '.Str::random(6), 'department' => 'MIS', 'leadId' => $admin->id, 'scopeCodes' => []]);
@@ -1105,6 +1120,45 @@ class PortalProjectEditorTest extends TestCase
         // A scope taken off takes its assignees along.
         $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => []])->assertOk();
         $this->assertSame(0, $portal->table('projects_scope_assignees')->where('project_id', $id)->count());
+    }
+
+    // The Airtable Project Scopes rows follow an assignment and disappear with it (2026-10-22, user).
+    public function test_saving_a_scope_assignment_mirrors_the_project_scope_row(): void
+    {
+        $portal = DB::connection('portal');
+        $id = $this->liveProjectId();
+        $admin = $this->employee('admin');
+        $token = $this->token($admin);
+        $member = $this->employee('user', 3);
+        $portal->table('employees_projects')->where('project_id', $id)->delete();
+        $portal->table('employees_projects')->insert(['employee_id' => $member->getKey(), 'project_id' => $id, 'role_on_project' => 'member']);
+        $portal->table('projects')->where('id', $id)->update(['department' => 'Engineering']);
+        Cache::flush();
+        $task = null;
+        foreach ((new PortalScopeTree)->codesFor('Engineering') as $code) {
+            if (substr_count($code, '-') === 3 && $portal->table('project_scope_t4_tasks')->whereRaw('TRIM(wbs_code) = ?', [$code])->exists()) {
+                $task = $code;
+                break;
+            }
+        }
+        $this->assertNotNull($task, 'Engineering has no T4 task to assign.');
+
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', [
+            'scopeCodes' => [$task],
+            'scopeAssignees' => [$task => [$member->getKey()]],
+        ])->assertOk();
+
+        $scopeId = (int) $portal->table('projects_project_scopes')->where('project_id', $id)->value('project_scope_id');
+        $this->assertGreaterThan(0, $scopeId);
+        $this->assertSame(1, $portal->table('project_scopes_t4_tasks')->where('project_scope_id', $scopeId)->count());
+        $this->assertSame(1, $portal->table('project_scopes_t3_activities')->where('project_scope_id', $scopeId)->count());
+        $this->assertSame([$member->getKey()], $portal->table('project_scopes_assigned_to')->where('project_scope_id', $scopeId)->pluck('employee_id')->map(static fn (mixed $person): int => (int) $person)->all());
+        $this->assertTrue(DB::connection('core')->table('actions')->where('resource', 'projects.scopes')->where('record_id', (string) $scopeId)->where('action_type', CoreActionType::ADD)->exists());
+
+        $this->withToken($token)->putJson(self::BASE.'/'.$id.'/scopes', ['scopeCodes' => []])->assertOk();
+
+        $this->assertSame(0, $portal->table('project_scopes')->where('id', $scopeId)->count());
+        $this->assertTrue(DB::connection('core')->table('actions')->where('resource', 'projects.scopes')->where('record_id', (string) $scopeId)->where('action_type', CoreActionType::DELETE)->exists());
     }
 
     public function test_writes_are_held_to_twenty_a_minute(): void

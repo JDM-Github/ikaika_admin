@@ -65,6 +65,11 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
             ->whereNumber('id');
         Route::delete('manage/references/departments/{id}', [ReferencesController::class, 'destroyDepartment'])
             ->whereNumber('id');
+        Route::post('manage/references/earn-codes', [ReferencesController::class, 'storeEarnCode']);
+        Route::patch('manage/references/earn-codes/{id}', [ReferencesController::class, 'updateEarnCode'])
+            ->whereNumber('id');
+        Route::delete('manage/references/earn-codes/{id}', [ReferencesController::class, 'destroyEarnCode'])
+            ->whereNumber('id');
         Route::post('manage/references/clients', [ReferencesController::class, 'storeClient']);
         Route::patch('manage/references/clients/{id}', [ReferencesController::class, 'updateClient'])
             ->whereNumber('id');
@@ -108,6 +113,8 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::patch('manage/registrations/{id}', [OnboardingController::class, 'update'])
             ->whereNumber('id');
         Route::delete('manage/registrations/{id}', [OnboardingController::class, 'destroy'])
+            ->whereNumber('id');
+        Route::delete('manage/registrations/{id}/entry', [OnboardingController::class, 'destroyEntry'])
             ->whereNumber('id');
         Route::post('manage/registrations/{id}/sent', [OnboardingController::class, 'sent'])
             ->whereNumber('id');

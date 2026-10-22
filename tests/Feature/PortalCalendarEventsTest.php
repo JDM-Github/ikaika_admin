@@ -186,6 +186,17 @@ class PortalCalendarEventsTest extends TestCase
         $this->assertSame('17:00', $log->payload['endsAt']);
         $this->assertSame('company_event', $log->payload['category']);
         $this->assertSame('everyone', $log->payload['audience']);
+
+        // The Calendar mirror reads these columns; the ledger tells the sync to create the record.
+        $event = DB::connection('portal')->table('calendar_events')->where('title', 'All hands')->first();
+        $this->assertNotNull($event);
+        $this->assertSame($day.' 16:00:00', $event->starts_at_full);
+        $this->assertSame($day.' 17:00:00', $event->ends_at_full);
+        $this->assertSame($this->memberName($actor), $event->author);
+        $this->assertNull($event->employee_names);
+        $this->assertNull($event->departments);
+        $this->assertTrue(DB::connection('core')->table('actions')->where('resource', 'calendar.events')
+            ->where('record_id', (string) $event->id)->where('action_type', 'add')->exists());
     }
 
     public function test_a_project_event_uses_project_kind(): void

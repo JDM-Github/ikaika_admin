@@ -124,6 +124,7 @@ final class PortalLeaveRequests
             $actor,
         ): array {
             $ids = [];
+            $earnCodeId = (new PortalEarnCodes)->leaveIdFor($type);
             foreach ($dates as $date) {
                 $id = (int) $this->connection()->table('requests')->insertGetId([
                     'request_date' => $date,
@@ -135,6 +136,12 @@ final class PortalLeaveRequests
                     'date_created' => $createdAt->toDateTimeString(),
                 ]);
                 $ids[] = $id;
+                if ($earnCodeId !== null) {
+                    $this->connection()->table('requests_earn_codes')->insert([
+                        'request_id' => $id,
+                        'earn_code_id' => $earnCodeId,
+                    ]);
+                }
 
                 $this->ledger->recordAdd(
                     CoreLedger::PRODUCT_PORTAL,
@@ -242,6 +249,14 @@ final class PortalLeaveRequests
                 'reason' => $reason,
                 'category' => $type,
             ]);
+            $this->connection()->table('requests_earn_codes')->where('request_id', (int) $row->id)->delete();
+            $earnCodeId = (new PortalEarnCodes)->leaveIdFor($type);
+            if ($earnCodeId !== null) {
+                $this->connection()->table('requests_earn_codes')->insert([
+                    'request_id' => (int) $row->id,
+                    'earn_code_id' => $earnCodeId,
+                ]);
+            }
 
             $this->ledger->recordEdit(
                 CoreLedger::PRODUCT_PORTAL,

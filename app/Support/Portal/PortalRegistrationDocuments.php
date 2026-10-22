@@ -110,6 +110,22 @@ final class PortalRegistrationDocuments
     /**
      * @return list<array{id: string, kind: string, name: string, mimeType: string, sizeBytes: int, uploadedAt: string}>
      */
+    /**
+     * The files kept for an entry, so deleting the entry can remove them from the private disk.
+     *
+     * @return list<string>
+     */
+    public function pathsFor(int $registrationId): array
+    {
+        return $this->table()
+            ->where('registration_id', $registrationId)
+            ->pluck('path')
+            ->filter(static fn (mixed $path): bool => is_string($path) && $path !== '')
+            ->map(static fn (string $path): string => $path)
+            ->values()
+            ->all();
+    }
+
     public function listFor(int $registrationId): array
     {
         return $this->table()

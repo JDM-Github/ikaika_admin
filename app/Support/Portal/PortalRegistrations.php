@@ -188,6 +188,56 @@ final class PortalRegistrations
     }
 
     /**
+     * Hard-delete an onboarding entry: its registration link, its submitted New Employee Data row
+     * (also deleted in Airtable), and the candidate's documents. Revoke only closes the link.
+     *
+     * @return array{deleted: bool}
+     */
+    public function deleteEntry(Employee $actor, Request $request, int $id): array
+    {
+        $row = $this->open($id);
+        $name = trim((string) $row->candidate_name);
+        $employeeDataId = $row->employee_data_id === null ? null : (int) $row->employee_data_id;
+        $paths = $this->documents->pathsFor($id);
+
+        $this->ledger->within($this->connection(), function () use ($id, $employeeDataId, $actor): void {
+            if ($employeeDataId !== null) {
+                $data = $this->connection()->table('new_employee_data')->where('id', $employeeDataId)->first(['id', 'airtable_record_id']);
+                // Another registration naming the same data keeps it; only this link goes.
+                $shared = $this->connection()->table('registrations')
+                    ->where('employee_data_id', $employeeDataId)
+                    ->where('id', '!=', $id)
+                    ->exists();
+                if ($data !== null && ! $shared) {
+                    $airtableId = is_string($data->airtable_record_id) && $data->airtable_record_id !== ''
+                        ? $data->airtable_record_id
+                        : null;
+                    $this->connection()->table('new_employee_data')->where('id', $employeeDataId)->delete();
+                    $this->ledger->recordDelete(
+                        CoreLedger::PRODUCT_PORTAL,
+                        CoreLedger::PRODUCT_PORTAL.'.new_employee_data',
+                        ['id' => (string) $employeeDataId, 'airtableRecordId' => $airtableId],
+                        'onboarding.employee_data',
+                        (string) $employeeDataId,
+                        (int) $actor->getKey(),
+                        is_string($actor->id_no) ? $actor->id_no : null,
+                    );
+                }
+            }
+
+            $this->connection()->table('registrations')->where('id', $id)->delete();
+        });
+
+        foreach ($paths as $path) {
+            PortalPrivateFiles::delete($path);
+        }
+
+        $this->audit->record($actor, PortalLogAction::DELETE, 'manage.onboarding', '{UserName|You} deleted the onboarding entry '.$name, (string) $id, $request);
+
+        return ['deleted' => true];
+    }
+
+    /**
      * @return array{password: string}
      */
     public function regenerate(Employee $actor, Request $request, int $id): array
