@@ -55,6 +55,11 @@ class BugReportsController extends Controller
         return response()->json($this->reports->refreshFromJira($request->boolean('withArchived')));
     }
 
+    public function jiraOptions(): JsonResponse
+    {
+        return response()->json($this->reports->jiraOptions());
+    }
+
     public function sendToJira(Request $request, int $id): JsonResponse
     {
         return response()->json($this->reports->sendToJira($this->actor($request), $id, $request));

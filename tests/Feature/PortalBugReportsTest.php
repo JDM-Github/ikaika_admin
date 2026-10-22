@@ -69,7 +69,8 @@ class PortalBugReportsTest extends TestCase
         // The server it was sent on (2026-10-21, user: production and staging share one Jira project).
         $this->assertSame('development', $row->channel);
         $this->assertSame(
-            ['id', 'kind', 'title', 'description', 'page', 'status', 'cancel_reason', 'duplicate_of', 'note', 'assignee_id', 'version_level', 'fixed_in', 'reporter_id', 'channel', 'reported_on', 'updated_at',
+            ['id', 'kind', 'title', 'description', 'page', 'status', 'cancel_reason', 'duplicate_of', 'note', 'assignee_id', 'version_level', 'fixed_in',
+                'start_on', 'due_on', 'parent_key', 'parent_summary', 'team_id', 'team_name', 'reporter_id', 'channel', 'reported_on', 'updated_at',
                 'archived_at', 'archived_by', 'deleted_at', 'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at', 'jira_create_started_at'],
             Schema::connection('portal')->getColumnListing('bug_reports'),
         );
@@ -189,7 +190,7 @@ class PortalBugReportsTest extends TestCase
         $engineering = $this->headersFor($this->memberOf('Engineering'));
 
         $listed = collect($this->withHeaders($mis)->getJson(self::BASE.'bug-reports')->assertOk()->json('data'))->firstWhere('id', (string) $id);
-        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'images', 'jira', 'jiraHere', 'jiraElsewhere', 'cancelReason', 'duplicateOf', 'archivedAt', 'archivedBy'], array_keys($listed));
+        $this->assertSame(['id', 'kind', 'title', 'description', 'page', 'status', 'note', 'reportedOn', 'assignee', 'reporter', 'versionLevel', 'fixedIn', 'startOn', 'dueOn', 'parent', 'team', 'images', 'jira', 'jiraHere', 'jiraElsewhere', 'cancelReason', 'duplicateOf', 'archivedAt', 'archivedBy'], array_keys($listed));
         $this->assertNull($listed['reporter']);
         $this->assertNull($listed['jira']);
         $this->assertSame('2026-10-12', $listed['reportedOn']);
@@ -213,7 +214,7 @@ class PortalBugReportsTest extends TestCase
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'closed'])
             ->assertStatus(422)->assertJsonPath('message', 'Choose New, In progress, In review, Fixed or Cancelled.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/'.$id, [])
-            ->assertStatus(422)->assertJsonPath('message', 'Change its kind, status, note, who handles it or its version.');
+            ->assertStatus(422)->assertJsonPath('message', 'Change its kind, status, note, who handles it, its dates, parent, team or version.');
         $this->withHeaders($mis)->patchJson(self::BASE.'bug-reports/999999999', ['status' => 'fixed'])->assertNotFound();
         $this->withHeaders($engineering)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'new'])->assertForbidden();
     }

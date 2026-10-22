@@ -151,11 +151,13 @@ final class PortalJiraIssue
     }
 
     /**
-     * The fields of a new issue for a report row.
+     * The fields of a new issue for a report row, with what it carries of the report's plan (2026-10-22, user) --
+     * already in Jira's terms, as planForCreate() has it.
      *
+     * @param  array<string, mixed>  $plan
      * @return array<string, mixed>
      */
-    public static function fields(object $row, string $projectKey, string $issueTypeId, string $label, ?string $senderName = null, ?string $environment = null): array
+    public static function fields(object $row, string $projectKey, string $issueTypeId, string $label, ?string $senderName = null, ?string $environment = null, array $plan = []): array
     {
         $kind = (string) ($row->kind ?? PortalBugReports::KIND_BUG);
         $kindLabel = PortalBugReports::KINDS[$kind]['label'] ?? PortalBugReports::KINDS[PortalBugReports::KIND_BUG]['label'];
@@ -174,6 +176,7 @@ final class PortalJiraIssue
                     ? 'Sent anonymously from the IKAIKA portal '.$mark.'.'
                     : 'Sent from the IKAIKA portal by '.$senderName.' '.$mark.'.',
             ]),
+            ...$plan,
         ];
     }
 

@@ -44,6 +44,10 @@ use RuntimeException;
  * which it names. That one cannot be itself or a duplicate, so no chain or loop forms; any other status clears
  * both. On a linked report the issue moves to Cancelled too, and a duplicate is labelled and linked there.
  *
+ * A report's plan (2026-10-22, user): when it starts and is due, the epic it sits under and the team that owns it --
+ * the epic one of the project's and the team one of the site's, both checked with Jira. A linked report's are the
+ * issue's too, changed in Jira first like its kind and status; an unlinked one's stay here until it is sent.
+ *
  * Archive and delete (2026-10-21, user): an archived report is listed only when asked for, and stays as it was
  * until it is unarchived; a deleted one (PortalBugReportDeletion) is gone from the page into its deleter's
  * Recycle Bin. Either one moves an open linked report's issue to Cancelled first, and the report with it -- Jira
@@ -285,13 +289,15 @@ final class PortalBugReports
             if ($handler === null && array_diff(array_keys($changes), ['assignee_id']) !== []) {
                 abort(422, 'Assign someone to handle it before changing it.');
             }
-            // A linked report's kind and status are the issue's too (2026-10-20, user): Jira changes first, or nothing does.
+            // A linked report's kind, status and plan are the issue's too (2026-10-20, 2026-10-22, user): Jira changes
+            // first, or nothing does.
             $toJira = $this->jira->owns($row)
                 && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status)
-                    || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes));
+                    || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes)
+                    || PortalBugReportsJira::planChanges($row, $changes) !== []);
             if ($toJira) {
                 if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
-                    abort(403, 'Its kind and status change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
+                    abort(403, 'Its kind, status, team, parent and dates change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
                 }
                 if (! $this->jira->isConfigured()) {
                     abort(503, 'Jira is not connected yet.');
@@ -367,11 +373,108 @@ final class PortalBugReports
             $triage['duplicate_of'] = $original === '' ? null : $this->validatedOriginal($row, $original);
         }
         $changes = [...$changes, ...$this->withTriage($row, $changes, $triage)];
+        // Its plan (2026-10-22, user): the dates, then the epic and the team, each one Jira has.
+        foreach (['startOn' => ['start_on', 'start'], 'dueOn' => ['due_on', 'due']] as $input => [$column, $word]) {
+            if ($request->has($input)) {
+                $changes[$column] = $this->validatedDay($request->input($input), 'Write the '.$word.' date as YYYY-MM-DD, like 2026-10-30.');
+            }
+        }
+        if (array_key_exists('start_on', $changes) || array_key_exists('due_on', $changes)) {
+            $start = array_key_exists('start_on', $changes) ? $changes['start_on'] : $row->start_on;
+            $due = array_key_exists('due_on', $changes) ? $changes['due_on'] : $row->due_on;
+            if ($start !== null && $due !== null && substr((string) $start, 0, 10) > substr((string) $due, 0, 10)) {
+                abort(422, 'It cannot start after it is due.');
+            }
+        }
+        if ($request->has('parentKey')) {
+            $changes = [...$changes, ...$this->validatedParent($request->input('parentKey'))];
+        }
+        if ($request->has('teamId')) {
+            $changes = [...$changes, ...$this->validatedTeam($request->input('teamId'))];
+        }
         if ($changes === []) {
-            abort(422, 'Change its kind, status, note, who handles it or its version.');
+            abort(422, 'Change its kind, status, note, who handles it, its dates, parent, team or version.');
         }
 
         return $changes;
+    }
+
+    // A day the calendar has, as YYYY-MM-DD; nothing clears it.
+    private function validatedDay(mixed $value, string $message): ?string
+    {
+        $day = trim((string) $value);
+        if ($day === '') {
+            return null;
+        }
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $day, $parts) !== 1 || ! checkdate((int) $parts[2], (int) $parts[3], (int) $parts[1])) {
+            abort(422, $message);
+        }
+
+        return $day;
+    }
+
+    /**
+     * The epic a report sits under: one of the project's, asked of Jira afresh once before a key it does not know
+     * is refused. Nothing clears it.
+     *
+     * @return array{parent_key: ?string, parent_summary: ?string}
+     */
+    private function validatedParent(mixed $value): array
+    {
+        $key = strtoupper(trim((string) $value));
+        if ($key === '') {
+            return ['parent_key' => null, 'parent_summary' => null];
+        }
+        if (preg_match('/^[A-Z][A-Z0-9_]*-\d+$/', $key) !== 1) {
+            abort(422, 'Choose an epic for its parent.');
+        }
+        foreach ([false, true] as $fresh) {
+            foreach ($this->planList('epics', $fresh) as $epic) {
+                if (strtoupper((string) $epic['key']) === $key) {
+                    return ['parent_key' => (string) $epic['key'], 'parent_summary' => $epic['summary'] === '' ? null : (string) $epic['summary']];
+                }
+            }
+        }
+        abort(422, $key.' is not an epic in '.$this->jira->projectLabel().'.');
+    }
+
+    /**
+     * The team that owns a report: one of the site's, asked of Jira afresh once before one it does not know is
+     * refused. Nothing clears it.
+     *
+     * @return array{team_id: ?string, team_name: ?string}
+     */
+    private function validatedTeam(mixed $value): array
+    {
+        $id = trim((string) $value);
+        if ($id === '') {
+            return ['team_id' => null, 'team_name' => null];
+        }
+        foreach ([false, true] as $fresh) {
+            foreach ($this->planList('teams', $fresh) as $team) {
+                if ((string) $team['id'] === $id) {
+                    return ['team_id' => $id, 'team_name' => (string) $team['name']];
+                }
+            }
+        }
+        abort(422, 'Choose one of the teams in Jira.');
+    }
+
+    /**
+     * Jira's epics or teams for a choice made here, or why they cannot be had.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function planList(string $which, bool $fresh): array
+    {
+        if (! $this->jira->isConfigured()) {
+            abort(503, 'Jira is not connected yet.');
+        }
+        try {
+            return $this->jira->planList($which, $fresh);
+        } catch (RuntimeException $error) {
+            abort(503, 'Jira could not list its '.$which.': '.$error->getMessage());
+        }
     }
 
     /**
@@ -426,6 +529,8 @@ final class PortalBugReports
     {
         if ($this->jira->isConfigured()) {
             try {
+                // An epic made in Jira since is offered now, rather than in ten minutes.
+                $this->jira->forgetEpics();
                 $this->jira->reconcile();
             } catch (RuntimeException) {
                 // The client has already recorded the connection the list reports.
@@ -433,6 +538,27 @@ final class PortalBugReports
         }
 
         return $this->list($withArchived);
+    }
+
+    /**
+     * What a report's plan is picked from (2026-10-22, user): Jira's teams and epics, the team new issues go to,
+     * which plan fields the site has, and which MIS members Jira knows. Asked apart from the list, which never waits
+     * on Jira; only reads, so it is anyone's who sees the list.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function jiraOptions(): array
+    {
+        if (! $this->jira->isConfigured()) {
+            abort(503, 'Jira is not connected yet.');
+        }
+        try {
+            $options = $this->jira->planOptions();
+        } catch (RuntimeException $error) {
+            abort(503, 'Jira did not list its teams and epics: '.$error->getMessage());
+        }
+
+        return ['section' => 'bug-reports', 'resource' => 'jira-options', 'data' => $options];
     }
 
     /**
@@ -740,6 +866,11 @@ final class PortalBugReports
             'reporter' => $reporterId === null ? null : ['id' => (string) $reporterId, 'name' => $names[$reporterId] ?? 'Member'],
             'versionLevel' => $row->version_level,
             'fixedIn' => $row->fixed_in,
+            // Its plan (2026-10-22, user): the dates, the epic it sits under and the team, each the issue's too.
+            'startOn' => ($row->start_on ?? null) === null ? null : substr((string) $row->start_on, 0, 10),
+            'dueOn' => ($row->due_on ?? null) === null ? null : substr((string) $row->due_on, 0, 10),
+            'parent' => ($row->parent_key ?? null) === null ? null : ['key' => (string) $row->parent_key, 'summary' => $row->parent_summary],
+            'team' => ($row->team_id ?? null) === null ? null : ['id' => (string) $row->team_id, 'name' => $row->team_name],
             'images' => array_map(fn (object $image): array => [
                 'url' => (string) $image->file_url,
                 'mimeType' => (string) $image->mime_type,

@@ -32,6 +32,10 @@ use RuntimeException;
  * for an issue only after this server really started making one, and a new issue is first put in step with its
  * report -- moved to its column, a duplicate labelled and linked -- before a read-back may take anything from it.
  *
+ * A report's plan is the issue's too (2026-10-22, user): its start and due dates, the epic it sits under and the team
+ * that owns it go both ways as kind and status do. A new issue carries what its create screen takes of them -- and the
+ * default team (DEV) when the report names none -- and a change in the portal edits only what Jira holds otherwise.
+ *
  * A project's key can change (2026-10-22, user: IPS became IP2, and IPS-1 to IPS-3 were followed by IP2-4). Jira
  * still takes the old key, so an issue is this project's under the configured key or the one Jira gives it now,
  * and a report linked under a key the project no longer goes by is found again by its id when issues are read back.
@@ -68,6 +72,7 @@ final class PortalBugReportsJira
         private readonly PortalJiraClient $jira,
         private readonly PortalCloudinary $cloudinary,
         private readonly PortalJiraEnvironment $environment,
+        private readonly PortalJiraPeople $people,
     ) {}
 
     public function isConfigured(): bool
@@ -290,12 +295,18 @@ final class PortalBugReportsJira
         $move = isset($changes['status']) && $changes['status'] !== $row->status
             ? $this->findMove($issueId, (string) $changes['status'], (string) $row->jira_issue_key)
             : null;
-        $staleLinks = $oldTarget !== null && $oldTarget !== $newTarget
-            ? PortalJiraIssue::duplicateLinkIds($this->jira->issue($issueId)['fields'] ?? [], $this->duplicateLinkType(), $oldTarget)
-            : [];
+        $plan = self::planChanges($row, $changes);
+        $unlinks = $oldTarget !== null && $oldTarget !== $newTarget;
+        $current = $unlinks || $plan !== [] ? ($this->jira->issue($issueId)['fields'] ?? []) : [];
+        $staleLinks = $unlinks ? PortalJiraIssue::duplicateLinkIds($current, $this->duplicateLinkType(), $oldTarget) : [];
+        $planEdit = $plan === [] ? [] : $this->planEdit($plan, $current);
 
         if (isset($changes['kind']) && $changes['kind'] !== $row->kind) {
             $this->jira->editIssue($issueId, ['issuetype' => ['id' => $this->issueTypeId((string) $changes['kind'])]]);
+        }
+        // The plan after the kind, whose work type decides the screen the fields are edited on.
+        if ($planEdit !== []) {
+            $this->editPlan($issueId, $planEdit);
         }
         // Triage (2026-10-21, user): the label and the link before the move, so a delivery racing the save already
         // sees a cancelled duplicate as one.
@@ -547,15 +558,18 @@ final class PortalBugReportsJira
                 }
             }
         }
+        $default = null;
         if ($issue === null) {
             $kind = array_key_exists((string) $row->kind, PortalBugReports::KINDS) ? (string) $row->kind : PortalBugReports::KIND_BUG;
-            // The type first: a refused createmeta makes nothing, so there is nothing for a retry to look for.
+            // Every read first -- the type, and the plan its screen takes -- so a refused one makes nothing, and
+            // there is nothing for a retry to look for.
             $typeId = $this->issueTypeId($kind);
+            [$plan, $default] = $this->planForCreate($row, $typeId);
             if ($started === null) {
                 DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update(['jira_create_started_at' => now('UTC')->format('Y-m-d H:i:s')]);
             }
             $issue = $this->jira->createIssue(PortalJiraIssue::fields(
-                $row, (string) $this->jira->projectKey(), $typeId, (string) config('services.jira.label', 'ikaika-portal'), $this->senderName($row), $environment,
+                $row, (string) $this->jira->projectKey(), $typeId, (string) config('services.jira.label', 'ikaika-portal'), $this->senderName($row), $environment, $plan,
             ));
         }
         DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update([
@@ -564,6 +578,8 @@ final class PortalBugReportsJira
             'jira_state' => self::STATE_PENDING,
             'jira_status' => null,
             'jira_attached' => 0,
+            // Filed under the default team, the report names it too.
+            ...($default === null ? [] : ['team_id' => $default['id'], 'team_name' => $default['name']]),
         ]);
 
         return $this->row((int) $row->id) ?? $row;
@@ -587,6 +603,65 @@ final class PortalBugReportsJira
         }
 
         return ['wanted' => $wanted, 'id' => null, 'name' => null];
+    }
+
+    /**
+     * What a report's plan is picked from (2026-10-22, user): the teams and epics, the team a new issue goes to,
+     * which plan fields the site has, and which MIS members Jira knows -- that last as best it can, since a
+     * missing Browse users and groups must not hide the rest.
+     *
+     * @return array{teams: list<array{id: string, name: string}>, defaultTeamId: ?string, epics: list<array{key: string, summary: string, isDone: bool}>, fields: array{team: bool, startDate: bool}, people: list<array{id: string, inJira: bool}>}
+     */
+    public function planOptions(): array
+    {
+        $ids = $this->jira->fieldIds();
+        try {
+            $people = array_map(static fn (array $member): array => ['id' => (string) $member['id'], 'inJira' => $member['accountId'] !== null], $this->people->roster());
+        } catch (RuntimeException) {
+            $people = [];
+        }
+
+        return [
+            'teams' => $this->jira->teams(),
+            'defaultTeamId' => $this->defaultTeam()['id'] ?? null,
+            'epics' => $this->jira->epics(),
+            'fields' => ['team' => $ids['team'] !== null, 'startDate' => $ids['startDate'] !== null],
+            'people' => $people,
+        ];
+    }
+
+    /**
+     * The project's epics, or its teams; fresh asks Jira again rather than taking what is kept.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function planList(string $which, bool $fresh = false): array
+    {
+        if ($which === 'epics') {
+            if ($fresh) {
+                $this->jira->forgetEpics();
+            }
+
+            return $this->jira->epics();
+        }
+        if ($fresh) {
+            $this->jira->forgetTeams();
+        }
+
+        return $this->jira->teams();
+    }
+
+    public function forgetEpics(): void
+    {
+        $this->jira->forgetEpics();
+    }
+
+    // The key the project goes by now, which a refusal names it by.
+    public function projectLabel(): string
+    {
+        $keys = $this->jira->projectKeys();
+
+        return (string) (end($keys) ?: $this->jira->projectKey());
     }
 
     /**
@@ -638,20 +713,140 @@ final class PortalBugReportsJira
         $fixedIn = PortalJiraIssue::fixedIn($issue['fields']) ?? $row->fixed_in;
         $kind = $this->kindOfType($issue['fields']['issuetype']['name'] ?? null, (string) $row->kind);
         [$reason, $original] = $this->triageFrom($row, $issue, $status);
+        $plan = PortalJiraIssue::planOf($issue['fields'], $this->jira->fieldIds());
         $changes = [
             'jira_issue_key' => $issue['key'],
             'jira_status' => PortalJiraIssue::statusName($issue['fields']),
             'jira_synced_at' => now('UTC')->format('Y-m-d H:i:s'),
         ];
         $was = ($row->duplicate_of ?? null) === null ? null : (int) $row->duplicate_of;
-        if ($status !== $row->status || $fixedIn !== $row->fixed_in || $kind !== $row->kind || $reason !== ($row->cancel_reason ?? null) || $original !== $was) {
+        $planMoved = self::planChanges($row, $plan) !== [] || ($plan['parent_summary'] ?? null) !== ($row->parent_summary ?? null)
+            || (array_key_exists('team_name', $plan) && $plan['team_name'] !== null && $plan['team_name'] !== ($row->team_name ?? null));
+        if ($status !== $row->status || $fixedIn !== $row->fixed_in || $kind !== $row->kind || $reason !== ($row->cancel_reason ?? null) || $original !== $was || $planMoved) {
             $changes += [
                 'status' => $status, 'fixed_in' => $fixedIn, 'kind' => $kind, 'cancel_reason' => $reason, 'duplicate_of' => $original,
+                // Jira's name for a team stands; a team it gave by id alone keeps the name the portal has.
+                ...$plan, ...(array_key_exists('team_name', $plan) && $plan['team_name'] === null && ($plan['team_id'] ?? null) === ($row->team_id ?? null) ? ['team_name' => $row->team_name ?? null] : []),
                 'updated_at' => now('UTC')->format('Y-m-d H:i:s'),
             ];
             Log::info('portal.jira.synced', ['report' => (int) $row->id, 'status' => $status]);
         }
         DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update($changes);
+    }
+
+    /**
+     * The plan columns a save or a read-back changes from what the report has (2026-10-22, user).
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array<string, ?string>
+     */
+    public static function planChanges(object $row, array $changes): array
+    {
+        $changed = [];
+        foreach (['start_on', 'due_on', 'parent_key', 'team_id'] as $column) {
+            if (array_key_exists($column, $changes) && self::planValue($column, $changes[$column]) !== self::planValue($column, $row->$column ?? null)) {
+                $changed[$column] = self::planValue($column, $changes[$column]);
+            }
+        }
+
+        return $changed;
+    }
+
+    // A plan column as it compares: a day as YYYY-MM-DD, whatever the database adds to it.
+    private static function planValue(string $column, mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return str_ends_with($column, '_on') ? substr((string) $value, 0, 10) : (string) $value;
+    }
+
+    /**
+     * The edit a save makes to the issue's plan: each field it changes that Jira holds otherwise. A parent is
+     * cleared only when the issue has one, since Jira answers the clearing of none with an error.
+     *
+     * @param  array<string, ?string>  $changed
+     * @param  array<string, mixed>  $fields  the issue as Jira has it now
+     * @return array<string, mixed>
+     */
+    private function planEdit(array $changed, array $fields): array
+    {
+        $ids = $this->jira->fieldIds();
+        $held = PortalJiraIssue::planOf($fields, $ids);
+        $edit = [];
+        if (array_key_exists('due_on', $changed) && $changed['due_on'] !== ($held['due_on'] ?? null)) {
+            $edit['duedate'] = $changed['due_on'];
+        }
+        if ($ids['startDate'] !== null && array_key_exists('start_on', $changed) && $changed['start_on'] !== ($held['start_on'] ?? null)) {
+            $edit[$ids['startDate']] = $changed['start_on'];
+        }
+        if ($ids['team'] !== null && array_key_exists('team_id', $changed) && $changed['team_id'] !== ($held['team_id'] ?? null)) {
+            $edit[$ids['team']] = $changed['team_id'];
+        }
+        if (array_key_exists('parent_key', $changed) && $changed['parent_key'] !== $held['parent_key']) {
+            if ($changed['parent_key'] !== null) {
+                $edit['parent'] = ['key' => $changed['parent_key']];
+            } elseif ($held['parent_key'] !== null) {
+                $edit['parent'] = null;
+            }
+        }
+
+        return $edit;
+    }
+
+    /**
+     * The plan edit sent, with Jira's words naming the fields as people know them; a refused team forgets the
+     * teams kept, since one was renamed or removed.
+     *
+     * @param  array<string, mixed>  $edit
+     */
+    private function editPlan(string $issueId, array $edit): void
+    {
+        $ids = $this->jira->fieldIds();
+        try {
+            $this->jira->editIssue($issueId, $edit);
+        } catch (RuntimeException $error) {
+            if ($ids['team'] !== null && str_contains($error->getMessage(), $ids['team'])) {
+                $this->jira->forgetTeams();
+            }
+            $names = array_filter([(string) $ids['team'] => 'Team', (string) $ids['startDate'] => 'Start date'], static fn (string $name, string $id): bool => $id !== '', ARRAY_FILTER_USE_BOTH);
+            throw new RuntimeException(strtr($error->getMessage(), $names), $error->getCode());
+        }
+    }
+
+    /**
+     * What a new issue carries of its report's plan, in Jira's terms: the dates, the epic and the team -- the
+     * report's, else the default -- as far as the type's create screen takes them; and the default team it went
+     * to, which the report then names too. A screen Jira cannot say is taken to take them all.
+     *
+     * @return array{0: array<string, mixed>, 1: array{id: string, name: string}|null}
+     */
+    private function planForCreate(object $row, string $issueTypeId): array
+    {
+        $ids = $this->jira->fieldIds();
+        $default = null;
+        $team = $row->team_id ?? null;
+        if ($team === null && $ids['team'] !== null) {
+            try {
+                $default = $this->defaultTeam();
+            } catch (RuntimeException) {
+                // A new issue is not held back for want of its team.
+            }
+            $team = $default['id'] ?? null;
+        }
+        $plan = array_filter([
+            'parent' => ($row->parent_key ?? null) === null ? null : ['key' => (string) $row->parent_key],
+            'duedate' => self::planValue('due_on', $row->due_on ?? null),
+            ...($ids['startDate'] === null ? [] : [$ids['startDate'] => self::planValue('start_on', $row->start_on ?? null)]),
+            ...($ids['team'] === null ? [] : [$ids['team'] => $team]),
+        ], static fn (mixed $value): bool => $value !== null);
+        $screen = $plan === [] ? null : $this->jira->createFields($issueTypeId);
+        if ($screen !== null) {
+            $plan = array_intersect_key($plan, array_flip($screen));
+        }
+
+        return [$plan, $default !== null && $ids['team'] !== null && isset($plan[$ids['team']]) ? $default : null];
     }
 
     /**

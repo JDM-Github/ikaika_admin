@@ -60,8 +60,9 @@ final class PortalJiraClient
 
     private const CREATE_FIELDS_KEY = 'portal:jira:create-fields:';
 
-    // The fields a sync reads; nothing else of an issue is ever fetched. Labels and links say a duplicate's (2026-10-21).
-    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype', 'labels', 'issuelinks'];
+    // The fields a sync reads; nothing else of an issue is ever fetched. Labels and links say a duplicate's (2026-10-21);
+    // the parent and due date a report's plan (2026-10-22), with the site's Team and Start date fields (syncFields()).
+    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype', 'labels', 'issuelinks', 'parent', 'duedate'];
 
     // The env keys behind config('services.jira'), for saying which one is missing.
     private const SETTINGS = [
@@ -514,7 +515,7 @@ final class PortalJiraClient
     public function issue(string $issueId): ?array
     {
         $request = $this->retrying();
-        $response = $this->answer(fn (): Response => $request->get($this->url('/rest/api/3/issue/'.rawurlencode($issueId).'?fields='.implode(',', self::SYNC_FIELDS))), false, true);
+        $response = $this->answer(fn (): Response => $request->get($this->url('/rest/api/3/issue/'.rawurlencode($issueId).'?fields='.implode(',', $this->syncFields()))), false, true);
 
         return $response === null ? null : $this->issueFrom($response->json());
     }
@@ -530,7 +531,7 @@ final class PortalJiraClient
     {
         $since = $createdSince === null ? '' : ' AND created >= "'.$createdSince.'"';
         $jql = 'project = "'.$this->projectKey().'" AND '.$labelsJql.$since.' AND description ~ "\\"'.$words.'\\"" ORDER BY created ASC';
-        $fields = implode(',', [...self::SYNC_FIELDS, 'description']);
+        $fields = implode(',', [...$this->syncFields(), 'description']);
         $body = $this->read('GET', '/rest/api/3/search/jql?'.http_build_query(['jql' => $jql, 'fields' => $fields, 'maxResults' => 10]))->json();
         $issues = [];
         foreach (is_array($body['issues'] ?? null) ? $body['issues'] : [] as $issue) {
@@ -544,6 +545,18 @@ final class PortalJiraClient
     }
 
     /**
+     * The fields every read asks for: the sync's own, and the site's Team and Start date fields where it has them.
+     *
+     * @return list<string>
+     */
+    private function syncFields(): array
+    {
+        $ids = $this->fieldIds();
+
+        return [...self::SYNC_FIELDS, ...array_values(array_filter([$ids['team'], $ids['startDate']]))];
+    }
+
+    /**
      * Up to 100 issues by id in one call, and the ids Jira did not return -- deleted, moved out of reach,
      * or no longer visible to the account.
      *
@@ -552,7 +565,7 @@ final class PortalJiraClient
      */
     public function bulkFetch(array $issueIds): array
     {
-        $body = $this->read('POST', '/rest/api/3/issue/bulkfetch', ['issueIdsOrKeys' => array_values($issueIds), 'fields' => self::SYNC_FIELDS])->json();
+        $body = $this->read('POST', '/rest/api/3/issue/bulkfetch', ['issueIdsOrKeys' => array_values($issueIds), 'fields' => $this->syncFields()])->json();
         $issues = [];
         foreach (is_array($body['issues'] ?? null) ? $body['issues'] : [] as $issue) {
             $parsed = is_array($issue) ? $this->issueFrom($issue) : null;

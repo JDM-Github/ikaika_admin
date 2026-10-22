@@ -25,6 +25,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // Refresh: every linked one read back from Jira now, then the list. It only reads, so it is the viewer's.
     Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
         ->post('bug-reports/jira/sync', [BugReportsController::class, 'refreshFromJira']);
+    // A report's plan is picked from Jira's teams and epics (2026-10-22, user); asked apart from the list, which
+    // never waits on Jira. It only reads, so it is the viewer's.
+    Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
+        ->get('bug-reports/jira/options', [BugReportsController::class, 'jiraOptions']);
     // Jira (2026-10-19): send one by hand or try it again, and the switch that sends new ones on their own.
     Route::middleware(['portal.rule:bug-reports.jira', 'throttle:portal-bug-report-write'])
         ->post('bug-reports/{id}/jira', [BugReportsController::class, 'sendToJira'])

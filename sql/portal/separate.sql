@@ -1439,6 +1439,15 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     assignee_id   INT UNSIGNED NULL,
     version_level VARCHAR(10)  NULL,
     fixed_in      VARCHAR(20)  NULL,
+    -- When it starts and is due, the epic it sits under and the team that owns it (2026-10-22), each the Jira issue's
+    -- too once it is linked; the epic's summary and the team's name as Jira last gave them. Existing databases:
+    -- add_portal_bug_report_plan.
+    start_on       DATE         NULL,
+    due_on         DATE         NULL,
+    parent_key     VARCHAR(32)  NULL,
+    parent_summary VARCHAR(255) NULL,
+    team_id        VARCHAR(64)  NULL,
+    team_name      VARCHAR(255) NULL,
     -- Who sent it, only when they chose to be named (2026-10-20). Existing databases: add_portal_bug_report_reporter.
     reporter_id   INT UNSIGNED NULL,
     -- The server it was sent on, its API channel (2026-10-21): production and staging share one Jira project, and

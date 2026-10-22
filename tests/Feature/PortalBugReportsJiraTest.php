@@ -306,7 +306,7 @@ class PortalBugReportsJiraTest extends TestCase
         $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
         $before = count(Http::recorded());
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed'])
-            ->assertForbidden()->assertJsonPath('message', 'Its kind and status change IKP-7 in Jira too, which needs Send to Jira.');
+            ->assertForbidden()->assertJsonPath('message', 'Its kind, status, team, parent and dates change IKP-7 in Jira too, which needs Send to Jira.');
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['note' => 'Waiting on Jira.', 'versionLevel' => 'patch'])
             ->assertOk()->assertJsonPath('data.note', 'Waiting on Jira.');
         $this->assertCount($before, Http::recorded());
@@ -315,6 +315,191 @@ class PortalBugReportsJiraTest extends TestCase
         DB::connection('portal')->table('bug_reports')->where('id', $id)->update(['jira_state' => 'deleted']);
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed'])
             ->assertOk()->assertJsonPath('data.status', 'fixed')->assertJsonPath('data.jira.state', 'deleted');
+    }
+
+    // A report's plan (2026-10-22, user): a new issue carries its dates and epic, and goes to the default team, as far
+    // as its create screen takes them; the report then names the team too.
+    public function test_a_new_issue_carries_its_plan_and_goes_to_the_default_team(): void
+    {
+        $this->connectJira();
+        config(['services.jira.default_team' => 'dev']);
+        $bug = $this->report(['start_on' => '2026-10-23', 'due_on' => '2026-10-30', 'parent_key' => 'IKP-1', 'parent_summary' => 'Payroll revamp']);
+        $feedback = $this->report(['kind' => 'feedback', 'start_on' => '2026-10-23', 'team_id' => '9999-ops', 'team_name' => 'Ops']);
+        $planned = ['status' => self::TO_DO, 'parent' => ['key' => 'IKP-1', 'fields' => ['summary' => 'Payroll revamp']], 'duedate' => '2026-10-30',
+            'customfield_10015' => '2026-10-23', 'customfield_10001' => ['id' => '3688-dev', 'name' => 'DEV']];
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue' => Http::sequence()->push(['id' => '10042', 'key' => 'IKP-12'], 201)->push(['id' => '10043', 'key' => 'IKP-13'], 201),
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-12', 'fields' => $planned]),
+            self::SITE.'/rest/api/3/issue/10043*' => Http::response(['id' => '10043', 'key' => 'IKP-13', 'fields' => ['status' => self::TO_DO, 'customfield_10001' => '9999-ops']]),
+            ...$this->planStubs(),
+        ]);
+        $headers = $this->headersFor($this->memberOf('MIS'));
+
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$bug.'/jira')->assertOk()
+            ->assertJsonPath('data.team', ['id' => '3688-dev', 'name' => 'DEV'])
+            ->assertJsonPath('data.parent', ['key' => 'IKP-1', 'summary' => 'Payroll revamp'])
+            ->assertJsonPath('data.dueOn', '2026-10-30');
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$feedback.'/jira')->assertOk()
+            ->assertJsonPath('data.team', ['id' => '9999-ops', 'name' => 'Ops']);
+
+        $created = Http::recorded(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue')->map(fn (array $pair): array => $pair[0]['fields'])->values();
+        $this->assertSame(['key' => 'IKP-1'], $created[0]['parent']);
+        $this->assertSame(['2026-10-30', '2026-10-23', '3688-dev'], [$created[0]['duedate'], $created[0]['customfield_10015'], $created[0]['customfield_10001']]);
+        // Feedback is filed as Task, whose screen has no start date: it goes without, and with its own team.
+        $this->assertArrayNotHasKey('customfield_10015', $created[1]);
+        $this->assertSame('9999-ops', $created[1]['customfield_10001']);
+        $this->assertSame(['2026-10-23', 'Ops'], [
+            substr((string) DB::connection('portal')->table('bug_reports')->where('id', $feedback)->value('start_on'), 0, 10),
+            DB::connection('portal')->table('bug_reports')->where('id', $feedback)->value('team_name'),
+        ]);
+    }
+
+    // Both ways (2026-10-22, user): a linked report's plan changes in Jira first -- one edit of only what Jira holds
+    // otherwise -- and a parent is cleared only on an issue that has one.
+    public function test_mis_changes_a_linked_reports_plan_in_jira_first(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $id = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent', 'due_on' => '2026-10-28']);
+        Http::preventStrayRequests();
+        Http::fake([
+            // Jira was given the 5th directly; the portal has not heard yet.
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-7', 'fields' => ['status' => self::TO_DO, 'duedate' => '2026-11-05']]),
+            ...$this->planStubs(),
+        ]);
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['startOn' => '2026-10-23', 'dueOn' => '2026-11-05', 'teamId' => '3688-dev', 'parentKey' => 'ikp-1'])
+            ->assertOk()
+            ->assertJsonPath('data.startOn', '2026-10-23')
+            ->assertJsonPath('data.dueOn', '2026-11-05')
+            ->assertJsonPath('data.team', ['id' => '3688-dev', 'name' => 'DEV'])
+            ->assertJsonPath('data.parent', ['key' => 'IKP-1', 'summary' => 'Payroll revamp']);
+
+        $this->assertSame(['GET issue/10042', 'PUT issue/10042', 'GET issue/10042'], array_slice($this->calls(), -3));
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT'
+            && $request->data() === ['fields' => ['customfield_10015' => '2026-10-23', 'customfield_10001' => '3688-dev', 'parent' => ['key' => 'IKP-1']]]);
+        // Clearing a parent the issue does not have, and a due date Jira already has, needs no edit at all.
+        $before = count(Http::recorded());
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['parentKey' => '', 'dueOn' => '2026-11-05'])->assertOk()->assertJsonPath('data.parent', null);
+        $this->assertSame(['GET issue/10042', 'GET issue/10042'], array_slice($this->calls(), $before));
+    }
+
+    public function test_a_plan_change_jira_refuses_changes_nothing_and_needs_send_to_jira(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $id = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent']);
+        $unsent = $this->report(['assignee_id' => $analyst->getKey()]);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue/10042' => fn (Request $request) => $request->method() === 'PUT'
+                ? Http::response(['errors' => ['customfield_10001' => 'Field customfield_10001 is not valid.']], 400)
+                : Http::response(['id' => '10042', 'key' => 'IKP-7', 'fields' => ['status' => self::TO_DO]]),
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-7', 'fields' => ['status' => self::TO_DO]]),
+            ...$this->planStubs(),
+        ]);
+
+        // Jira's words, with the field named as people know it.
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['teamId' => '3688-dev'])
+            ->assertStatus(422)->assertJsonPath('message', 'Jira did not take the change: Jira HTTP 400: Team: Field Team is not valid.');
+        $this->assertNull(DB::connection('portal')->table('bug_reports')->where('id', $id)->value('team_id'));
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['dueOn' => '2026-10-30'])
+            ->assertForbidden()->assertJsonPath('message', 'Its kind, status, team, parent and dates change IKP-7 in Jira too, which needs Send to Jira.');
+        // A report not in Jira keeps its plan here, without Send to Jira.
+        $before = count(Http::recorded());
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$unsent, ['dueOn' => '2026-10-30', 'startOn' => '2026-10-23'])
+            ->assertOk()->assertJsonPath('data.dueOn', '2026-10-30');
+        $this->assertCount($before, Http::recorded());
+    }
+
+    public function test_a_plan_is_checked_before_anything_changes(): void
+    {
+        $this->connectJira();
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $id = $this->report(['assignee_id' => $analyst->getKey(), 'due_on' => '2026-10-30']);
+        Http::preventStrayRequests();
+        Http::fake($this->planStubs());
+
+        foreach ([
+            [['dueOn' => '30/10/2026'], 'Write the due date as YYYY-MM-DD, like 2026-10-30.'],
+            [['startOn' => '2026-02-30'], 'Write the start date as YYYY-MM-DD, like 2026-10-30.'],
+            [['startOn' => '2026-10-31'], 'It cannot start after it is due.'],
+            [['parentKey' => 'Payroll revamp'], 'Choose an epic for its parent.'],
+            [['parentKey' => 'IKP-99'], 'IKP-99 is not an epic in IKP.'],
+            [['teamId' => 'nobody'], 'Choose one of the teams in Jira.'],
+        ] as [$body, $message]) {
+            $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, $body)->assertStatus(422)->assertJsonPath('message', $message);
+        }
+        // An unknown epic is asked of Jira afresh once before it is refused.
+        $this->assertCount(2, Http::recorded(fn (Request $request): bool => str_contains($request->url(), '/search/jql')));
+        $this->assertNull(DB::connection('portal')->table('bug_reports')->where('id', $id)->value('start_on'));
+
+        // Without Jira, the dates still change, and an epic or a team cannot be checked.
+        config(['services.jira.base_url' => null]);
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['startOn' => '2026-10-23'])->assertOk()->assertJsonPath('data.startOn', '2026-10-23');
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['teamId' => '3688-dev'])->assertStatus(503)->assertJsonPath('message', 'Jira is not connected yet.');
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['parentKey' => ''])->assertOk()->assertJsonPath('data.parent', null);
+    }
+
+    // Read back (2026-10-22, user): Jira's dates, epic and team come back; a field it did not send stays the portal's.
+    public function test_jiras_plan_comes_back_and_what_it_does_not_send_stays(): void
+    {
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $moved = $this->report(['jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent', 'due_on' => '2026-10-28', 'team_id' => '3688-dev', 'team_name' => 'DEV']);
+        $kept = $this->report(['jira_issue_id' => '10051', 'jira_issue_key' => 'IKP-21', 'jira_state' => 'sent', 'start_on' => '2026-10-20', 'team_id' => '3688-dev', 'team_name' => 'DEV',
+            'parent_key' => 'IKP-1', 'parent_summary' => 'Payroll revamp']);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+            ['id' => '10050', 'key' => 'IKP-20', 'fields' => ['status' => self::TO_DO, 'duedate' => '2026-11-05', 'customfield_10015' => '2026-10-24',
+                'parent' => ['key' => 'IKP-1', 'fields' => ['summary' => 'Payroll, revamped']], 'customfield_10001' => ['id' => '9999-ops', 'title' => 'Ops']]],
+            // Its team given by id alone keeps the name the portal has; its parent removed in Jira is gone here too.
+            ['id' => '10051', 'key' => 'IKP-21', 'fields' => ['status' => self::TO_DO, 'customfield_10001' => '3688-dev']],
+        ], 'issueErrors' => []])]);
+
+        $this->withHeaders($this->headersFor($this->memberOf('MIS')))->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$moved, $kept])->orderBy('id')->get();
+        $plan = fn (object $row): array => [
+            $row->start_on === null ? null : substr((string) $row->start_on, 0, 10), $row->due_on === null ? null : substr((string) $row->due_on, 0, 10),
+            $row->parent_key, $row->parent_summary, $row->team_id, $row->team_name,
+        ];
+        $this->assertSame(['2026-10-24', '2026-11-05', 'IKP-1', 'Payroll, revamped', '9999-ops', 'Ops'], $plan($rows[0]));
+        $this->assertSame(['2026-10-20', null, null, null, '3688-dev', 'DEV'], $plan($rows[1]));
+    }
+
+    // The pickers' choices come apart from the list (2026-10-22, user), and only for who sees the list.
+    public function test_the_plan_options_name_the_teams_the_epics_and_who_is_in_jira(): void
+    {
+        $this->connectJira();
+        config(['services.jira.default_team' => 'DEV']);
+        Http::preventStrayRequests();
+        Http::fake([...$this->planStubs(), self::SITE.'/rest/api/3/user/search*' => Http::response([])]);
+        $mis = $this->headersFor($this->memberOf('MIS'));
+
+        $options = $this->withHeaders($mis)->getJson(self::BASE.'bug-reports/jira/options')->assertOk()
+            ->assertJsonPath('resource', 'jira-options')
+            ->assertJsonPath('data.teams', [['id' => '3688-dev', 'name' => 'DEV']])
+            ->assertJsonPath('data.defaultTeamId', '3688-dev')
+            ->assertJsonPath('data.epics', [['key' => 'IKP-1', 'summary' => 'Payroll revamp', 'isDone' => false]])
+            ->assertJsonPath('data.fields', ['team' => true, 'startDate' => true])
+            ->json('data.people');
+        $this->assertNotEmpty($options);
+        $this->assertFalse(collect($options)->contains('inJira', true));
+        // Kept, so a second sheet asks Jira nothing.
+        $asked = count(Http::recorded());
+        $this->withHeaders($mis)->getJson(self::BASE.'bug-reports/jira/options')->assertOk();
+        $this->assertCount($asked, Http::recorded());
+
+        $this->withHeaders($this->headersFor($this->memberOf('Engineering')))->getJson(self::BASE.'bug-reports/jira/options')->assertForbidden();
+        config(['services.jira.base_url' => null]);
+        $this->withHeaders($mis)->getJson(self::BASE.'bug-reports/jira/options')->assertStatus(503)->assertJsonPath('message', 'Jira is not connected yet.');
     }
 
     // Read back (2026-10-20, user): a work type changed in Jira changes the kind, and Fixed in stays without a fix version.
@@ -1032,6 +1217,30 @@ class PortalBugReportsJiraTest extends TestCase
 
         Http::assertSent(fn (Request $request): bool => $request['issueIdsOrKeys'] === ['10052']);
         $this->assertContains((string) $live, collect($listed)->pluck('id')->all());
+    }
+
+    /**
+     * What a report's plan is picked from (2026-10-22): the project's types with its epic type, each kind's create
+     * screen (Task's without a start date), the site's one team, and one epic.
+     *
+     * @return array<string, mixed>
+     */
+    private function planStubs(): array
+    {
+        $screen = ['summary', 'issuetype', 'description', 'labels', 'assignee', 'parent', 'duedate', 'customfield_10001', 'customfield_10015'];
+
+        return [
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/10001*' => Http::response(['fields' => array_map(fn (string $id): array => ['fieldId' => $id], $screen)]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/10003*' => Http::response(['fields' => array_map(fn (string $id): array => ['fieldId' => $id], array_diff($screen, ['customfield_10015']))]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [
+                ['id' => '10000', 'name' => 'Epic', 'hierarchyLevel' => 1],
+                ['id' => '10001', 'name' => 'Bug', 'hierarchyLevel' => 0],
+                ['id' => '10002', 'name' => 'Story', 'hierarchyLevel' => 0],
+                ['id' => '10003', 'name' => 'Task', 'hierarchyLevel' => 0],
+            ]]),
+            self::SITE.'/rest/api/3/jql/autocompletedata/suggestions*' => Http::response(['results' => [['value' => '3688-dev', 'displayName' => 'DEV']]]),
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => [['key' => 'IKP-1', 'fields' => ['summary' => 'Payroll revamp', 'status' => self::TO_DO]]]]),
+        ];
     }
 
     /**
