@@ -505,7 +505,9 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         foreach (PortalBugReports::KINDS as $kind => $words) {
             $type = $jira->issueTypeFor($kind);
             $screen = $type['id'] === null ? null : $client->createFields($type['id']);
-            $lacking = $screen === null ? [] : array_values(array_diff(array_filter(['assignee', 'parent', 'duedate', $ids['team'], $ids['startDate']]), $screen));
+            // An epic goes under nothing, so its screen lacking a parent is as it should be.
+            $wanted = array_filter(['assignee', $kind === PortalBugReports::KIND_EPIC ? null : 'parent', 'duedate', $ids['team'], $ids['startDate']]);
+            $lacking = $screen === null ? [] : array_values(array_diff($wanted, $screen));
             if ($lacking !== []) {
                 $this->warn($words['label'].' ('.$type['name'].') has no '.implode(', ', $lacking).' on its create screen, so a new one goes without.');
             }
