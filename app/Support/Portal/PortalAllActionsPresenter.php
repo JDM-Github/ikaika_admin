@@ -63,6 +63,7 @@ final class PortalAllActionsPresenter
      *     employeeIdNo: ?string,
      *     employeeName: string,
      *     syncedAt: ?string,
+     *     syncedAtLabel: ?string,
      *     createdAt: string,
      *     dateLabel: string,
      *     timeLabel: string,
@@ -107,6 +108,9 @@ final class PortalAllActionsPresenter
             'employeeIdNo' => $idNo,
             'employeeName' => ($known['name'] ?? ($idNo ?? 'Member')).((bool) $row->as_developer ? PortalAccessGraph::DEVELOPER_MODE_SUFFIX : ''),
             'syncedAt' => $row->synced_at === null ? null : self::instant($row->synced_at)->utc()->toIso8601String(),
+            'syncedAtLabel' => $row->synced_at === null
+                ? null
+                : self::instant($row->synced_at)->setTimezone($timezone)->format('l, F j, Y \a\t g:i A'),
             'createdAt' => $createdAt->copy()->utc()->toIso8601String(),
             'dateLabel' => $local->format('l, F j, Y'),
             'timeLabel' => $local->format('g:i A'),

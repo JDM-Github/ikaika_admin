@@ -134,7 +134,7 @@ Airtable. The reason is kept in `last_error`, and the try count in `attempts`.
 
 There is no "retry 5 times then give up". An outage can outlast 5 tries, and a cap would leave those
 changes unsent forever. Instead, the scheduled run waits longer after each try that did not land:
-- 1 minute, then 2, 4, 8 … doubling up to 6 hours, counted from that try;
+- 1 minute, then 2, 4, 8 â€¦ doubling up to 6 hours, counted from that try;
 - after that, every 6 hours, forever.
 
 A blip clears in minutes. A change Airtable keeps refusing stops costing calls, and it still lands on its
@@ -162,9 +162,9 @@ API allowance.
 - The dry run (`php artisan portal:airtable-sync`) lists every waiting change with its outcome and reason.
 - A scheduled send that did not land everything writes `portal.airtable_sync.not_landed` to
   `~/apps/portal-prod/app/storage/logs/laravel.log`.
-- The portal's Administration > All Actions page has a Sync to Airtable button (Developer mode): it checks
-  the mappings, previews the next send, and after a second confirmation sends with the same engine and lock
-  as `--send`. The check and preview write nothing.
+- The portal's Administration > All Actions page has a Sync to Airtable button (Developer mode): it previews
+  the next send, then after a second confirmation sends with the same engine and lock as `--send`. The
+  preview writes nothing; `--check` remains the CLI preflight.
 
 ## Not synced, by design
 

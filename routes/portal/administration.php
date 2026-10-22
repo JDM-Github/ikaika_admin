@@ -24,10 +24,9 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::get('administration/all-actions', [AllActionsController::class, 'index']);
         Route::get('administration/all-actions/{id}', [AllActionsController::class, 'show'])->whereNumber('id');
     });
-    // Sync to Airtable: check, dry run, then send, each behind the Developer mode password; the
-    // password throttle is Developer mode's own (five a minute).
+    // Sync to Airtable: dry run, then send, behind the Developer mode password; the password throttle
+    // is Developer mode's own (five a minute).
     Route::middleware(['portal.rule:administration.actions.sync', 'throttle:portal-developer'])->group(function (): void {
-        Route::post('administration/actions/sync-check', [AirtableSyncController::class, 'check']);
         Route::post('administration/actions/sync-preview', [AirtableSyncController::class, 'preview']);
         Route::post('administration/actions/sync-send', [AirtableSyncController::class, 'send']);
     });

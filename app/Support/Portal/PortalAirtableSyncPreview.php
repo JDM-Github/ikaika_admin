@@ -9,9 +9,9 @@ use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 /**
- * Sync to Airtable from All Actions, in three steps: confirm it is you, read the mapping check and
- * the dry run (both write nothing), then send. The password is checked per request and never logged.
- * Sending is the same engine and lock as `portal:airtable-sync --send`.
+ * Sync to Airtable from All Actions: confirm it is you, read the dry run (writes nothing), then send.
+ * The password is checked per request and never logged. Sending is the same engine and lock as
+ * `portal:airtable-sync --send`.
  */
 final class PortalAirtableSyncPreview
 {
@@ -30,32 +30,9 @@ final class PortalAirtableSyncPreview
     /**
      * @return array{section: string, resource: string, data: array{counts: array<string, int>, items: list<array<string, mixed>>}}
      */
-    public function check(Employee $actor, Request $request): array
-    {
-        $this->confirm($actor, $request);
-
-        try {
-            $items = $this->sync->check();
-        } catch (Throwable $error) {
-            abort(502, 'Airtable could not be read: '.$error->getMessage());
-        }
-
-        $counts = array_fill_keys(['create', 'update', 'delete', 'discard', 'synced', 'covered', 'superseded', 'nothing', 'blocked', 'failed', 'skipped'], 0);
-        foreach ($items as $item) {
-            $counts[$item['outcome']] = ($counts[$item['outcome']] ?? 0) + 1;
-        }
-        $data = ['counts' => $counts, 'items' => $this->items($items)];
-
-        $this->audit->record($actor, PortalLogAction::POST, self::RESOURCE, PortalActivityCopy::checkedAirtableSync(count($items)), null, $request, ['counts' => $counts]);
-
-        return ['section' => 'administration', 'resource' => 'airtable-sync-check', 'data' => $data];
-    }
-
-    /**
-     * @return array{section: string, resource: string, data: array{counts: array<string, int>, items: list<array<string, mixed>>}}
-     */
     public function preview(Employee $actor, Request $request): array
     {
+        @set_time_limit(0);
         $this->confirm($actor, $request);
 
         try {
@@ -76,6 +53,7 @@ final class PortalAirtableSyncPreview
      */
     public function send(Employee $actor, Request $request): array
     {
+        @set_time_limit(0);
         $this->confirm($actor, $request);
 
         if (config('services.airtable.env') === 'prod' && ! app()->environment('production')) {

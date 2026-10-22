@@ -12,11 +12,6 @@ class AirtableSyncController extends Controller
 {
     public function __construct(private readonly PortalAirtableSyncPreview $preview) {}
 
-    public function check(Request $request): JsonResponse
-    {
-        return response()->json($this->preview->check($this->actor($request), $request));
-    }
-
     public function preview(Request $request): JsonResponse
     {
         return response()->json($this->preview->preview($this->actor($request), $request));

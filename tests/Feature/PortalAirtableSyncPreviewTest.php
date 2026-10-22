@@ -16,9 +16,9 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
 /**
- * Sync to Airtable from All Actions is a dry run (2026-10-01), confirmed with the person's own
- * Developer mode password: it lists what the next send would do and writes nothing to Airtable or
- * the ledger. The password is never the one-time default, and only developers have one.
+ * Sync to Airtable from All Actions: confirmed with the person's own Developer mode password, it
+ * previews what the next send would do (writing nothing) and, after another confirmation, sends.
+ * The password is never the one-time default, and only developers have one.
  */
 class PortalAirtableSyncPreviewTest extends TestCase
 {
@@ -30,8 +30,6 @@ class PortalAirtableSyncPreviewTest extends TestCase
     protected array $connectionsToTransact = ['portal', 'core'];
 
     private const URL = '/api/development/portal/administration/actions/sync-preview';
-
-    private const CHECK_URL = '/api/development/portal/administration/actions/sync-check';
 
     private const SEND_URL = '/api/development/portal/administration/actions/sync-send';
 
@@ -93,22 +91,16 @@ class PortalAirtableSyncPreviewTest extends TestCase
             ->where('employee_id', $this->developer->getKey())->where('resource', 'administration.actions.sync')->orderByDesc('id')->value('message'));
     }
 
-    public function test_the_check_reads_the_mappings_without_writing(): void
+    public function test_the_send_runs_when_nothing_is_waiting(): void
     {
-        Http::fake(['api.airtable.com/v0/meta/*' => Http::response(['tables' => []])]);
+        Http::fake();
         $this->setPassword('correct-horse-battery');
-        $unsynced = Action::query()->whereNull('synced_at')->count();
+        Action::query()->whereNull('synced_at')->update(['synced_at' => now()]);
 
-        $response = $this->withToken($this->developerToken())->postJson(self::CHECK_URL, ['password' => 'correct-horse-battery'])
+        $this->withToken($this->developerToken())->postJson(self::SEND_URL, ['password' => 'correct-horse-battery'])
             ->assertOk()
-            ->assertJsonPath('resource', 'airtable-sync-check');
-
-        $this->assertIsArray($response->json('data.counts'));
-        $this->assertNotEmpty($response->json('data.items'));
-        Http::assertNotSent(fn (HttpRequest $request): bool => $request->method() !== 'GET');
-        $this->assertSame($unsynced, Action::query()->whereNull('synced_at')->count());
-        $this->assertStringStartsWith('{UserName|You} checked the Airtable mappings', (string) DB::connection('portal')->table('logs')
-            ->where('employee_id', $this->developer->getKey())->where('resource', 'administration.actions.sync')->orderByDesc('id')->value('message'));
+            ->assertJsonPath('resource', 'airtable-sync-sent')
+            ->assertJsonPath('data.stopped', false);
     }
 
     public function test_the_send_is_refused_for_the_prod_profile_outside_production(): void
