@@ -162,6 +162,10 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::delete('manage/users/{id}/documents/{documentId}', [UsersController::class, 'destroyDocument'])
             ->whereNumber(['id', 'documentId']);
     });
+    // Edit details (2026-10-20, user): the record's name, job title, work email, location, employment and start date.
+    Route::middleware(['portal.rule:manage.users.information.edit', 'throttle:portal-manage-users-write'])
+        ->patch('manage/users/{id}/details', [UsersController::class, 'updateDetails'])
+        ->whereNumber('id');
     // Activate and deactivate: an account Active or Inactive, which sign-in follows (2026-10-12).
     Route::middleware(['portal.rule:manage.users.status', 'throttle:portal-manage-users-write'])
         ->patch('manage/users/{id}/status', [UsersController::class, 'updateStatus'])
@@ -201,6 +205,13 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // A receipt photo is uploaded first and named by the transaction it goes with, a new one or an edited one.
     Route::middleware(['portal.rule:finance.transactions.add|finance.transactions.edit', 'throttle:portal-manage-budget-write'])
         ->post('manage/budget-transactions/receipts', [BudgetEnvelopesController::class, 'storeTransactionReceipt']);
+    // The payor list the transaction form offers, kept and trimmed by whoever adds or edits transactions (2026-10-21).
+    Route::middleware(['portal.rule:finance.transactions.add|finance.transactions.edit', 'throttle:portal-manage-requests'])
+        ->get('manage/budget-payors', [BudgetEnvelopesController::class, 'payors']);
+    Route::middleware(['portal.rule:finance.transactions.add|finance.transactions.edit', 'throttle:portal-manage-budget-write'])->group(function (): void {
+        Route::post('manage/budget-payors', [BudgetEnvelopesController::class, 'storePayor']);
+        Route::post('manage/budget-payors/remove', [BudgetEnvelopesController::class, 'removePayor']);
+    });
     // Edit transactions: a transaction's details, never its money (2026-10-13).
     Route::middleware(['portal.rule:finance.transactions.edit', 'throttle:portal-manage-budget-write'])
         ->patch('manage/budget-transactions/{id}', [BudgetEnvelopesController::class, 'updateTransaction'])
@@ -224,7 +235,7 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     // Manage / Map: where each person last saved something; an administrator's power.
     Route::middleware(['portal.rule:'.PortalTeamMap::RULE, 'throttle:portal-manage-requests'])
         ->get('manage/map', [TeamMapController::class, 'index']);
-    // Flagged users: whoever may approve or reject flagged reports puts people on review and takes them off.
+    // Flagged users: whoever holds Flag users on Daily Reports puts people on review and takes them off.
     Route::middleware(['portal.rule:'.PortalFlaggedMembers::RULE, 'throttle:portal-manage-requests'])
         ->get('manage/flagged-members', [FlaggedMembersController::class, 'index']);
     Route::middleware(['portal.rule:'.PortalFlaggedMembers::RULE, 'throttle:portal-manage-requests-write'])->group(function (): void {

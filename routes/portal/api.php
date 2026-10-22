@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Route;
  *   routes/portal/developer.php       Settings / Developer mode
  *   routes/portal/administration.php  Administration / Recycle Bin
  *   routes/portal/bug-reports.php     Bug Reports (anyone reports, MIS reads)
+ *   routes/portal/clashflow.php       ClashFlow desktop app (my projects and role)
  */
 
 // No write needs a location since 2026-10-19 (supervisor): logs keep the network's place only, see PortalLocationResolver.
@@ -37,4 +38,5 @@ Route::prefix('portal')->group(function (): void {
     require __DIR__.'/share.php';
     require __DIR__.'/register.php';
     require __DIR__.'/bug-reports.php';
+    require __DIR__.'/clashflow.php';
 });

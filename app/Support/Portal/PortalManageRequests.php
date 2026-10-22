@@ -1124,6 +1124,7 @@ final class PortalManageRequests
         $ids = $rows->map(static fn (object $row): int => (int) $row->id)->all();
         $receiptFields = $this->reimbursements->receiptFieldsByItemId($ids);
         $payoutFields = $this->reimbursements->payoutReceiptFieldsByItemId($ids);
+        $qrs = $this->reimbursements->paymentQrsByItemId($ids);
 
         // The queue splits a claim by status, so its approved and pending items arrive as two rows
         // of claims. Both carry the claim's own key, so the portal can tell they are one claim.
@@ -1141,6 +1142,8 @@ final class PortalManageRequests
             $itemIds = $claimItems[$this->submissionKey($group[0])] ?? [];
             $claim = $this->presentClaim($group, $receiptFields, $payoutFields, $envelopes, $itemIds === [] ? null : min($itemIds));
             if ($claim !== null) {
+                // The QR the member chose from their Profile (2026-10-21, user), on whichever half of a split claim this is.
+                $claim['paymentQr'] = PortalReimbursementRequests::claimPaymentQr($itemIds === [] ? array_map(static fn (object $row): int => (int) $row->id, $group) : $itemIds, $qrs);
                 $data[] = $claim;
             }
         }

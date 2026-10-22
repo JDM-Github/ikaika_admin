@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -27,6 +28,9 @@ final class PortalProfileChanges
 {
     public const RULE = 'manage.users.information.approve';
 
+    // Edit profile (2026-10-20, user): whether someone may change their own information at all.
+    public const EDIT_RULE = 'user.profile';
+
     public const PENDING = 'Pending';
 
     public const APPROVED = 'Approved';
@@ -49,7 +53,7 @@ final class PortalProfileChanges
     /** Each address's line on the record, and the prefix its parts are sent under, as the registration's. */
     private const ADDRESSES = ['address' => 'address', 'emergencyContactAddress' => 'emergencyContact'];
 
-    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street'];
+    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street', 'zip'];
 
     public function __construct(
         private readonly PortalManageUsers $users,
@@ -59,7 +63,17 @@ final class PortalProfileChanges
         private readonly PortalAddressResolver $resolver,
         private readonly PortalRegistrationInput $input,
         private readonly PortalHomeLocations $homes,
+        private readonly CoreLedger $ledger,
     ) {}
+
+    /**
+     * Edit profile sits under User, which executives never hold and nobody can switch for them, so the
+     * switch governs only whoever holds User; anyone else edits as they always could.
+     */
+    private static function mayEdit(Employee $employee, Request $request): bool
+    {
+        return PortalRules::holds($employee, $request, self::EDIT_RULE) || ! PortalRules::holds($employee, $request, 'user');
+    }
 
     /**
      * Their own employee information and documents, the change waiting on them, and how the last one went.
@@ -80,6 +94,8 @@ final class PortalProfileChanges
             'information' => $information,
             // Whoever approves profile changes saves their own straight onto their record (2026-10-19, user).
             'approvesOwn' => PortalRules::holds($employee, $request, self::RULE),
+            // A head admin may switch Edit profile off for them (2026-10-20, user).
+            'canEdit' => self::mayEdit($employee, $request),
             // Where each address line places them in the Philippines, for the pickers to open on.
             'addressPlaces' => array_map(fn (string $line): ?array => $this->placeOf($information[$line] ?? null), array_combine(array_keys(self::ADDRESSES), array_keys(self::ADDRESSES))),
             'documents' => $documents,
@@ -110,6 +126,9 @@ final class PortalProfileChanges
     public function submit(Employee $employee, Request $request): array
     {
         $employee = $this->whole($employee);
+        if (! self::mayEdit($employee, $request)) {
+            abort(403, 'Editing your profile is switched off for you. Ask a head admin to switch it back on.');
+        }
         if ($this->rowsOf($employee)->where('status', self::PENDING)->exists()) {
             abort(422, 'Your earlier changes are still waiting for approval. Withdraw them to change something else.');
         }
@@ -156,11 +175,11 @@ final class PortalProfileChanges
 
         // A head admin's own changes are approved by them as they are sent, and reach their record now.
         if (PortalRules::holds($employee, $request, self::RULE)) {
-            $id = DB::connection('portal')->transaction(function () use ($row, $employee): int {
+            $id = $this->ledger->within(DB::connection('portal'), function () use ($row, $employee): int {
                 $id = (int) DB::connection('portal')->table(self::TABLE)->insertGetId(
                     ['status' => self::APPROVED, 'decided_at' => now(), 'decided_by' => (int) $employee->getKey()] + $row,
                 );
-                $this->apply($employee, self::fieldsOf((object) $row), self::documentsOf((object) $row));
+                $this->apply($employee, $employee, self::fieldsOf((object) $row), self::documentsOf((object) $row));
 
                 return $id;
             });
@@ -265,7 +284,8 @@ final class PortalProfileChanges
         $isApproved = $data['decision'] === 'approve';
         $remarks = self::text($data['remarks'] ?? null);
 
-        $outcome = DB::connection('portal')->transaction(function () use ($reviewer, $id, $request, $isApproved, $remarks): array {
+        // The approved details and their ledger entry land together, so the Airtable sync sends them (2026-10-20).
+        $outcome = $this->ledger->within(DB::connection('portal'), function () use ($reviewer, $id, $request, $isApproved, $remarks): array {
             $row = DB::connection('portal')->table(self::TABLE)->where('id', $id)->lockForUpdate()->first();
             if ($row === null) {
                 abort(404, 'Those profile changes were not found.');
@@ -280,7 +300,7 @@ final class PortalProfileChanges
             $documents = self::documentsOf($row);
             $fields = self::fieldsOf($row);
             if ($isApproved) {
-                $this->apply($employee, $fields, $documents);
+                $this->apply($reviewer, $employee, $fields, $documents);
             }
             DB::connection('portal')->table(self::TABLE)->where('id', $id)->update([
                 'status' => $isApproved ? self::APPROVED : self::REJECTED,
@@ -405,7 +425,7 @@ final class PortalProfileChanges
      * The province, city and barangay an address line names, for the pickers to open on; null when it
      * names none. The street stays typed, since a line does not say where the street ends.
      *
-     * @return array{provinceCode: string, cityCode: ?string, barangayCode: ?string}|null
+     * @return array{provinceCode: ?string, cityCode: ?string, barangayCode: ?string, zip: ?string}|null
      */
     private function placeOf(?string $line): ?array
     {
@@ -413,12 +433,25 @@ final class PortalProfileChanges
             return null;
         }
         $place = $this->resolver->identify($line, null);
+        $zip = self::zipOf($line);
 
-        return $place['provinceCode'] === null ? null : [
+        return $place['provinceCode'] === null && $zip === null ? null : [
             'provinceCode' => $place['provinceCode'],
             'cityCode' => $place['cityCode'],
             'barangayCode' => $place['barangayCode'],
+            'zip' => $zip,
         ];
+    }
+
+    /**
+     * The zip code a line ends with, four digits in its last two parts ("Laguna 4027, Philippines"), so
+     * a house number at its start is never taken for one (2026-10-20, user).
+     */
+    private static function zipOf(string $line): ?string
+    {
+        $tail = implode(' ', array_slice(array_map('trim', explode(',', $line)), -2));
+
+        return preg_match_all('/\b(\d{4})\b/', $tail, $found) > 0 ? (string) end($found[1]) : null;
     }
 
     /**
@@ -457,18 +490,21 @@ final class PortalProfileChanges
      * @param  array<string, string|null>  $fields
      * @param  array{add: list<array{field: string, fileUrl: string, fileName: string, sizeBytes: int, mimeType: string}>, remove: list<int>}  $documents
      */
-    private function apply(Employee $employee, array $fields, array $documents): void
+    private function apply(Employee $actor, Employee $employee, array $fields, array $documents): void
     {
+        $slots = [];
         foreach ($documents['remove'] as $documentId) {
             if ($this->documents->fieldOf($employee, $documentId) !== null) {
-                $this->documents->remove($employee, $documentId);
+                $slots[] = $this->documents->remove($employee, $documentId);
             }
         }
         $this->documents->assertRoom($employee, array_column($documents['add'], 'field'), []);
         foreach ($documents['add'] as $stored) {
             $this->documents->attach($employee, $stored);
+            $slots[] = $stored['field'];
         }
-        $this->users->applyInformation($employee, $fields);
+        $this->documents->ledgerChange($actor, $employee, $slots);
+        $this->users->applyInformation($employee, $fields, $actor);
         $this->users->bumpCache();
     }
 

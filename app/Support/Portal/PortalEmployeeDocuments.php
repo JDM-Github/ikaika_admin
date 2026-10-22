@@ -3,6 +3,7 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use App\Support\Core\CoreLedger;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -62,6 +63,7 @@ final class PortalEmployeeDocuments
     public function __construct(
         private readonly PortalRegistrationDocuments $documents,
         private readonly PortalCloudinary $cloudinary,
+        private readonly CoreLedger $ledger,
     ) {}
 
     /**
@@ -120,9 +122,10 @@ final class PortalEmployeeDocuments
      *
      * @return array{copied: int, skipped: int, failed: int}
      */
-    public function copyFromRegistration(Employee $employee, int $registrationId): array
+    public function copyFromRegistration(Employee $employee, int $registrationId, ?Employee $actor = null): array
     {
         $outcome = ['copied' => 0, 'skipped' => 0, 'failed' => 0];
+        $slots = [];
         foreach ($this->documents->listFor($registrationId) as $document) {
             $field = self::FIELD_FOR_KIND[$document['kind']] ?? $document['kind'];
             if ($this->hasCopy($employee, $field, $document['name'])) {
@@ -145,6 +148,7 @@ final class PortalEmployeeDocuments
                     'mime_type' => $file['mime'],
                 ]);
                 $outcome['copied']++;
+                $slots[] = $field;
             } catch (Throwable $error) {
                 Log::warning('portal.employee_documents.not_copied', [
                     'employeeId' => (int) $employee->getKey(),
@@ -157,8 +161,38 @@ final class PortalEmployeeDocuments
         if ($outcome['copied'] > 0) {
             PortalCache::bump();
         }
+        $this->ledgerChange($actor, $employee, $slots);
 
         return $outcome;
+    }
+
+    /**
+     * One employees edit in the ledger naming the columns and document slots that changed, so the
+     * Airtable sync sends exactly those (2026-10-20). Columns go as a plain list: the ledger strips
+     * government and bank keys from every payload, and the sync reads the values from SQL anyway.
+     *
+     * @param  list<string>  $slots
+     * @param  list<string>  $columns
+     */
+    public function ledgerChange(?Employee $actor, Employee $employee, array $slots, array $columns = []): void
+    {
+        if ($slots === [] && $columns === []) {
+            return;
+        }
+        $parameters = ['table' => 'employees', 'key' => 'id', 'id' => (string) $employee->getKey(), 'columns' => array_values(array_unique($columns))];
+        foreach (array_unique($slots) as $slot) {
+            $parameters['doc_'.$slot] = true;
+        }
+        $this->ledger->recordEdit(
+            CoreLedger::PRODUCT_PORTAL,
+            CoreLedger::PRODUCT_PORTAL.'.employees',
+            $parameters,
+            'employees',
+            (string) $employee->getKey(),
+            null,
+            $actor === null ? null : (int) $actor->getKey(),
+            $actor !== null && is_string($actor->id_no) ? $actor->id_no : null,
+        );
     }
 
     /**

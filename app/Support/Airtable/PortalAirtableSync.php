@@ -5,8 +5,10 @@ namespace App\Support\Airtable;
 use App\Modules\Core\Models\Action;
 use App\Support\Core\CoreActionType;
 use App\Support\Core\CoreLedger;
+use GuzzleHttp\Exception\ConnectException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Throwable;
@@ -46,10 +48,11 @@ final class PortalAirtableSync
      * @return array{
      *     sent: bool,
      *     counts: array<string, int>,
-     *     items: list<array{actionId: int, resource: ?string, actionType: string, recordId: ?string, outcome: string, table: ?string, airtableId: ?string, fields: array<string, mixed>, problems: list<string>}>
+     *     items: list<array{actionId: int, resource: ?string, actionType: string, recordId: ?string, outcome: string, table: ?string, airtableId: ?string, fields: array<string, mixed>, problems: list<string>}>,
+     *     stopped: bool
      * }
      */
-    public function run(bool $send, int $settleSeconds = 0, bool $retryCreates = false, ?int $afterId = null): array
+    public function run(bool $send, int $settleSeconds = 0, bool $retryCreates = false, ?int $afterId = null, bool $backoff = false, ?int $budgetSeconds = null): array
     {
         $this->retryCreates = $retryCreates;
         $schema = $this->airtable->tables();
@@ -57,18 +60,16 @@ final class PortalAirtableSync
         $items = [];
         // The first unit on a row pushes that row's current state, which already holds every later one.
         $firstByRow = [];
+        // Past its budget a run takes no new action (2026-10-20): each settles on its own, so the next run
+        // carries on, and a run never outlives the lock that keeps two sends apart.
+        $deadline = $budgetSeconds === null ? null : Carbon::now()->addSeconds($budgetSeconds);
+        $stopped = false;
 
-        $actions = Action::query()
-            ->where('product', CoreLedger::PRODUCT_PORTAL)
-            ->whereNull('synced_at')
-            // The ledger commits a moment before the portal row does; a fresh action waits a run.
-            ->when($settleSeconds > 0, fn ($query) => $query->where('created_at', '<=', Carbon::now()->subSeconds($settleSeconds)))
-            // Only what came after a given action: a test scenario judges its own writes alone.
-            ->when($afterId !== null, fn ($query) => $query->where('id', '>', $afterId))
-            ->orderBy('id')
-            ->get();
-
-        foreach ($actions as $action) {
+        foreach ($this->pending($settleSeconds, $afterId, $backoff) as $action) {
+            if ($deadline !== null && Carbon::now()->gte($deadline)) {
+                $stopped = true;
+                break;
+            }
             $units = [];
             foreach ($this->units($action, $schema, $firstByRow) as $unit) {
                 if ($send && in_array($unit['outcome'], ['create', 'update', 'delete', 'discard'], true)) {
@@ -89,7 +90,99 @@ final class PortalAirtableSync
             }
         }
 
-        return ['sent' => $send, 'counts' => $counts, 'items' => $items];
+        return ['sent' => $send, 'counts' => $counts, 'items' => $items, 'stopped' => $stopped];
+    }
+
+    /**
+     * Whether a scheduled run has anything to try, read from SQL alone (2026-10-20): an idle minute
+     * then asks Airtable nothing, which matters on a plan that counts every call.
+     */
+    public function hasDueWork(int $settleSeconds): bool
+    {
+        return $this->pending($settleSeconds, null, true)->isNotEmpty();
+    }
+
+    /**
+     * Settles every unsynced action up to an id without sending it (2026-10-20): what was ledgered before
+     * an import names rows the import has since renumbered, so replaying it could touch the wrong records.
+     */
+    public function skipThrough(int $actionId): int
+    {
+        return Action::query()
+            ->where('product', CoreLedger::PRODUCT_PORTAL)
+            ->whereNull('synced_at')
+            ->where('id', '<=', $actionId)
+            ->update(['synced_at' => Carbon::now(), 'last_error' => 'Not sent: settled by --skip-through='.$actionId.'.']);
+    }
+
+    /**
+     * @return Collection<int, Action>
+     */
+    private function pending(int $settleSeconds, ?int $afterId, bool $backoff): Collection
+    {
+        // ponytail: loads every unsynced action at once; page it with lazyById if a backlog ever runs to tens of thousands.
+        return Action::query()
+            ->where('product', CoreLedger::PRODUCT_PORTAL)
+            ->whereNull('synced_at')
+            // The ledger commits a moment before the portal row does; a fresh action waits a run.
+            ->when($settleSeconds > 0, fn ($query) => $query->where('created_at', '<=', Carbon::now()->subSeconds($settleSeconds)))
+            // Only what came after a given action: a test scenario judges its own writes alone.
+            ->when($afterId !== null, fn ($query) => $query->where('id', '>', $afterId))
+            ->orderBy('id')
+            ->get()
+            ->when($backoff, fn ($actions) => $actions->filter(fn (Action $action): bool => self::due($action)))
+            ->values();
+    }
+
+    /**
+     * A try that did not land waits longer each time, counted from that try (2026-10-20): 1, 2, 4 ...
+     * minutes, doubling up to six hours, then every six hours. A blip clears in minutes; a value Airtable
+     * refuses stops costing a call a minute, yet lands on its own once someone fixes the base.
+     */
+    private static function due(Action $action): bool
+    {
+        $attempts = (int) $action->attempts;
+        $since = $action->attempted_at ?? $action->created_at;
+        if ($attempts === 0 || $since === null) {
+            return true;
+        }
+
+        return Carbon::parse($since)->addMinutes(min(2 ** min($attempts - 1, 9), 360))->lte(Carbon::now());
+    }
+
+    /**
+     * Names a base that holds none of the records this database points at (2026-10-20): sent to
+     * another base -- the test base on production -- every update would read as a deleted record,
+     * clear its airtable_record_id and create a copy there. The newest id of up to five tables is
+     * asked; one found is enough, since a right base answers for nearly every row.
+     */
+    public function wrongBase(): ?string
+    {
+        $tables = [];
+        foreach (AirtableSyncMap::resources() as $resource) {
+            $map = AirtableSyncMap::for($resource);
+            if ($map !== null) {
+                $tables[$map['sql_table']] ??= $map['airtable_table'];
+            }
+        }
+
+        $asked = 0;
+        foreach ($tables as $sqlTable => $airtableTable) {
+            $recordId = DB::connection('portal')->table($sqlTable)->whereNotNull('airtable_record_id')->orderByDesc('id')->value('airtable_record_id');
+            if (! is_string($recordId) || $recordId === '') {
+                continue;
+            }
+            if ($this->airtable->exists($airtableTable, $recordId)) {
+                return null;
+            }
+            if (++$asked === 5) {
+                break;
+            }
+        }
+
+        return $asked === 0
+            ? null
+            : 'The Airtable base holds none of the '.$asked.' records this database points at, so AIRTABLE_BASE_ID names another base. Nothing was sent.';
     }
 
     /**
@@ -188,6 +281,11 @@ final class PortalAirtableSync
     private function deleteUnits(Action $action, array $map, array $payload): array
     {
         $table = $map['airtable_table'];
+        // A table whose deletes the map does not carry (projects: the record is Airtable's to keep) has
+        // nothing to send, so the action settles instead of coming back every run.
+        if (! isset($map['rows']) && ! isset($map['deleted_id'])) {
+            return [$this->unit($action, $table, $action->record_id, 'nothing', ['Deletes are not synced for this table; Airtable keeps its record.'])];
+        }
         $unknown = [$this->unit($action, $table, $action->record_id, 'skipped', ['This delete predates Airtable ids in the ledger; left for a manual check.'])];
 
         if (isset($map['rows'])) {
@@ -252,6 +350,11 @@ final class PortalAirtableSync
         $key = $map['sql_table'].'#'.$rowId;
         $row = DB::connection('portal')->table($map['sql_table'])->where('id', $rowId)->first();
         if ($row === null) {
+            // A create whose answer was lost may have landed for this line: that waits for a person and
+            // --retry-creates, never a silent supersede that would leave a duplicate behind (2026-10-20).
+            if (! $this->retryCreates && str_contains((string) $action->last_error, self::UNCERTAIN_CREATE)) {
+                return $this->unit($action, $map['airtable_table'], $key, 'failed', [self::UNCERTAIN_CREATE]);
+            }
             // Gone by design only when a later action on the same report, or the same record,
             // explains it (an edit replaced the line, a delete removed it). Anything else is retried:
             // it may be a line whose report has not finished committing yet.
@@ -279,10 +382,14 @@ final class PortalAirtableSync
                 : 'In the Recycle Bin; Airtable keeps its own record.'], $airtableId);
         }
 
-        // Withdrawn by the member: it was never really filed, so Airtable should not hold it at all.
+        // Withdrawn by the member: it was never really filed, so Airtable should not hold it at all. A
+        // changed-only edit deletes the record only when it is the edit that cancelled it, so a typo fixed
+        // on a cancelled row never takes a record out of Airtable (2026-10-20).
         $discard = $map['discard_when'] ?? null;
         if ($discard !== null && is_string($row->{$discard['column']} ?? null)
-            && $this->comparable($row->{$discard['column']}) === $this->comparable($discard['value'])) {
+            && $this->comparable($row->{$discard['column']}) === $this->comparable($discard['value'])
+            && ($airtableId === null || $probe || ! isset($map['changed_only'])
+                || in_array($discard['column'], $this->changedColumns($action, $map['changed_only']), true))) {
             return $this->unit($action, $map['airtable_table'], $key, 'discard', [$airtableId === null
                 ? 'Cancelled before it reached Airtable; it will never be sent.'
                 : 'Cancelled after it reached Airtable; its record there will be deleted.'], $airtableId);
@@ -325,6 +432,10 @@ final class PortalAirtableSync
             }
         }
         $problems = [...$linkProblems, ...$this->problems($map['airtable_table'], $fields, $schema)];
+        // Everything an edit changed was left out: there is no update to send, and an empty one is refused.
+        if ($changed !== null && $fields === [] && $problems === []) {
+            return $this->unit($action, $map['airtable_table'], $key, 'nothing', $notes, $airtableId);
+        }
 
         return [
             ...$this->unit($action, $map['airtable_table'], $key, $problems !== [] ? 'blocked' : ($creating ? 'create' : 'update'), [...$problems, ...$notes], $airtableId),
@@ -385,7 +496,7 @@ final class PortalAirtableSync
                     // Deleted in Airtable while SQL still holds the row. SQL is the truth, so the row is
                     // sent again -- except where only changed columns are ever sent, which cannot rebuild it.
                     if (isset($map['changed_only'])) {
-                        return [...$unit, 'outcome' => 'blocked', 'problems' => [...$unit['problems'], 'Its Airtable record was deleted there; only changes are synced for this table, so it cannot be rebuilt.']];
+                        return [...$unit, 'outcome' => 'failed', 'problems' => [...$unit['problems'], 'Its Airtable record was deleted there; only changes are synced for this table, so it cannot be rebuilt.']];
                     }
                     DB::connection('portal')->table($map['sql_table'])
                         ->where('id', $rowId)
@@ -395,13 +506,18 @@ final class PortalAirtableSync
                 }
             }
 
-            if (! $this->retryCreates && str_contains((string) $action->last_error, self::UNCERTAIN_CREATE)) {
+            if (! $this->retryCreates && (str_contains((string) $action->last_error, self::UNCERTAIN_CREATE) || $this->heldOnRow($action, $map, (int) $rowId))) {
                 return [...$unit, 'outcome' => 'failed', 'problems' => [...$unit['problems'], self::UNCERTAIN_CREATE]];
+            }
+            // Marked before the call (2026-10-20): a run killed mid-create holds the row instead of creating
+            // it twice; settling the action replaces the mark either way.
+            if ($action->getKey() !== null) {
+                Action::query()->whereKey($action->getKey())->update(['last_error' => self::UNCERTAIN_CREATE]);
             }
             try {
                 $created = $this->airtable->create($unit['table'], $unit['fields']);
-            } catch (ConnectionException) {
-                return [...$unit, 'outcome' => 'failed', 'problems' => [...$unit['problems'], self::UNCERTAIN_CREATE]];
+            } catch (ConnectionException $error) {
+                return [...$unit, 'outcome' => 'failed', 'problems' => [...$unit['problems'], self::neverSent($error) ? $error->getMessage() : self::UNCERTAIN_CREATE]];
             }
             // Written back only onto a row still without one: a row that changed mid-run (an edit, a
             // delete, another run) must not end up pointing at a second record.
@@ -436,28 +552,60 @@ final class PortalAirtableSync
      */
     private function settle(Action $action, array $units): void
     {
-        $failed = array_filter($units, static fn (array $unit): bool => $unit['outcome'] === 'failed');
-        if ($failed !== []) {
-            $messages = array_merge(...array_map(static fn (array $unit): array => $unit['problems'], $failed));
-            Action::query()->whereKey($action->getKey())->update([
-                'attempts' => DB::raw('LEAST(attempts + 1, '.self::MAX_ATTEMPTS.')'),
-                'last_error' => mb_substr(implode(' | ', $messages), 0, 1000),
-            ]);
-
+        if ($units === []) {
             return;
         }
-
         $done = array_filter($units, static fn (array $unit): bool => in_array($unit['outcome'], self::LANDED, true));
-        if ($units !== [] && count($done) === count($units)) {
+        if (count($done) === count($units)) {
             Action::query()->whereKey($action->getKey())->update(['synced_at' => Carbon::now(), 'last_error' => null]);
 
             return;
         }
-        $waiting = array_filter($units, static fn (array $unit): bool => ! in_array($unit['outcome'], self::LANDED, true));
-        $reasons = array_merge(...array_map(static fn (array $unit): array => $unit['problems'], array_values($waiting)));
-        if ($reasons !== []) {
-            Action::query()->whereKey($action->getKey())->update(['last_error' => mb_substr(implode(' | ', $reasons), 0, 1000)]);
-        }
+
+        // Anything short of landing is a try (2026-10-20), so the scheduled run backs off a blocked or
+        // skipped row too, instead of planning it again every minute.
+        $waiting = array_values(array_filter($units, static fn (array $unit): bool => ! in_array($unit['outcome'], self::LANDED, true)));
+        $reasons = array_values(array_unique(array_merge(...array_map(static fn (array $unit): array => $unit['problems'], $waiting))));
+        // The lost-create hold leads, so a long message can never cut it off and re-arm a blind create.
+        usort($reasons, static fn (string $a, string $b): int => ($b === self::UNCERTAIN_CREATE) <=> ($a === self::UNCERTAIN_CREATE));
+        Action::query()->whereKey($action->getKey())->update([
+            'attempts' => DB::raw('LEAST(attempts + 1, '.self::MAX_ATTEMPTS.')'),
+            'attempted_at' => Carbon::now(),
+            'last_error' => $reasons === [] ? null : mb_substr(implode(' | ', $reasons), 0, 1000),
+        ]);
+    }
+
+    // cURL could not resolve, reach or shake hands with the host: the request never left, so nothing landed.
+    private static function neverSent(ConnectionException $error): bool
+    {
+        $previous = $error->getPrevious();
+        $errno = $previous instanceof ConnectException ? ($previous->getHandlerContext()['errno'] ?? null) : null;
+
+        return in_array($errno, [6, 7, 35], true);
+    }
+
+    /**
+     * Another unsynced action on this row holds a lost create: creating now could put a second record
+     * beside one that may already be there, so this waits for --retry-creates too (2026-10-20).
+     *
+     * @param  array{sql_table: string}  $map
+     */
+    private function heldOnRow(Action $action, array $map, int $rowId): bool
+    {
+        $resources = array_values(array_filter(
+            AirtableSyncMap::resources(),
+            static fn (string $resource): bool => (AirtableSyncMap::for($resource)['sql_table'] ?? null) === $map['sql_table'],
+        ));
+
+        return Action::query()
+            ->where('product', CoreLedger::PRODUCT_PORTAL)
+            ->whereNull('synced_at')
+            ->when($action->getKey() !== null, fn ($query) => $query->whereKeyNot($action->getKey()))
+            ->where('last_error', 'like', '%'.self::UNCERTAIN_CREATE.'%')
+            ->where(fn ($query) => $query
+                ->where(fn ($row) => $row->whereIn('resource', $resources)->where('record_id', (string) $rowId))
+                ->when($action->recycle_key !== null, fn ($row) => $row->orWhere('recycle_key', $action->recycle_key)))
+            ->exists();
     }
 
     /**

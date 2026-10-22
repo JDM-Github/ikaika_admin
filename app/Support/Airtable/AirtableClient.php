@@ -3,9 +3,11 @@
 namespace App\Support\Airtable;
 
 use Composer\CaBundle\CaBundle;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use RuntimeException;
 
 /**
@@ -103,7 +105,7 @@ final class AirtableClient
      * Airtable answers a missing record and a missing permission with the same 403, so whether a
      * record is really gone is asked with a read, which the token can make either way.
      */
-    private function exists(string $table, string $recordId): bool
+    public function exists(string $table, string $recordId): bool
     {
         // Only a well-formed id goes into the formula; anything else is never declared gone.
         if (preg_match('/^rec[A-Za-z0-9]{14}$/', $recordId) !== 1) {
@@ -121,7 +123,7 @@ final class AirtableClient
     private function send(string $method, string $path, array $payload = [], bool $returnNotFound = false): Response
     {
         for ($attempt = 1; $attempt <= 2; $attempt++) {
-            usleep(self::SPACING_MICROSECONDS);
+            Sleep::usleep(self::SPACING_MICROSECONDS);
             $response = match ($method) {
                 'get' => $this->request()->get(self::BASE_URL.$path),
                 'delete' => $this->request()->delete(self::BASE_URL.$path),
@@ -129,7 +131,7 @@ final class AirtableClient
             };
 
             if ($response->status() === 429 && $attempt === 1) {
-                sleep(self::LOCKOUT_SECONDS);
+                Sleep::sleep(self::LOCKOUT_SECONDS);
 
                 continue;
             }
@@ -137,6 +139,11 @@ final class AirtableClient
             // A missing record and a missing permission share these; the caller tells them apart.
             if ($returnNotFound && in_array($response->status(), [403, 404], true)) {
                 return $response;
+            }
+
+            // A gateway that gave up on a create may still have let it land: the caller holds it, never resends blind.
+            if ($method === 'post' && in_array($response->status(), [502, 504], true)) {
+                throw new ConnectionException('Airtable answered '.$response->status().' to a create; it may have landed.');
             }
 
             if ($response->failed()) {

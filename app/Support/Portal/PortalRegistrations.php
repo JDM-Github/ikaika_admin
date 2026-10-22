@@ -81,6 +81,7 @@ final class PortalRegistrations
         'addressBarangay' => 'max:120',
         'addressBarangayCode' => 'max:9',
         'addressStreet' => 'max:200',
+        'addressZip' => 'max:10',
         'emergencyContactCountry' => 'max:60',
         'emergencyContactProvince' => 'max:120',
         'emergencyContactProvinceCode' => 'max:9',
@@ -89,12 +90,13 @@ final class PortalRegistrations
         'emergencyContactBarangay' => 'max:120',
         'emergencyContactBarangayCode' => 'max:9',
         'emergencyContactStreet' => 'max:200',
+        'emergencyContactZip' => 'max:10',
     ];
 
     /** Each address's whole line, and the prefix its parts are sent under. */
     private const ADDRESSES = ['address' => 'address', 'emergencyContactAddress' => 'emergencyContact'];
 
-    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street'];
+    private const ADDRESS_PARTS = ['country', 'province', 'provinceCode', 'city', 'cityCode', 'barangay', 'barangayCode', 'street', 'zip'];
 
     /** What a submit must have, the old form's required set. */
     private const REQUIRED_DETAILS = [
@@ -321,9 +323,9 @@ final class PortalRegistrations
         $details = $this->detailsOf($row);
         $employee = $this->users->createEmployee($actor, [
             'id_no' => $idNo,
-            'first_name' => $this->text($details['firstName'] ?? null) ?? 'New',
-            'middle_name' => $this->text($details['middleName'] ?? null),
-            'last_name' => $this->text($details['lastName'] ?? null) ?? 'Employee',
+            'first_name' => PortalNameCase::proper($this->text($details['firstName'] ?? null)) ?? 'New',
+            'middle_name' => PortalNameCase::proper($this->text($details['middleName'] ?? null)),
+            'last_name' => PortalNameCase::proper($this->text($details['lastName'] ?? null)) ?? 'Employee',
             'nickname' => $this->text($details['nickname'] ?? null),
             'email' => $email,
             'personal_email' => strtolower(trim((string) $row->email)),
@@ -360,7 +362,7 @@ final class PortalRegistrations
             });
         }
         // Their files go to Cloudinary as their documents, the photo becoming their profile photo (2026-10-12, user).
-        $this->employeeDocuments->copyFromRegistration($employee, $id);
+        $this->employeeDocuments->copyFromRegistration($employee, $id, $actor);
         $this->audit->record($actor, PortalLogAction::INSERT, 'manage.onboarding', '{UserName|You} promoted '.trim((string) $row->candidate_name).' to employee '.$idNo, (string) $id, $request, ['idNo' => $idNo, 'department' => $department]);
 
         return ['employee' => [
@@ -561,9 +563,9 @@ final class PortalRegistrations
         }
 
         $record = [
-            'first_name' => $this->text($details['firstName'] ?? null),
-            'middle_name' => $this->text($details['middleName'] ?? null),
-            'last_name' => $this->text($details['lastName'] ?? null),
+            'first_name' => PortalNameCase::proper($this->text($details['firstName'] ?? null)),
+            'middle_name' => PortalNameCase::proper($this->text($details['middleName'] ?? null)),
+            'last_name' => PortalNameCase::proper($this->text($details['lastName'] ?? null)),
             'nickname' => $this->text($details['nickname'] ?? null),
             'email' => strtolower(trim((string) $row->email)),
             'start_date' => $this->text($details['startDate'] ?? null),

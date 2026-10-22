@@ -111,15 +111,17 @@ final class PortalPlaces
     /**
      * One address as sent, its parts already cleaned: in the Philippines each picked code must sit in
      * the one above it, and its name is the list's; elsewhere the typed names stand. The line is null
-     * until every part it needs is there -- in the Philippines a barangay too.
+     * until every part it needs is there -- in the Philippines a barangay too. A zip code, when given,
+     * follows the province ("Laguna 4027"), as the country's own addresses write it (2026-10-20, user).
      *
-     * @param  array<string, ?string>  $sent  country, province, provinceCode, city, cityCode, barangay, barangayCode, street
+     * @param  array<string, ?string>  $sent  country, province, provinceCode, city, cityCode, barangay, barangayCode, street, zip
      * @return array{parts: array<string, ?string>, line: ?string}
      */
     public function resolve(array $sent): array
     {
         $country = $sent['country'] ?? null;
         $street = $sent['street'] ?? null;
+        $zip = $sent['zip'] ?? null;
         if ($country === self::COUNTRY) {
             $province = $this->pick('psgc_provinces', $sent['provinceCode'] ?? null, null, null, 'Choose the province again.');
             $city = $this->pick('psgc_cities', $sent['cityCode'] ?? null, 'province_code', $province, 'Choose the city or municipality again; it is not in that province.');
@@ -130,6 +132,7 @@ final class PortalPlaces
                 'city' => $city?->name, 'cityCode' => $city?->code,
                 'barangay' => $barangay?->name, 'barangayCode' => $barangay?->code,
                 'street' => $street,
+                'zip' => $zip,
             ];
             $needed = [$parts['province'], $parts['city'], $parts['barangay'], $street];
         } else {
@@ -139,12 +142,15 @@ final class PortalPlaces
                 'city' => $sent['city'] ?? null, 'cityCode' => null,
                 'barangay' => $sent['barangay'] ?? null, 'barangayCode' => null,
                 'street' => $street,
+                'zip' => $zip,
             ];
             $needed = [$country, $parts['province'], $parts['city'], $street];
         }
         $isComplete = ! in_array(null, $needed, true);
         $line = $isComplete
-            ? implode(', ', array_filter([$street, $parts['barangay'], $parts['city'], $parts['province'], $country], static fn (?string $part): bool => $part !== null))
+            ? implode(', ', array_filter([
+                $street, $parts['barangay'], $parts['city'], trim(($parts['province'] ?? '').' '.($zip ?? '')), $country,
+            ], static fn (?string $part): bool => $part !== null && $part !== ''))
             : null;
 
         return ['parts' => $parts, 'line' => $line];

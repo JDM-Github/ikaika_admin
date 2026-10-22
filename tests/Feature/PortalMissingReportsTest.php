@@ -6,6 +6,7 @@ use App\Mail\PortalEmailMail;
 use App\Modules\Portal\Models\EmailMessage;
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalNotification;
+use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -84,7 +85,7 @@ class PortalMissingReportsTest extends TestCase
         $this->assertTrue($rows->has((string) $this->admin->getKey()));
         $this->assertFalse($rows->has((string) $this->outsider->getKey()));
         $this->assertSame(
-            ['employeeId', 'name', 'email', 'isAdmin', 'days', 'earlierDay'],
+            ['employeeId', 'name', 'email', 'isAdmin', 'days', 'earlierDay', 'reminders'],
             array_keys($rows[(string) $this->colleague->getKey()]),
         );
         $this->assertSame('member0@ikaika.test', $rows[(string) $this->colleague->getKey()]['email']);
@@ -131,6 +132,42 @@ class PortalMissingReportsTest extends TestCase
         // A past day is only fileable as a late report, so the bell opens that form.
         $notice = PortalNotification::query()->where('employee_id', $this->colleague->getKey())->latest('id')->firstOrFail();
         $this->assertSame('/reports/late-report', $notice->link_path);
+
+        // Marked on the page for that day (2026-10-21): the one emailed, never the one who had filed.
+        $marks = collect($this->read('?from=2020-06-01&to=2020-06-30')->json('data'))->keyBy('employeeId');
+        $this->assertSame('2020-06-10', $marks[(string) $this->colleague->getKey()]['reminders'][0]['day']);
+        $this->assertSame([], $marks[(string) $this->teammate->getKey()]['reminders']);
+    }
+
+    // The reported ask (2026-10-21): a reminder sent from the Email page marks who was emailed for its day.
+    public function test_a_reminder_sent_from_the_email_page_marks_who_was_emailed_for_its_day(): void
+    {
+        Mail::fake();
+        $headers = $this->headersFor($this->admin);
+        $draft = [
+            'category' => 'notice', 'subject' => 'Reminder', 'body' => 'Please file it.',
+            'audience' => 'members', 'memberIds' => [(string) $this->colleague->getKey()],
+        ];
+
+        $this->postJson('/api/development/portal/administration/emails', [...$draft, 'reminderFor' => '2020-06-10'], $headers)->assertCreated();
+
+        $rows = collect($this->read('?from=2020-06-01&to=2020-06-30')->json('data'))->keyBy('employeeId');
+        $marks = $rows[(string) $this->colleague->getKey()]['reminders'];
+        $this->assertCount(1, $marks);
+        $this->assertSame('2020-06-10', $marks[0]['day']);
+        $this->assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/', $marks[0]['sentAt']);
+        $this->assertSame(PortalSubmittedReportPresenter::memberName($this->admin->first_name, $this->admin->last_name), $marks[0]['sentBy']);
+        $this->assertSame([], $rows[(string) $this->teammate->getKey()]['reminders']);
+        // A month the reminder is not about lists none.
+        $july = collect($this->read('?from=2020-07-01&to=2020-07-31')->json('data'))->firstWhere('employeeId', (string) $this->colleague->getKey());
+        $this->assertSame([], $july['reminders']);
+
+        // An email that is no reminder marks nobody, and a day that does not exist is refused.
+        $this->postJson('/api/development/portal/administration/emails', $draft, $headers)->assertCreated();
+        $this->assertSame(1, DB::connection('portal')->table('report_reminders')->where('employee_id', $this->colleague->getKey())->count());
+        $this->postJson('/api/development/portal/administration/emails', [...$draft, 'reminderFor' => '2020-02-31'], $headers)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'That reminder names a day that does not exist.');
     }
 
     public function test_a_reminder_is_refused_outside_the_reach_on_a_weekend_ahead_or_for_nobody(): void

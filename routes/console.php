@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\EmailMessage;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\ApiPath;
@@ -35,11 +36,28 @@ Artisan::command('inspire', function () {
 Artisan::command('portal:airtable-sync
     {--send : Write to Airtable; without it nothing is written anywhere}
     {--check : Test every mapping against one real row each; writes nothing}
-    {--retry-creates : Send again the creates whose answer was lost, once you have checked Airtable holds none of them}', function (PortalAirtableSync $sync) {
+    {--retry-creates : Send again the creates whose answer was lost, once you have checked Airtable holds none of them}
+    {--backoff : Leave an action that keeps failing until its next turn (1, 2, 4 ... minutes after its last try, then six-hourly); the schedule passes it}
+    {--skip-through= : Settle every unsynced action up to this action id without sending it, e.g. what was recorded before an import; writes nothing to Airtable}', function (PortalAirtableSync $sync) {
     $send = (bool) $this->option('send');
     $check = (bool) $this->option('check');
-    // Two sends at once could land an older state over a newer one, so a send runs alone (2026-10-14).
-    $lock = $send ? Cache::lock('portal:airtable-sync', 3600) : null;
+    $backoff = (bool) $this->option('backoff');
+
+    $through = $this->option('skip-through');
+    if ($through !== null) {
+        if (! ctype_digit((string) $through)) {
+            $this->error('--skip-through takes an action id, the number after # in the dry run.');
+
+            return 1;
+        }
+        $this->info($sync->skipThrough((int) $through).' unsynced actions up to #'.$through.' settled without sending; nothing was written to Airtable.');
+
+        return 0;
+    }
+
+    // Two sends at once could land an older state over a newer one, so a send runs alone (2026-10-14). The lock
+    // outlasts the run's ten-minute budget, and a killed run frees it within fifteen minutes (2026-10-20).
+    $lock = $send ? Cache::lock('portal:airtable-sync', 900) : null;
     if ($lock !== null && ! $lock->get()) {
         $this->error('Another Airtable send is already running; nothing was sent.');
 
@@ -52,10 +70,23 @@ Artisan::command('portal:airtable-sync
     });
 
     try {
+        // An idle scheduled minute asks Airtable nothing (2026-10-20): a plan that counts calls is not spent on it.
+        if ($send && $backoff && ! $sync->hasDueWork(10)) {
+            $this->line('Nothing due.');
+
+            return 0;
+        }
+        // The wrong base would take every update as a deleted record and re-create it there (2026-10-20).
+        $wrongBase = $send || $check ? $sync->wrongBase() : null;
+        if ($wrongBase !== null) {
+            $this->error($wrongBase);
+
+            return 1;
+        }
         // An action younger than ten seconds waits a run: its portal row may still be committing.
         $report = $check
             ? ['items' => $sync->check(), 'counts' => null]
-            : $sync->run($send, 10, (bool) $this->option('retry-creates'));
+            : $sync->run($send, 10, (bool) $this->option('retry-creates'), backoff: $backoff, budgetSeconds: $send ? 600 : null);
     } catch (Throwable $error) {
         // Unreachable or misconfigured Airtable: a readable reason, never a stack trace or the token.
         $this->error('Airtable sync stopped: '.$error->getMessage().' Anything already sent is recorded; run it again to continue.');
@@ -65,10 +96,14 @@ Artisan::command('portal:airtable-sync
         $lock?->release();
     }
 
+    // When each action was recorded, in Manila time, so a dry run shows what came before an import.
+    $recorded = Action::query()->whereIn('id', array_unique(array_column($report['items'], 'actionId')))->pluck('created_at', 'id');
     foreach ($report['items'] as $item) {
+        $at = $recorded[$item['actionId']] ?? null;
         $this->line(sprintf(
-            '#%d  %-8s  %-22s  %-6s  record %-6s  -> %s%s',
+            '#%d  %s  %-8s  %-22s  %-6s  record %-6s  -> %s%s',
             $item['actionId'],
+            $at !== null ? $at->copy()->timezone('Asia/Manila')->format('Y-m-d H:i') : '-',
             strtoupper($item['outcome']),
             (string) $item['resource'],
             $item['actionType'],
@@ -87,6 +122,13 @@ Artisan::command('portal:airtable-sync
     $counts = $report['counts'];
     if ($counts === null) {
         return 0;
+    }
+    if ($report['stopped'] ?? false) {
+        $this->warn('Stopped after ten minutes so a run never outlives its lock; run it again to send the rest.');
+    }
+    // The schedule's output goes nowhere, so a send that did not land everything says so in the log.
+    if ($send && $counts['failed'] + $counts['blocked'] + $counts['skipped'] > 0) {
+        Log::warning('portal.airtable_sync.not_landed', $counts);
     }
     $this->newLine();
     $this->info(implode(' · ', array_map(
@@ -485,6 +527,9 @@ Schedule::command('portal:bitbucket-sync')->hourly()->withoutOverlapping();
 Schedule::command('portal:jira-sync')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();
 Schedule::command('portal:remind-missing-reports')->weekdays()->at('18:00')->timezone('Asia/Manila')->withoutOverlapping();
+// The Airtable sync, off until AIRTABLE_SYNC_SCHEDULED=true (2026-10-20). Every tick, so it follows the cron's cadence.
+Schedule::command('portal:airtable-sync --send --backoff')->everyMinute()->withoutOverlapping(15)->runInBackground()
+    ->when(fn (): bool => (bool) config('services.airtable.scheduled'));
 
 // The mail queue's worker. The server runs no daemon, so the minute cron starts one that leaves when the queue is
 // empty or after 55 s, before the next one starts; two that do meet cannot take the same job.

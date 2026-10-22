@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Portal\Manage;
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalBudgetEnvelopes;
+use App\Support\Portal\PortalBudgetPayors;
 use App\Support\Portal\PortalBudgetSetup;
 use App\Support\Portal\PortalBudgetTransactions;
 use App\Support\Portal\PortalBudgetTransfers;
@@ -18,7 +19,24 @@ class BudgetEnvelopesController extends Controller
         private readonly PortalBudgetSetup $setup,
         private readonly PortalBudgetTransfers $transfers,
         private readonly PortalBudgetTransactions $entries,
+        private readonly PortalBudgetPayors $payors,
     ) {}
+
+    // The payor list Add Transaction offers (2026-10-21): the ledger's names and the hand-kept ones.
+    public function payors(): JsonResponse
+    {
+        return response()->json($this->payors->list());
+    }
+
+    public function storePayor(Request $request): JsonResponse
+    {
+        return response()->json($this->payors->add($this->actor($request), $request), 201);
+    }
+
+    public function removePayor(Request $request): JsonResponse
+    {
+        return response()->json($this->payors->remove($this->actor($request), $request));
+    }
 
     public function index(): JsonResponse
     {

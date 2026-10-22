@@ -8,6 +8,8 @@ Target: the **Test Server** WordPress site on Bluehost. The API and the portal l
 | Health check | `https://test.ikaikabim.com/central-api/api/staging/portal/health` |
 | Portal (deployed from `ikaika-portal`) | `https://test.ikaikabim.com/portal` |
 
+Turning on the Airtable sync in production, and what it does when something fails: [AIRTABLE-SYNC.md](AIRTABLE-SYNC.md).
+
 ## Day to day
 
 From the repo root in PowerShell. Each is a toolkit command (`.\script.ps1 <command> -Help` says what it does) over the script in this folder, which still runs on its own as `deployment\<script>.ps1`:
@@ -150,7 +152,9 @@ ssh bluehost "bash ~/apps/test-server/scripts/apply-env.sh"
 
 **Email** goes through the WordPress bridge on ikaikabim.com (`MAIL_MAILER=wprelay`), the same as local. That route arrives in Outlook without the "can't verify sender" banner.
 
-**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_CLOUD_ID`, `JIRA_WEBHOOK_SECRET`, `JIRA_ISSUE_TYPE_BUG`, `JIRA_ISSUE_TYPE_FEATURE`, `JIRA_ISSUE_TYPE_FEEDBACK`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`, `PORTAL_ID_LOGIN_PASSWORD`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
+**Secret settings from your local `.env`:** `push-env.ps1` (also the first step of `deploy-all.ps1`) sends these keys and replaces any old line for each, so nothing is ever duplicated: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `BITBUCKET_TOKEN`, `BITBUCKET_WEBHOOK_SECRET`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_CLOUD_ID`, `JIRA_WEBHOOK_SECRET`, `JIRA_ISSUE_TYPE_BUG`, `JIRA_ISSUE_TYPE_FEATURE`, `JIRA_ISSUE_TYPE_FEEDBACK`, `JIRA_DEFAULT_TEAM`, `JIRA_FIELD_TEAM`, `JIRA_FIELD_START_DATE`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`, `OLLAMA_API_KEY`, `PORTAL_ID_LOGIN_PASSWORD`. Values go over SSH and are never printed; a key empty in your local `.env` is skipped, so it never blanks the server's. `MAIL_MAILER` is left out on purpose (the server keeps its own). A deploy alone never copies your local `.env`.
+
+Production: `push-env.ps1 -Prod -Keys KEY1,KEY2` sends only the keys you name to `~/apps/portal-prod` (it refuses without `-Keys`, because the default list holds the Test Server's Jira sandbox). To edit production's `.env` by hand and apply it: `ssh -t bluehost "nano ~/apps/portal-prod/.env"`, then `ssh bluehost "ROOT=~/apps/portal-prod bash ~/apps/portal-prod/scripts/apply-env.sh"`.
 
 - Cloudinary (email images, reimbursement receipts): until its keys are on the server, uploads answer "Image upload is not configured." / "Receipt upload is not configured.".
 - ID-number sign-in (Settings > Advanced switch) also needs `PORTAL_ID_LOGIN_PASSWORD`; until it is on the server, every ID sign-in is refused.

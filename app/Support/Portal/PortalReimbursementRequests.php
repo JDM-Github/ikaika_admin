@@ -53,6 +53,13 @@ final class PortalReimbursementRequests
 
     private const RECEIPT_TABLE = 'reimbursements';
 
+    /*
+     * The bank or e-wallet QR the member chose from their Profile (2026-10-21, user), copied onto the claim
+     * so a QR changed later never rewrites one already paid. One per claim, kept on its lowest item: an
+     * edit reuses ids from the lowest up, so that row stays. Its file_name holds the bank the admin reads.
+     */
+    private const PAYMENT_QR_FIELD = 'payment_qr';
+
     private const RECEIPT_CACHE_TTL_SECONDS = 3600;
 
     /** @var list<string> */
@@ -82,6 +89,7 @@ final class PortalReimbursementRequests
         private readonly PortalCloudinary $cloudinary,
         private readonly PortalAudit $audit,
         private readonly PortalCalendarEvents $calendar,
+        private readonly PortalPaymentQrs $paymentQrs,
     ) {}
 
     /**
@@ -128,6 +136,7 @@ final class PortalReimbursementRequests
     {
         $date = $this->validatedDate($request);
         $items = $this->validatedItems($actor, $request);
+        $paymentQr = $this->chosenPaymentQr($actor, $request);
         $employeeId = (int) $actor->getKey();
         $name = $this->memberName($actor);
         $createdAt = $this->timezone->now();
@@ -135,6 +144,7 @@ final class PortalReimbursementRequests
         $insertedIds = $this->ledger->within($this->connection(), function () use (
             $date,
             $items,
+            $paymentQr,
             $employeeId,
             $name,
             $createdAt,
@@ -160,6 +170,7 @@ final class PortalReimbursementRequests
                 $this->writeReceipt($id, $item['receipt']);
                 $ids[] = $id;
             }
+            $this->writePaymentQr($ids, $paymentQr);
 
             $this->ledgerItems(CoreActionType::ADD, $actor, $date, $ids);
 
@@ -229,6 +240,7 @@ final class PortalReimbursementRequests
         $rows = $this->ownPendingClaim($actor, $id);
         $date = $this->validatedDate($request);
         $items = $this->validatedItems($actor, $request);
+        $paymentQr = $this->chosenPaymentQr($actor, $request);
         $employeeId = (int) $actor->getKey();
         $name = $this->memberName($actor);
         $seed = $rows[0];
@@ -239,6 +251,7 @@ final class PortalReimbursementRequests
         $keptIds = $this->ledger->within($this->connection(), function () use (
             $date,
             $items,
+            $paymentQr,
             $employeeId,
             $name,
             $createdAt,
@@ -275,6 +288,9 @@ final class PortalReimbursementRequests
                 $this->writeReceipt($newId, $item['receipt']);
                 $kept[] = $newId;
             }
+
+            // Left out of the edit, the QR is taken off, as a receipt is.
+            $this->writePaymentQr([...$existingIds, ...$kept], $paymentQr);
 
             // Snapshot the dropped items before they go, so each leaves a delete the sync can archive.
             $removed = array_values(array_diff($existingIds, $kept));
@@ -560,6 +576,7 @@ final class PortalReimbursementRequests
         $ids = $rows->map(static fn (object $row): int => (int) $row->id)->all();
         $receipts = $this->attachmentsByRecordId($ids, self::RECEIPT_FIELD);
         $payouts = $this->payoutReceiptFieldsByItemId($ids);
+        $qrs = $this->paymentQrsByItemId($ids);
 
         $groups = [];
         foreach ($rows as $row) {
@@ -568,7 +585,7 @@ final class PortalReimbursementRequests
 
         $data = [];
         foreach ($groups as $group) {
-            $claim = $this->presentClaim($group, $actor, $receipts, $payouts);
+            $claim = $this->presentClaim($group, $actor, $receipts, $payouts, $qrs);
             if ($claim !== null) {
                 $data[] = $claim;
             }
@@ -614,6 +631,7 @@ final class PortalReimbursementRequests
             $actor,
             $this->attachmentsByRecordId($ids, self::RECEIPT_FIELD),
             $this->payoutReceiptFieldsByItemId($ids),
+            $this->paymentQrsByItemId($ids),
         );
     }
 
@@ -621,9 +639,10 @@ final class PortalReimbursementRequests
      * @param  list<object>  $rows
      * @param  array<int, object>  $receipts
      * @param  array<int, array{payoutReceiptName: ?string, payoutReceiptUrl: ?string, payoutReceiptMime: ?string, payoutReceiptThumbUrl: ?string}>  $payouts
+     * @param  array<int, array{bankLabel: string, fileUrl: string, mimeType: ?string}>  $qrs
      * @return array<string, mixed>|null
      */
-    private function presentClaim(array $rows, Employee $actor, array $receipts, array $payouts = []): ?array
+    private function presentClaim(array $rows, Employee $actor, array $receipts, array $payouts = [], array $qrs = []): ?array
     {
         if ($rows === []) {
             return null;
@@ -689,7 +708,27 @@ final class PortalReimbursementRequests
             'status' => self::rolledUpStatus($statuses),
             'approverRemarks' => $approverRemarks,
             'items' => $items,
+            'paymentQr' => self::claimPaymentQr($ids, $qrs),
         ];
+    }
+
+    /**
+     * The QR a claim carries, kept on its lowest item; null when the member chose none.
+     *
+     * @param  list<int>  $ids
+     * @param  array<int, array{bankLabel: string, fileUrl: string, mimeType: ?string}>  $qrs
+     * @return array{bankLabel: string, fileUrl: string, mimeType: ?string}|null
+     */
+    public static function claimPaymentQr(array $ids, array $qrs): ?array
+    {
+        sort($ids);
+        foreach ($ids as $id) {
+            if (isset($qrs[$id])) {
+                return $qrs[$id];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -1020,6 +1059,75 @@ final class PortalReimbursementRequests
     }
 
     /**
+     * The Profile QR the member chose for this claim (paymentQrId); none when the form sends none.
+     *
+     * @return array{bankLabel: string, fileUrl: string, sizeBytes: int, mimeType: string}|null
+     */
+    private function chosenPaymentQr(Employee $actor, Request $request): ?array
+    {
+        $id = trim((string) $request->input('paymentQrId', ''));
+        if ($id === '') {
+            return null;
+        }
+        $qr = $this->paymentQrs->own($actor, $id);
+        if ($qr === null) {
+            abort(422, 'That payment QR is no longer on your Profile. Choose another.');
+        }
+
+        return $qr;
+    }
+
+    /**
+     * @param  list<int>  $claimIds  every item of the claim, before and after an edit
+     * @param  array{bankLabel: string, fileUrl: string, sizeBytes: int, mimeType: string}|null  $qr
+     */
+    private function writePaymentQr(array $claimIds, ?array $qr): void
+    {
+        $this->connection()->table('attachments')
+            ->where('table_name', self::RECEIPT_TABLE)
+            ->where('field_name', self::PAYMENT_QR_FIELD)
+            ->whereIn('record_id', $claimIds)
+            ->delete();
+        if ($qr === null || $claimIds === []) {
+            return;
+        }
+
+        $this->connection()->table('attachments')->insert([
+            'table_name' => self::RECEIPT_TABLE,
+            'record_id' => min($claimIds),
+            'field_name' => self::PAYMENT_QR_FIELD,
+            'file_url' => $qr['fileUrl'],
+            'file_name' => $qr['bankLabel'],
+            'file_size_bytes' => $qr['sizeBytes'],
+            'mime_type' => $qr['mimeType'],
+        ]);
+    }
+
+    /**
+     * The payment QRs among a batch of items, by the item that holds them, shared with the approver
+     * queue so both read the same attachment.
+     *
+     * @param  list<int>  $ids
+     * @return array<int, array{bankLabel: string, fileUrl: string, mimeType: ?string}>
+     */
+    public function paymentQrsByItemId(array $ids): array
+    {
+        $qrs = [];
+        foreach ($this->attachmentsByRecordId($ids, self::PAYMENT_QR_FIELD) as $itemId => $row) {
+            $url = $this->text($row->file_url ?? null);
+            if ($url !== null) {
+                $qrs[$itemId] = [
+                    'bankLabel' => $this->text($row->file_name ?? null) ?? 'Payment QR',
+                    'fileUrl' => $url,
+                    'mimeType' => $this->text($row->mime_type ?? null),
+                ];
+            }
+        }
+
+        return $qrs;
+    }
+
+    /**
      * @param  array{fileName: string, fileUrl: string, sizeBytes: int, mimeType: string, cacheKey: ?string}|null  $receipt
      */
     private function writeReceipt(int $itemId, ?array $receipt): void
@@ -1332,7 +1440,7 @@ final class PortalReimbursementRequests
 
         $this->connection()->table('attachments')
             ->where('table_name', self::RECEIPT_TABLE)
-            ->where('field_name', self::RECEIPT_FIELD)
+            ->whereIn('field_name', [self::RECEIPT_FIELD, self::PAYMENT_QR_FIELD])
             ->whereIn('record_id', $ids)
             ->delete();
         $this->connection()->table('employees_reimbursements')->whereIn('reimbursement_id', $ids)->delete();

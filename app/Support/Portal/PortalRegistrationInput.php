@@ -8,7 +8,8 @@ namespace App\Support\Portal;
  * runs of space collapsed -- then held to its field's shape: names in letters, numbers in digits of
  * the length their ID carries, a SWIFT code as banks write one, a blood type from the list. Mashed
  * keys are refused too (2026-10-12): a letter three times running in a name, a number of one digit.
- * New Employee Data only ever receives plain text an HR reviewer can trust.
+ * New Employee Data only ever receives plain text an HR reviewer can trust. A name is written the
+ * company's way (2026-10-20, user): "JAYCRIS PAMINTUAN" is "Jaycris Pamintuan"; a nickname stays as typed.
  *
  * An address comes in parts since 2026-10-13 (user): its street, and -- outside the Philippines, where
  * nothing is picked from a list -- its province, city and barangay as typed. A start date is today or
@@ -28,6 +29,9 @@ final class PortalRegistrationInput
     private const NUMBER = 'number';
 
     private const SWIFT = 'swift';
+
+    // A zip or postal code (2026-10-20, user): the Philippines' four digits, or another country's own.
+    private const ZIP = 'zip';
 
     private const DATE = 'date';
 
@@ -64,11 +68,13 @@ final class PortalRegistrationInput
         'addressCity' => [self::TEXT, 'city'],
         'addressBarangay' => [self::TEXT, 'barangay'],
         'addressStreet' => [self::TEXT, 'house number and street'],
+        'addressZip' => [self::ZIP, 'zip code'],
         'emergencyContactCountry' => [self::TEXT, 'contact country'],
         'emergencyContactProvince' => [self::TEXT, 'contact province'],
         'emergencyContactCity' => [self::TEXT, 'contact city'],
         'emergencyContactBarangay' => [self::TEXT, 'contact barangay'],
         'emergencyContactStreet' => [self::TEXT, 'contact house number and street'],
+        'emergencyContactZip' => [self::ZIP, 'contact zip code'],
     ];
 
     /** The letters a full name must carry at least. */
@@ -132,6 +138,7 @@ final class PortalRegistrationInput
             self::PHONE => $this->phone($clean, $label, $rule[2] ?? 0, $rule[3] ?? 0),
             self::NUMBER => $this->number($clean, $label, $rule[2] ?? 0, $rule[3] ?? 0),
             self::SWIFT => $this->swift($clean),
+            self::ZIP => $this->zip($clean, $label),
             self::BLOOD => $this->bloodType($clean),
             default => $this->date($field, $clean, $label),
         };
@@ -161,7 +168,7 @@ final class PortalRegistrationInput
             abort(422, ucfirst($label).' needs at least '.self::MIN_LETTERS[$field].' letters.');
         }
 
-        return $value;
+        return $field === 'nickname' ? $value : (string) PortalNameCase::proper($value);
     }
 
     private function text(string $field, string $value, string $label): string
@@ -243,6 +250,16 @@ final class PortalRegistrationInput
         $code = strtoupper(str_replace(' ', '', $value));
         if (preg_match('/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/', $code) !== 1 || preg_match('/^(.)\1*$/', $code) === 1) {
             abort(422, 'Enter an 8 or 11 character SWIFT code, such as BNORPHMM.');
+        }
+
+        return $code;
+    }
+
+    private function zip(string $value, string $label): string
+    {
+        $code = strtoupper($value);
+        if (preg_match('/^[A-Z0-9][A-Z0-9 \-]{1,9}$/', $code) !== 1 || preg_match('/\d/', $code) !== 1) {
+            abort(422, ucfirst($label).' can only have letters, numbers, spaces and hyphens, such as 4027.');
         }
 
         return $code;

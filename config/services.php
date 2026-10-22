@@ -35,10 +35,12 @@ return [
         ],
     ],
 
-    // A token scoped to the TEST base only, so the portal sync cannot write to production.
+    // The local .env holds a token scoped to the TEST base only; production sets its own PROD token and base
+    // (deployment/AIRTABLE-SYNC.md). `scheduled` turns the minute sync on, once the first send was read.
     'airtable' => [
         'token' => env('AIRTABLE_TOKEN'),
         'base' => env('AIRTABLE_BASE_ID'),
+        'scheduled' => (bool) env('AIRTABLE_SYNC_SCHEDULED', false),
     ],
 
     // A read-only Bitbucket access token for MIS projects' code activity; it lives in .env alone.

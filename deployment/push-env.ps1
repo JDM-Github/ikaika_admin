@@ -22,10 +22,16 @@ param(
     # The target's home-relative work folder (its .env and scripts/). Test Server by default.
     [string]$RemoteDir = '~/apps/test-server',
     # The settings file to read; this repo's .env when left out.
-    [string]$EnvFile = ''
+    [string]$EnvFile = '',
+    # Production (~/apps/portal-prod). Needs -Keys: the default list carries the Test Server's Jira sandbox.
+    [switch]$Prod
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Prod) {
+    if (-not $PSBoundParameters.ContainsKey('Keys')) { throw '-Prod needs -Keys, e.g. -Keys JIRA_ISSUE_TYPE_FEATURE' }
+    $RemoteDir = '~/apps/portal-prod'
+}
 $remote  = $RemoteDir
 $envFile = if ($EnvFile) { $EnvFile } else { Join-Path (Split-Path $PSScriptRoot -Parent) '.env' }
 if (-not (Test-Path $envFile)) { throw "No .env at $envFile" }

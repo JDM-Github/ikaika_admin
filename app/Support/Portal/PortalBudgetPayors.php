@@ -1,0 +1,172 @@
+<?php
+
+namespace App\Support\Portal;
+
+use App\Modules\Portal\Models\Employee;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Finance / Transactions' payor list (2026-10-21, user): the names Add Transaction offers for a payor or
+ * payee, so the same one is picked rather than retyped.
+ *
+ * The list is every name the tracker's transactions already carry, plus the names added here by hand, less
+ * any taken off it. The one used or added most recently comes first, then the most used: the form shows
+ * only the first few until something is typed, so a name just added has to be among them to be picked
+ * again (2026-10-21, user). Taking a name off only hides it from the list: the transactions that carry it
+ * keep it, and adding it again brings it back. Names match without case, as the database compares them.
+ */
+final class PortalBudgetPayors
+{
+    public const TABLE = 'finance_payors';
+
+    public const MAX_NAME = 191;
+
+    public function __construct(
+        private readonly PortalBudgetEnvelopes $envelopes,
+        private readonly PortalBudgetLedger $ledger,
+        private readonly PortalBudgetInput $input,
+        private readonly PortalAudit $audit,
+    ) {}
+
+    /**
+     * @return array{section: string, resource: string, data: list<array{name: string, uses: int}>}
+     */
+    public function list(): array
+    {
+        $byKey = [];
+        foreach ($this->ledgerUses() as $name => $use) {
+            $byKey[mb_strtolower($name)] = ['name' => $name, 'uses' => $use['uses'], 'lastUsed' => $use['lastUsed']];
+        }
+        foreach ($this->rows() as $row) {
+            $key = mb_strtolower($row['name']);
+            if ($row['isHidden']) {
+                unset($byKey[$key]);
+
+                continue;
+            }
+            $byKey[$key] ??= ['name' => $row['name'], 'uses' => 0, 'lastUsed' => ''];
+            // Adding a name by hand counts as using it.
+            $byKey[$key]['lastUsed'] = max($byKey[$key]['lastUsed'], $row['dateUpdated']);
+        }
+
+        $data = array_values($byKey);
+        usort($data, static fn (array $left, array $right): int => [$right['lastUsed'], $right['uses'], mb_strtolower($left['name'])]
+            <=> [$left['lastUsed'], $left['uses'], mb_strtolower($right['name'])]);
+
+        return [
+            'section' => 'manage',
+            'resource' => 'budget-payors',
+            'data' => array_map(static fn (array $entry): array => ['name' => $entry['name'], 'uses' => $entry['uses']], $data),
+        ];
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: list<array{name: string, uses: int}>}
+     */
+    public function add(Employee $actor, Request $request): array
+    {
+        $name = $this->validatedName($request);
+        $this->keep($actor, $name, false);
+        $this->audit->record($actor, PortalLogAction::POST, 'manage.budget-payors', PortalActivityCopy::addedPayor($name), null, $request, ['name' => $name]);
+
+        return $this->list();
+    }
+
+    /**
+     * @return array{section: string, resource: string, data: list<array{name: string, uses: int}>}
+     */
+    public function remove(Employee $actor, Request $request): array
+    {
+        $name = $this->validatedName($request);
+        $this->keep($actor, $name, true);
+        $this->audit->record($actor, PortalLogAction::DELETE, 'manage.budget-payors', PortalActivityCopy::removedPayor($name), null, $request, ['name' => $name]);
+
+        return $this->list();
+    }
+
+    private function validatedName(Request $request): string
+    {
+        $name = $this->input->validatedName($request, 'Type the payor or payee to keep on the list.', 'The payor or payee');
+        if (mb_strlen($name) > self::MAX_NAME) {
+            abort(422, 'A payor or payee on the list cannot exceed '.self::MAX_NAME.' characters.');
+        }
+
+        return $name;
+    }
+
+    // One row per name: adding or taking off again only flips whether it is hidden.
+    private function keep(Employee $actor, string $name, bool $isHidden): void
+    {
+        DB::connection('portal')->table(self::TABLE)->upsert(
+            [[
+                'name' => $name,
+                'is_hidden' => $isHidden,
+                'updated_by' => (int) $actor->getKey(),
+                'date_updated' => Carbon::now('UTC')->toDateTimeString(),
+            ]],
+            ['name'],
+            ['is_hidden', 'updated_by', 'date_updated'],
+        );
+    }
+
+    /**
+     * How many transactions carry each payor or payee, and when one last did, by the spelling the database
+     * groups them under. Nothing when the tracker is switched off here or cannot be read: the hand-kept names
+     * still show. Both stamps are UTC, as the ledger writes them.
+     *
+     * @return array<string, array{uses: int, lastUsed: string}>
+     */
+    private function ledgerUses(): array
+    {
+        if (! $this->envelopes->isAvailable()) {
+            return [];
+        }
+        try {
+            $rows = $this->ledger->connection()
+                ->table('transactions')
+                ->whereNotNull('payor_payee')
+                ->where('payor_payee', '!=', '')
+                ->groupBy('payor_payee')
+                ->select('payor_payee')
+                ->selectRaw('COUNT(*) AS uses')
+                ->selectRaw('MAX(COALESCE(created_at, transaction_date)) AS last_used')
+                ->get();
+        } catch (QueryException) {
+            return [];
+        }
+
+        $uses = [];
+        foreach ($rows as $row) {
+            $name = trim((string) $row->payor_payee);
+            if ($name !== '') {
+                $uses[$name] = [
+                    'uses' => ($uses[$name]['uses'] ?? 0) + (int) $row->uses,
+                    'lastUsed' => max($uses[$name]['lastUsed'] ?? '', (string) ($row->last_used ?? '')),
+                ];
+            }
+        }
+
+        return $uses;
+    }
+
+    /**
+     * @return list<array{name: string, isHidden: bool, dateUpdated: string}>
+     */
+    private function rows(): array
+    {
+        try {
+            return DB::connection('portal')->table(self::TABLE)->get(['name', 'is_hidden', 'date_updated'])
+                ->map(static fn (object $row): array => [
+                    'name' => trim((string) $row->name),
+                    'isHidden' => (bool) $row->is_hidden,
+                    'dateUpdated' => (string) ($row->date_updated ?? ''),
+                ])
+                ->all();
+        } catch (QueryException) {
+            return [];
+        }
+    }
+}

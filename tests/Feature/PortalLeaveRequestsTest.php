@@ -334,20 +334,45 @@ class PortalLeaveRequestsTest extends TestCase
         $this->assertSame([$date], $list->json('reportedDays'));
     }
 
-    public function test_a_day_already_gone_cannot_be_asked_for(): void
+    // The reported ask (2026-10-21): a day missed in the last week can be filed, an older one cannot.
+    public function test_leave_reaches_a_week_back_and_no_further(): void
     {
         $actor = $this->activeMember();
         $token = $this->loginToken($actor);
-        $yesterday = Carbon::today()->subDay()->toDateString();
+        $tooOld = Carbon::today()->subDays(8)->toDateString();
 
         $this->withToken($token)->postJson('/api/development/portal/requests/leave', [
             'leaveType' => '02 Sick Leave',
-            'startDate' => $yesterday,
-            'endDate' => $yesterday,
+            'startDate' => $tooOld,
+            'endDate' => $tooOld,
             'reason' => 'Down with the flu',
         ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Leave starts today or later.');
+            ->assertJsonPath('message', 'Leave can start no more than 7 days back.');
+
+        // The latest weekday in the last week, cleared of this person's report and requests for the test.
+        $offset = 1;
+        while (Carbon::today()->subDays($offset)->isWeekend()) {
+            $offset++;
+        }
+        $missed = Carbon::today()->subDays($offset)->toDateString();
+        $reports = DB::connection('portal')->table('user_reports')
+            ->join('employees_user_reports', 'employees_user_reports.user_report_id', '=', 'user_reports.id')
+            ->where('employees_user_reports.employee_id', $actor->getKey())
+            ->where('user_reports.report_date', $missed)
+            ->pluck('user_reports.id');
+        DB::connection('portal')->table('employees_user_reports')->whereIn('user_report_id', $reports)->delete();
+        DB::connection('portal')->table('requests')
+            ->whereRaw('LOWER(TRIM(name)) = ?', [strtolower($this->memberName($actor))])
+            ->where('request_date', $missed)
+            ->delete();
+
+        $this->withToken($token)->postJson('/api/development/portal/requests/leave', [
+            'leaveType' => '02 Sick Leave',
+            'startDate' => $missed,
+            'endDate' => $missed,
+            'reason' => 'Down with the flu',
+        ])->assertCreated();
     }
 
     public function test_a_pending_request_can_be_edited_and_a_decided_one_cannot(): void

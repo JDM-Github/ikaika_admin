@@ -468,6 +468,33 @@ class PortalBudgetMovementsTest extends TestCase
         $this->assertSame(0, $tracker->table('transactions_budget_codes')->where('transaction_id', $plain)->count());
     }
 
+    // The reported ask (2026-10-21): a code chosen first is kept where the envelope holds money under it.
+    public function test_a_chosen_budget_code_is_kept_where_the_envelope_was_credited_under_it(): void
+    {
+        $tracker = DB::connection('tracker');
+        $account = $this->account('Seeded Chosen Account', 'chosen.seeded@example.test', 500.00);
+        $funder = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-MOVE-FUNDER']);
+        $stranger = (int) $tracker->table('budget_codes')->insertGetId(['name' => 'SEED-MOVE-STRANGER']);
+        // Credited under a code it was never linked to, as Airtable's credits were.
+        $envelope = $this->envelope('Seeded Funded Envelope', 300.00);
+        $credit = (int) $tracker->table('transactions_envelopes')->where('envelope_id', $envelope)->value('transaction_id');
+        $tracker->table('transactions_budget_codes')->insert(['transaction_id' => $credit, 'budget_code_id' => $funder]);
+
+        $listed = collect($this->getJson(self::BASE.'budget-codes', $this->admin())->assertOk()->json('data'))->firstWhere('id', (string) $funder);
+        $this->assertSame([(string) $envelope], $listed['fundedEnvelopeIds']);
+
+        $id = (int) $this->addTransaction([
+            'type' => 'Expense', 'name' => 'Coded spend', 'amount' => 100, 'envelopeId' => $envelope, 'accountId' => $account, 'budgetCodeId' => $funder,
+        ])->assertCreated()->json('data.id');
+        $this->assertSame([$funder], $tracker->table('transactions_budget_codes')->where('transaction_id', $id)->pluck('budget_code_id')->map(fn ($code) => (int) $code)->all());
+
+        // A code it holds nothing under is not taken: the line keeps the envelope's own, here none.
+        $stray = (int) $this->addTransaction([
+            'type' => 'Expense', 'name' => 'Stray spend', 'amount' => 10, 'envelopeId' => $envelope, 'accountId' => $account, 'budgetCodeId' => $stranger,
+        ])->assertCreated()->json('data.id');
+        $this->assertSame(0, $tracker->table('transactions_budget_codes')->where('transaction_id', $stray)->count());
+    }
+
     public function test_a_member_reaches_none_of_the_money_routes(): void
     {
         $headers = ['Authorization' => 'Bearer '.$this->loginToken($this->activeMember())];
@@ -616,7 +643,7 @@ class PortalBudgetMovementsTest extends TestCase
         $transfer = DB::connection('tracker')->table('transactions')->where('transaction_name', 'Expense - Envelope Transfer')->orderByDesc('id')->first();
         $this->patchJson(self::BASE.'budget-transactions/'.$transfer->id, ['name' => 'Renamed', 'occurredOn' => '2026-10-06'], $this->admin())
             ->assertStatus(422)
-            ->assertJsonPath('message', 'This line was written by a transfer, an allocation, funds received or an approval. Change it where it was made.');
+            ->assertJsonPath('message', 'This line was written by a transfer, an allocation or an approval. Change it where it was made.');
         Cache::flush();
         $this->assertFalse(collect($this->getJson(self::BASE.'budget-transactions', $this->admin())->json('data'))->firstWhere('id', (string) $transfer->id)['isEditable']);
         $this->patchJson(self::BASE.'budget-transactions/999999999', ['name' => 'x', 'occurredOn' => '2026-10-06'], $this->admin())->assertNotFound();
@@ -672,6 +699,41 @@ class PortalBudgetMovementsTest extends TestCase
         $this->patchJson(self::BASE.'budget-transactions/'.$income->id, ['name' => 'Refund', 'occurredOn' => '2026-10-06', 'amount' => 100], $admin)
             ->assertStatus(422)
             ->assertJsonPath('message', 'Seeded Amount Envelope has only ₱10.00 left. Confirm to go past it.');
+    }
+
+    // The reported ask (2026-10-21): Funds Received is one line into one account, so it is edited, but only its amount
+    // and day; it cannot come down past what the account has not yet allocated.
+    public function test_funds_received_edits_only_its_amount_and_day_and_never_drops_below_what_is_unallocated(): void
+    {
+        $account = $this->account('Seeded Received Account', 'received.seeded@example.test', 0.00);
+        $admin = $this->admin();
+        $this->postJson(self::BASE.'budget-accounts/'.$account.'/funds', ['amount' => 1000, 'receivedOn' => '2026-10-07', 'notes' => 'Quarterly allotment'], $admin)->assertCreated();
+        $row = $this->lastRowOf($account);
+        $edit = fn (array $fields) => $this->patchJson(self::BASE.'budget-transactions/'.$row->id, [
+            'name' => 'Renamed', 'occurredOn' => '2026-10-08', 'notes' => 'Corrected', 'payorPayee' => 'Someone', 'removeReceipt' => true, ...$fields,
+        ], $admin);
+
+        Cache::flush();
+        $listed = collect($this->getJson(self::BASE.'budget-transactions', $admin)->assertOk()->json('data'))->keyBy('id');
+        $this->assertTrue($listed[(string) $row->id]['isEditable']);
+        $this->assertTrue($listed[(string) $row->id]['isFundsReceived']);
+
+        // Its name, payor and notes stay whatever else is sent.
+        $edit(['amount' => 1200])->assertOk()->assertJsonPath('data.name', 'Funds Received');
+        $edited = DB::connection('tracker')->table('transactions')->where('id', $row->id)->first();
+        $this->assertSame('Funds Received', $edited->transaction_name);
+        $this->assertSame('Quarterly allotment', $edited->description);
+        $this->assertNull($edited->payor_payee);
+        $this->assertSame('2026-10-08', substr((string) $edited->transaction_date, 0, 10));
+        $this->assertEqualsWithDelta(1200.00, $this->accountRemaining($account), 0.001);
+
+        // With 900 already spent from the account, the line can come down by the 300 still free and no more.
+        $this->spendFromAccount($account, 900.00);
+        $edit(['amount' => 200])->assertStatus(422)
+            ->assertJsonPath('message', 'This account has only ₱300.00 not yet allocated, so this can come down by no more than that. Move money back from its envelopes first.');
+        $this->assertEqualsWithDelta(1200.00, (float) DB::connection('tracker')->table('transactions')->where('id', $row->id)->value('amount'), 0.001);
+        $edit(['amount' => 900])->assertOk();
+        $this->assertEqualsWithDelta(0.00, $this->accountRemaining($account), 0.001);
     }
 
     public function test_with_the_tracker_switched_off_nothing_moves(): void

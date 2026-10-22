@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Mail\PortalEmailMail;
+use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalEmailMarkup;
 use App\Support\Portal\PortalEmployeeIdCards;
@@ -413,6 +414,16 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame('Liza Mae', $saved['firstName']);
         $this->assertSame('BNORPHMM', $saved['bankSwiftCode']);
 
+        // Names are written the company's way (2026-10-20, user); a nickname stays as typed.
+        $named = $this->withToken($session)->patchJson(self::REGISTER.'/details', ['middleName' => ' CRUZ ', 'lastName' => '  dela  REYES-santos ', 'nickname' => 'LIZ'])
+            ->assertOk()->json('data.details');
+        $this->assertSame(['Cruz', 'Dela Reyes-Santos', 'LIZ'], [$named['middleName'], $named['lastName'], $named['nickname']]);
+
+        // A zip code beside the street (2026-10-20, user): kept in capitals, and refused when it is not one.
+        $this->assertSame('4027', $this->withToken($session)->patchJson(self::REGISTER.'/details', ['addressZip' => ' 4027 '])->assertOk()->json('data.details.addressZip'));
+        $this->withToken($session)->patchJson(self::REGISTER.'/details', ['addressZip' => 'zip!'])
+            ->assertStatus(422)->assertJsonPath('message', 'Zip code can only have letters, numbers, spaces and hyphens, such as 4027.');
+
         // A refused save changes nothing.
         $this->withToken($session)->patchJson(self::REGISTER.'/details', ['firstName' => 'Liza2'])
             ->assertStatus(422)
@@ -687,9 +698,15 @@ class PortalOnboardingTest extends TestCase
         $plain = $this->plainAdminToken();
         $id = $this->submittedRegistration($plain);
         $head = $this->headAdminToken();
+        $mark = (int) Action::query()->max('id');
         $employeeId = (int) $this->withToken($head)->postJson(self::BASE.'/'.$id.'/promote', [
             'idNo' => '991231-9011', 'email' => 'liza.reyes@ikaikabim.test', 'department' => 'MIS',
         ])->assertOk()->json('data.employee.id');
+        // The copies are ledgered, so the Airtable sync sends them even when it ran before they landed (2026-10-20).
+        $this->assertSame(
+            ['bank_certificate', 'hdmf_id', 'philhealth_id', 'photo', 'signature', 'ss_id', 'tax_identification'],
+            $this->ledgeredEmployeeChange($employeeId, $mark)['slots'],
+        );
 
         // Each file under the field Airtable gives it, as every employee's documents are kept.
         $this->assertEqualsCanonicalizing(
@@ -764,6 +781,7 @@ class PortalOnboardingTest extends TestCase
         $documents = '/api/development/portal/manage/users/'.$employeeId.'/documents';
         $put = fn (string $field, string $name, string $content) => $this->withToken($head)
             ->post($documents, ['field' => $field, 'file' => $this->upload($name, $content)], ['Accept' => 'application/json']);
+        $mark = (int) Action::query()->max('id');
 
         // A signature is a slot of its own, and a new photo replaces the old one.
         $profile = $put('signature', 'signature.png', $this->png())->assertCreated()->json('data');
@@ -799,6 +817,8 @@ class PortalOnboardingTest extends TestCase
         $this->withToken($head)->deleteJson($documents.'/'.$signatureId)->assertNotFound();
         $this->assertTrue(DB::connection('portal')->table('logs')->where('record_id', (string) $employeeId)
             ->where('message', 'like', '%changed the documents of%')->exists());
+        // Each upload and removal is ledgered with its slot; refused ones are not (2026-10-20).
+        $this->assertSame(['bank_certificate', 'photo', 'signature', 'tax_identification'], $this->ledgeredEmployeeChange($employeeId, $mark)['slots']);
 
         // Without Edit employee information, nothing changes.
         $photoId = (int) DB::connection('portal')->table('attachments')
@@ -961,8 +981,10 @@ class PortalOnboardingTest extends TestCase
         $this->assertSame([], $this->cloudinaryFields($employeeId));
 
         $this->fakeCloudinary();
+        $mark = (int) Action::query()->max('id');
         $this->artisan('portal:copy-registration-documents')->expectsOutputToContain('copied')->assertExitCode(0);
         $this->assertCount(7, $this->cloudinaryFields($employeeId));
+        $this->assertCount(7, $this->ledgeredEmployeeChange($employeeId, $mark)['slots']);
     }
 
     public function test_a_document_downloads_for_an_admin_and_never_for_a_member(): void

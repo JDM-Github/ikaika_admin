@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\Employee;
 use App\Support\Portal\PortalNotificationType;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -124,7 +125,13 @@ class PortalProfileChangesTest extends TestCase
         $waiting = collect($this->withToken($headSession)->getJson(self::CHANGES)->assertOk()->json('data.items'))->firstWhere('id', $asked['id']);
         $this->assertSame((string) $member->getKey(), $waiting['employee']['id']);
 
+        $mark = (int) Action::query()->max('id');
         $this->withToken($headSession)->patchJson(self::CHANGES.'/'.$asked['id'], ['decision' => 'approve'])->assertOk();
+        // The approval is ledgered, so the Airtable sync sends the details and both slots (2026-10-20).
+        $this->assertSame(
+            ['columns' => ['blood_type', 'phone_number'], 'slots' => ['ss_id', 'tax_identification']],
+            $this->ledgeredEmployeeChange((int) $member->getKey(), $mark),
+        );
         $after = $this->record($member);
         $this->assertSame('AB+', $after['blood_type']);
         $this->assertSame('09171234567', $after['phone_number']);
@@ -193,7 +200,7 @@ class PortalProfileChangesTest extends TestCase
         $session = $this->token($member);
 
         $places = $this->withToken($session)->getJson(self::MINE)->assertOk()->json('data.addressPlaces');
-        $this->assertSame(['provinceCode' => '043400000', 'cityCode' => '043405000', 'barangayCode' => '043405020'], $places['address']);
+        $this->assertSame(['provinceCode' => '043400000', 'cityCode' => '043405000', 'barangayCode' => '043405020', 'zip' => null], $places['address']);
         $this->assertNull($places['emergencyContactAddress']);
 
         $this->assertContains(['code' => '043400000', 'name' => 'Laguna'], $this->withToken($session)->getJson('/api/development/portal/user/places/provinces')->assertOk()->json('data'));
@@ -210,13 +217,13 @@ class PortalProfileChangesTest extends TestCase
 
         $pending = $this->withToken($session)->post(self::MINE.'/changes', [
             'addressCountry' => 'Philippines', 'addressProvinceCode' => '043400000', 'addressCityCode' => '043405000',
-            'addressBarangayCode' => '043405020', 'addressStreet' => '12 Rizal Street',
+            'addressBarangayCode' => '043405020', 'addressStreet' => '12 Rizal Street', 'addressZip' => '4027',
             'emergencyContactCountry' => 'Japan', 'emergencyContactProvince' => 'Tokyo', 'emergencyContactCity' => 'Shinjuku',
             'emergencyContactStreet' => '3-1 Nishi-Shinjuku',
         ], ['Accept' => 'application/json'])->assertCreated()->json('data.pending');
         $asked = $pending['fields'];
 
-        $this->assertContains(['key' => 'address', 'from' => '377 Chipeco Avenue, Barangay Lecheria, Calamba City, Laguna', 'to' => '12 Rizal Street, Lecheria, City of Calamba, Laguna, Philippines'], $asked);
+        $this->assertContains(['key' => 'address', 'from' => '377 Chipeco Avenue, Barangay Lecheria, Calamba City, Laguna', 'to' => '12 Rizal Street, Lecheria, City of Calamba, Laguna 4027, Philippines'], $asked);
         $this->assertContains(['key' => 'emergencyContactAddress', 'from' => null, 'to' => '3-1 Nishi-Shinjuku, Shinjuku, Tokyo, Japan'], $asked);
 
         // The reported ask (2026-10-19): once approved, their home on the map moves to the new address, and stays theirs.
@@ -303,8 +310,11 @@ class PortalProfileChangesTest extends TestCase
         $nathaniel = $this->employee("id_no = '".self::NATHANIEL."'");
         $steven = $this->employee("id_no = '".self::STEVEN."'");
         $kept = $this->attachment($nathaniel, 'tax_identification');
+        // A change of theirs already waiting on this database is set aside for the test, undone after it.
+        DB::connection('portal')->table('employee_change_requests')->where('employee_id', (int) $nathaniel->getKey())->where('status', 'Pending')->update(['status' => 'Withdrawn']);
         $session = $this->token($nathaniel);
         $this->assertTrue($this->withToken($session)->getJson(self::MINE)->assertOk()->json('data.approvesOwn'));
+        $mark = (int) Action::query()->max('id');
 
         $mine = $this->withToken($session)->post(self::MINE.'/changes', [
             'bloodType' => 'AB+',
@@ -315,6 +325,7 @@ class PortalProfileChangesTest extends TestCase
         $this->assertNull($mine['pending']);
         $this->assertSame('Approved', $mine['lastDecision']['status']);
         $this->assertSame('AB+', $this->record($nathaniel)['blood_type']);
+        $this->assertSame(['columns' => ['blood_type'], 'slots' => ['ss_id', 'tax_identification']], $this->ledgeredEmployeeChange((int) $nathaniel->getKey(), $mark));
         $this->assertSame(1, $this->files($nathaniel, 'ss_id'));
         $this->assertFalse(DB::connection('portal')->table('attachments')->where('id', $kept)->exists());
         $row = DB::connection('portal')->table('employee_change_requests')->where('employee_id', (int) $nathaniel->getKey())->orderByDesc('id')->first();
@@ -328,6 +339,18 @@ class PortalProfileChangesTest extends TestCase
         ]);
         $this->withToken($session)->patchJson(self::CHANGES.'/'.$waiting, ['decision' => 'approve'])->assertOk();
         $this->assertSame('B+', $this->record($nathaniel)['blood_type']);
+    }
+
+    // Edit profile (2026-10-20): it sits under User, which executives never hold, so they still edit as before.
+    public function test_an_executive_edits_their_profile_without_holding_user(): void
+    {
+        $executive = $this->employee("LOWER(COALESCE(role_level, '')) = 'executive'");
+        DB::connection('portal')->table('employee_change_requests')->where('employee_id', (int) $executive->getKey())->where('status', 'Pending')->update(['status' => 'Withdrawn']);
+        $session = $this->token($executive);
+
+        $this->assertTrue($this->withToken($session)->getJson(self::MINE)->assertOk()->json('data.canEdit'));
+        $this->withToken($session)->post(self::MINE.'/changes', ['bloodType' => 'AB+'], ['Accept' => 'application/json'])
+            ->assertSuccessful();
     }
 
     private function employee(string $where): Employee

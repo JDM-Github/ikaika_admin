@@ -72,6 +72,8 @@ class WorkspaceWriteTest extends TestCase
         // A logical target the sync can map in any environment, plus the flat new-value map.
         $this->assertSame('portal.projects', $action->database_target);
         $this->assertSame(['project_name' => $after], $action->parameters['parameters']['fields']);
+        // Named as a list too, which survives the ledger stripping bank and government keys (2026-10-20).
+        $this->assertSame(['project_name'], $action->parameters['parameters']['columns']);
     }
 
     public function test_a_value_that_did_not_move_writes_nothing_and_logs_nothing(): void

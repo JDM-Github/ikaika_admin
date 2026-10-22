@@ -44,6 +44,22 @@ final class PortalManageUsers
     // Edit employee information (2026-10-12): the private details, held by those who may see them.
     private const INFORMATION_EDIT_RULE = 'manage.users.information.edit';
 
+    /** Edit details (2026-10-20, user): the record's own fields the Details block shows, by the key the portal sends. */
+    private const DETAIL_COLUMNS = [
+        'firstName' => 'first_name',
+        'middleName' => 'middle_name',
+        'lastName' => 'last_name',
+        'nickname' => 'nickname',
+        'jobTitle' => 'job_title',
+        'email' => 'email',
+        'location' => 'location',
+        'employmentStatus' => 'employment_status',
+        'startDate' => 'start_date',
+    ];
+
+    /** The employment statuses a record carries, as Airtable's Employment Status select holds them. */
+    private const EMPLOYMENT_STATUSES = ['Probation', 'Regular', 'Resigned', 'Terminated'];
+
     /** The private details it changes, by the key the profile sends them under. */
     private const INFORMATION_COLUMNS = [
         'dateOfBirth' => 'date_of_birth',
@@ -142,7 +158,7 @@ final class PortalManageUsers
                 if ($employee instanceof Employee) {
                     $rows[] = [
                         ...PortalManageUserPresenter::rosterItem($employee),
-                        'canEditAccess' => $graph->canManage($viewerId, (int) $employee->getKey()),
+                        'canEditAccess' => $graph->canManage($viewerId, (int) $employee->getKey()) || $graph->headOnly($viewerId, (int) $employee->getKey()),
                         'canChangeStatus' => $holdsStatus && $this->statusRefusal($viewerId, $employee, $holdsPeers) === null,
                     ];
                 }
@@ -305,8 +321,8 @@ final class PortalManageUsers
         if ($reach !== 'all' && $reach !== 'department') {
             abort(403, 'Adding someone needs Users at your department or every department.');
         }
-        $firstName = self::text($data['firstName']);
-        $lastName = self::text($data['lastName']);
+        $firstName = PortalNameCase::proper(self::text($data['firstName']));
+        $lastName = PortalNameCase::proper(self::text($data['lastName']));
         if ($firstName === null || $lastName === null) {
             abort(422, 'Give the first and last name.');
         }
@@ -326,7 +342,7 @@ final class PortalManageUsers
         $employee = $this->createEmployee($actor, [
             'id_no' => $idNo,
             'first_name' => $firstName,
-            'middle_name' => self::text($data['middleName'] ?? null),
+            'middle_name' => PortalNameCase::proper(self::text($data['middleName'] ?? null)),
             'last_name' => $lastName,
             'email' => $email,
             'job_title' => self::text($data['jobTitle'] ?? null),
@@ -421,6 +437,94 @@ final class PortalManageUsers
     }
 
     /**
+     * Edit details (2026-10-20, user): someone's name, nickname, job title, work email, location,
+     * employment status and start date, by whoever may edit employee information, never an executive's.
+     * Names are written the company's way, only what changed is saved, and the Airtable sync carries it.
+     * The ID No. and the department keep their own ways.
+     *
+     * @return array{section: string, resource: string, data: array<string, mixed>}
+     */
+    public function updateDetails(Employee $actor, int $id, Request $request): array
+    {
+        $target = $this->inReach($actor, $id, $request);
+        if (! $this->mayEditDetails($actor, $target, $request)) {
+            abort(403, 'An executive\'s details cannot be changed here.');
+        }
+        /** @var array<string, string|null> $data */
+        $data = $request->validate([
+            'firstName' => ['sometimes', 'required', 'string', 'max:100'],
+            'middleName' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'lastName' => ['sometimes', 'required', 'string', 'max:100'],
+            'nickname' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'jobTitle' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'email' => ['sometimes', 'required', 'string', 'email', 'max:255'],
+            'location' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'employmentStatus' => ['sometimes', 'nullable', 'string', Rule::in(self::EMPLOYMENT_STATUSES)],
+            'startDate' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
+        ], [], ['firstName' => 'first name', 'lastName' => 'last name', 'jobTitle' => 'job title', 'email' => 'work email', 'employmentStatus' => 'employment status', 'startDate' => 'start date']);
+
+        // The names are held to the registration's own rules, and come back written the company's way.
+        $names = $this->input->cleaned(array_intersect_key($data, array_flip(['firstName', 'middleName', 'lastName', 'nickname'])));
+        $changes = [];
+        foreach ($data as $key => $value) {
+            $column = self::DETAIL_COLUMNS[$key];
+            $next = array_key_exists($key, $names) ? self::text($names[$key]) : self::text($value);
+            if ($key === 'email' && $next !== null) {
+                $next = strtolower($next);
+                if (Employee::query()->whereKeyNot($target->getKey())->whereRaw('LOWER(TRIM(email)) = ?', [$next])->exists()) {
+                    abort(422, 'Someone already has that email address.');
+                }
+            }
+            $current = $target->getAttribute($column);
+            $previous = $key === 'startDate'
+                ? ($current === null ? null : substr((string) $target->getRawOriginal($column), 0, 10))
+                : self::text(is_string($current) ? $current : null);
+            if ($previous !== $next) {
+                $changes[$column] = ['from' => $previous, 'to' => $next];
+                $target->setAttribute($column, $next);
+            }
+        }
+
+        if ($changes !== []) {
+            $this->ledger->within($target->getConnection(), function () use ($target, $actor, $changes): void {
+                $target->save();
+                $this->ledger->recordEdit(
+                    CoreLedger::PRODUCT_PORTAL,
+                    CoreLedger::PRODUCT_PORTAL.'.employees',
+                    [
+                        'table' => 'employees',
+                        'key' => 'id',
+                        'fields' => array_map(static fn (array $change): ?string => $change['to'], $changes),
+                        'changes' => $changes,
+                    ],
+                    'employees',
+                    (string) $target->getKey(),
+                    null,
+                    (int) $actor->getKey(),
+                    is_string($actor->id_no) ? $actor->id_no : null,
+                );
+            });
+            $this->bumpCache();
+            PortalCache::bump();
+            $this->audit->record(
+                $actor,
+                PortalLogAction::PATCH,
+                self::INFORMATION_EDIT_RULE,
+                '{UserName|You} changed the details of '.PortalAccessGraph::name($target),
+                (string) $target->getKey(),
+                $request,
+                ['fields' => array_keys($changes)],
+            );
+        }
+
+        return [
+            'section' => 'manage',
+            'resource' => 'users',
+            'data' => $this->profileData($actor, $target, $request, $this->seesPrivate($actor, $target, $request)),
+        ];
+    }
+
+    /**
      * Activate and deactivate (2026-10-12, user): someone in the actor's Users reach turned Active or
      * Inactive. Inactive cannot sign in, and a session already open stops at its next call. Never the
      * actor themselves or an executive, and a fellow administrator only with Manage other admins.
@@ -495,23 +599,9 @@ final class PortalManageUsers
             abort(422, 'Change at least one detail.');
         }
 
-        $changed = $this->applyInformation($target, $changes);
+        // The save and its ledger entry land together, or an edit could commit that never reaches Airtable.
+        $changed = $this->ledger->within($target->getConnection(), fn (): array => $this->applyInformation($target, $changes, $actor));
         if ($changed !== []) {
-            // Named as a plain list: the ledger strips government and bank keys, and the sync reads SQL.
-            $columns = array_values(array_map(static fn (string $key): string => self::INFORMATION_COLUMNS[$key], $changed));
-            $this->ledger->within($target->getConnection(), function () use ($target, $actor, $columns): void {
-                $target->save();
-                $this->ledger->recordEdit(
-                    CoreLedger::PRODUCT_PORTAL,
-                    CoreLedger::PRODUCT_PORTAL.'.employees',
-                    ['table' => 'employees', 'key' => 'id', 'id' => (string) $target->getKey(), 'columns' => $columns],
-                    'employees',
-                    (string) $target->getKey(),
-                    null,
-                    (int) $actor->getKey(),
-                    is_string($actor->id_no) ? $actor->id_no : null,
-                );
-            });
             $this->bumpCache();
             PortalCache::bump();
             $this->audit->record(
@@ -583,11 +673,12 @@ final class PortalManageUsers
 
     /**
      * Cleaned private details written to someone, and the keys that changed; an unknown key is ignored.
+     * The columns changed are ledgered for the Airtable sync, so a caller wraps this in the ledger's within().
      *
      * @param  array<string, string|null>  $changes
      * @return list<string>
      */
-    public function applyInformation(Employee $target, array $changes): array
+    public function applyInformation(Employee $target, array $changes, ?Employee $actor): array
     {
         $current = $this->informationOf($target);
         $changed = [];
@@ -600,6 +691,7 @@ final class PortalManageUsers
         }
         if ($changed !== []) {
             $target->save();
+            $this->employeeDocuments->ledgerChange($actor, $target, [], array_map(static fn (string $key): string => self::INFORMATION_COLUMNS[$key], $changed));
             $this->bumpCache();
             PortalCache::bump();
         }
@@ -625,8 +717,10 @@ final class PortalManageUsers
     {
         $target = $this->privateTarget($actor, $id, $request);
         $field = trim((string) $request->input('field', ''));
-        $this->employeeDocuments->upload($target, $field, $request->file('file'));
-        $this->ledgerDocument($actor, $target, $field);
+        $this->ledger->within($target->getConnection(), function () use ($actor, $target, $field, $request): void {
+            $this->employeeDocuments->upload($target, $field, $request->file('file'));
+            $this->employeeDocuments->ledgerChange($actor, $target, [$field]);
+        });
         $this->documentsChanged($actor, $target, $request, PortalLogAction::POST, $field);
 
         return $this->profileResponse($actor, $target, $request);
@@ -638,8 +732,12 @@ final class PortalManageUsers
     public function removeDocument(Employee $actor, int $id, int $documentId, Request $request): array
     {
         $target = $this->privateTarget($actor, $id, $request);
-        $field = $this->employeeDocuments->remove($target, $documentId);
-        $this->ledgerDocument($actor, $target, $field);
+        $field = $this->ledger->within($target->getConnection(), function () use ($actor, $target, $documentId): string {
+            $field = $this->employeeDocuments->remove($target, $documentId);
+            $this->employeeDocuments->ledgerChange($actor, $target, [$field]);
+
+            return $field;
+        });
         $this->documentsChanged($actor, $target, $request, PortalLogAction::DELETE, $field);
 
         return $this->profileResponse($actor, $target, $request);
@@ -724,21 +822,6 @@ final class PortalManageUsers
             'resource' => 'users',
             'data' => $this->profileData($viewer, $target, $request, $withPrivate),
         ];
-    }
-
-    // A document slot changed: the sync sends that slot's files to the Airtable field it maps to.
-    private function ledgerDocument(Employee $actor, Employee $target, string $field): void
-    {
-        $this->ledger->recordEdit(
-            CoreLedger::PRODUCT_PORTAL,
-            CoreLedger::PRODUCT_PORTAL.'.employees',
-            ['table' => 'employees', 'key' => 'id', 'id' => (string) $target->getKey(), 'columns' => [], 'doc_'.$field => true],
-            'employees',
-            (string) $target->getKey(),
-            null,
-            (int) $actor->getKey(),
-            is_string($actor->id_no) ? $actor->id_no : null,
-        );
     }
 
     /**
@@ -885,7 +968,39 @@ final class PortalManageUsers
             // Their documents on Cloudinary, and whether this viewer may change their private details (2026-10-12).
             'documents' => $withPrivate ? $this->employeeDocuments->listFor($target) : [],
             'canEditInformation' => $withPrivate && PortalRules::holds($viewer, $request, self::INFORMATION_EDIT_RULE),
+            // Edit details (2026-10-20, user): whether this viewer may, and the choices its pickers offer.
+            'canEditDetails' => $this->mayEditDetails($viewer, $target, $request),
+            'detailOptions' => ! $this->mayEditDetails($viewer, $target, $request) ? null : [
+                'locations' => $this->locations(),
+                'employmentStatuses' => self::EMPLOYMENT_STATUSES,
+            ],
         ];
+    }
+
+    // The route checks the power; an executive's record is kept by their own portal.
+    private function mayEditDetails(Employee $viewer, Employee $target, Request $request): bool
+    {
+        return PortalRules::holds($viewer, $request, self::INFORMATION_EDIT_RULE)
+            && ! PortalRole::isLocked($target->role, $target->role_level);
+    }
+
+    /**
+     * Every location on the roster, for the Location picker, A to Z.
+     *
+     * @return list<string>
+     */
+    private function locations(): array
+    {
+        $names = [];
+        foreach (Employee::query()->whereNotNull('location')->distinct()->pluck('location') as $value) {
+            $name = self::text(is_string($value) ? $value : null);
+            if ($name !== null) {
+                $names[strtolower($name)] ??= $name;
+            }
+        }
+        natcasesort($names);
+
+        return array_values($names);
     }
 
     // Why the viewer may not change this account's status, or null; the power and the reach are checked apart.

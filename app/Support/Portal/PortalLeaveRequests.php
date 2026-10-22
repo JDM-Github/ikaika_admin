@@ -32,6 +32,9 @@ final class PortalLeaveRequests
     // Leave is booked as well as recorded, so the picker reaches forward where reports do not.
     private const MAX_AHEAD_MONTHS = 12;
 
+    // Leave may be filed for a day up to a week gone (2026-10-21, user), as a daily report can be.
+    private const MAX_BACK_DAYS = 7;
+
     private const MAX_DAYS = 31;
 
     private const MAX_REASON = 500;
@@ -658,16 +661,17 @@ final class PortalLeaveRequests
     }
 
     /**
-     * Leave is asked for, not recorded after the fact: the day has to be today or later. A day
-     * already gone is either a report or an absence somebody else has to sort out, and neither is
-     * this form's to file. `$floor` lets an edit keep the day it already had.
+     * Leave is mostly asked for ahead, but a day missed in the last week can still be filed after the
+     * fact (2026-10-21, user), as a daily report can; a day with a report already filed stays refused
+     * as worked. Anything older is somebody else's to sort out. `$floor` lets an edit keep its day.
      */
     private function assertFilableDate(Carbon $day, ?string $floor = null): void
     {
         $today = $this->timezone->today();
-        $earliest = $floor === null ? $today : $this->timezone->day($floor)->min($today);
+        $reach = $today->copy()->subDays(self::MAX_BACK_DAYS);
+        $earliest = $floor === null ? $reach : $this->timezone->day($floor)->min($reach);
         if ($day->lt($earliest)) {
-            abort(422, 'Leave starts today or later.');
+            abort(422, 'Leave can start no more than '.self::MAX_BACK_DAYS.' days back.');
         }
         if ($day->gt($today->copy()->addMonths(self::MAX_AHEAD_MONTHS))) {
             abort(422, 'Leave cannot be booked more than a year ahead.');

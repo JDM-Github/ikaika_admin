@@ -45,6 +45,8 @@ final class PortalAccessControl
         $editorId = (int) $editor->getKey();
         $asDeveloper = $graph->actingTier($editorId) === PortalAccessGraph::TIER_DEVELOPER;
         $target = $this->manageable($graph, $editorId, $targetId);
+        // A department's head over a fellow admin sees only the powers a head may switch (2026-10-20, user).
+        $headOnly = $graph->headOnly($editorId, $targetId);
         $theirs = $graph->effective($targetId);
         $grants = $graph->grantsOn($targetId);
         $limits = $graph->limitsOn($targetId);
@@ -56,7 +58,8 @@ final class PortalAccessControl
         foreach ($graph->powersFor($editorId, $targetId) as $key => $mine) {
             // Developer-only powers come only with Developer mode, a power their role or department can never hold is not
             // theirs to see, and one that always stays on (the Access page) is nothing to give or limit.
-            if ($graph->isDeveloperOnly($key) || $this->alwaysOn($graph, $key) || (! $graph->canHold($targetId, $key) && ! isset($theirs[$key]))) {
+            if ($graph->isDeveloperOnly($key) || $this->alwaysOn($graph, $key) || (! $graph->canHold($targetId, $key) && ! isset($theirs[$key]))
+                || ($headOnly && ! in_array($key, PortalAccessGraph::HEAD_KEYS, true))) {
                 continue;
             }
             $row = $graph->catalog()[$key];
@@ -150,6 +153,9 @@ final class PortalAccessControl
         $editorId = (int) $editor->getKey();
         $target = $this->manageable($graph, $editorId, $targetId);
         $key = $change['key'];
+        if ($graph->headOnly($editorId, $targetId) && ! in_array($key, PortalAccessGraph::HEAD_KEYS, true)) {
+            abort(403, 'For a fellow administrator a department head changes only Daily Reports, Flag users and Edit profile.');
+        }
         if (($change['reach'] ?? null) === 'lead' && ! PortalProjectPowers::supportsLeadReach($key)) {
             abort(422, 'Only Edit projects, Manage scopes and Delete projects reach the projects you lead.');
         }
@@ -554,7 +560,7 @@ final class PortalAccessControl
     private function manageable(PortalAccessGraph $graph, int $editorId, int $targetId): Employee
     {
         $target = $graph->employee($targetId);
-        if ($target === null || ! $graph->canManage($editorId, $targetId)) {
+        if ($target === null || (! $graph->canManage($editorId, $targetId) && ! $graph->headOnly($editorId, $targetId))) {
             abort(404, 'That person is not someone you manage.');
         }
 

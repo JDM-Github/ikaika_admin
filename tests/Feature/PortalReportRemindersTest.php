@@ -96,6 +96,11 @@ class PortalReportRemindersTest extends TestCase
         $row = EmailMessage::query()->latest('id')->firstOrFail();
         $this->assertSame('Reminder: 2 reports not yet filed', $row->subject);
         $this->assertStringContainsString('- Monday, March 9, 2020', (string) $row->body);
+        // Each day it names is marked on Missing Reports as the portal's, so nobody reminds them by hand too.
+        $marks = DB::connection('portal')->table('report_reminders')->where('message_id', $row->id)->orderBy('report_date')->get();
+        $this->assertSame(['2020-03-09', '2020-03-12'], $marks->map(fn (object $mark): string => substr((string) $mark->report_date, 0, 10))->all());
+        $this->assertSame([null, null], $marks->pluck('sent_by')->all());
+        $this->assertSame([(int) $this->member->getKey()], $marks->pluck('employee_id')->map(fn ($id): int => (int) $id)->unique()->values()->all());
     }
 
     public function test_a_sample_goes_straight_to_the_address_and_skips_the_outbox(): void
