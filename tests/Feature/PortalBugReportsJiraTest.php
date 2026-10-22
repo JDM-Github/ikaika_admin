@@ -43,7 +43,7 @@ class PortalBugReportsJiraTest extends TestCase
     {
         parent::setUp();
         Cache::flush();
-        DB::connection('core')->table('settings')->where('product', 'portal')->where('setting_key', 'jira.auto_send')->delete();
+        DB::connection('core')->table('settings')->where('product', 'portal')->whereIn('setting_key', ['jira.auto_send', 'jira.sync_fields'])->delete();
         // As production, which files as it always has and follows the reports from before a channel was kept
         // (2026-10-21, user); the staging tests below say so. The routes stay under the test's own channel.
         config(['products.channel' => 'production']);
@@ -51,6 +51,7 @@ class PortalBugReportsJiraTest extends TestCase
 
     public function test_mis_sends_a_feature_request_and_jira_gets_what_it_says_and_no_names(): void
     {
+        $this->syncFieldsOn();
         $this->connectJira();
         $analyst = $this->memberOf('MIS');
         $id = $this->report(['kind' => 'feature', 'note' => 'Ask Jamie about the layout', 'assignee_id' => $analyst->getKey()], ['one.png' => 'image/png', 'two.jpg' => 'image/jpeg']);
@@ -245,7 +246,7 @@ class PortalBugReportsJiraTest extends TestCase
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/jira', ['autoSend' => false])
             ->assertOk()->assertJsonPath('data.autoSend', false)->assertJsonPath('data.connection', 'not_configured');
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/jira', ['autoSend' => 'off'])
-            ->assertStatus(422)->assertJsonPath('message', 'Say whether new ones go to Jira on their own.');
+            ->assertStatus(422)->assertJsonPath('message', 'Say whether new ones go to Jira on their own, or whether their fields are kept in step with Jira.');
 
         $this->withHeaders($headers)->getJson(self::BASE.'bug-reports')->assertOk()->assertJsonPath('jira.autoSend', false);
         $this->assertTrue(PortalLog::query()->where('employee_id', $analyst->getKey())
@@ -311,7 +312,7 @@ class PortalBugReportsJiraTest extends TestCase
         $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
         $before = count(Http::recorded());
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'fixed'])
-            ->assertForbidden()->assertJsonPath('message', 'Its kind, status, assignee, team, parent and dates change IKP-7 in Jira too, which needs Send to Jira.');
+            ->assertForbidden()->assertJsonPath('message', 'Its kind and status change IKP-7 in Jira too, which needs Send to Jira.');
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['note' => 'Waiting on Jira.', 'versionLevel' => 'patch'])
             ->assertOk()->assertJsonPath('data.note', 'Waiting on Jira.');
         $this->assertCount($before, Http::recorded());
@@ -326,6 +327,7 @@ class PortalBugReportsJiraTest extends TestCase
     // as its create screen takes them; the report then names the team too.
     public function test_a_new_issue_carries_its_plan_and_goes_to_the_default_team(): void
     {
+        $this->syncFieldsOn();
         $this->connectJira();
         config(['services.jira.default_team' => 'dev']);
         $bug = $this->report(['start_on' => '2026-10-23', 'due_on' => '2026-10-30', 'parent_key' => 'IKP-1', 'parent_summary' => 'Payroll revamp']);
@@ -364,6 +366,7 @@ class PortalBugReportsJiraTest extends TestCase
     // otherwise -- and a parent is cleared only on an issue that has one.
     public function test_mis_changes_a_linked_reports_plan_in_jira_first(): void
     {
+        $this->syncFieldsOn();
         $this->connectJira();
         $analyst = $this->memberOf('MIS');
         $headers = $this->headersFor($analyst);
@@ -393,6 +396,7 @@ class PortalBugReportsJiraTest extends TestCase
 
     public function test_a_plan_change_jira_refuses_changes_nothing_and_needs_send_to_jira(): void
     {
+        $this->syncFieldsOn();
         $this->connectJira();
         $analyst = $this->memberOf('MIS');
         $headers = $this->headersFor($analyst);
@@ -455,10 +459,11 @@ class PortalBugReportsJiraTest extends TestCase
     // Read back (2026-10-22, user): Jira's dates, epic and team come back; a field it did not send stays the portal's.
     public function test_jiras_plan_comes_back_and_what_it_does_not_send_stays(): void
     {
+        $this->syncFieldsOn();
         $this->connectJira();
         DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
-        $moved = $this->report(['jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent', 'due_on' => '2026-10-28', 'team_id' => '3688-dev', 'team_name' => 'DEV']);
-        $kept = $this->report(['jira_issue_id' => '10051', 'jira_issue_key' => 'IKP-21', 'jira_state' => 'sent', 'start_on' => '2026-10-20', 'team_id' => '3688-dev', 'team_name' => 'DEV',
+        $moved = $this->report(['jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent', 'jira_fields_synced_at' => '2026-10-22 01:00:00', 'due_on' => '2026-10-28', 'team_id' => '3688-dev', 'team_name' => 'DEV']);
+        $kept = $this->report(['jira_issue_id' => '10051', 'jira_issue_key' => 'IKP-21', 'jira_state' => 'sent', 'jira_fields_synced_at' => '2026-10-22 01:00:00', 'start_on' => '2026-10-20', 'team_id' => '3688-dev', 'team_name' => 'DEV',
             'parent_key' => 'IKP-1', 'parent_summary' => 'Payroll revamp']);
         Http::preventStrayRequests();
         Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
@@ -511,6 +516,7 @@ class PortalBugReportsJiraTest extends TestCase
     // account for leaves it unassigned there, and stays assigned here when it is read back.
     public function test_assigning_a_linked_report_assigns_its_issue_too(): void
     {
+        $this->syncFieldsOn();
         $this->connectJira();
         DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
         $headers = $this->headersFor($this->memberOf('MIS'));
@@ -544,6 +550,7 @@ class PortalBugReportsJiraTest extends TestCase
     // as handling it until Jira lets them go -- or MIS does, from here.
     public function test_jiras_assignee_comes_back_and_someone_outside_mis_counts_as_handling_it(): void
     {
+        $this->syncFieldsOn();
         $this->connectJira();
         DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
         $headers = $this->headersFor($this->memberOf('MIS'));
@@ -567,6 +574,131 @@ class PortalBugReportsJiraTest extends TestCase
         $this->assertNull($inJira);
         $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$id, ['status' => 'in_review'])
             ->assertStatus(422)->assertJsonPath('message', 'Assign someone to handle it before changing it.');
+    }
+
+    // Off until MIS turns it on (2026-10-22, user: nothing changes in Jira on deploy): a new issue carries no assignee,
+    // plan or team, a linked report's plan and assignee change here alone, and a read-back takes neither.
+    public function test_with_the_field_sync_off_assignees_dates_parents_and_teams_stay_in_the_portal(): void
+    {
+        $this->connectJira();
+        config(['services.jira.default_team' => 'dev']);
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $new = $this->report(['assignee_id' => $analyst->getKey(), 'due_on' => '2026-10-30', 'parent_key' => 'IKP-1', 'parent_summary' => 'Payroll revamp']);
+        $linked = $this->report(['assignee_id' => $analyst->getKey(), 'jira_issue_id' => '10050', 'jira_issue_key' => 'IKP-20', 'jira_state' => 'sent', 'due_on' => '2026-10-28']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issue' => Http::response(['id' => '10042', 'key' => 'IKP-12'], 201),
+            self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+                ['id' => '10042', 'key' => 'IKP-12', 'fields' => ['status' => self::TO_DO, 'assignee' => ['accountId' => '712020:outside', 'displayName' => 'Jane Doe'], 'duedate' => '2026-11-05']],
+                ['id' => '10050', 'key' => 'IKP-20', 'fields' => ['status' => self::TO_DO, 'assignee' => null, 'duedate' => '2026-11-05', 'customfield_10001' => ['id' => '9999-ops', 'title' => 'Ops']]],
+            ], 'issueErrors' => []]),
+            self::SITE.'/rest/api/3/issue/10042*' => Http::response(['id' => '10042', 'key' => 'IKP-12', 'fields' => ['status' => self::TO_DO]]),
+            ...$this->planStubs(),
+        ]);
+
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/'.$new.'/jira')->assertOk()->assertJsonPath('data.jiraAssignee', null);
+        $created = Http::recorded(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue')->first()[0]['fields'];
+        foreach (['assignee', 'duedate', 'parent', 'customfield_10001', 'customfield_10015'] as $field) {
+            $this->assertArrayNotHasKey($field, $created);
+        }
+
+        // Without Send to Jira its kind is not theirs to change, but its plan and who works on it are, and Jira hears nothing.
+        $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$linked, ['kind' => 'feature'])
+            ->assertForbidden()->assertJsonPath('message', 'Its kind and status change IKP-20 in Jira too, which needs Send to Jira.');
+        $before = count(Http::recorded());
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$linked, ['dueOn' => '2026-10-31'])->assertOk()->assertJsonPath('data.dueOn', '2026-10-31');
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/'.$linked, ['assigneeId' => ''])->assertOk()->assertJsonPath('data.assignee', null);
+        $this->assertCount($before, Http::recorded());
+
+        $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+        $rows = DB::connection('portal')->table('bug_reports')->whereIn('id', [$new, $linked])->orderBy('id')->get();
+        $kept = fn (object $row): array => [$row->assignee_id === null ? null : (int) $row->assignee_id, substr((string) $row->due_on, 0, 10), $row->team_id, $row->jira_assignee_id, $row->jira_fields_synced_at];
+        $this->assertSame([(int) $analyst->getKey(), '2026-10-30', null, null, null], $kept($rows[0]));
+        $this->assertSame([null, '2026-10-31', null, null, null], $kept($rows[1]));
+    }
+
+    // Turned on (2026-10-22, user: no mess when it goes live): the first read-back sends Jira what the portal has and
+    // takes what only Jira has; from then on Jira's changes come back. One Jira refuses is tried again at the next.
+    public function test_turning_the_field_sync_on_merges_each_side_once_then_follows_jira(): void
+    {
+        $headers = $this->headersFor($this->memberOf('MIS'));
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/jira', ['syncFields' => true])->assertOk()->assertJsonPath('data.syncFields', true);
+        $this->connectJira();
+        DB::connection('portal')->table('bug_reports')->whereNotNull('jira_state')->update(['jira_state' => null, 'jira_issue_id' => null]);
+        [$member] = $this->misAddresses(['member@ikaika.test']);
+        $id = $this->report(['assignee_id' => $member, 'jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent', 'due_on' => '2026-10-28']);
+        $fields = ['status' => self::TO_DO, 'assignee' => null, 'duedate' => '2026-11-05', 'customfield_10015' => '2026-10-24', 'customfield_10001' => ['id' => '9999-ops', 'title' => 'Ops']];
+        $refuse = true;
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/user/search*' => Http::response([['accountId' => '712020:member', 'accountType' => 'atlassian', 'active' => true]]),
+            self::SITE.'/rest/api/3/issue/bulkfetch' => function () use (&$fields) {
+                return Http::response(['issues' => [['id' => '10042', 'key' => 'IKP-7', 'fields' => $fields]], 'issueErrors' => []]);
+            },
+            self::SITE.'/rest/api/3/issue/10042' => function (Request $request) use (&$refuse, &$fields) {
+                if ($refuse) {
+                    return Http::response(['errorMessages' => ['Not now.']], 400);
+                }
+                $fields = [...$fields, ...$request['fields']];
+
+                return Http::response(null, 204);
+            },
+            ...$this->planStubs(),
+        ]);
+        $sync = fn () => $this->withHeaders($headers)->postJson(self::BASE.'bug-reports/jira/sync')->assertOk();
+        $row = fn (): object => DB::connection('portal')->table('bug_reports')->where('id', $id)->first();
+        $state = fn (): array => [
+            substr((string) $row()->start_on, 0, 10), substr((string) $row()->due_on, 0, 10), $row()->team_id, $row()->team_name,
+            (int) $row()->assignee_id, $row()->jira_assignee_id, $row()->jira_fields_synced_at !== null,
+        ];
+
+        $sync();
+        $this->assertSame(['', '2026-10-28', null, null, $member, null, false], $state());
+
+        $refuse = false;
+        $sync();
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT'
+            && $request->data() === ['fields' => ['duedate' => '2026-10-28', 'assignee' => ['accountId' => '712020:member']]]);
+        $this->assertSame(['2026-10-24', '2026-10-28', '9999-ops', 'Ops', $member, '712020:member', true], $state());
+
+        $puts = count(Http::recorded(fn (Request $request): bool => $request->method() === 'PUT'));
+        $fields['duedate'] = '2026-11-12';
+        $sync();
+        $this->assertSame('2026-11-12', substr((string) $row()->due_on, 0, 10));
+        $this->assertCount($puts, Http::recorded(fn (Request $request): bool => $request->method() === 'PUT'));
+    }
+
+    // The second switch (2026-10-22, user), beside the first and for the same people. Off forgets which reports were
+    // in step, so turning it on again merges both sides afresh rather than taking Jira's over what changed here.
+    public function test_mis_turns_the_field_sync_on_and_off_and_off_forgets_what_was_in_step(): void
+    {
+        $analyst = $this->memberOf('MIS');
+        $headers = $this->headersFor($analyst);
+        $id = $this->report(['jira_issue_id' => '10042', 'jira_issue_key' => 'IKP-7', 'jira_state' => 'sent', 'jira_fields_synced_at' => '2026-10-22 01:00:00']);
+        $stamp = fn (): ?string => DB::connection('portal')->table('bug_reports')->where('id', $id)->value('jira_fields_synced_at');
+
+        $this->withHeaders($headers)->getJson(self::BASE.'bug-reports')->assertOk()->assertJsonPath('jira.syncFields', false);
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/jira', ['syncFields' => true])
+            ->assertOk()->assertJsonPath('data.syncFields', true)->assertJsonPath('data.autoSend', true);
+        foreach ([['syncFields' => 'on'], ['autoSend' => true, 'syncFields' => 1], []] as $body) {
+            $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/jira', $body)->assertStatus(422);
+        }
+        $this->assertNotNull($stamp());
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/jira', ['syncFields' => false, 'autoSend' => false])
+            ->assertOk()->assertJsonPath('data.syncFields', false)->assertJsonPath('data.autoSend', false);
+        $this->assertNull($stamp());
+        foreach (['on', 'off'] as $word) {
+            $this->assertTrue(PortalLog::query()->where('employee_id', $analyst->getKey())
+                ->where('message', 'like', '%turned keeping assignees, dates, parents and teams in step with Jira '.$word)->exists());
+        }
+
+        $this->withHeaders($headers)->patchJson(self::BASE.'access/switches', ['key' => 'bug-reports.jira', 'on' => false])->assertOk();
+        $this->withHeaders($headers)->patchJson(self::BASE.'bug-reports/jira', ['syncFields' => true])->assertForbidden();
+        $this->withHeaders($headers)->getJson(self::BASE.'bug-reports')->assertOk()->assertJsonPath('jira.syncFields', false);
     }
 
     // Read back (2026-10-20, user): a work type changed in Jira changes the kind, and Fixed in stays without a fix version.
@@ -1438,6 +1570,12 @@ class PortalBugReportsJiraTest extends TestCase
         }
 
         return $id;
+    }
+
+    // The field sync is off until MIS turns it on (2026-10-22, user); the tests of what it does turn it on.
+    private function syncFieldsOn(): void
+    {
+        DB::connection('core')->table('settings')->insert(['product' => 'portal', 'setting_key' => 'jira.sync_fields', 'setting_value' => '1']);
     }
 
     // An active ordinary member of the department; when the database has none -- its members all admins -- one of

@@ -70,9 +70,16 @@ final class PortalBugReportsJira
 
     private const SETTING = 'jira.auto_send';
 
+    private const SYNC_SETTING = 'jira.sync_fields';
+
+    // A report's plan as its columns: what the field sync keeps in step with the issue.
+    private const PLAN_COLUMNS = ['start_on', 'due_on', 'parent_key', 'team_id'];
+
     private const FALLBACK_TYPE = 'Task';
 
     private const DELETED_MESSAGE = 'Deleted in Jira, or the Jira account can no longer see it.';
+
+    private ?bool $syncing = null;
 
     public function __construct(
         private readonly PortalJiraClient $jira,
@@ -140,9 +147,42 @@ final class PortalBugReportsJira
     }
 
     /**
+     * Whether assignees, dates, parent and team are kept in step with Jira (2026-10-22, user): off until MIS turns it
+     * on, so a deploy to production or staging changes nothing in Jira by itself. Kind and status always are.
+     */
+    public function syncFields(): bool
+    {
+        if ($this->syncing === null) {
+            $value = DB::connection('core')->table('settings')
+                ->where('product', 'portal')
+                ->where('setting_key', self::SYNC_SETTING)
+                ->value('setting_value');
+            $this->syncing = $value !== null && in_array(strtolower(trim((string) $value)), ['1', 'true'], true);
+        }
+
+        return $this->syncing;
+    }
+
+    /**
+     * Turned off, every report's fields count as never kept in step, so turning it on again first merges what
+     * each side has rather than taking Jira's over what changed here meanwhile.
+     */
+    public function setSyncFields(bool $on): void
+    {
+        DB::connection('core')->table('settings')->updateOrInsert(
+            ['product' => 'portal', 'setting_key' => self::SYNC_SETTING],
+            ['setting_value' => $on ? '1' : '0'],
+        );
+        $this->syncing = $on;
+        if (! $on) {
+            $this->environment->scope(DB::connection('portal')->table('bug_reports'))->whereNotNull('jira_fields_synced_at')->update(['jira_fields_synced_at' => null]);
+        }
+    }
+
+    /**
      * What the page shows about Jira as a whole.
      *
-     * @return array{connection: string, connectionMessage: ?string, checkedAt: ?string, autoSend: bool, projectKey: ?string, environment: ?string}
+     * @return array{connection: string, connectionMessage: ?string, checkedAt: ?string, autoSend: bool, syncFields: bool, projectKey: ?string, environment: ?string}
      */
     public function settings(): array
     {
@@ -153,6 +193,7 @@ final class PortalBugReportsJira
             'connectionMessage' => $connection['message'],
             'checkedAt' => $connection['checkedAt'],
             'autoSend' => $this->autoSend(),
+            'syncFields' => $this->syncFields(),
             'projectKey' => $this->jira->projectKey(),
             // The label this server adds in the shared project, or null on production.
             'environment' => $this->environment->label(),
@@ -303,8 +344,10 @@ final class PortalBugReportsJira
         $move = isset($changes['status']) && $changes['status'] !== $row->status
             ? $this->findMove($issueId, (string) $changes['status'], (string) $row->jira_issue_key)
             : null;
-        $plan = self::planChanges($row, $changes);
-        $assigning = self::assigneeChanges($row, $changes);
+        // Its plan and assignee only while they are kept in step (2026-10-22, user).
+        $sync = $this->syncFields();
+        $plan = $sync ? self::planChanges($row, $changes) : [];
+        $assigning = $sync && self::assigneeChanges($row, $changes);
         $account = $assigning ? $this->people->accountOf($changes['assignee_id'] === null ? null : (int) $changes['assignee_id']) : null;
         $unlinks = $oldTarget !== null && $oldTarget !== $newTarget;
         $current = $unlinks || $plan !== [] || $assigning ? ($this->jira->issue($issueId)['fields'] ?? []) : [];
@@ -598,11 +641,13 @@ final class PortalBugReportsJira
             // there is nothing for a retry to look for.
             $typeId = $this->issueTypeId($kind);
             [$plan, $default, $account] = $this->planForCreate($row, $typeId);
-            // Filed under the default team, the report names it too; its assignee is what the two sides agree on.
+            // Filed under the default team, the report names it too; its assignee is what the two sides agree on, and
+            // filed while fields are kept in step, it is in step from the start.
             $made = [
                 ...($default === null ? [] : ['team_id' => $default['id'], 'team_name' => $default['name']]),
                 'jira_assignee_id' => $account,
                 'jira_assignee_name' => null,
+                'jira_fields_synced_at' => $this->syncFields() ? now('UTC')->format('Y-m-d H:i:s') : null,
             ];
             if ($started === null) {
                 DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update(['jira_create_started_at' => now('UTC')->format('Y-m-d H:i:s')]);
@@ -751,8 +796,12 @@ final class PortalBugReportsJira
         $fixedIn = PortalJiraIssue::fixedIn($issue['fields']) ?? $row->fixed_in;
         $kind = $this->kindOfType($issue['fields']['issuetype']['name'] ?? null, (string) $row->kind);
         [$reason, $original] = $this->triageFrom($row, $issue, $status);
-        $plan = PortalJiraIssue::planOf($issue['fields'], $this->jira->fieldIds());
-        $assignee = array_key_exists('assignee', $issue['fields']) ? $this->assigneeFrom($row, $issue['fields']) : [];
+        // The fields come back only while they are kept in step, and the first time, each side fills what the other lacks.
+        $sync = $this->syncFields();
+        $kept = $sync && ($row->jira_fields_synced_at ?? null) !== null;
+        $plan = $kept ? PortalJiraIssue::planOf($issue['fields'], $this->jira->fieldIds()) : [];
+        $assignee = $kept && array_key_exists('assignee', $issue['fields']) ? $this->assigneeFrom($row, $issue['fields']) : [];
+        $merged = $sync && ! $kept ? $this->firstFieldSync($row, $issue['fields']) : [];
         $changes = [
             'jira_issue_key' => $issue['key'],
             'jira_status' => PortalJiraIssue::statusName($issue['fields']),
@@ -761,17 +810,72 @@ final class PortalBugReportsJira
         $was = ($row->duplicate_of ?? null) === null ? null : (int) $row->duplicate_of;
         $planMoved = self::planChanges($row, $plan) !== [] || ($plan['parent_summary'] ?? null) !== ($row->parent_summary ?? null)
             || (array_key_exists('team_name', $plan) && $plan['team_name'] !== null && $plan['team_name'] !== ($row->team_name ?? null));
-        if ($status !== $row->status || $fixedIn !== $row->fixed_in || $kind !== $row->kind || $reason !== ($row->cancel_reason ?? null) || $original !== $was || $planMoved || $assignee !== []) {
+        if ($status !== $row->status || $fixedIn !== $row->fixed_in || $kind !== $row->kind || $reason !== ($row->cancel_reason ?? null) || $original !== $was || $planMoved || $assignee !== [] || $merged !== []) {
             $changes += [
                 'status' => $status, 'fixed_in' => $fixedIn, 'kind' => $kind, 'cancel_reason' => $reason, 'duplicate_of' => $original,
                 // Jira's name for a team stands; a team it gave by id alone keeps the name the portal has.
                 ...$plan, ...(array_key_exists('team_name', $plan) && $plan['team_name'] === null && ($plan['team_id'] ?? null) === ($row->team_id ?? null) ? ['team_name' => $row->team_name ?? null] : []),
                 ...$assignee,
+                ...$merged,
                 'updated_at' => now('UTC')->format('Y-m-d H:i:s'),
             ];
             Log::info('portal.jira.synced', ['report' => (int) $row->id, 'status' => $status]);
         }
         DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update($changes);
+    }
+
+    /**
+     * The first read-back once fields are kept in step (2026-10-22, user: no mess on deploy). Where the portal has a
+     * value it goes to Jira; where only Jira has one, the portal takes it; then the report is stamped, and from then on
+     * a change on either side counts. Nothing either side has is cleared, but for someone here Jira has no account
+     * for, whose issue is unassigned there as a change here would leave it. Jira refusing leaves it unstamped, to try
+     * again at the next read-back.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array<string, mixed>
+     */
+    private function firstFieldSync(object $row, array $fields): array
+    {
+        $held = PortalJiraIssue::planOf($fields, $this->jira->fieldIds());
+        $ours = array_filter(array_combine(self::PLAN_COLUMNS, array_map(static fn (string $column): ?string => self::planValue($column, $row->$column ?? null), self::PLAN_COLUMNS)),
+            static fn (?string $value): bool => $value !== null);
+        $edit = $this->planEdit($ours, $fields);
+        $inJira = PortalJiraIssue::assigneeOf($fields)[0];
+        try {
+            $account = $row->assignee_id === null ? null : $this->people->accountOf((int) $row->assignee_id);
+        } catch (RuntimeException) {
+            return [];
+        }
+        // Someone here wins, and one Jira has no account for leaves it unassigned there, as a change here does.
+        if ($row->assignee_id !== null && $inJira !== $account) {
+            $edit['assignee'] = $account === null ? null : ['accountId' => $account];
+        }
+        if ($edit !== []) {
+            try {
+                $this->editPlan((string) $row->jira_issue_id, $edit);
+            } catch (RuntimeException $error) {
+                Log::warning('portal.jira.first_field_sync_failed', ['report' => (int) $row->id, 'status' => $error->getCode()]);
+
+                return [];
+            }
+        }
+        $adopted = [];
+        foreach (self::PLAN_COLUMNS as $column) {
+            if (! isset($ours[$column]) && ($held[$column] ?? null) !== null) {
+                $adopted[$column] = $held[$column];
+                $adopted += match ($column) {
+                    'team_id' => ['team_name' => $held['team_name'] ?? null],
+                    'parent_key' => ['parent_summary' => $held['parent_summary']],
+                    default => [],
+                };
+            }
+        }
+        // Nobody here takes whoever Jira has.
+        $assignee = $row->assignee_id === null
+            ? $this->assigneeFrom((object) [...(array) $row, 'jira_assignee_id' => null], $fields)
+            : ['jira_assignee_id' => $account, 'jira_assignee_name' => null];
+
+        return [...$adopted, ...$assignee, 'jira_fields_synced_at' => now('UTC')->format('Y-m-d H:i:s')];
     }
 
     /**
@@ -815,7 +919,7 @@ final class PortalBugReportsJira
     public static function planChanges(object $row, array $changes): array
     {
         $changed = [];
-        foreach (['start_on', 'due_on', 'parent_key', 'team_id'] as $column) {
+        foreach (self::PLAN_COLUMNS as $column) {
             if (array_key_exists($column, $changes) && self::planValue($column, $changes[$column]) !== self::planValue($column, $row->$column ?? null)) {
                 $changed[$column] = self::planValue($column, $changes[$column]);
             }
@@ -897,6 +1001,10 @@ final class PortalBugReportsJira
      */
     private function planForCreate(object $row, string $issueTypeId): array
     {
+        // Filed while fields are not kept in step, a new issue carries none of them, nor the default team.
+        if (! $this->syncFields()) {
+            return [[], null, null];
+        }
         $ids = $this->jira->fieldIds();
         $account = null;
         try {

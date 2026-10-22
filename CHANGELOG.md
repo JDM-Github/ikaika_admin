@@ -14,6 +14,7 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 - Issues & Requests can be archived and deleted to the Recycle Bin.
 - A report in Issues & Requests has start and due dates and a parent epic and a team that change in Jira too and new issues go to the DEV team.
 - Who works on a report in Issues & Requests is its Jira assignee too and a change on either side shows on both.
+- MIS chooses when a report's assignee and dates and parent and team start following Jira and until then they stay in the portal.
 
 ### Fixed
 

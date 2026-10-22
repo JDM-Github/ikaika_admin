@@ -303,6 +303,11 @@ final class PortalActivityCopy
         return self::YOU.' turned sending new issues and requests to Jira '.($on ? 'on' : 'off');
     }
 
+    public static function switchedJiraFieldSync(bool $on): string
+    {
+        return self::YOU.' turned keeping assignees, dates, parents and teams in step with Jira '.($on ? 'on' : 'off');
+    }
+
     // Triage (2026-10-21, user): cancelled as won't fix, or marked a duplicate of the report it names.
     public static function cancelledBugReport(string $title, string $noun, ?string $original = null): string
     {

@@ -1521,6 +1521,9 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     -- MIS. Existing databases: add_portal_bug_report_jira_assignee.
     jira_assignee_id   VARCHAR(128) NULL,
     jira_assignee_name VARCHAR(255) NULL,
+    -- When its fields were first kept in step with Jira (2026-10-22); null merges both sides at the next read-back.
+    -- Existing databases: add_portal_bug_report_fields_synced_at.
+    jira_fields_synced_at TIMESTAMP NULL,
     INDEX bug_reports_status_reported_on_index (status, reported_on),
     INDEX bug_reports_duplicate_of_index (duplicate_of),
     UNIQUE KEY bug_reports_jira_issue_id_unique (jira_issue_id)

@@ -72,7 +72,7 @@ class PortalBugReportsTest extends TestCase
             ['id', 'kind', 'title', 'description', 'page', 'status', 'cancel_reason', 'duplicate_of', 'note', 'assignee_id', 'version_level', 'fixed_in',
                 'start_on', 'due_on', 'parent_key', 'parent_summary', 'team_id', 'team_name', 'reporter_id', 'channel', 'reported_on', 'updated_at',
                 'archived_at', 'archived_by', 'deleted_at', 'jira_issue_id', 'jira_issue_key', 'jira_state', 'jira_status', 'jira_error', 'jira_attached', 'jira_attempts', 'jira_synced_at', 'jira_create_started_at',
-                'jira_assignee_id', 'jira_assignee_name'],
+                'jira_assignee_id', 'jira_assignee_name', 'jira_fields_synced_at'],
             Schema::connection('portal')->getColumnListing('bug_reports'),
         );
         $this->assertSame($logged, PortalLog::query()->count());

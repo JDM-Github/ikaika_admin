@@ -289,7 +289,8 @@ final class PortalBugReports
             $changes = $this->validatedChanges($row, $request);
             $handler = array_key_exists('assignee_id', $changes) ? $changes['assignee_id'] : $row->assignee_id;
             // Someone Jira has it assigned to from outside MIS handles it too (2026-10-22, user).
-            $inJira = ! array_key_exists('assignee_id', $changes) && ($row->jira_assignee_id ?? null) !== null && $this->jira->owns($row);
+            $sync = $this->jira->syncFields();
+            $inJira = $sync && ! array_key_exists('assignee_id', $changes) && ($row->jira_assignee_id ?? null) !== null && $this->jira->owns($row);
             if ($handler === null && ! $inJira && array_diff(array_keys($changes), ['assignee_id']) !== []) {
                 abort(422, 'Assign someone to handle it before changing it.');
             }
@@ -298,11 +299,11 @@ final class PortalBugReports
             $toJira = $this->jira->owns($row)
                 && ((isset($changes['kind']) && $changes['kind'] !== $row->kind) || (isset($changes['status']) && $changes['status'] !== $row->status)
                     || array_key_exists('cancel_reason', $changes) || array_key_exists('duplicate_of', $changes)
-                    || PortalBugReportsJira::planChanges($row, $changes) !== [] || PortalBugReportsJira::assigneeChanges($row, $changes));
+                    || ($sync && (PortalBugReportsJira::planChanges($row, $changes) !== [] || PortalBugReportsJira::assigneeChanges($row, $changes))));
             $fromJira = [];
             if ($toJira) {
                 if (! PortalRules::holds($actor, $request, PortalBugReportsJira::RULE)) {
-                    abort(403, 'Its kind, status, assignee, team, parent and dates change '.$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
+                    abort(403, ($sync ? 'Its kind, status, assignee, team, parent and dates change ' : 'Its kind and status change ').$row->jira_issue_key.' in Jira too, which needs Send to Jira.');
                 }
                 if (! $this->jira->isConfigured()) {
                     abort(503, 'Jira is not connected yet.');
@@ -407,13 +408,13 @@ final class PortalBugReports
     /**
      * Who has a followed issue in Jira, against who handles it here: the same, nobody while someone here has it -- an
      * MIS member Jira has no account for -- or someone outside MIS, by the name Jira shows. Null for an issue this
-     * server does not follow, or a report never sent.
+     * server does not follow, a report never sent, or while the field sync is off and nobody's assignee is compared.
      *
      * @return array{state: string, name: ?string}|null
      */
     private function jiraAssignee(object $row, ?string $elsewhere): ?array
     {
-        if ($elsewhere !== null || $row->jira_issue_id === null || $row->jira_state === PortalBugReportsJira::STATE_DELETED) {
+        if ($elsewhere !== null || $row->jira_issue_id === null || $row->jira_state === PortalBugReportsJira::STATE_DELETED || ! $this->jira->syncFields()) {
             return null;
         }
         $agreed = $row->jira_assignee_id ?? null;
@@ -717,12 +718,20 @@ final class PortalBugReports
      */
     public function updateJira(Employee $actor, Request $request): array
     {
-        $on = $request->input('autoSend');
-        if (! is_bool($on)) {
-            abort(422, 'Say whether new ones go to Jira on their own.');
+        // Either switch, or both (2026-10-22, user: keeping the fields in step, off until turned on).
+        $autoSend = $request->input('autoSend');
+        $syncFields = $request->input('syncFields');
+        if (($request->has('autoSend') && ! is_bool($autoSend)) || ($request->has('syncFields') && ! is_bool($syncFields)) || (! is_bool($autoSend) && ! is_bool($syncFields))) {
+            abort(422, 'Say whether new ones go to Jira on their own, or whether their fields are kept in step with Jira.');
         }
-        $this->jira->setAutoSend($on);
-        $this->audit->record($actor, PortalLogAction::PATCH, 'bug-reports', PortalActivityCopy::switchedJiraAutoSend($on), null, $request, ['autoSend' => $on]);
+        if (is_bool($autoSend)) {
+            $this->jira->setAutoSend($autoSend);
+            $this->audit->record($actor, PortalLogAction::PATCH, 'bug-reports', PortalActivityCopy::switchedJiraAutoSend($autoSend), null, $request, ['autoSend' => $autoSend]);
+        }
+        if (is_bool($syncFields)) {
+            $this->jira->setSyncFields($syncFields);
+            $this->audit->record($actor, PortalLogAction::PATCH, 'bug-reports', PortalActivityCopy::switchedJiraFieldSync($syncFields), null, $request, ['syncFields' => $syncFields]);
+        }
 
         return ['section' => 'bug-reports', 'resource' => 'jira', 'data' => $this->jira->settings()];
     }

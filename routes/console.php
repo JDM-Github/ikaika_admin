@@ -521,6 +521,7 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         return 1;
     }
     $this->info('New ones go to Jira on their own: '.($jira->autoSend() ? 'on' : 'off'));
+    $this->info('Fields kept in step with Jira: '.($jira->syncFields() ? 'on' : 'off - assignees, dates, parents and teams stay in the portal'));
     $hasSecret = trim((string) config('services.jira.webhook_secret')) !== '';
     $hasSecret ? $this->info('Webhook secret: set') : $this->warn('Webhook secret: not set - every delivery will be refused until JIRA_WEBHOOK_SECRET is.');
     $this->line('');
