@@ -24,6 +24,11 @@ namespace App\Support\Portal;
  * Won't fix is shown as Cancelled since 2026-10-21 (the value stays wont_fix), and a cancelled one says why: a
  * duplicate when Jira's resolution or status says so or the issue carries the duplicate label, else won't fix; a
  * duplicate's own links name the issue it duplicates as their outward end.
+ *
+ * A report's plan is the issue's too (2026-10-22, user): its start and due dates, the epic it sits under and the
+ * team that owns it. The site's Team and Start date fields are found by their type -- and the start date by its
+ * name -- since their ids differ from site to site. Back from Jira, only a field the issue was read with counts,
+ * so one its project's screens lack keeps the portal's; but an issue without a parent leaves that field out.
  */
 final class PortalJiraIssue
 {
@@ -47,6 +52,103 @@ final class PortalJiraIssue
     private const SMALL_WORDS = ['a', 'an', 'and', 'as', 'at', 'by', 'for', 'from', 'in', 'into', 'of', 'on', 'or', 'plus', 'the', 'to', 'vs', 'with'];
 
     private const EXTENSIONS = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', 'image/gif' => 'gif'];
+
+    // The Team field's type as the site lists it, and as Atlassian documents it.
+    private const TEAM_FIELD_TYPES = ['com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team', 'com.atlassian.teams:rm-teams-custom-field-team'];
+
+    /**
+     * The ids of the site's Team and Start date fields among the site's fields: the whole site's before a
+     * project's own, which counts only when it is the one there is.
+     *
+     * @return array{team: ?string, startDate: ?string}
+     */
+    public static function planFieldIds(mixed $fields): array
+    {
+        $team = [];
+        $start = [];
+        foreach (is_array($fields) ? $fields : [] as $field) {
+            if (! is_array($field) || ! is_string($field['id'] ?? null)) {
+                continue;
+            }
+            $custom = (string) ($field['schema']['custom'] ?? '');
+            if (in_array($custom, self::TEAM_FIELD_TYPES, true)) {
+                $team[] = $field;
+            } elseif (str_ends_with($custom, ':datepicker') && strcasecmp(trim((string) ($field['name'] ?? '')), 'Start date') === 0) {
+                $start[] = $field;
+            }
+        }
+
+        return ['team' => self::siteWideId($team), 'startDate' => self::siteWideId($start)];
+    }
+
+    /**
+     * The teams a Team field's suggestions name, by id, without the markup a suggestion is highlighted with.
+     *
+     * @return list<array{id: string, name: string}>
+     */
+    public static function teamsFrom(mixed $results): array
+    {
+        $teams = [];
+        foreach (is_array($results) ? $results : [] as $result) {
+            $id = is_array($result) && is_string($result['value'] ?? null) ? trim($result['value']) : '';
+            if ($id === '') {
+                continue;
+            }
+            $name = trim(html_entity_decode(strip_tags((string) ($result['displayName'] ?? '')), ENT_QUOTES | ENT_HTML5));
+            $teams[$id] = ['id' => $id, 'name' => $name === '' ? $id : $name];
+        }
+
+        return array_values($teams);
+    }
+
+    /**
+     * Epics as a search answers with them, each done once its column says the work ended.
+     *
+     * @return list<array{key: string, summary: string, isDone: bool}>
+     */
+    public static function epicsFrom(mixed $issues): array
+    {
+        $epics = [];
+        foreach (is_array($issues) ? $issues : [] as $issue) {
+            if (! is_array($issue) || ! is_string($issue['key'] ?? null) || $issue['key'] === '') {
+                continue;
+            }
+            $fields = is_array($issue['fields'] ?? null) ? $issue['fields'] : [];
+            $epics[] = [
+                'key' => $issue['key'],
+                'summary' => trim((string) ($fields['summary'] ?? '')),
+                'isDone' => in_array(self::portalStatus($fields, PortalBugReports::STATUS_NEW), [PortalBugReports::STATUS_FIXED, PortalBugReports::STATUS_CANCELLED], true),
+            ];
+        }
+
+        return $epics;
+    }
+
+    /**
+     * What an issue says of a report's plan, as its columns. The dates and the team only when the issue was read
+     * with them; the parent always, an issue without one being none.
+     *
+     * @param  array<string, mixed>  $fields
+     * @param  array{team: ?string, startDate: ?string}  $ids
+     * @return array{parent_key: ?string, parent_summary: ?string, due_on?: ?string, start_on?: ?string, team_id?: ?string, team_name?: ?string}
+     */
+    public static function planOf(array $fields, array $ids): array
+    {
+        $parent = is_array($fields['parent'] ?? null) && is_string($fields['parent']['key'] ?? null) && $fields['parent']['key'] !== '' ? $fields['parent'] : null;
+        $summary = $parent === null ? null : trim((string) ($parent['fields']['summary'] ?? ''));
+        $plan = ['parent_key' => $parent === null ? null : (string) $parent['key'], 'parent_summary' => $summary === '' ? null : $summary];
+        if (array_key_exists('duedate', $fields)) {
+            $plan['due_on'] = self::day($fields['duedate']);
+        }
+        if ($ids['startDate'] !== null && array_key_exists($ids['startDate'], $fields)) {
+            $plan['start_on'] = self::day($fields[$ids['startDate']]);
+        }
+        if ($ids['team'] !== null && array_key_exists($ids['team'], $fields)) {
+            [$plan['team_id'], $plan['team_name']] = self::teamOf($fields[$ids['team']]);
+        }
+
+        return $plan;
+    }
 
     /**
      * The fields of a new issue for a report row.
@@ -271,6 +373,43 @@ final class PortalJiraIssue
         }
 
         return mb_substr(self::SUMMARY_PREFIX.'-'.($words === [] ? 'Untitled' : implode('-', $words)), 0, 255);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $candidates
+     */
+    private static function siteWideId(array $candidates): ?string
+    {
+        $siteWide = array_values(array_filter($candidates, static fn (array $field): bool => ! isset($field['scope'])));
+        if ($siteWide !== []) {
+            return (string) $siteWide[0]['id'];
+        }
+
+        return count($candidates) === 1 ? (string) $candidates[0]['id'] : null;
+    }
+
+    // A day as Jira writes one, YYYY-MM-DD; anything else is none.
+    private static function day(mixed $value): ?string
+    {
+        return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}/', $value) === 1 ? substr($value, 0, 10) : null;
+    }
+
+    /**
+     * A Team field's value, as the team and its name: Jira answers with the team, or with its id alone.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private static function teamOf(mixed $value): array
+    {
+        if (is_string($value)) {
+            return trim($value) === '' ? [null, null] : [trim($value), null];
+        }
+        if (! is_array($value) || ! is_string($value['id'] ?? null) || trim($value['id']) === '') {
+            return [null, null];
+        }
+        $name = $value['name'] ?? $value['title'] ?? null;
+
+        return [trim($value['id']), is_string($name) && trim($name) !== '' ? trim($name) : null];
     }
 
     private static function oneLine(string $text): string

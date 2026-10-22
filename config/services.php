@@ -76,6 +76,14 @@ return [
             'feature' => env('JIRA_ISSUE_TYPE_FEATURE', 'Story'),
             'feedback' => env('JIRA_ISSUE_TYPE_FEEDBACK', 'Task'),
         ],
+        // A report's plan is the issue's too (2026-10-22, user). The site's Team and Start date fields, by id
+        // (customfield_N), are found by their type and name unless set here.
+        'fields' => [
+            'team' => env('JIRA_FIELD_TEAM'),
+            'start_date' => env('JIRA_FIELD_START_DATE'),
+        ],
+        // The team every new issue is filed under, by its name; blank, none.
+        'default_team' => env('JIRA_DEFAULT_TEAM', 'DEV'),
     ],
 
     // ID-number sign-in on a deployed portal: only MIS knows it; unset, ID sign-in stays refused there.

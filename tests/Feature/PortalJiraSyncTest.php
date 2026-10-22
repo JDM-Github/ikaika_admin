@@ -135,6 +135,36 @@ class PortalJiraSyncTest extends TestCase
             ->assertExitCode(0);
     }
 
+    // A report's plan is the issue's too (2026-10-22, user): the check names the two fields, the team new issues go
+    // to and the epics, and what a kind's create screen lacks, which a new issue is then sent without.
+    public function test_the_check_names_the_plan_fields_the_default_team_and_the_epics(): void
+    {
+        config(['services.jira.default_team' => 'dev']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/10001*' => Http::response(['fields' => [
+                ['fieldId' => 'summary'], ['fieldId' => 'assignee'], ['fieldId' => 'parent'], ['fieldId' => 'duedate'], ['fieldId' => 'customfield_10001'], ['fieldId' => 'customfield_10015'],
+            ]]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/10003*' => Http::response(['fields' => [['fieldId' => 'summary'], ['fieldId' => 'assignee']]]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [
+                ['id' => '10000', 'name' => 'Epic', 'hierarchyLevel' => 1], ['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task'],
+            ]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
+            self::SITE.'/rest/api/3/jql/autocompletedata/suggestions*' => Http::response(['results' => [['value' => '3688-uuid', 'displayName' => 'DEV']]]),
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => [['key' => 'IKP-12', 'fields' => ['summary' => 'Payroll revamp']]]]),
+        ]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('Team field: customfield_10001 (set by JIRA_FIELD_TEAM)')
+            ->expectsOutputToContain('Start date field: customfield_10015 (set by JIRA_FIELD_START_DATE)')
+            ->expectsOutputToContain('New issues go to team: DEV (3688-uuid)')
+            ->expectsOutputToContain('Epics: 1 in IKP')
+            ->expectsOutputToContain('Feature request (Task) has no parent, duedate, customfield_10001, customfield_10015 on its create screen, so a new one goes without.')
+            ->assertExitCode(0);
+    }
+
     // A key the project had before still files (2026-10-22, user: IPS became IP2): the check says to move to the key it
     // has now, and prints the webhook's JQL with that one.
     public function test_the_check_names_the_key_a_renamed_project_has_now(): void

@@ -416,6 +416,33 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         } else {
             $this->info('Duplicates are linked as: '.$linkType.' (the account needs Link issues)');
         }
+        // A report's plan is the issue's too (2026-10-22, user): the site's two fields, the team new issues go
+        // to, the epics, and what each kind's create screen leaves out -- which a new issue is then sent without.
+        $ids = $client->fieldIds();
+        foreach (['team' => ['Team', 'JIRA_FIELD_TEAM', 'team'], 'startDate' => ['Start date', 'JIRA_FIELD_START_DATE', 'start_date']] as $which => [$label, $env, $setting]) {
+            $set = trim((string) config('services.jira.fields.'.$setting)) !== '';
+            $ids[$which] === null
+                ? $this->warn($label.' field: none on the site, so a report keeps its '.strtolower($label).' to itself; set '.$env.' to its id if the site names it otherwise.')
+                : $this->info($label.' field: '.$ids[$which].($set ? ' (set by '.$env.')' : ' (found on the site)'));
+        }
+        $wantedTeam = trim((string) config('services.jira.default_team', ''));
+        $team = $jira->defaultTeam();
+        if ($wantedTeam === '') {
+            $this->info('New issues go to no team (JIRA_DEFAULT_TEAM is blank).');
+        } elseif ($team === null) {
+            $this->warn('New issues go to no team: Jira has no single team named '.$wantedTeam.'. It has: '.(implode(', ', array_column($client->teams(), 'name')) ?: 'none').'.');
+        } else {
+            $this->info('New issues go to team: '.$team['name'].' ('.$team['id'].')');
+        }
+        $this->info('Epics: '.count($client->epics()).' in '.$project['key']);
+        foreach (PortalBugReports::KINDS as $kind => $words) {
+            $type = $jira->issueTypeFor($kind);
+            $screen = $type['id'] === null ? null : $client->createFields($type['id']);
+            $lacking = $screen === null ? [] : array_values(array_diff(array_filter(['assignee', 'parent', 'duedate', $ids['team'], $ids['startDate']]), $screen));
+            if ($lacking !== []) {
+                $this->warn($words['label'].' ('.$type['name'].') has no '.implode(', ', $lacking).' on its create screen, so a new one goes without.');
+            }
+        }
     } catch (RuntimeException $error) {
         $this->error($error->getMessage());
         if ($error->getCode() === 401 && trim((string) config('services.jira.cloud_id')) === '') {

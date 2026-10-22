@@ -213,6 +213,66 @@ class PortalJiraClientTest extends TestCase
         $this->assertSame('Jira HTTP 404: No project could be found with key IKP.', $client->connection()['message']);
     }
 
+    // The plan fields (2026-10-22, user): found once a day unless the env names them, and a failed look is tried
+    // again in minutes rather than for every report on a page.
+    public function test_the_plan_fields_are_found_on_the_site_once_and_a_failed_look_only_briefly(): void
+    {
+        config(['services.jira.fields' => ['team' => null, 'start_date' => null]]);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/field' => Http::sequence()
+            ->push(['errorMessages' => ['You do not have permission.']], 403)
+            ->push([
+                ['id' => 'customfield_10001', 'name' => 'Team', 'schema' => ['custom' => 'com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team']],
+                ['id' => 'customfield_10015', 'name' => 'Start date', 'schema' => ['custom' => 'com.atlassian.jira.plugin.system.customfieldtypes:datepicker']],
+            ])]);
+        $client = app(PortalJiraClient::class);
+
+        $this->assertSame(['team' => null, 'startDate' => null], $client->fieldIds());
+        $this->assertSame(['team' => null, 'startDate' => null], $client->fieldIds());
+        Http::assertSentCount(1);
+        $this->travel(6)->minutes();
+        $this->assertSame(['team' => 'customfield_10001', 'startDate' => 'customfield_10015'], $client->fieldIds());
+        $client->fieldIds();
+        Http::assertSentCount(2);
+        // Named by the env, a field is taken as it is.
+        config(['services.jira.fields' => ['team' => 'customfield_777', 'start_date' => 'customfield_778']]);
+        $this->assertSame(['team' => 'customfield_777', 'startDate' => 'customfield_778'], $client->fieldIds());
+        Http::assertSentCount(2);
+    }
+
+    public function test_the_teams_the_epics_and_a_create_screen_are_asked_once_and_kept(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/jql/autocompletedata/suggestions*' => Http::response(['results' => [['value' => '3688-uuid', 'displayName' => '<b>DEV</b>']]]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/10004*' => Http::response(['fields' => [['fieldId' => 'summary'], ['fieldId' => 'assignee'], ['fieldId' => 'customfield_10001']]]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/99999*' => Http::response(['errorMessages' => ['No such issue type.']], 404),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [
+                ['id' => '10000', 'name' => 'Epic', 'hierarchyLevel' => 1],
+                ['id' => '10004', 'name' => 'Bug', 'hierarchyLevel' => 0],
+                ['id' => '10009', 'name' => 'Subtask', 'subtask' => true, 'hierarchyLevel' => -1],
+            ]]),
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => [['key' => 'IKP-12', 'fields' => ['summary' => 'Payroll revamp', 'status' => ['name' => 'To Do']]]]]),
+        ]);
+        $client = app(PortalJiraClient::class);
+
+        $this->assertSame([['id' => '3688-uuid', 'name' => 'DEV']], $client->teams());
+        // An epic is an issue of the level-1 type, whatever the project calls it.
+        $this->assertSame([['key' => 'IKP-12', 'summary' => 'Payroll revamp', 'isDone' => false]], $client->epics());
+        $this->assertSame(['summary', 'assignee', 'customfield_10001'], $client->createFields('10004'));
+        $client->teams();
+        $client->epics();
+        $client->createFields('10004');
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), 'fieldName=cf[10001]'));
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), 'project = "IKP" AND issuetype in (10000) ORDER BY created DESC'));
+        $this->assertCount(4, Http::recorded());
+        // Refresh asks for the epics again; a screen Jira cannot say is unknown, not empty.
+        $client->forgetEpics();
+        $client->epics();
+        $this->assertCount(5, Http::recorded());
+        $this->assertNull($client->createFields('99999'));
+    }
+
     public function test_a_screenshot_is_downloaded_only_from_the_portals_own_cloudinary(): void
     {
         Http::preventStrayRequests();

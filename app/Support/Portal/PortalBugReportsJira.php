@@ -589,6 +589,23 @@ final class PortalBugReportsJira
         return ['wanted' => $wanted, 'id' => null, 'name' => null];
     }
 
+    /**
+     * The team a new issue is filed under (2026-10-22, user: DEV): the one JIRA_DEFAULT_TEAM names, when exactly
+     * one of the field's teams has that name; none when it is blank or names none.
+     *
+     * @return array{id: string, name: string}|null
+     */
+    public function defaultTeam(): ?array
+    {
+        $name = trim((string) config('services.jira.default_team', ''));
+        if ($name === '') {
+            return null;
+        }
+        $named = array_values(array_filter($this->jira->teams(), static fn (array $team): bool => strcasecmp($team['name'], $name) === 0));
+
+        return count($named) === 1 ? $named[0] : null;
+    }
+
     private function issueTypeId(string $kind): string
     {
         $type = $this->issueTypeFor($kind);

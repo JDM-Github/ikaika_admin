@@ -179,4 +179,73 @@ class PortalJiraIssueTest extends TestCase
         $this->assertSame('screenshot-1.webp', PortalJiraIssue::attachmentName(1, 'IMAGE/WEBP'));
         $this->assertSame('screenshot-3.png', PortalJiraIssue::attachmentName(3, 'application/octet-stream'));
     }
+
+    // The plan fields (2026-10-22, user): their ids differ by site, so they are found by type, and the start date by name.
+    public function test_the_team_and_start_date_fields_are_found_by_their_type_and_the_site_wide_one_wins(): void
+    {
+        $datepicker = 'com.atlassian.jira.plugin.system.customfieldtypes:datepicker';
+        $fields = [
+            ['id' => 'duedate', 'name' => 'Due date', 'schema' => ['system' => 'duedate']],
+            ['id' => 'customfield_10040', 'name' => 'Start date', 'schema' => ['custom' => $datepicker], 'scope' => ['type' => 'PROJECT']],
+            ['id' => 'customfield_10015', 'name' => 'Start Date', 'schema' => ['custom' => $datepicker]],
+            ['id' => 'customfield_10016', 'name' => 'Go-live date', 'schema' => ['custom' => $datepicker]],
+            ['id' => 'customfield_10001', 'name' => 'Team', 'schema' => ['custom' => 'com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team']],
+        ];
+
+        $this->assertSame(['team' => 'customfield_10001', 'startDate' => 'customfield_10015'], PortalJiraIssue::planFieldIds($fields));
+        // Atlassian's documented type counts too, and a project's own field only when it is the one there is.
+        $this->assertSame(
+            ['team' => 'customfield_20001', 'startDate' => 'customfield_10040'],
+            PortalJiraIssue::planFieldIds([$fields[1], ['id' => 'customfield_20001', 'name' => 'Squad', 'schema' => ['custom' => 'com.atlassian.teams:rm-teams-custom-field-team']]]),
+        );
+        $this->assertSame(['team' => null, 'startDate' => null], PortalJiraIssue::planFieldIds([$fields[0], $fields[3]]));
+        $this->assertSame(['team' => null, 'startDate' => null], PortalJiraIssue::planFieldIds('not a list'));
+    }
+
+    public function test_teams_are_their_suggestions_without_markup_and_epics_say_when_they_are_done(): void
+    {
+        $this->assertSame(
+            [['id' => 'a1b2', 'name' => 'DEV & Ops'], ['id' => 'c3d4', 'name' => 'c3d4']],
+            PortalJiraIssue::teamsFrom([
+                ['value' => 'a1b2', 'displayName' => '<b>DEV</b> &amp; Ops'],
+                ['value' => 'a1b2', 'displayName' => 'DEV &amp; Ops'],
+                ['value' => 'c3d4', 'displayName' => ''],
+                ['value' => '', 'displayName' => 'Nobody'],
+                'junk',
+            ]),
+        );
+        $this->assertSame(
+            [['key' => 'IP2-12', 'summary' => 'Payroll revamp', 'isDone' => false], ['key' => 'IP2-3', 'summary' => '', 'isDone' => true]],
+            PortalJiraIssue::epicsFrom([
+                ['key' => 'IP2-12', 'fields' => ['summary' => ' Payroll revamp ', 'status' => ['name' => 'In Progress', 'statusCategory' => ['key' => 'indeterminate']]]],
+                // Read by its column, as a report's status is: this board files Done under "in progress".
+                ['key' => 'IP2-3', 'fields' => ['status' => ['name' => 'Done', 'statusCategory' => ['key' => 'indeterminate']]]],
+                ['fields' => ['summary' => 'No key']],
+            ]),
+        );
+    }
+
+    // Back from Jira, a field the issue was not read with keeps the portal's; a parent left out is none.
+    public function test_the_plan_is_read_only_from_what_the_issue_was_read_with(): void
+    {
+        $ids = ['team' => 'customfield_10001', 'startDate' => 'customfield_10015'];
+
+        $this->assertSame([
+            'parent_key' => 'IP2-12', 'parent_summary' => 'Payroll revamp', 'due_on' => '2026-10-30', 'start_on' => '2026-10-23', 'team_id' => '3688-uuid', 'team_name' => 'DEV',
+        ], PortalJiraIssue::planOf([
+            'parent' => ['id' => '10060', 'key' => 'IP2-12', 'fields' => ['summary' => 'Payroll revamp']],
+            'duedate' => '2026-10-30',
+            'customfield_10015' => '2026-10-23T00:00:00.000+0800',
+            'customfield_10001' => ['id' => '3688-uuid', 'name' => 'DEV', 'title' => 'DEV team'],
+        ], $ids));
+        // Cleared in Jira, each comes back null; a team given as its id alone, or by its title, still counts.
+        $this->assertSame(
+            ['parent_key' => null, 'parent_summary' => null, 'due_on' => null, 'start_on' => null, 'team_id' => '3688-uuid', 'team_name' => null],
+            PortalJiraIssue::planOf(['duedate' => null, 'customfield_10015' => 'soon', 'customfield_10001' => '3688-uuid'], $ids),
+        );
+        $this->assertSame('DEV team', PortalJiraIssue::planOf(['customfield_10001' => ['id' => 'x', 'title' => 'DEV team']], $ids)['team_name']);
+        // Read without them -- or on a site without the fields -- the dates and team are not said at all.
+        $this->assertSame(['parent_key' => null, 'parent_summary' => null], PortalJiraIssue::planOf(['status' => ['name' => 'To Do']], $ids));
+        $this->assertSame(['parent_key' => null, 'parent_summary' => null, 'due_on' => null], PortalJiraIssue::planOf(['duedate' => null, 'customfield_10001' => 'x'], ['team' => null, 'startDate' => null]));
+    }
 }
