@@ -693,7 +693,7 @@ final class PortalBugReportsJira
      * which plan fields the site has, and which MIS members Jira knows -- that last as best it can, since a
      * missing Browse users and groups must not hide the rest.
      *
-     * @return array{teams: list<array{id: string, name: string}>, defaultTeamId: ?string, epics: list<array{key: string, summary: string, isDone: bool}>, fields: array{team: bool, startDate: bool}, people: list<array{id: string, inJira: bool}>}
+     * @return array{projectKey: ?string, teams: list<array{id: string, name: string}>, defaultTeamId: ?string, epics: list<array{key: string, summary: string, isDone: bool}>, fields: array{team: bool, startDate: bool}, people: list<array{id: string, inJira: bool}>}
      */
     public function planOptions(): array
     {
@@ -703,8 +703,11 @@ final class PortalBugReportsJira
         } catch (RuntimeException) {
             $people = [];
         }
+        // The key Jira files under now, which an empty list names rather than the configured one (2026-10-22: IPS, now IP2).
+        $keys = $this->jira->projectKeys();
 
         return [
+            'projectKey' => $keys === [] ? null : $keys[array_key_last($keys)],
             'teams' => $this->jira->teams(),
             'defaultTeamId' => $this->defaultTeam()['id'] ?? null,
             'epics' => $this->jira->epics(),

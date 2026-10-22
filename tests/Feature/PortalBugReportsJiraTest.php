@@ -490,11 +490,13 @@ class PortalBugReportsJiraTest extends TestCase
         $this->connectJira();
         config(['services.jira.default_team' => 'DEV']);
         Http::preventStrayRequests();
-        Http::fake([...$this->planStubs(), self::SITE.'/rest/api/3/user/search*' => Http::response([])]);
+        Http::fake([...$this->planStubs(), self::SITE.'/rest/api/3/user/search*' => Http::response([]),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IK2', 'name' => 'Portal'])]);
         $mis = $this->headersFor($this->memberOf('MIS'));
 
         $options = $this->withHeaders($mis)->getJson(self::BASE.'bug-reports/jira/options')->assertOk()
             ->assertJsonPath('resource', 'jira-options')
+            ->assertJsonPath('data.projectKey', 'IK2')
             ->assertJsonPath('data.teams', [['id' => '3688-dev', 'name' => 'DEV']])
             ->assertJsonPath('data.defaultTeamId', '3688-dev')
             ->assertJsonPath('data.epics', [['key' => 'IKP-1', 'summary' => 'Payroll revamp', 'isDone' => false]])
