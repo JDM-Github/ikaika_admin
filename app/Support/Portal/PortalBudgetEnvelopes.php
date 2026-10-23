@@ -176,7 +176,7 @@ final class PortalBudgetEnvelopes
                 ->where('table_name', PortalBudgetTransactions::RECEIPT_TABLE)
                 ->where('field_name', PortalBudgetTransactions::RECEIPT_FIELD)
                 ->orderBy('id')
-                ->get(['record_id', 'file_url', 'file_name', 'mime_type'])
+                ->get(['id', 'record_id', 'file_url', 'file_name', 'mime_type'])
                 ->groupBy('record_id');
         } catch (QueryException) {
             abort(503, 'Budget transactions are unavailable right now.');
@@ -245,6 +245,8 @@ final class PortalBudgetEnvelopes
                     ...($receipts->get($row->id) ?? collect())
                         ->filter(fn (object $receipt): bool => $this->text($receipt->file_url) !== null)
                         ->map(fn (object $receipt): array => [
+                            // Named so an edit can take this one receipt off (2026-10-22).
+                            'id' => (string) $receipt->id,
                             'fileName' => $this->text($receipt->file_name) ?? 'Receipt',
                             'fileUrl' => (string) $receipt->file_url,
                             'mimeType' => $this->text($receipt->mime_type),
@@ -262,6 +264,8 @@ final class PortalBudgetEnvelopes
                 'isEditable' => PortalBudgetTransactions::isEditable($row->transaction_name, $row->source_key),
                 // Funds Received, whose edit changes only its amount and day (2026-10-21, user).
                 'isFundsReceived' => PortalBudgetTransactions::isFundsReceived($row->transaction_name),
+                // The split this line is one envelope's share of, so the ledger can show the whole (2026-10-22, user).
+                'splitKey' => PortalBudgetTransactions::splitKeyOf($row->source_key),
             ];
         }
 

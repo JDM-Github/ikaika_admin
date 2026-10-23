@@ -362,8 +362,9 @@ final class PortalProfileChanges
             $fields[] = ['key' => $key, 'from' => $current[$key] ?? null, 'to' => $value];
         }
         $added = [];
+        // Named for its request too (2026-10-23, user): two requests' first files were both new-0, so a preview opened the wrong one.
         foreach ($documents['add'] as $index => $stored) {
-            $added[] = $this->documents->described('new-'.$index, $stored['field'], $stored['fileName'], $stored['mimeType'], $stored['sizeBytes'], $stored['fileUrl']);
+            $added[] = $this->documents->described('new-'.$row->id.'-'.$index, $stored['field'], $stored['fileName'], $stored['mimeType'], $stored['sizeBytes'], $stored['fileUrl']);
         }
         $removed = [];
         foreach ($documents['remove'] as $documentId) {
