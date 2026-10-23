@@ -37,7 +37,7 @@ return [
      */
     'readonly_columns' => [
         'portal' => [
-            'employees' => ['is_developer'],
+            'employees' => ['is_developer', 'microsoft_oid'],
         ],
     ],
 

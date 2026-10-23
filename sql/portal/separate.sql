@@ -502,6 +502,11 @@ ALTER TABLE employees_user_reports
 ALTER TABLE employees
     ADD COLUMN is_developer TINYINT(1) NOT NULL DEFAULT 0;
 
+-- Microsoft sign-in binds to Entra's immutable object id (oid), never the display name
+-- (2026-10-23 security audit F-002). NULL means not linked yet and is refused by login.
+ALTER TABLE employees
+    ADD COLUMN microsoft_oid VARCHAR(64) NULL UNIQUE;
+
 -- The portal's developers. Matched on id_no, never on name: another employee carries
 -- "Malabanan" as a middle name. Needs the employees data.sql loads, which is why
 -- reset.ps1 runs this file after data.sql.

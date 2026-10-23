@@ -20,6 +20,8 @@ class AdvancedSettingsController extends Controller
         return response()->json(['data' => [
             'notificationEmails' => PortalAdvancedSettings::notificationEmails(),
             'idLogin' => PortalAdvancedSettings::idLogin(),
+            'microsoftFallback' => PortalAdvancedSettings::microsoftFallback(),
+            'unlinkedMicrosoft' => PortalAdvancedSettings::unlinkedMicrosoftCount(),
         ]]);
     }
 
@@ -29,10 +31,12 @@ class AdvancedSettingsController extends Controller
         $validated = $request->validate([
             'notificationEmails' => ['nullable', 'boolean'],
             'idLogin' => ['nullable', 'boolean'],
+            'microsoftFallback' => ['nullable', 'boolean'],
         ]);
         $notificationEmails = $validated['notificationEmails'] ?? null;
         $idLogin = $validated['idLogin'] ?? null;
-        if ($notificationEmails === null && $idLogin === null) {
+        $microsoftFallback = $validated['microsoftFallback'] ?? null;
+        if ($notificationEmails === null && $idLogin === null && $microsoftFallback === null) {
             abort(422, 'Give at least one switch.');
         }
 
@@ -42,10 +46,15 @@ class AdvancedSettingsController extends Controller
         if ($idLogin !== null) {
             $this->advanced->setIdLogin($actor, $request, (bool) $idLogin);
         }
+        if ($microsoftFallback !== null) {
+            $this->advanced->setMicrosoftFallback($actor, $request, (bool) $microsoftFallback);
+        }
 
         return response()->json(['data' => [
             'notificationEmails' => PortalAdvancedSettings::notificationEmails(),
             'idLogin' => PortalAdvancedSettings::idLogin(),
+            'microsoftFallback' => PortalAdvancedSettings::microsoftFallback(),
+            'unlinkedMicrosoft' => PortalAdvancedSettings::unlinkedMicrosoftCount(),
         ]]);
     }
 

@@ -315,6 +315,30 @@ This creates the four databases and the user, with a random password written str
 
 Go to Azure portal → App registrations → the portal app (`f995e827-...`) → Authentication → **Single-page application**, and add `https://test.ikaikabim.com/portal`. Without it, Microsoft sign-in fails.
 
+After the migration, Microsoft sign-in is bound to the Entra `oid`, not the display name. Verify
+each person's UPN/work email in Entra, then link their portal employee:
+
+```powershell
+ssh bluehost "cd ~/apps/test-server/app && php artisan portal:link-microsoft-oid 220101-0001 <entra-oid>"
+```
+
+The temporary **Microsoft account fallback** is on by default while this migration runs. It links
+only by exact signed work email/UPN, never by name. Turn it off manually after everyone is linked:
+sign in with a linked admin account and open **Settings → Advanced**. To test the off state, turn it
+off, leave your oid unlinked, confirm Microsoft login is refused, then sign in with the local
+ID-number box and turn it back on.
+
+For a whole tenant without auto-linking, use the bulk command with an Entra Graph CSV
+(`Id`, `UserPrincipalName`, `Mail`); it matches the work email/UPN to the portal employee. Run the
+dry run first, then `--apply`:
+
+```powershell
+php artisan portal:link-microsoft-oids <entra-users.csv>
+php artisan portal:link-microsoft-oids <entra-users.csv> --apply
+```
+
+The `oid` column is read-only in the admin workspace; do not edit it there.
+
 ### 5. Deploy
 
 Run `deploy.ps1` here, then the portal's `deploy.ps1`.
@@ -330,6 +354,7 @@ Run `deploy.ps1` here, then the portal's `deploy.ps1`.
 | `uapi ... failed` | cPanel refused (name taken, quota). The error says which |
 | `Access denied` during import | `db.env` doesn't match the `eoxvhumy_ts` user any more. Delete the user in cPanel and `db.env`, then rerun `copy-databases.ps1` |
 | Microsoft login: redirect mismatch | Azure and `PORTAL_AZURE_REDIRECT_URI` must both be exactly the portal URL |
+| Microsoft login: account not linked | Run `portal:link-microsoft-oid <id_no> <oid>` after verifying the Entra UPN |
 | `Bitbucket HTTP 401` from the sync | `BITBUCKET_TOKEN` is wrong, expired (they last a year at most) or lacks `read:repository:bitbucket` |
 | Webhook deliveries answer `401` | The webhook's secret and `BITBUCKET_WEBHOOK_SECRET` differ, or the setting was not applied |
 | Issues & Requests says Jira is "not connected" | One of `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` is empty on that server; `portal:jira-check` names it |

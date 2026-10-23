@@ -45,7 +45,7 @@ posting is refused without it -- the step mail did not need).
 
 **Why not the signed-in user's token:** the portal signs in with MSAL for **identity only**
 (`openid profile email`); `PortalAuthController::loginMicrosoft` takes the id_token, matches the
-employee and issues the portal's own session. It never holds a token that can act as the person, and a
+employee by Entra `oid` and issues the portal's own session. It never holds a token that can act as the person, and a
 Friday-3PM run has no user present anyway. Delegated `Mail.Send` is the "requires a signed-in user"
 version the supervisor meant; it is not usable here.
 

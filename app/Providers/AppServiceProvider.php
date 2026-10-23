@@ -102,6 +102,12 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(5)->by('developer:'.$this->portalLimiterKey($request));
         });
 
+        // Advanced settings do not check a password, so they get the ordinary read budget instead
+        // of sharing the developer-password bucket (2026-10-23).
+        RateLimiter::for('portal-developer-settings', function (Request $request) {
+            return Limit::perMinute(60)->by('developer-settings:'.$this->portalLimiterKey($request));
+        });
+
         RateLimiter::for('portal-access', function (Request $request) {
             return Limit::perMinute(60)->by('access:'.$this->portalLimiterKey($request));
         });

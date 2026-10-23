@@ -1,3 +1,17 @@
+## Security context (read before security-sensitive work)
+
+The security workspace is `docs/security/`. Before planning or editing authentication,
+authorization, routes, middleware, sharing, uploads, tokens, data exposure, or deployment:
+
+1. Read `docs/security/README.md`.
+2. Read the relevant topic: `findings.md`, `remediation-plan.md`, `prevention.md`, or `runbook.md`.
+3. Do not add a new endpoint, shareable page, upload, token flow, or production deploy while a
+   related Phase 0 task in `remediation-plan.md` is open.
+4. After a security change, update `changelog.md` and the task status; add a finding when a new risk
+   is discovered.
+
+The portal has its own companion workspace at `../ikaika-portal/docs/security/`.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

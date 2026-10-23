@@ -42,7 +42,11 @@ class PortalAdvancedSettingsTest extends TestCase
         }
         DB::connection('core')->table('settings')
             ->where('product', 'portal')
-            ->whereIn('setting_key', [PortalAdvancedSettings::NOTIFICATION_EMAILS, PortalAdvancedSettings::ID_LOGIN])
+            ->whereIn('setting_key', [
+                PortalAdvancedSettings::NOTIFICATION_EMAILS,
+                PortalAdvancedSettings::ID_LOGIN,
+                PortalAdvancedSettings::MICROSOFT_FALLBACK,
+            ])
             ->delete();
 
         $this->developer = $this->active();
@@ -133,6 +137,36 @@ class PortalAdvancedSettingsTest extends TestCase
 
         $this->withToken($token)->patchJson(self::URL, ['idLogin' => false])->assertOk()->assertJsonPath('data.idLogin', false);
         $this->getJson($public)->assertOk()->assertJsonPath('data.idLogin', false);
+    }
+
+    public function test_the_microsoft_fallback_is_on_by_default_and_can_be_turned_off(): void
+    {
+        $token = $this->developerToken();
+        $this->read($token)->assertOk()
+            ->assertJsonPath('data.microsoftFallback', true)
+            ->assertJsonPath('data.unlinkedMicrosoft', PortalAdvancedSettings::unlinkedMicrosoftCount());
+
+        $this->withToken($token)
+            ->patchJson(self::URL, ['microsoftFallback' => false])
+            ->assertOk()
+            ->assertJsonPath('data.microsoftFallback', false);
+
+        $this->assertSame('0', DB::connection('core')->table('settings')
+            ->where('product', 'portal')
+            ->where('setting_key', PortalAdvancedSettings::MICROSOFT_FALLBACK)
+            ->value('setting_value'));
+
+        $log = PortalLog::query()
+            ->where('employee_id', $this->developer->getKey())
+            ->where('resource', 'settings.advanced')
+            ->orderByDesc('id')
+            ->firstOrFail();
+        $this->assertFalse((bool) ($log->payload['microsoftFallback'] ?? true));
+
+        $this->withToken($token)
+            ->patchJson(self::URL, ['microsoftFallback' => true])
+            ->assertOk()
+            ->assertJsonPath('data.microsoftFallback', true);
     }
 
     // The reported bug (2026-10-14, user): the box showed on the Test Server but the sign-in itself answered 404.

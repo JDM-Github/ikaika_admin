@@ -25,7 +25,7 @@ class PortalMicrosoftIdToken
     }
 
     /**
-     * @return array{email: ?string, emails: list<string>, given_name: string, family_name: string, name_pairs: list<array{given: string, family: string}>, oid: ?string, name: ?string}|null
+     * @return array{email: ?string, emails: list<string>, oid: ?string}|null
      */
     public function parse(string $idToken): ?array
     {
@@ -80,23 +80,13 @@ class PortalMicrosoftIdToken
             return null;
         }
 
-        $pairs = $this->namePairsFromClaims($payload);
-        if ($pairs === []) {
-            return null;
-        }
-
         $emails = $this->emailsFromClaims($payload);
         $oid = $payload['oid'] ?? null;
-        $displayName = $this->claimString($payload['name'] ?? null);
 
         return [
             'email' => $emails[0] ?? null,
             'emails' => $emails,
-            'given_name' => $pairs[0]['given'],
-            'family_name' => $pairs[0]['family'],
-            'name_pairs' => $pairs,
             'oid' => is_string($oid) && trim($oid) !== '' ? trim($oid) : null,
-            'name' => $displayName,
         ];
     }
 
@@ -291,92 +281,6 @@ class PortalMicrosoftIdToken
         }
 
         return false;
-    }
-
-    /**
-     * @param  array<string, mixed>  $claims
-     * @return list<array{given: string, family: string}>
-     */
-    private function namePairsFromClaims(array $claims): array
-    {
-        $pairs = [];
-        $seen = [];
-
-        $given = $this->claimString($claims['given_name'] ?? null);
-        $family = $this->claimString($claims['family_name'] ?? null);
-        if ($given !== null && $family !== null) {
-            $this->addNamePair($pairs, $seen, $given, $family);
-            $this->addNameSplits($pairs, $seen, $given.' '.$family);
-        }
-
-        $display = $this->claimString($claims['name'] ?? null);
-        if ($display !== null) {
-            $this->addNameSplits($pairs, $seen, $display);
-            if (str_contains($display, ',')) {
-                $parts = explode(',', $display, 2);
-                $this->addNamePair($pairs, $seen, $parts[1] ?? null, $parts[0] ?? null);
-            }
-        }
-
-        return $pairs;
-    }
-
-    /**
-     * @param  list<array{given: string, family: string}>  $pairs
-     * @param  array<string, true>  $seen
-     */
-    private function addNameSplits(array &$pairs, array &$seen, string $display): void
-    {
-        $tokens = preg_split('/\s+/u', $display);
-        if (! is_array($tokens)) {
-            return;
-        }
-        $tokens = array_values(array_filter($tokens, fn (string $token): bool => $token !== ''));
-        $count = count($tokens);
-        if ($count < 2) {
-            return;
-        }
-
-        for ($index = 1; $index < $count; $index++) {
-            $this->addNamePair(
-                $pairs,
-                $seen,
-                implode(' ', array_slice($tokens, 0, $index)),
-                implode(' ', array_slice($tokens, $index)),
-            );
-        }
-    }
-
-    /**
-     * @param  list<array{given: string, family: string}>  $pairs
-     * @param  array<string, true>  $seen
-     */
-    private function addNamePair(array &$pairs, array &$seen, mixed $given, mixed $family): void
-    {
-        $givenName = $this->claimString(is_string($given) ? $given : null);
-        $familyName = $this->claimString(is_string($family) ? $family : null);
-        if ($givenName === null || $familyName === null) {
-            return;
-        }
-
-        $key = strtolower($givenName)."\n".strtolower($familyName);
-        if (isset($seen[$key])) {
-            return;
-        }
-
-        $seen[$key] = true;
-        $pairs[] = ['given' => $givenName, 'family' => $familyName];
-    }
-
-    private function claimString(mixed $value): ?string
-    {
-        if (! is_string($value)) {
-            return null;
-        }
-
-        $collapsed = trim((string) preg_replace('/\s+/u', ' ', $value));
-
-        return $collapsed === '' ? null : $collapsed;
     }
 
     /**

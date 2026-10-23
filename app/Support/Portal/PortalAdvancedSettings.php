@@ -20,6 +20,11 @@ final class PortalAdvancedSettings
     // so a deployed portal offers it only on purpose (2026-10-14, user).
     public const ID_LOGIN = 'login.id';
 
+    // Temporary migration aid (2026-10-23): when on, an unlinked Microsoft account may claim the
+    // one active employee whose work email/UPN exactly matches. On by default; the supervisor
+    // turns it off manually after the migration.
+    public const MICROSOFT_FALLBACK = 'login.microsoft_fallback';
+
     public function __construct(private readonly PortalAudit $audit) {}
 
     // The stored choice, else the config default; '1'/'true' are on and '0'/'false' are off.
@@ -42,6 +47,28 @@ final class PortalAdvancedSettings
         return self::storedOn(self::ID_LOGIN);
     }
 
+    // On by default, and only a stored 0/false turns it off; the supervisor does that manually.
+    public static function microsoftFallback(): bool
+    {
+        $stored = DB::connection('core')->table('settings')
+            ->where('product', 'portal')
+            ->where('setting_key', self::MICROSOFT_FALLBACK)
+            ->value('setting_value');
+
+        return $stored === null || in_array(strtolower(trim((string) $stored)), ['1', 'true'], true);
+    }
+
+    // Active employees who can still use Microsoft but have no oid yet.
+    public static function unlinkedMicrosoftCount(): int
+    {
+        return Employee::query()
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereNotNull('email')
+            ->where('email', '!=', '')
+            ->whereNull('microsoft_oid')
+            ->count();
+    }
+
     private static function storedOn(string $key): bool
     {
         $stored = DB::connection('core')->table('settings')
@@ -60,6 +87,18 @@ final class PortalAdvancedSettings
     public function setIdLogin(Employee $actor, Request $request, bool $on): void
     {
         $this->store($actor, $request, self::ID_LOGIN, $on, 'ID number sign-in', ['idLogin' => $on]);
+    }
+
+    public function setMicrosoftFallback(Employee $actor, Request $request, bool $on): void
+    {
+        $this->store(
+            $actor,
+            $request,
+            self::MICROSOFT_FALLBACK,
+            $on,
+            'Microsoft account fallback',
+            ['microsoftFallback' => $on],
+        );
     }
 
     /**

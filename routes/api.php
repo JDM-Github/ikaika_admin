@@ -4,7 +4,6 @@ use App\Http\Controllers\Api\Bitbucket\BitbucketWebhookController;
 use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\Jira\JiraWebhookController;
 use App\Http\Controllers\Api\ProductController;
-use App\Http\Controllers\Api\ResourceController;
 use App\Http\Controllers\Api\WorkspaceGridController;
 use App\Http\Controllers\Api\WorkspaceSchemaController;
 use App\Http\Controllers\Api\WorkspaceViewController;
@@ -26,8 +25,8 @@ Route::prefix($channel)->group(function (): void {
     // Jira's admin webhook for Issues & Requests (2026-10-19); likewise signed, and only that.
     Route::middleware('throttle:jira-webhook')->post('jira/webhook', JiraWebhookController::class);
 
-    // Before the {product}/{resource} catch-all below, which would otherwise swallow
-    // _schema and _grid and report them as unknown resources.
+    // The typed workspace endpoints; the old raw {product}/{resource} model dump was removed
+    // (2026-10-23 security audit F-001).
     Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
         Route::middleware('throttle:workspace')->group(function (): void {
             Route::get('{product}/_schema', [WorkspaceSchemaController::class, 'index']);
@@ -44,8 +43,4 @@ Route::prefix($channel)->group(function (): void {
         });
     });
 
-    Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
-        Route::get('{product}/{resource}', [ResourceController::class, 'index']);
-        Route::get('{product}/{resource}/{id}', [ResourceController::class, 'show']);
-    });
 });

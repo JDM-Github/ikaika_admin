@@ -11,8 +11,9 @@ Route::middleware([AuthenticatePortalJwt::class, 'throttle:portal-developer'])->
     Route::patch('developer/password', [DeveloperModeController::class, 'updatePassword']);
 });
 
-// Settings' Advanced card, read and written only while Developer mode is on.
-Route::middleware([AuthenticatePortalJwt::class, 'throttle:portal-developer'])->group(function (): void {
+// Settings' Advanced card, read and written only while Developer mode is on. It does not check
+// the Developer mode password, so it has its own ordinary throttle, not the password bucket.
+Route::middleware([AuthenticatePortalJwt::class, 'throttle:portal-developer-settings'])->group(function (): void {
     Route::get('settings/advanced', [AdvancedSettingsController::class, 'show']);
     Route::patch('settings/advanced', [AdvancedSettingsController::class, 'update']);
 });

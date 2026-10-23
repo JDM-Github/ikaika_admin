@@ -135,4 +135,14 @@ class PortalGuestReadOnlySweepTest extends TestCase
                 ->assertStatus(403, "A guest write landed on {$method} {$path}.");
         }
     }
+
+    public function test_a_guest_cannot_use_the_removed_model_dump(): void
+    {
+        $share = $this->share(['projects.view']);
+        $token = (string) $this->postJson(self::SHARE.'/'.$share['code'].'/access', ['password' => $share['password']])
+            ->assertOk()
+            ->json('data.token');
+
+        $this->withToken($token)->getJson('/api/development/portal/employees')->assertNotFound();
+    }
 }

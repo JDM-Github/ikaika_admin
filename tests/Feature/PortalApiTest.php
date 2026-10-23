@@ -100,7 +100,8 @@ class PortalApiTest extends TestCase
             ->assertJsonPath('health.database', config('products.catalog.portal.database'));
     }
 
-    public function test_portal_employees_endpoint(): void
+    // The raw model dump was removed after the 2026-10-23 security audit (F-001).
+    public function test_the_raw_model_dump_is_gone(): void
     {
         $employee = Employee::query()->where('status', 'Active')->first();
         $this->assertNotNull($employee);
@@ -111,11 +112,10 @@ class PortalApiTest extends TestCase
 
         $this->getJson('/api/development/portal/employees', [
             'Authorization' => "Bearer {$token}",
-        ])
-            ->assertOk()
-            ->assertJsonPath('product', 'portal')
-            ->assertJsonPath('resource', 'employees')
-            ->assertJsonStructure(['data', 'meta' => ['total', 'per_page']]);
+        ])->assertNotFound();
+        $this->getJson('/api/development/portal/employees/'.$employee->getKey(), [
+            'Authorization' => "Bearer {$token}",
+        ])->assertNotFound();
     }
 
     public function test_disabled_estimator_is_not_served(): void

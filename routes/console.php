@@ -2,6 +2,7 @@
 
 use App\Modules\Core\Models\Action;
 use App\Modules\Portal\Models\EmailMessage;
+use App\Modules\Portal\Models\Employee;
 use App\Support\Airtable\AirtableClient;
 use App\Support\Airtable\PortalAirtableSync;
 use App\Support\ApiPath;
@@ -29,10 +30,202 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schedule;
+use Illuminate\Support\Str;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+// Microsoft sign-in is oid-only (2026-10-23 security audit F-002). Verify the person's work
+// email/UPN in Entra first; this only records the immutable id after that check.
+Artisan::command('portal:link-microsoft-oid
+    {id_no : The employee ID number}
+    {oid : The Entra object id from that account}', function () {
+    $idNo = trim((string) $this->argument('id_no'));
+    $oid = strtolower(trim((string) $this->argument('oid')));
+    if ($idNo === '' || ! Str::isUuid($oid)) {
+        $this->error('Use an employee ID number and a UUID object id.');
+
+        return 1;
+    }
+
+    $employee = Employee::query()->where('id_no', $idNo)->first();
+    if ($employee === null) {
+        $this->error('No portal employee has that ID number.');
+
+        return 1;
+    }
+
+    $owner = Employee::query()
+        ->where('microsoft_oid', $oid)
+        ->whereKeyNot($employee->getKey())
+        ->first();
+    if ($owner !== null) {
+        $this->error('That Microsoft oid is already linked to '.$owner->id_no.'.');
+
+        return 1;
+    }
+
+    $current = strtolower(trim((string) ($employee->microsoft_oid ?? '')));
+    if ($current !== '' && $current !== $oid) {
+        $this->error('That employee is already linked to a different Microsoft oid; clear it first.');
+
+        return 1;
+    }
+    if ($current === $oid) {
+        $this->info('Already linked.');
+
+        return 0;
+    }
+
+    $employee->forceFill(['microsoft_oid' => $oid])->save();
+    $this->info('Linked '.$employee->id_no.' to Microsoft oid '.$oid.'.');
+
+    return 0;
+})->purpose('Link a verified Entra object id to a portal employee');
+
+// Bulk version of the same link, for an Entra Graph export (Id/UserPrincipalName/Mail) or a
+// prepared id_no,oid CSV. Dry run unless --apply; email/UPN must match exactly one employee.
+Artisan::command('portal:link-microsoft-oids
+    {csv : CSV with Id/UserPrincipalName/Mail, or id_no,oid}
+    {--apply : Write the links; without it this only reports}', function () {
+    $path = (string) $this->argument('csv');
+    if (! is_file($path) || ! is_readable($path)) {
+        $this->error('CSV not found or not readable.');
+
+        return 1;
+    }
+
+    $handle = fopen($path, 'rb');
+    if ($handle === false) {
+        $this->error('CSV could not be opened.');
+
+        return 1;
+    }
+
+    $header = fgetcsv($handle, null, ',', '"', '');
+    if (! is_array($header) || $header === []) {
+        fclose($handle);
+        $this->error('CSV has no header row.');
+
+        return 1;
+    }
+    $columns = array_map(static fn ($value): string => strtolower(trim((string) $value)), $header);
+    $columns[0] = preg_replace('/^\xEF\xBB\xBF/', '', $columns[0]);
+    $column = static fn (array $row, string $name): string => trim((string) ($row[$name] ?? ''));
+    $oidColumn = in_array('oid', $columns, true) ? 'oid' : (in_array('id', $columns, true) ? 'id' : null);
+    $directIdColumn = in_array('id_no', $columns, true) ? 'id_no' : null;
+    $emailColumns = array_values(array_intersect(['mail', 'userprincipalname', 'email'], $columns));
+    if ($oidColumn === null || ($directIdColumn === null && $emailColumns === [])) {
+        fclose($handle);
+        $this->error('CSV needs oid (or Id) plus id_no or an email/UPN column.');
+
+        return 1;
+    }
+
+    $apply = (bool) $this->option('apply');
+    $linked = 0;
+    $already = 0;
+    $errors = [];
+    $seen = [];
+    $line = 1;
+    while (($values = fgetcsv($handle, null, ',', '"', '')) !== false) {
+        $line++;
+        if (count($values) !== count($columns)) {
+            $errors[] = "line {$line}: column count does not match the header";
+
+            continue;
+        }
+        $row = array_combine($columns, $values);
+        if (! is_array($row)) {
+            $errors[] = "line {$line}: could not read the row";
+
+            continue;
+        }
+
+        $oid = strtolower($column($row, $oidColumn));
+        if (! Str::isUuid($oid)) {
+            $errors[] = "line {$line}: oid is not a UUID";
+
+            continue;
+        }
+
+        $employee = null;
+        if ($directIdColumn !== null && $column($row, $directIdColumn) !== '') {
+            $employee = Employee::query()->where('id_no', $column($row, $directIdColumn))->first();
+        } else {
+            foreach ($emailColumns as $emailColumn) {
+                $email = strtolower($column($row, $emailColumn));
+                if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                    continue;
+                }
+                $matches = Employee::query()
+                    ->whereRaw('LOWER(TRIM(email)) = ?', [$email])
+                    ->get();
+                if ($matches->count() > 1) {
+                    $errors[] = "line {$line}: {$email} matches more than one employee";
+
+                    continue 2;
+                }
+                if ($matches->count() === 1) {
+                    $employee = $matches->first();
+                    break;
+                }
+            }
+        }
+        if ($employee === null) {
+            $errors[] = "line {$line}: no portal employee matched";
+
+            continue;
+        }
+
+        if (isset($seen[$oid]) && $seen[$oid] !== (int) $employee->getKey()) {
+            $errors[] = "line {$line}: oid appears twice in the CSV";
+
+            continue;
+        }
+        $seen[$oid] = (int) $employee->getKey();
+
+        $owner = Employee::query()
+            ->where('microsoft_oid', $oid)
+            ->whereKeyNot($employee->getKey())
+            ->first();
+        if ($owner !== null) {
+            $errors[] = "line {$line}: oid is already linked to {$owner->id_no}";
+
+            continue;
+        }
+
+        $current = strtolower(trim((string) ($employee->microsoft_oid ?? '')));
+        if ($current !== '' && $current !== $oid) {
+            $errors[] = "line {$line}: {$employee->id_no} is linked to a different oid";
+
+            continue;
+        }
+        if ($current === $oid) {
+            $already++;
+
+            continue;
+        }
+
+        if ($apply) {
+            $employee->forceFill(['microsoft_oid' => $oid])->save();
+        }
+        $linked++;
+        $this->line(($apply ? 'Linked ' : 'Would link ').$employee->id_no.' <- '.$oid);
+    }
+    fclose($handle);
+
+    foreach ($errors as $error) {
+        $this->warn($error);
+    }
+    $this->info(($apply ? 'Linked ' : 'Would link ').$linked.' account(s); '.$already.' already linked; '.count($errors).' error(s).');
+    if (! $apply) {
+        $this->line('Dry run only. Re-run with --apply to write.');
+    }
+
+    return $errors === [] ? 0 : 1;
+})->purpose('Bulk-link Entra object ids from a CSV, matching by id_no or work email/UPN');
 
 // Dry run unless --send is given: the default must never write to Airtable by accident.
 Artisan::command('portal:airtable-sync

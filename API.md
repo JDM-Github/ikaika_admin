@@ -1,6 +1,6 @@
 # IKAIKA Platform API
 
-Give this file to frontend. Live routes are marked **live**. Everything else in the portal database already exists in SQL — if they need it, ask for the resource slug and it can be wired the same way as employees/projects.
+Give this file to frontend. Live routes are marked **live**. Everything else in the portal database already exists in SQL; if they need it, add a typed, rule-checked endpoint, not a raw model dump.
 
 ```
 {origin}{pathPrefix}/api/{channel}/{product}/{resource}
@@ -69,7 +69,7 @@ is still comparable there.
 
 Portal data routes need a Bearer token. Health and catalog do not.
 
-Sectioned portal routes (Manage / Users, …) live **beside** the generic resource dump, not inside it. Screens call the sectioned URL and get only the columns they render.
+Sectioned portal routes are the API. Screens call the sectioned URL and get only the columns they render; the old generic resource dump has been removed.
 
 | Method | Staging path | Auth |
 |---|---|---|
@@ -108,16 +108,21 @@ Sectioned portal routes (Manage / Users, …) live **beside** the generic resour
 | `GET` | `/api/staging/portal/administration/all-logs` | Bearer + Admin or Executive. Every member's activity logs |
 | `GET` | `/api/staging/portal/administration/recycle-bin/{id}` | Bearer. One deleted report's generated details. Members: own rows. Admin/Executive: any portal row |
 | `POST` | `/api/staging/portal/administration/recycle-bin/{id}/restore` | Bearer. Restore a recycled submitted report. Members: own rows. Admin/Executive: any portal row |
-| `GET` | `/api/staging/portal/{resource}` | Bearer |
-| `GET` | `/api/staging/portal/{resource}/{id}` | Bearer |
+| ~~`GET`~~ | ~~`/api/staging/portal/{resource}`~~ | Removed; raw model dump (F-001) |
+| ~~`GET`~~ | ~~`/api/staging/portal/{resource}/{id}`~~ | Removed; raw model dump (F-001) |
 
-Login only succeeds for an **Active** employee. ID login matches `id_no`. Microsoft login redeems the Azure authorization code on the server (`PORTAL_AZURE_REDIRECT_URI` must match exactly), validates the id_token (tenant JWKS, `aud` = `PORTAL_AZURE_CLIENT_ID`, `iss` = the tenant v2 issuer), and matches `employees.first_name` + `employees.last_name` against Azure `given_name` / `family_name` (or `name`). Both issue the same portal JWT. Response includes `token`, `token_type: Bearer`, `expires_in` (default 28800 seconds), and `employee`.
+Login only succeeds for an **Active** employee. ID login currently uses one shared environment password; do not enable it in production until F-003 is fixed. Microsoft login is bound to the Entra `oid`; an unlinked account is refused unless the temporary Advanced fallback is on. That fallback is on by default, links only by exact signed work email/UPN, never by name, and is turned off manually after the migration. Link exceptions with `php artisan portal:link-microsoft-oid <id_no> <oid>`. Both methods issue the same portal JWT. Response includes `token`, `token_type: Bearer`, `expires_in` (default 28800 seconds), and `employee`.
 
 The shell header weather is not a portal route. The app reads Open-Meteo for Manila and San Jose.
 
 ---
 
-## How every resource works (once it is live)
+## How resources work (raw model API removed)
+
+> **Security (2026-10-23):** the raw `GET /api/{channel}/{product}/{resource}` model routes were
+> removed. They returned whole Eloquent models with no rule, reach, guest, or private-field check
+> (finding F-001). Use the typed portal endpoints or the guarded `_schema`/`_grid` workspace below.
+> Do not re-add a raw model dump.
 
 Paths below are after the staging prefix. Full staging URL = `https://ikaikabim.com/staging/central-api` + path.
 
@@ -128,23 +133,13 @@ Paths below are after the staging prefix. Full staging URL = `https://ikaikabim.
 | `GET` | `/api/{channel}/portal/health` | No | `{ ok, database, error }`. Optional Bearer adds `session` |
 | `GET` | `/api/{channel}/core/health` | No | Core DB ping |
 | `GET` | `/up` | No | Process health |
-| `GET` | `/api/{channel}/portal/{resource}` | Bearer | Paginated list |
-| `GET` | `/api/{channel}/portal/{resource}/{id}` | Bearer | One record + named relations |
+| ~~`GET`~~ | ~~`/api/{channel}/portal/{resource}`~~ | - | Removed; raw model dump (F-001) |
+| ~~`GET`~~ | ~~`/api/{channel}/portal/{resource}/{id}`~~ | - | Removed; raw model dump (F-001) |
 
 `{channel}` is `staging` on Bluehost and `development` locally.
 
-List query params: `page` (default 1), `per_page` (default 20, max 100), `q` (search listed columns).
-
-**Live today:** list returns the row only. **Show** returns the row plus relations in the “Show loads” column.
-
-**Easy to add on request (same pattern, already in SQL):**
-
-- New resource: `GET .../portal/{slug}` + `GET .../portal/{slug}/{id}`
-- Extra `q` columns or filters (`?status=`, `?employee_id=`)
-- Extra relations on show (or optionally on list)
-- Nested “by parent” routes, e.g. `/projects/{id}/employees`
-
-**Not built for any model yet:** `PUT` / `PATCH` / `DELETE` on records, file downloads, Airtable sync.
+The removed raw endpoints accepted `page`, `per_page`, `q` and returned whole models. Typed
+endpoints define their own query and response shapes; do not add a new generic model route.
 
 ---
 
@@ -298,6 +293,9 @@ created by an admin; anyone who can browse can keep 30 private ones per table.
 ---
 
 ## Portal models
+
+> The model sections below describe the SQL shapes. Their old generic endpoints are removed; use the
+> typed endpoints listed by the app/API map.
 
 ### Live
 

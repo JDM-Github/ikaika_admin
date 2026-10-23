@@ -16,6 +16,7 @@ use App\Support\Portal\PortalMicrosoftIdToken;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class PortalAuthController extends Controller
 {
@@ -95,60 +96,84 @@ class PortalAuthController extends Controller
             abort(401, 'Microsoft sign-in failed.');
         }
 
-        $employee = $this->employeeForMicrosoftName($claims['name_pairs']);
-        if ($employee === null) {
-            abort(401, $this->unmatchedMicrosoftNameMessage($claims['name_pairs']));
+        $oid = $claims['oid'];
+        if ($oid === null || ! Str::isUuid($oid)) {
+            abort(401, 'Microsoft sign-in failed.');
+        }
+        $oid = strtolower(trim($oid));
+
+        $employee = Employee::query()
+            ->select(PortalManageUserPresenter::sessionColumns())
+            ->where('microsoft_oid', $oid)
+            ->first();
+        if ($employee !== null) {
+            return $this->issueSession($employee, $request, $oid);
         }
 
-        return $this->issueSession($employee, $request, $claims['oid']);
+        if (! PortalAdvancedSettings::microsoftFallback()) {
+            abort(401, 'This Microsoft account is not linked to a portal account.');
+        }
+
+        $employee = $this->employeeForMicrosoftEmail($claims['emails']);
+        if ($employee === null) {
+            abort(401, 'This Microsoft account is not linked to a portal account.');
+        }
+
+        $claimed = Employee::query()
+            ->whereKey($employee->getKey())
+            ->whereNull('microsoft_oid')
+            ->update(['microsoft_oid' => $oid]);
+        if ($claimed !== 1) {
+            // Another request won the race; only continue if it stored this same oid.
+            $employee = Employee::query()
+                ->select(PortalManageUserPresenter::sessionColumns())
+                ->where('microsoft_oid', $oid)
+                ->first();
+            if ($employee === null) {
+                abort(401, 'This Microsoft account is not linked to a portal account.');
+            }
+        } else {
+            $employee->refresh();
+            Log::info('portal.microsoft_fallback.linked', ['employee_id' => $employee->getKey()]);
+        }
+
+        return $this->issueSession($employee, $request, $oid);
     }
 
     /**
-     * @param  list<array{given: string, family: string}>  $pairs
+     * The one active, unlinked employee whose work email/UPN exactly matches a signed claim.
+     * More than one match means the claims are ambiguous, so the migration refuses.
+     *
+     * @param  list<string>  $emails
      */
-    private function employeeForMicrosoftName(array $pairs): ?Employee
+    private function employeeForMicrosoftEmail(array $emails): ?Employee
     {
-        if ($pairs === []) {
+        $normalized = array_values(array_unique(array_filter(
+            array_map(static fn (string $email): string => strtolower(trim($email)), $emails),
+            static fn (string $email): bool => $email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) !== false,
+        )));
+        if ($normalized === []) {
             return null;
         }
 
-        $matches = Employee::query()
+        $employees = Employee::query()
             ->select(PortalManageUserPresenter::sessionColumns())
-            ->where(function ($query) use ($pairs): void {
-                foreach ($pairs as $index => $pair) {
-                    $clause = function ($inner) use ($pair): void {
-                        $inner->whereRaw('LOWER(TRIM(first_name)) = ?', [strtolower($pair['given'])])
-                            ->whereRaw('LOWER(TRIM(last_name)) = ?', [strtolower($pair['family'])]);
-                    };
-                    if ($index === 0) {
-                        $query->where($clause);
-                    } else {
-                        $query->orWhere($clause);
-                    }
+            ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereNull('microsoft_oid')
+            ->where(function ($query) use ($normalized): void {
+                foreach ($normalized as $email) {
+                    $query->orWhereRaw('LOWER(TRIM(email)) = ?', [$email]);
                 }
             })
             ->get()
             ->unique('id')
             ->values();
 
-        if ($matches->count() > 1) {
-            abort(401, 'That Microsoft name matches more than one portal account.');
+        if ($employees->count() > 1) {
+            abort(401, 'That Microsoft email matches more than one portal account.');
         }
 
-        return $matches->first();
-    }
-
-    /**
-     * @param  list<array{given: string, family: string}>  $pairs
-     */
-    private function unmatchedMicrosoftNameMessage(array $pairs): string
-    {
-        $checked = [];
-        foreach ($pairs as $pair) {
-            $checked[] = $pair['given'].' / '.$pair['family'];
-        }
-
-        return 'No portal account matches that Microsoft account. Checked first/last: '.implode('; ', $checked).'.';
+        return $employees->first();
     }
 
     // Email sign-in, step one: a code to each address on record, and where they went (masked).

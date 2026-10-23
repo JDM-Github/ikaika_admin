@@ -4,10 +4,13 @@ namespace Tests\Feature;
 
 use App\Modules\Portal\Models\Employee;
 use App\Modules\Portal\Models\PortalLog;
+use App\Support\Portal\PortalAdvancedSettings;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class PortalAuthTest extends TestCase
@@ -17,7 +20,7 @@ class PortalAuthTest extends TestCase
     /**
      * @var list<string>
      */
-    protected array $connectionsToTransact = ['portal'];
+    protected array $connectionsToTransact = ['portal', 'core'];
 
     public function test_login_issues_a_jwt_for_an_active_employee_id_number(): void
     {
@@ -92,7 +95,7 @@ class PortalAuthTest extends TestCase
             ->assertUnprocessable();
     }
 
-    public function test_me_and_employees_use_the_bearer_token_instead_of_an_id_query(): void
+    public function test_me_uses_the_bearer_token_instead_of_an_id_query(): void
     {
         $employee = Employee::query()->where('status', 'Active')->first();
         $this->assertNotNull($employee);
@@ -106,17 +109,12 @@ class PortalAuthTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('employee.id', $employee->id)
             ->assertJsonPath('employee.role', $employee->role);
-
-        $this->getJson('/api/development/portal/employees?per_page=1', [
-            'Authorization' => "Bearer {$token}",
-        ])->assertOk()
-            ->assertJsonPath('resource', 'employees');
     }
 
-    public function test_employees_without_a_token_are_unauthorized(): void
+    // The old raw employees dump was removed (security audit F-001), signed in or not.
+    public function test_the_raw_employees_dump_is_gone(): void
     {
-        $this->getJson('/api/development/portal/employees')
-            ->assertUnauthorized();
+        $this->getJson('/api/development/portal/employees')->assertNotFound();
     }
 
     public function test_login_rejects_an_inactive_employee(): void
@@ -210,16 +208,19 @@ class PortalAuthTest extends TestCase
             ->assertJsonPath('session.ok', false);
     }
 
-    public function test_microsoft_login_issues_the_same_jwt_for_a_matching_name(): void
+    public function test_microsoft_login_uses_the_linked_oid_and_ignores_the_display_name(): void
     {
-        $employee = $this->activeEmployeeWithUniqueName();
+        $employee = $this->activeEmployeeWithEmail();
         $this->assertNotNull($employee);
         $this->configureAzure();
-        $oid = '8f97d4d9-f8c7-4a7b-841f-edd810effe4d';
+        $oid = $this->uniqueOid();
+        $this->linkMicrosoftOid($employee, $oid);
         [$idToken, $jwk] = $this->mintAzureIdToken([
-            'preferred_username' => $employee->email,
             'oid' => $oid,
-            ...$this->microsoftNameClaims($employee),
+            'preferred_username' => $employee->email,
+            'given_name' => 'Completely',
+            'family_name' => 'Different',
+            'name' => 'Completely Different',
         ]);
         $this->fakeAzureJwks($jwk);
 
@@ -251,85 +252,108 @@ class PortalAuthTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_microsoft_login_matches_name_case_insensitively(): void
+    public function test_microsoft_login_rejects_an_unlinked_account_when_the_fallback_is_off(): void
     {
-        $employee = $this->activeEmployeeWithUniqueName();
+        $employee = $this->activeEmployeeWithEmail();
         $this->assertNotNull($employee);
         $this->configureAzure();
+        $this->disableMicrosoftFallback();
+        $linkedOid = $this->uniqueOid();
+        $otherOid = $this->uniqueOid();
+        $this->linkMicrosoftOid($employee, $linkedOid);
         [$idToken, $jwk] = $this->mintAzureIdToken([
-            'given_name' => strtoupper(trim((string) $employee->first_name)),
-            'family_name' => strtoupper(trim((string) $employee->last_name)),
-        ]);
-        $this->fakeAzureJwks($jwk);
-
-        $this->postJson('/api/development/portal/auth/login/microsoft', [
-            'id_token' => $idToken,
-        ])->assertOk()
-            ->assertJsonPath('employee.id', $employee->id);
-    }
-
-    public function test_microsoft_login_matches_a_display_name_when_given_and_family_are_absent(): void
-    {
-        $employee = $this->activeEmployeeWithUniqueName();
-        $this->assertNotNull($employee);
-        $this->configureAzure();
-        [$idToken, $jwk] = $this->mintAzureIdToken([
-            'name' => trim($employee->first_name.' '.$employee->last_name),
-        ]);
-        $this->fakeAzureJwks($jwk);
-
-        $this->postJson('/api/development/portal/auth/login/microsoft', [
-            'id_token' => $idToken,
-        ])->assertOk()
-            ->assertJsonPath('employee.id', $employee->id);
-    }
-
-    public function test_microsoft_login_matches_when_azure_splits_a_multi_word_first_name(): void
-    {
-        $employee = Employee::query()
-            ->where('status', 'Active')
-            ->where('first_name', 'like', '% %')
-            ->whereNotNull('last_name')
-            ->where('last_name', '!=', '')
-            ->first();
-        if ($employee === null) {
-            $this->markTestSkipped('No active employee with a multi-word first name in the portal database.');
-        }
-
-        $tokens = preg_split('/\s+/u', trim($employee->first_name.' '.$employee->last_name));
-        $this->assertIsArray($tokens);
-        $this->assertGreaterThanOrEqual(2, count($tokens));
-
-        $this->configureAzure();
-        [$idToken, $jwk] = $this->mintAzureIdToken([
-            'given_name' => $tokens[0],
-            'family_name' => implode(' ', array_slice($tokens, 1)),
-        ]);
-        $this->fakeAzureJwks($jwk);
-
-        $this->postJson('/api/development/portal/auth/login/microsoft', [
-            'id_token' => $idToken,
-        ])->assertOk()
-            ->assertJsonPath('employee.id', $employee->id);
-    }
-
-    public function test_microsoft_login_rejects_an_unknown_name(): void
-    {
-        $this->configureAzure();
-        $family = 'Ikaika'.uniqid();
-        [$idToken, $jwk] = $this->mintAzureIdToken([
-            'given_name' => 'Nobody',
-            'family_name' => $family,
+            'oid' => $otherOid,
+            'preferred_username' => $employee->email,
+            ...$this->microsoftNameClaims($employee),
         ]);
         $this->fakeAzureJwks($jwk);
 
         $this->postJson('/api/development/portal/auth/login/microsoft', [
             'id_token' => $idToken,
         ])->assertUnauthorized()
-            ->assertJsonPath(
-                'message',
-                'No portal account matches that Microsoft account. Checked first/last: Nobody / '.$family.'.',
-            );
+            ->assertJsonPath('message', 'This Microsoft account is not linked to a portal account.');
+
+        $this->assertNull(Employee::query()->where('microsoft_oid', $otherOid)->first());
+    }
+
+    public function test_microsoft_fallback_links_an_unlinked_account_by_exact_work_email(): void
+    {
+        $employee = $this->activeEmployeeWithEmail();
+        $this->assertNotNull($employee);
+        $this->assertNull($employee->microsoft_oid);
+        $this->enableMicrosoftFallback();
+        $this->configureAzure();
+        $oid = $this->uniqueOid();
+        [$idToken, $jwk] = $this->mintAzureIdToken([
+            'oid' => $oid,
+            'preferred_username' => $employee->email,
+            'given_name' => 'Wrong',
+            'family_name' => 'Name',
+            'name' => 'Wrong Name',
+        ]);
+        $this->fakeAzureJwks($jwk);
+
+        $this->postJson('/api/development/portal/auth/login/microsoft', [
+            'id_token' => $idToken,
+        ])->assertOk()
+            ->assertJsonPath('employee.id', $employee->id);
+
+        $this->assertSame($oid, $employee->fresh()->microsoft_oid);
+    }
+
+    public function test_microsoft_fallback_refuses_an_email_not_in_the_member_database(): void
+    {
+        $this->enableMicrosoftFallback();
+        $this->configureAzure();
+        $oid = $this->uniqueOid();
+        [$idToken, $jwk] = $this->mintAzureIdToken([
+            'oid' => $oid,
+            'preferred_username' => 'not-a-member-'.uniqid().'@ikaikabim.com',
+        ]);
+        $this->fakeAzureJwks($jwk);
+
+        $this->postJson('/api/development/portal/auth/login/microsoft', [
+            'id_token' => $idToken,
+        ])->assertUnauthorized()
+            ->assertJsonPath('message', 'This Microsoft account is not linked to a portal account.');
+
+        $this->assertNull(Employee::query()->where('microsoft_oid', $oid)->first());
+    }
+
+    public function test_microsoft_fallback_does_not_take_an_already_linked_account(): void
+    {
+        $employee = $this->activeEmployeeWithEmail();
+        $this->assertNotNull($employee);
+        $linkedOid = $this->uniqueOid();
+        $this->linkMicrosoftOid($employee, $linkedOid);
+        $this->enableMicrosoftFallback();
+        $this->configureAzure();
+        $otherOid = $this->uniqueOid();
+        [$idToken, $jwk] = $this->mintAzureIdToken([
+            'oid' => $otherOid,
+            'preferred_username' => $employee->email,
+        ]);
+        $this->fakeAzureJwks($jwk);
+
+        $this->postJson('/api/development/portal/auth/login/microsoft', [
+            'id_token' => $idToken,
+        ])->assertUnauthorized();
+
+        $this->assertSame($linkedOid, $employee->fresh()->microsoft_oid);
+    }
+
+    public function test_microsoft_login_rejects_a_token_without_an_oid(): void
+    {
+        $this->configureAzure();
+        [$idToken, $jwk] = $this->mintAzureIdToken([
+            'preferred_username' => 'someone@example.test',
+        ]);
+        $this->fakeAzureJwks($jwk);
+
+        $this->postJson('/api/development/portal/auth/login/microsoft', [
+            'id_token' => $idToken,
+        ])->assertUnauthorized()
+            ->assertJsonPath('message', 'Microsoft sign-in failed.');
     }
 
     public function test_microsoft_login_rejects_an_inactive_employee(): void
@@ -346,13 +370,81 @@ class PortalAuthTest extends TestCase
         }
 
         $this->configureAzure();
-        [$idToken, $jwk] = $this->mintAzureIdToken($this->microsoftNameClaims($employee));
+        $oid = $this->uniqueOid();
+        $this->linkMicrosoftOid($employee, $oid);
+        [$idToken, $jwk] = $this->mintAzureIdToken([
+            'oid' => $oid,
+            ...$this->microsoftNameClaims($employee),
+        ]);
         $this->fakeAzureJwks($jwk);
 
         $this->postJson('/api/development/portal/auth/login/microsoft', [
             'id_token' => $idToken,
         ])->assertUnauthorized()
             ->assertJsonPath('message', 'This account is not active.');
+    }
+
+    public function test_microsoft_oid_cannot_be_linked_to_two_employees(): void
+    {
+        $first = $this->activeEmployeeWithEmail();
+        $this->assertNotNull($first);
+        $second = Employee::query()
+            ->where('status', 'Active')
+            ->whereKeyNot($first->getKey())
+            ->first();
+        $this->assertNotNull($second);
+        $oid = $this->uniqueOid();
+
+        $this->artisan('portal:link-microsoft-oid', ['id_no' => $first->id_no, 'oid' => $oid])
+            ->assertExitCode(0);
+        $this->artisan('portal:link-microsoft-oid', ['id_no' => $second->id_no, 'oid' => $oid])
+            ->assertExitCode(1);
+
+        $this->assertSame($oid, $first->fresh()->microsoft_oid);
+        $this->assertNull($second->fresh()->microsoft_oid);
+    }
+
+    public function test_microsoft_oids_can_be_linked_from_a_csv_after_a_dry_run(): void
+    {
+        $employee = $this->activeEmployeeWithEmail();
+        $this->assertNotNull($employee);
+        $oid = $this->uniqueOid();
+        $path = tempnam(sys_get_temp_dir(), 'portal-oids-');
+        $this->assertNotFalse($path);
+        file_put_contents($path, "id_no,oid\n{$employee->id_no},{$oid}\n");
+
+        try {
+            $this->artisan('portal:link-microsoft-oids', ['csv' => $path])
+                ->assertExitCode(0);
+            $this->assertNull($employee->fresh()->microsoft_oid);
+
+            $this->artisan('portal:link-microsoft-oids', ['csv' => $path, '--apply' => true])
+                ->assertExitCode(0);
+            $this->assertSame($oid, $employee->fresh()->microsoft_oid);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_microsoft_oids_can_be_linked_from_an_entra_csv_by_email(): void
+    {
+        $employee = $this->activeEmployeeWithEmail();
+        $this->assertNotNull($employee);
+        $oid = $this->uniqueOid();
+        $path = tempnam(sys_get_temp_dir(), 'portal-entra-');
+        $this->assertNotFalse($path);
+        file_put_contents(
+            $path,
+            "Id,DisplayName,UserPrincipalName,Mail\n{$oid},Test User,{$employee->email},{$employee->email}\n",
+        );
+
+        try {
+            $this->artisan('portal:link-microsoft-oids', ['csv' => $path, '--apply' => true])
+                ->assertExitCode(0);
+            $this->assertSame($oid, $employee->fresh()->microsoft_oid);
+        } finally {
+            @unlink($path);
+        }
     }
 
     public function test_microsoft_login_rejects_a_tampered_id_token(): void
@@ -399,10 +491,12 @@ class PortalAuthTest extends TestCase
 
     public function test_microsoft_login_exchanges_an_authorization_code(): void
     {
-        $employee = $this->activeEmployeeWithUniqueName();
+        $employee = $this->activeEmployeeWithEmail();
         $this->assertNotNull($employee);
         $this->configureAzure();
-        [$idToken, $jwk] = $this->mintAzureIdToken($this->microsoftNameClaims($employee));
+        $oid = $this->uniqueOid();
+        $this->linkMicrosoftOid($employee, $oid);
+        [$idToken, $jwk] = $this->mintAzureIdToken(['oid' => $oid, ...$this->microsoftNameClaims($employee)]);
         $this->fakeAzureCodeExchange($idToken, $jwk);
 
         $this->postJson('/api/development/portal/auth/login/microsoft', [
@@ -423,10 +517,12 @@ class PortalAuthTest extends TestCase
 
     public function test_microsoft_login_retries_token_redemption_without_origin_after_spa_cors_rejection(): void
     {
-        $employee = $this->activeEmployeeWithUniqueName();
+        $employee = $this->activeEmployeeWithEmail();
         $this->assertNotNull($employee);
         $this->configureAzure();
-        [$idToken, $jwk] = $this->mintAzureIdToken($this->microsoftNameClaims($employee));
+        $oid = $this->uniqueOid();
+        $this->linkMicrosoftOid($employee, $oid);
+        [$idToken, $jwk] = $this->mintAzureIdToken(['oid' => $oid, ...$this->microsoftNameClaims($employee)]);
         Http::preventStrayRequests();
         Http::fake([
             'https://login.microsoftonline.com/70c0daac-fc8d-46de-b3eb-db0ce575ae83/oauth2/v2.0/token' => Http::sequence()
@@ -598,30 +694,34 @@ class PortalAuthTest extends TestCase
             ->where('status', 'Active')
             ->whereNotNull('email')
             ->where('email', 'like', '%@%')
+            ->whereNull('microsoft_oid')
             ->first();
     }
 
-    private function activeEmployeeWithUniqueName(): ?Employee
+    private function linkMicrosoftOid(Employee $employee, string $oid): void
     {
-        $employees = Employee::query()
-            ->where('status', 'Active')
-            ->whereNotNull('first_name')
-            ->whereNotNull('last_name')
-            ->where('first_name', '!=', '')
-            ->where('last_name', '!=', '')
-            ->get();
+        $employee->forceFill(['microsoft_oid' => strtolower($oid)])->save();
+    }
 
-        foreach ($employees as $employee) {
-            $count = Employee::query()
-                ->whereRaw('LOWER(TRIM(first_name)) = ?', [strtolower(trim((string) $employee->first_name))])
-                ->whereRaw('LOWER(TRIM(last_name)) = ?', [strtolower(trim((string) $employee->last_name))])
-                ->count();
-            if ($count === 1) {
-                return $employee;
-            }
-        }
+    private function enableMicrosoftFallback(): void
+    {
+        DB::connection('core')->table('settings')->updateOrInsert(
+            ['product' => 'portal', 'setting_key' => PortalAdvancedSettings::MICROSOFT_FALLBACK],
+            ['setting_value' => '1'],
+        );
+    }
 
-        return null;
+    private function disableMicrosoftFallback(): void
+    {
+        DB::connection('core')->table('settings')->updateOrInsert(
+            ['product' => 'portal', 'setting_key' => PortalAdvancedSettings::MICROSOFT_FALLBACK],
+            ['setting_value' => '0'],
+        );
+    }
+
+    private function uniqueOid(): string
+    {
+        return strtolower((string) Str::uuid());
     }
 
     /**
