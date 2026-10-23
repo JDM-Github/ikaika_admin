@@ -14,9 +14,24 @@ Route::middleware(AuthenticatePortalJwt::class)->group(function (): void {
     Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
         ->patch('bug-reports/{id}', [BugReportsController::class, 'update'])
         ->whereNumber('id');
+    // Many at once (2026-10-22, user): each through its own change, under its own rules.
+    Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
+        ->post('bug-reports/bulk', [BugReportsController::class, 'bulk']);
+    // Archive and delete (2026-10-21, user): archiving comes back, so it is the page's; deleting is a power of its
+    // own, and its throttle is the Recycle Bin's, where the report lands.
+    Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
+        ->patch('bug-reports/{id}/archive', [BugReportsController::class, 'archive'])
+        ->whereNumber('id');
+    Route::middleware(['portal.rule:bug-reports.delete', 'throttle:portal-administration-recycle-bin-write'])
+        ->delete('bug-reports/{id}', [BugReportsController::class, 'destroy'])
+        ->whereNumber('id');
     // Refresh: every linked one read back from Jira now, then the list. It only reads, so it is the viewer's.
     Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
         ->post('bug-reports/jira/sync', [BugReportsController::class, 'refreshFromJira']);
+    // A report's plan is picked from Jira's teams and epics (2026-10-22, user); asked apart from the list, which
+    // never waits on Jira. It only reads, so it is the viewer's.
+    Route::middleware(['portal.rule:bug-reports', 'throttle:portal-bug-report-write'])
+        ->get('bug-reports/jira/options', [BugReportsController::class, 'jiraOptions']);
     // Jira (2026-10-19): send one by hand or try it again, and the switch that sends new ones on their own.
     Route::middleware(['portal.rule:bug-reports.jira', 'throttle:portal-bug-report-write'])
         ->post('bug-reports/{id}/jira', [BugReportsController::class, 'sendToJira'])

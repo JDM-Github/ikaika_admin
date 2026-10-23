@@ -1514,16 +1514,40 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     description TEXT         NOT NULL,
     page        VARCHAR(200) NULL,
     status      VARCHAR(20)  NOT NULL DEFAULT 'new',
+    -- Why a cancelled one (status wont_fix, shown as Cancelled) was closed, and the report a duplicate duplicates
+    -- (2026-10-21). Existing databases: add_portal_bug_report_triage.
+    cancel_reason VARCHAR(20)  NULL,
+    duplicate_of  INT UNSIGNED NULL,
     note        TEXT         NULL,
     -- Who in MIS handles it, the semantic version level its fix needs, and the version it shipped in.
     -- Existing databases: add_portal_bug_report_assignee_and_version.
     assignee_id   INT UNSIGNED NULL,
     version_level VARCHAR(10)  NULL,
     fixed_in      VARCHAR(20)  NULL,
+    -- When it starts and is due, the epic it sits under and the team that owns it (2026-10-22), each the Jira issue's
+    -- too once it is linked; the epic's summary and the team's name as Jira last gave them. Existing databases:
+    -- add_portal_bug_report_plan.
+    start_on       DATE         NULL,
+    due_on         DATE         NULL,
+    parent_key     VARCHAR(32)  NULL,
+    parent_summary VARCHAR(255) NULL,
+    -- The report it sits under (2026-10-22): an epic, or another report whose sub-task it is. Existing databases:
+    -- add_portal_bug_report_parent_report.
+    parent_report_id INT UNSIGNED NULL,
+    team_id        VARCHAR(64)  NULL,
+    team_name      VARCHAR(255) NULL,
     -- Who sent it, only when they chose to be named (2026-10-20). Existing databases: add_portal_bug_report_reporter.
     reporter_id   INT UNSIGNED NULL,
+    -- The server it was sent on, its API channel (2026-10-21): production and staging share one Jira project, and
+    -- each follows only its own. Null counts as production's. Existing databases: add_portal_bug_report_channel.
+    channel       VARCHAR(32)  NULL,
     reported_on DATE         NOT NULL,
     updated_at  TIMESTAMP    NULL,
+    -- Archived out of the way behind a filter, and by whom; deleted to its deleter's Recycle Bin (2026-10-21).
+    -- Stamps, not removals, so a restore is exact. Existing databases: add_portal_bug_report_archive_and_delete.
+    archived_at TIMESTAMP    NULL,
+    archived_by INT UNSIGNED NULL,
+    deleted_at  TIMESTAMP    NULL,
     -- The Jira issue it became, and where sending it got to (2026-10-19): state is null (never sent),
     -- pending, sent, failed or deleted; attached counts the screenshots already there, attempts the
     -- scheduler's tries. Existing databases: add_portal_bug_report_jira.
@@ -1535,7 +1559,19 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     jira_attached  TINYINT UNSIGNED NOT NULL DEFAULT 0,
     jira_attempts  TINYINT UNSIGNED NOT NULL DEFAULT 0,
     jira_synced_at TIMESTAMP        NULL,
+    -- When this server last asked Jira to make the issue, until it is in step (2026-10-21): what a retry's search
+    -- and a read-back go by. Existing databases: add_portal_bug_report_channel.
+    jira_create_started_at TIMESTAMP NULL,
+    -- The issue's assignee the last time the two sides agreed (2026-10-22), and their name while they are not in
+    -- MIS. Existing databases: add_portal_bug_report_jira_assignee.
+    jira_assignee_id   VARCHAR(128) NULL,
+    jira_assignee_name VARCHAR(255) NULL,
+    -- When its fields were first kept in step with Jira (2026-10-22); null merges both sides at the next read-back.
+    -- Existing databases: add_portal_bug_report_fields_synced_at.
+    jira_fields_synced_at TIMESTAMP NULL,
     INDEX bug_reports_status_reported_on_index (status, reported_on),
+    INDEX bug_reports_duplicate_of_index (duplicate_of),
+    INDEX bug_reports_parent_report_id_index (parent_report_id),
     UNIQUE KEY bug_reports_jira_issue_id_unique (jira_issue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -1545,6 +1581,17 @@ CREATE TABLE IF NOT EXISTS bug_report_images (
     file_url      VARCHAR(500) NOT NULL,
     mime_type     VARCHAR(100) NOT NULL,
     size_bytes    INT UNSIGNED NOT NULL,
+    FOREIGN KEY (bug_report_id) REFERENCES bug_reports(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Everyone but the first who works on a report, in order (2026-10-22): the first is bug_reports.assignee_id, Jira's
+-- assignee; these are the issue's watchers. Existing databases: create_portal_bug_report_other_assignees.
+CREATE TABLE IF NOT EXISTS bug_report_other_assignees (
+    bug_report_id INT UNSIGNED NOT NULL,
+    employee_id   INT UNSIGNED NOT NULL,
+    position      SMALLINT UNSIGNED NOT NULL,
+    PRIMARY KEY (bug_report_id, employee_id),
+    INDEX bug_report_other_assignees_employee_id_index (employee_id),
     FOREIGN KEY (bug_report_id) REFERENCES bug_reports(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -1573,6 +1620,19 @@ INSERT INTO access_presets (role, permission_key, reach, include_executives) VAL
     ('member', 'bug-reports.jira', NULL, 0),
     ('admin', 'bug-reports.jira', NULL, 0),
     ('developer', 'bug-reports.jira', NULL, 0);
+
+-- Delete issues and requests (2026-10-21): to the deleter's Recycle Bin for 30 days; the same people as the
+-- page, switchable per person. Existing databases: add_portal_bug_report_archive_and_delete.
+INSERT INTO access_permissions
+    (permission_key, parent_key, label, description, supports_reach, can_toggle, only_department, sort_order)
+VALUES
+    ('bug-reports.delete', 'bug-reports', 'Delete issues and requests',
+     'Delete an issue or request to your Recycle Bin, where it stays for 30 days and can be restored.',
+     0, 1, 'MIS', 992);
+INSERT INTO access_presets (role, permission_key, reach, include_executives) VALUES
+    ('member', 'bug-reports.delete', NULL, 0),
+    ('admin', 'bug-reports.delete', NULL, 0),
+    ('developer', 'bug-reports.delete', NULL, 0);
 
 -- Edit transactions (2026-10-13): a transaction's name, date, payor or payee, notes and receipt, never
 -- its money; admins, executives and developers hold it like the rest of Finance.

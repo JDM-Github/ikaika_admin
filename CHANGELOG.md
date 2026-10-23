@@ -6,6 +6,28 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 
 ## Unreleased
 
+### Added
+
+- Every answer names the server version and channel that sent it.
+- Production and staging share one Jira project and each server follows only its own issues.
+- Issues & Requests can cancel a report as won't fix or close it as a duplicate that is fixed with its original and labelled and linked to it in Jira.
+- Issues & Requests can be archived and deleted to the Recycle Bin.
+- A report in Issues & Requests has start and due dates and a parent epic and a team that change in Jira too and new issues go to the DEV team.
+- Who works on a report in Issues & Requests is its Jira assignee too and a change on either side shows on both.
+- MIS chooses when a report's assignee and dates and parent and team start following Jira and until then they stay in the portal.
+- Issues & Requests can assign a report to several people and the others watch its Jira issue.
+- Issues & Requests has epics and sub-tasks that are Jira's too.
+- Issues & Requests can change many reports at once.
+
+### Fixed
+
+- Issues & Requests still follows its Jira issues after the Jira project key is changed.
+- Missing report reminders come only from production and never name a day the records are missing.
+
+### Other
+
+- Every production deploy is a tagged release and any version tag can be rebuilt to test it on staging.
+
 ## 1.0.0+2 - 2026-10-19
 
 ### Added
@@ -19,4 +41,3 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 - build-release tags and uploads when asked, as the estimator's does - -Tag, -Deploy, -DryRun - and -Clean, the Build release form's clean, removes the server's older backups and a failed deploy's leftovers.
 - build-release -Gui opens the project estimator's Build release dialog.
 - Releases and the build dialog name the backend IkaIka Portal Backend - as the estimator names its own
-

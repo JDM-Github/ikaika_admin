@@ -18,6 +18,9 @@ use App\Support\Portal\PortalEmployeeDocuments;
 use App\Support\Portal\PortalHolidays;
 use App\Support\Portal\PortalHomeLocations;
 use App\Support\Portal\PortalJiraClient;
+use App\Support\Portal\PortalJiraEnvironment;
+use App\Support\Portal\PortalJiraIssue;
+use App\Support\Portal\PortalJiraPeople;
 use App\Support\Portal\PortalMailDiagnostics;
 use App\Support\Portal\PortalManageRequests;
 use App\Support\Portal\PortalPlaces;
@@ -826,6 +829,12 @@ Artisan::command('portal:geocode-homes', function (PortalHomeLocations $homes): 
 Artisan::command('portal:remind-missing-reports
     {--dry-run : List who would be reminded and for which days; sends nothing}
     {--to= : Send one sample reminder to this address only, outside the outbox}', function (PortalReportReminders $reminders): int {
+    // A day too few filed on is one the records lack (2026-10-22, user: false reminders), and nobody hears of it.
+    foreach ($reminders->coverage(now()) as $day => $count) {
+        if (! $count['whole']) {
+            $this->warn($day.': '.$count['filed'].' of '.$count['expected'].' filed, too few for these records to be whole - nobody is reminded of it.');
+        }
+    }
     $plan = $reminders->missing(now());
     $summaries = $reminders->summaries($plan);
     foreach ($plan as $row) {
@@ -862,6 +871,11 @@ Artisan::command('portal:remind-missing-reports
             return 1;
         }
         $this->info('Samples sent to '.$to.': '.$plan[0]['name']."'s reminder".($summaries === [] ? '' : ' and the '.$summaries[0]['department'].' summary').'.');
+    } elseif (! PortalReportReminders::scheduled()) {
+        // Only production reminds people (2026-10-22, user): any other server's reports are a copy.
+        $this->error('Reminders are off on this server ('.config('products.channel').'): its reports are a copy of production\'s, so it would remind people of days they filed there. --dry-run lists, --to sends a sample; REPORT_REMINDERS_SCHEDULED=true turns them on.');
+
+        return 1;
     } else {
         foreach ($plan as $row) {
             $reminders->remind($row['employee'], $row['days']);
@@ -901,7 +915,7 @@ Artisan::command('portal:jira-sync', function (PortalBugReportsJira $jira, Porta
     return 0;
 })->purpose('Send the issues and requests waiting for Jira, and read every linked one back');
 
-Artisan::command('portal:jira-check', function (PortalJiraClient $client, PortalBugReportsJira $jira): int {
+Artisan::command('portal:jira-check', function (PortalJiraClient $client, PortalBugReportsJira $jira, PortalJiraEnvironment $environment, PortalJiraPeople $people): int {
     $missing = $client->missingSettings();
     if ($missing !== []) {
         $this->error('Jira is not configured: set '.implode(', ', $missing).' (JIRA_BASE_URL as https://<site>.atlassian.net).');
@@ -914,13 +928,89 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         $this->info('Account: '.$account['displayName'].' ('.$account['accountId'].')');
         $project = $client->project();
         $this->info('Project: '.$project['key'].' - '.$project['name']);
+        // A key the project had before still files (2026-10-22, user: IPS became IP2), under the key it has now.
+        if (strtoupper($project['key']) !== $client->projectKey()) {
+            $this->warn('JIRA_PROJECT_KEY is a key '.$project['key'].' had before: Jira files new issues as '.$project['key'].'-N, which this server follows too. Set JIRA_PROJECT_KEY='.$project['key'].' to match.');
+        }
+        // One project for production and staging (2026-10-21, user): how this server's issues are told apart.
+        $this->info('Files as: '.$environment->channel().' - labels '.implode(', ', $environment->labels()).'; marked '.str_replace('#0', '#N', PortalJiraIssue::reportMark(0, $environment->label())));
         foreach (PortalBugReports::KINDS as $kind => $words) {
             $type = $jira->issueTypeFor($kind);
-            if ($type['id'] === null) {
+            // An epic is Epic or nothing (2026-10-22, user); a project without one only cannot have epics.
+            if ($type['id'] === null && $kind === PortalBugReports::KIND_EPIC) {
+                $this->warn('Epic: no issue type '.$type['wanted'].' in the project, so MIS cannot plan an epic. The project has: '.implode(', ', array_column($client->issueTypes(), 'name')).'.');
+            } elseif ($type['id'] === null) {
                 $failed = true;
                 $this->error($words['label'].': no issue type '.$type['wanted'].' or Task. The project has: '.implode(', ', array_column($client->issueTypes(), 'name')).'.');
             } else {
                 $this->info($words['label'].' -> '.$type['name'].($type['name'] === $type['wanted'] ? '' : ' (no '.$type['wanted'].' in the project)'));
+            }
+        }
+        // A report under another is its sub-task (2026-10-22, user).
+        $subtask = $client->subtaskType();
+        $subtask === null
+            ? $this->warn('Sub-task: none in the project, so a report under another stands on its own in Jira.')
+            : $this->info('A report under another -> '.$subtask['name']);
+        // Triage (2026-10-21, user): a duplicate is linked to its original's issue, by a link type the site must have.
+        $linkType = (string) config('services.jira.duplicate_link_type', 'Duplicate');
+        $linkTypes = $client->issueLinkTypes();
+        if (! in_array(strtolower($linkType), array_map('strtolower', $linkTypes), true)) {
+            $failed = true;
+            $this->error('No '.$linkType.' link type on the site, so a duplicate cannot be linked to its original. The site has: '.implode(', ', $linkTypes).'.');
+        } else {
+            $this->info('Duplicates are linked as: '.$linkType.' (the account needs Link issues)');
+        }
+        // One filed anew at another level is linked to the issue it replaces (2026-10-22, user).
+        $movedType = (string) config('services.jira.moved_link_type', 'Relates');
+        in_array(strtolower($movedType), array_map('strtolower', $linkTypes), true)
+            ? $this->info('One moved to another level is linked to its old issue as: '.$movedType)
+            : $this->warn('No '.$movedType.' link type on the site, so an issue filed anew at another level is not linked to the one it replaces.');
+        // A report's plan is the issue's too (2026-10-22, user): the site's two fields, the team new issues go
+        // to, the epics, and what each kind's create screen leaves out -- which a new issue is then sent without.
+        $ids = $client->fieldIds();
+        foreach (['team' => ['Team', 'JIRA_FIELD_TEAM', 'team'], 'startDate' => ['Start date', 'JIRA_FIELD_START_DATE', 'start_date']] as $which => [$label, $env, $setting]) {
+            $set = trim((string) config('services.jira.fields.'.$setting)) !== '';
+            $ids[$which] === null
+                ? $this->warn($label.' field: none on the site, so a report keeps its '.strtolower($label).' to itself; set '.$env.' to its id if the site names it otherwise.')
+                : $this->info($label.' field: '.$ids[$which].($set ? ' (set by '.$env.')' : ' (found on the site)'));
+        }
+        $wantedTeam = trim((string) config('services.jira.default_team', ''));
+        $team = $jira->defaultTeam();
+        if ($wantedTeam === '') {
+            $this->info('New issues go to no team (JIRA_DEFAULT_TEAM is blank).');
+        } elseif ($team === null) {
+            $this->warn('New issues go to no team: Jira has no single team named '.$wantedTeam.'. It has: '.(implode(', ', array_column($client->teams(), 'name')) ?: 'none').'.');
+        } else {
+            $this->info('New issues go to team: '.$team['name'].' ('.$team['id'].')');
+        }
+        $this->info('Epics: '.count($client->epics()).' in '.$project['key']);
+        foreach (PortalBugReports::KINDS as $kind => $words) {
+            $type = $jira->issueTypeFor($kind);
+            $screen = $type['id'] === null ? null : $client->createFields($type['id']);
+            // An epic goes under nothing, so its screen lacking a parent is as it should be.
+            $wanted = array_filter(['assignee', $kind === PortalBugReports::KIND_EPIC ? null : 'parent', 'duedate', $ids['team'], $ids['startDate']]);
+            $lacking = $screen === null ? [] : array_values(array_diff($wanted, $screen));
+            if ($lacking !== []) {
+                $this->warn($words['label'].' ('.$type['name'].') has no '.implode(', ', $lacking).' on its create screen, so a new one goes without.');
+            }
+        }
+        // Who in MIS is who in Jira (2026-10-22, user), found by work address, which needs Browse users and groups.
+        $held = $client->permissions(['ASSIGN_ISSUES', 'EDIT_ISSUES', 'USER_PICKER', 'MANAGE_WATCHERS']);
+        $without = [
+            'USER_PICKER' => 'nobody in MIS can be found in Jira.',
+            // The others who work on a report are the issue's watchers (2026-10-22, user), which only this may change.
+            'MANAGE_WATCHERS' => 'the others who work on a report stay in the portal and do not watch its issue.',
+        ];
+        foreach (['ASSIGN_ISSUES' => 'Assign issues', 'EDIT_ISSUES' => 'Edit issues', 'USER_PICKER' => 'Browse users and groups', 'MANAGE_WATCHERS' => 'Manage watcher list'] as $key => $name) {
+            if (! $held[$key]) {
+                $this->warn('The account lacks '.$name.', so '.($without[$key] ?? 'a change to an issue it needs is refused.'));
+            }
+        }
+        if ($held['USER_PICKER']) {
+            foreach ($people->roster(fresh: true) as $member) {
+                $member['accountId'] === null
+                    ? $this->warn($member['name'].': no Jira account found by their work address - they can be assigned here, and their issues stay unassigned in Jira.')
+                    : $this->info($member['name'].' -> '.$member['accountId']);
             }
         }
     } catch (RuntimeException $error) {
@@ -933,13 +1023,14 @@ Artisan::command('portal:jira-check', function (PortalJiraClient $client, Portal
         return 1;
     }
     $this->info('New ones go to Jira on their own: '.($jira->autoSend() ? 'on' : 'off'));
+    $this->info('Fields kept in step with Jira: '.($jira->syncFields() ? 'on' : 'off - assignees, dates, parents and teams stay in the portal'));
     $hasSecret = trim((string) config('services.jira.webhook_secret')) !== '';
     $hasSecret ? $this->info('Webhook secret: set') : $this->warn('Webhook secret: not set - every delivery will be refused until JIRA_WEBHOOK_SECRET is.');
     $this->line('');
     $this->line('A Jira admin registers the webhook in Jira settings > System > WebHooks:');
     $this->line('  URL:    '.url(ApiPath::join((string) config('products.channel'), 'jira', 'webhook')));
     $this->line('  Events: Issue updated, Issue deleted');
-    $this->line('  JQL:    project = '.$client->projectKey().' AND labels = '.config('services.jira.label'));
+    $this->line('  JQL:    '.$environment->webhookJql($project['key']));
     $this->line('  Secret: the value of JIRA_WEBHOOK_SECRET');
 
     return $failed ? 1 : 0;
@@ -958,7 +1049,10 @@ Schedule::command('portal:map-clients')->hourly()->withoutOverlapping()
 // Jira's backstop: what failed or waits is sent again, and every linked issue is read back, if a delivery was lost.
 Schedule::command('portal:jira-sync')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('portal:geocode-homes')->daily()->withoutOverlapping();
-Schedule::command('portal:remind-missing-reports')->weekdays()->at('18:00')->timezone('Asia/Manila')->withoutOverlapping();
+// Production's alone unless REPORT_REMINDERS_SCHEDULED says otherwise (2026-10-22, user): the Test Server's
+// reports are a copy of production's, and it reminded people of days they had filed there.
+Schedule::command('portal:remind-missing-reports')->weekdays()->at('18:00')->timezone('Asia/Manila')->withoutOverlapping()
+    ->when(fn (): bool => PortalReportReminders::scheduled());
 // The Airtable sync, off until AIRTABLE_SYNC_SCHEDULED=true (2026-10-20). Every tick, so it follows the cron's cadence.
 Schedule::command('portal:airtable-sync --send --backoff')->everyMinute()->withoutOverlapping(15)->runInBackground()
     ->when(fn (): bool => (bool) config('services.airtable.scheduled'));

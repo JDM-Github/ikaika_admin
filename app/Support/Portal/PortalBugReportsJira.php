@@ -3,6 +3,8 @@
 namespace App\Support\Portal;
 
 use App\Modules\Portal\Models\Employee;
+use Closure;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -14,7 +16,8 @@ use RuntimeException;
  * there at once (2026-10-20, user: production had reports from before Jira). Status and kind then go both
  * ways: Jira's are read back on every webhook delivery and scheduled run, and MIS changing them in the
  * portal changes the issue first (2026-10-20, user). Fixed in is the portal's unless the issue names a fix
- * version -- IPS's screens carry none. The note, who handles it and the version level stay the portal's.
+ * version -- IPS's screens carry none. The note and the version level stay the portal's; who handles it is the
+ * issue's assignee too (2026-10-22, user), matched to Jira by PortalJiraPeople.
  *
  * Sending is one report at a time, behind a lock, in steps a retry can carry on from: find or create the
  * issue (its id is kept the moment Jira gives it; one deleted in Jira since is made anew), attach each
@@ -22,9 +25,31 @@ use RuntimeException;
  * five times while the switch is on, and a refused account does not count against the report.
  *
  * A report Jira no longer has is marked deleted -- unless every issue asked about at once came back
- * missing, which says the account lost sight of the project rather than that the issues went. Only issues
- * in the configured project are read back, so a copy of production's reports on the Test Server, which
- * names a sandbox project, is left alone.
+ * missing, which says the account lost sight of the project rather than that the issues went.
+ *
+ * Production and staging share one project (2026-10-21, user), so a server follows only the reports it was sent
+ * on, whose issue -- if one is live -- is in the configured project (handles()): the Test Server's copies of
+ * production's reports, and its old links into the sandbox it used before, are left as they are. A retry searches
+ * for an issue only after this server really started making one, and a new issue is first put in step with its
+ * report -- moved to its column, a duplicate labelled and linked -- before a read-back may take anything from it.
+ *
+ * A report's plan is the issue's too (2026-10-22, user): its start and due dates, the epic it sits under and the team
+ * that owns it go both ways as kind and status do. A new issue carries what its create screen takes of them -- and the
+ * default team (DEV) when the report names none -- and a change in the portal edits only what Jira holds otherwise.
+ *
+ * So does who works on it (2026-10-22, user), and the others on it are the issue's watchers -- best-effort, since
+ * only an account with Manage watcher list may change them, so a refusal is logged and never stops a save. jira_assignee_id is the assignee both sides last agreed on: a read-back
+ * finding the same changes nothing -- which keeps an MIS member Jira has no account for assigned here, and unassigned
+ * there -- and finding another takes it: an MIS member's account is that member, anyone else unassigns it here and is
+ * named, so the page can say who has it in Jira.
+ *
+ * A project's key can change (2026-10-22, user: IPS became IP2, and IPS-1 to IPS-3 were followed by IP2-4). Jira
+ * still takes the old key, so an issue is this project's under the configured key or the one Jira gives it now,
+ * and a report linked under a key the project no longer goes by is found again by its id when issues are read back.
+ *
+ * An archived or deleted report (2026-10-21, user) is out of Jira's way: never queued, sent or read back until it
+ * is back. Removing an open linked one moves its issue to Cancelled first (cancelForRemoval), under the same lock
+ * a send takes, so the two never cross.
  */
 final class PortalBugReportsJira
 {
@@ -46,6 +71,11 @@ final class PortalBugReportsJira
 
     private const SETTING = 'jira.auto_send';
 
+    private const SYNC_SETTING = 'jira.sync_fields';
+
+    // A report's plan as its columns: what the field sync keeps in step with the issue.
+    private const PLAN_COLUMNS = ['start_on', 'due_on', 'parent_key', 'team_id'];
+
     private const FALLBACK_TYPE = 'Task';
 
     private const DELETED_MESSAGE = 'Deleted in Jira, or the Jira account can no longer see it.';
@@ -53,11 +83,42 @@ final class PortalBugReportsJira
     public function __construct(
         private readonly PortalJiraClient $jira,
         private readonly PortalCloudinary $cloudinary,
+        private readonly PortalJiraEnvironment $environment,
+        private readonly PortalJiraPeople $people,
     ) {}
 
     public function isConfigured(): bool
     {
         return $this->jira->isConfigured();
+    }
+
+    // The channel a new report is recorded as sent on.
+    public function channel(): string
+    {
+        return $this->environment->channel();
+    }
+
+    // This server follows the report's Jira side: it was sent here, and any live issue is in this project.
+    public function handles(object $row): bool
+    {
+        return $this->whyNotHandled($row) === null;
+    }
+
+    // Why this server leaves a report's Jira side alone, or null when it does not.
+    public function whyNotHandled(object $row): ?string
+    {
+        if (! $this->environment->ownsRow($row)) {
+            return 'It came here with another server\'s data, so that server sends it to Jira and follows its issue.';
+        }
+        $key = $row->jira_issue_key ?? null;
+        $project = $this->jira->projectKey();
+        // Jira is asked which keys the project goes by only for an issue whose key is not the configured one's.
+        if ($key === null || $row->jira_state === self::STATE_DELETED || $project === null
+            || self::isKeyOf((string) $key, [$project]) || self::isKeyOf((string) $key, $this->jira->projectKeys())) {
+            return null;
+        }
+
+        return $key.' is in another Jira project than '.$project.', so this server leaves it as it is.';
     }
 
     // Whether new reports go to Jira on their own; on until someone turns it off.
@@ -85,9 +146,38 @@ final class PortalBugReportsJira
     }
 
     /**
+     * Whether assignees, dates, parent and team are kept in step with Jira (2026-10-22, user): off until MIS turns it
+     * on, so a deploy to production or staging changes nothing in Jira by itself. Kind and status always are.
+     */
+    public function syncFields(): bool
+    {
+        $value = DB::connection('core')->table('settings')
+            ->where('product', 'portal')
+            ->where('setting_key', self::SYNC_SETTING)
+            ->value('setting_value');
+
+        return $value !== null && in_array(strtolower(trim((string) $value)), ['1', 'true'], true);
+    }
+
+    /**
+     * Turned off, every report's fields count as never kept in step, so turning it on again first merges what
+     * each side has rather than taking Jira's over what changed here meanwhile.
+     */
+    public function setSyncFields(bool $on): void
+    {
+        DB::connection('core')->table('settings')->updateOrInsert(
+            ['product' => 'portal', 'setting_key' => self::SYNC_SETTING],
+            ['setting_value' => $on ? '1' : '0'],
+        );
+        if (! $on) {
+            $this->environment->scope(DB::connection('portal')->table('bug_reports'))->whereNotNull('jira_fields_synced_at')->update(['jira_fields_synced_at' => null]);
+        }
+    }
+
+    /**
      * What the page shows about Jira as a whole.
      *
-     * @return array{connection: string, connectionMessage: ?string, checkedAt: ?string, autoSend: bool, projectKey: ?string}
+     * @return array{connection: string, connectionMessage: ?string, checkedAt: ?string, autoSend: bool, syncFields: bool, projectKey: ?string, environment: ?string}
      */
     public function settings(): array
     {
@@ -98,14 +188,17 @@ final class PortalBugReportsJira
             'connectionMessage' => $connection['message'],
             'checkedAt' => $connection['checkedAt'],
             'autoSend' => $this->autoSend(),
+            'syncFields' => $this->syncFields(),
             'projectKey' => $this->jira->projectKey(),
+            // The label this server adds in the shared project, or null on production.
+            'environment' => $this->environment->label(),
         ];
     }
 
-    // Jira owns the report: an issue it still has.
+    // Jira owns the report: an issue it still has, which this server follows.
     public function owns(object $row): bool
     {
-        return $row->jira_issue_id !== null && $row->jira_state !== self::STATE_DELETED;
+        return $row->jira_issue_id !== null && $row->jira_state !== self::STATE_DELETED && $this->handles($row);
     }
 
     /**
@@ -135,20 +228,70 @@ final class PortalBugReportsJira
      */
     public function push(int $id): bool
     {
+        return $this->withReportLock($id, function () use ($id): void {
+            $row = $this->row($id);
+            if ($row !== null && self::isTracked($row) && $this->handles($row)) {
+                $this->sendSteps($row);
+            }
+        });
+    }
+
+    /**
+     * Run $work while holding the report against every send, and keep one off meanwhile; false when a send
+     * holds it now.
+     *
+     * @param  Closure(): void  $work
+     */
+    public function withReportLock(int $id, Closure $work): bool
+    {
         $lock = Cache::lock('portal-jira-push:'.$id, 120);
         if (! $lock->get()) {
             return false;
         }
         try {
-            $row = $this->row($id);
-            if ($row !== null) {
-                $this->sendSteps($row);
-            }
+            $work();
         } finally {
             $lock->release();
         }
 
         return true;
+    }
+
+    // The reports still followed in Jira: neither archived nor deleted.
+    public static function tracked(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at')->whereNull('deleted_at');
+    }
+
+    public static function isTracked(object $row): bool
+    {
+        return ($row->archived_at ?? null) === null && ($row->deleted_at ?? null) === null;
+    }
+
+    /**
+     * Before an open linked report is archived or deleted (2026-10-21, user): its issue moved to Cancelled, and the
+     * report with it, as won't fix. Jira is asked first, and moves nothing for an issue it no longer has -- marked
+     * deleted -- or one already closed there, which is read back. The key of an issue this moved, else null.
+     */
+    public function cancelForRemoval(object $row): ?string
+    {
+        $issue = $this->jira->issue((string) $row->jira_issue_id);
+        if ($issue === null) {
+            $this->markDeleted((int) $row->id);
+
+            return null;
+        }
+        $closed = [PortalBugReports::STATUS_FIXED, PortalBugReports::STATUS_CANCELLED];
+        if (in_array(PortalJiraIssue::portalStatus($issue['fields'], (string) $row->status), $closed, true)) {
+            $this->apply($row, $issue);
+
+            return null;
+        }
+        $changes = ['status' => PortalBugReports::STATUS_CANCELLED, 'cancel_reason' => PortalBugReports::CANCEL_WONT_FIX, 'duplicate_of' => null];
+        $this->changeInJira($row, $changes);
+        DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update([...$changes, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')]);
+
+        return (string) ($this->row((int) $row->id)?->jira_issue_key ?? $row->jira_issue_key);
     }
 
     /**
@@ -158,7 +301,7 @@ final class PortalBugReportsJira
      */
     public function queueUnsent(): array
     {
-        $ids = DB::connection('portal')->table('bug_reports')
+        $ids = $this->handled(DB::connection('portal')->table('bug_reports'))
             ->where(fn ($query) => $query->whereNull('jira_state')->orWhere('jira_state', self::STATE_FAILED))
             ->orderBy('id')
             ->pluck('id')
@@ -174,28 +317,79 @@ final class PortalBugReportsJira
 
     /**
      * A linked report's new kind or status, made in Jira before the portal keeps it: the work type edited, or
-     * the issue moved along the transition landing in the matching column. Throws Jira's own words.
+     * the issue moved along the transition landing in the matching column -- and, for triage (2026-10-21, user), a
+     * duplicate labelled and linked to its original's issue, or no longer; its plan and assignee (2026-10-22, user)
+     * edited where Jira holds otherwise. Throws Jira's own words. The columns the save keeps of Jira's side.
      *
      * @param  array<string, mixed>  $changes
+     * @return array{jira_assignee_id?: ?string, jira_assignee_name?: ?string}
      */
-    public function changeInJira(object $row, array $changes): void
+    public function changeInJira(object $row, array $changes): array
     {
         $issueId = (string) $row->jira_issue_id;
-        if (isset($changes['kind']) && $changes['kind'] !== $row->kind) {
+        // Where it sits (2026-10-22, user): a change of level files the issue anew, and one within it is an edit.
+        $sync = $this->syncFields();
+        $place = $this->placeIn($row, $changes, $sync);
+        if ($place !== null && $place['level'] !== PortalJiraIssue::levelOf($place['fields'])) {
+            return $this->moveIssue($row, $changes, $place['level'], $place['parentKey']);
+        }
+        $status = $changes['status'] ?? (string) $row->status;
+        $reason = array_key_exists('cancel_reason', $changes) ? $changes['cancel_reason'] : $row->cancel_reason;
+        $original = array_key_exists('duplicate_of', $changes) ? $changes['duplicate_of'] : $row->duplicate_of;
+        $wasDuplicate = PortalBugReports::isDuplicate($row->status, $row->cancel_reason);
+        $isDuplicate = PortalBugReports::isDuplicate($status, $reason);
+        $oldTarget = $wasDuplicate ? $this->duplicateTarget($row->duplicate_of) : null;
+        $newTarget = $isDuplicate ? $this->duplicateTarget($original) : null;
+
+        // Reads first, so a move Jira has no way to make changes nothing.
+        $move = isset($changes['status']) && $changes['status'] !== $row->status
+            ? $this->findMove($issueId, (string) $changes['status'], (string) $row->jira_issue_key)
+            : null;
+        // Its plan and assignee only while they are kept in step (2026-10-22, user).
+        $plan = $sync ? self::planChanges($row, $changes) : [];
+        if ($sync && $place !== null && (array_key_exists('parent_report_id', $changes) || array_key_exists('parent_key', $changes))) {
+            $plan['parent_key'] = $place['parentKey'];
+        }
+        $assigning = $sync && self::assigneeChanges($row, $changes);
+        $watching = $sync && self::othersChange($row, $changes);
+        $account = $assigning ? $this->people->accountOf($changes['assignee_id'] === null ? null : (int) $changes['assignee_id']) : null;
+        $unlinks = $oldTarget !== null && $oldTarget !== $newTarget;
+        $current = $place['fields'] ?? ($unlinks || $plan !== [] || $assigning ? ($this->jira->issue($issueId)['fields'] ?? []) : []);
+        $staleLinks = $unlinks ? PortalJiraIssue::duplicateLinkIds($current, $this->duplicateLinkType(), $oldTarget) : [];
+        $planEdit = $plan === [] ? [] : $this->planEdit($plan, $current);
+        // A member Jira has no account for leaves the issue unassigned there, rather than with whoever had it.
+        if ($assigning && PortalJiraIssue::assigneeOf($current)[0] !== $account) {
+            $planEdit['assignee'] = $account === null ? null : ['accountId' => $account];
+        }
+
+        // A sub-task stays Jira's Sub-task whatever its kind here: no other type stands at its level.
+        if (isset($changes['kind']) && $changes['kind'] !== $row->kind && (($row->parent_report_id ?? null) === null
+            || PortalJiraIssue::levelOf($current ?: ($this->jira->issue($issueId)['fields'] ?? [])) !== PortalBugReportHierarchy::SUBTASK)) {
             $this->jira->editIssue($issueId, ['issuetype' => ['id' => $this->issueTypeId((string) $changes['kind'])]]);
         }
-        if (isset($changes['status']) && $changes['status'] !== $row->status) {
-            $wanted = (string) $changes['status'];
-            $move = null;
-            foreach ($this->jira->transitions($issueId) as $candidate) {
-                if (PortalJiraIssue::portalStatus(['status' => $candidate['to']], '') === $wanted) {
-                    $move = $candidate;
-                    break;
-                }
-            }
-            if ($move === null) {
-                throw new RuntimeException('Jira has no way to move '.$row->jira_issue_key.' to '.PortalBugReports::STATUS_LABELS[$wanted].' from where it is.', 409);
-            }
+        // The plan after the kind, whose work type decides the screen the fields are edited on.
+        if ($planEdit !== []) {
+            $this->editPlan($issueId, $planEdit);
+        }
+        if ($watching) {
+            $first = array_key_exists('assignee_id', $changes) ? $changes['assignee_id'] : $row->assignee_id;
+            $this->keepWatchers($issueId, $row->other_assignees ?? [], $changes['other_assignees'], $first === null ? null : (int) $first);
+        }
+        // Triage (2026-10-21, user): the label and the link before the move, so a delivery racing the save already
+        // sees a cancelled duplicate as one.
+        foreach ($staleLinks as $linkId) {
+            $this->jira->deleteIssueLink($linkId);
+        }
+        if ($wasDuplicate && ! $isDuplicate) {
+            $this->jira->changeLabels($issueId, [], [$this->duplicateLabel()]);
+        }
+        if ($isDuplicate && ! $wasDuplicate) {
+            $this->jira->changeLabels($issueId, [$this->duplicateLabel()]);
+        }
+        if ($newTarget !== null && $newTarget !== $oldTarget) {
+            $this->jira->linkIssues($this->duplicateLinkType(), $issueId, $newTarget);
+        }
+        if ($move !== null) {
             $this->jira->transition($issueId, $move['id']);
         }
         $issue = $this->jira->issue($issueId);
@@ -206,12 +400,232 @@ final class PortalBugReportsJira
                 'jira_synced_at' => now('UTC')->format('Y-m-d H:i:s'),
             ]);
         }
+
+        return $assigning ? ['jira_assignee_id' => $account, 'jira_assignee_name' => null] : [];
+    }
+
+    /**
+     * Whether a save changes who works on it in Jira: another member, or letting go of the one Jira has it
+     * assigned to from outside MIS.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    public static function assigneeChanges(object $row, array $changes): bool
+    {
+        if (! array_key_exists('assignee_id', $changes)) {
+            return false;
+        }
+        $now = $changes['assignee_id'] === null ? null : (int) $changes['assignee_id'];
+        $was = $row->assignee_id === null ? null : (int) $row->assignee_id;
+
+        return $now !== $was || ($now === null && ($row->jira_assignee_id ?? null) !== null);
+    }
+
+    /**
+     * Whether a save puts it under another report, or none, which goes to Jira while fields are kept in step.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    public static function placeChanges(object $row, array $changes): bool
+    {
+        return array_key_exists('parent_report_id', $changes)
+            && $changes['parent_report_id'] !== (($row->parent_report_id ?? null) === null ? null : (int) $row->parent_report_id);
+    }
+
+    /**
+     * Where a save puts a linked report in Jira, when it moves it at all: the level its issue must stand at and the
+     * issue it goes under, with the issue as it is now. While fields are not kept in step only its kind moves it, so
+     * a sub-task there stays one; and one put under a report not in Jira yet stands on its own there until then.
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array{level: int, parentKey: ?string, fields: array<string, mixed>}|null
+     */
+    private function placeIn(object $row, array $changes, bool $sync): ?array
+    {
+        $kind = (string) ($changes['kind'] ?? $row->kind);
+        $moved = $kind !== (string) $row->kind && in_array(PortalBugReports::KIND_EPIC, [$kind, (string) $row->kind], true);
+        if (! $moved && ! ($sync && (array_key_exists('parent_report_id', $changes) || array_key_exists('parent_key', $changes)))) {
+            return null;
+        }
+        $fields = $this->jira->issue((string) $row->jira_issue_id)['fields'] ?? [];
+        if ($kind === PortalBugReports::KIND_EPIC) {
+            return ['level' => PortalBugReportHierarchy::EPIC, 'parentKey' => null, 'fields' => $fields];
+        }
+        if (! $sync) {
+            $level = PortalJiraIssue::levelOf($fields);
+
+            return ['level' => $level === PortalBugReportHierarchy::EPIC ? PortalBugReportHierarchy::ISSUE : $level, 'parentKey' => null, 'fields' => $fields];
+        }
+        $parentId = array_key_exists('parent_report_id', $changes) ? $changes['parent_report_id'] : ($row->parent_report_id ?? null);
+        $parent = PortalBugReportHierarchy::live($parentId);
+        $parentIssue = $parent !== null && $this->owns($parent) ? (string) $parent->jira_issue_key : null;
+        if ($parent !== null && (string) $parent->kind !== PortalBugReports::KIND_EPIC) {
+            return $parentIssue === null
+                ? ['level' => PortalBugReportHierarchy::ISSUE, 'parentKey' => null, 'fields' => $fields]
+                : ['level' => PortalBugReportHierarchy::SUBTASK, 'parentKey' => $parentIssue, 'fields' => $fields];
+        }
+        $parentKey = array_key_exists('parent_key', $changes) ? $changes['parent_key'] : ($row->parent_key ?? null);
+
+        return ['level' => PortalBugReportHierarchy::ISSUE, 'parentKey' => $parentIssue ?? $parentKey, 'fields' => $fields];
+    }
+
+    /**
+     * A linked report whose level changes in Jira -- to an epic or from one, under another report or from under it --
+     * which no edit can make (2026-10-22, user): its issue filed anew at that level with its content, plan and
+     * screenshots; the report pointed at it at once; then the old one labelled moved, linked to the new and
+     * cancelled, so its history stays. Jira first, or nothing: until the new issue is made the report keeps its old
+     * one. A screenshot refused leaves the send to try it again; an old issue Jira will not close says so in the log.
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array<string, mixed>
+     */
+    private function moveIssue(object $row, array $changes, int $level, ?string $parentKey): array
+    {
+        $next = (object) [...(array) $row, ...$changes, 'other_assignees' => $changes['other_assignees'] ?? ($row->other_assignees ?? [])];
+        if ($level === PortalBugReportHierarchy::SUBTASK) {
+            $subtask = $this->jira->subtaskType() ?? throw new RuntimeException('Jira has no sub-task type in '.$this->jira->projectKey().'.');
+            $typeId = $subtask['id'];
+        } else {
+            $typeId = $this->issueTypeId((string) $next->kind);
+        }
+        [$plan, , $account] = $this->planForCreate($next, $typeId, $parentKey);
+        $made = $this->jira->createIssue(PortalJiraIssue::fields(
+            $next, (string) $this->jira->projectKey(), $typeId, (string) config('services.jira.label', 'ikaika-portal'), $this->senderName($row), $this->environment->label(), $plan,
+        ));
+        $old = ['id' => (string) $row->jira_issue_id, 'key' => (string) $row->jira_issue_key];
+        $columns = [
+            'jira_issue_id' => $made['id'],
+            'jira_issue_key' => $made['key'],
+            'jira_state' => self::STATE_SENT,
+            'jira_error' => null,
+            'jira_status' => null,
+            'jira_attached' => 0,
+            'jira_assignee_id' => $account,
+            'jira_assignee_name' => null,
+            'jira_fields_synced_at' => $this->syncFields() ? now('UTC')->format('Y-m-d H:i:s') : null,
+        ];
+        DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update($columns);
+        Log::info('portal.jira.moved', ['report' => (int) $row->id, 'from' => $old['key'], 'to' => $made['key']]);
+
+        $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $row->id)->orderBy('id')->get()->values();
+        foreach ($images as $index => $image) {
+            try {
+                $this->jira->attach($made['id'], PortalJiraIssue::attachmentName($index + 1, (string) $image->mime_type), $this->cloudinary->download((string) $image->file_url), (string) $image->mime_type);
+            } catch (RuntimeException $error) {
+                $columns = [...$columns, 'jira_state' => self::STATE_FAILED, 'jira_error' => mb_substr('Screenshot '.($index + 1).' could not be attached: '.$error->getMessage(), 0, 255)];
+                break;
+            }
+            $columns['jira_attached'] = $index + 1;
+        }
+        $status = (string) ($changes['status'] ?? $row->status);
+        try {
+            if ($status !== PortalBugReports::STATUS_NEW) {
+                $this->jira->transition($made['id'], $this->findMove($made['id'], $status, $made['key'])['id']);
+            }
+        } catch (RuntimeException $error) {
+            Log::warning('portal.jira.moved_status_refused', ['report' => (int) $row->id, 'status' => $error->getCode()]);
+        }
+        if ($this->syncFields()) {
+            $this->keepWatchers($made['id'], [], $next->other_assignees, $next->assignee_id === null ? null : (int) $next->assignee_id);
+        }
+        try {
+            $this->jira->changeLabels($old['id'], [(string) config('services.jira.moved_label', 'moved')]);
+            $this->jira->linkIssues((string) config('services.jira.moved_link_type', 'Relates'), $old['id'], $made['id']);
+            $this->jira->transition($old['id'], $this->findMove($old['id'], PortalBugReports::STATUS_CANCELLED, $old['key'])['id']);
+        } catch (RuntimeException $error) {
+            Log::warning('portal.jira.moved_issue_left_open', ['report' => (int) $row->id, 'issue' => $old['key'], 'status' => $error->getCode()]);
+        }
+        $issue = $this->jira->issue($made['id']);
+
+        return [...$columns, 'jira_status' => $issue === null ? null : PortalJiraIssue::statusName($issue['fields']), 'jira_synced_at' => now('UTC')->format('Y-m-d H:i:s')];
+    }
+
+    /**
+     * Jira's parent as the portal keeps it: a report this server follows is the one it sits under, and any other an
+     * epic Jira alone has. None takes it out from under a report Jira has, but not from under one not in Jira yet.
+     *
+     * @param  array<string, mixed>  $plan
+     * @return array<string, mixed>
+     */
+    private function placeFromJira(object $row, array $plan): array
+    {
+        if (! array_key_exists('parent_key', $plan)) {
+            return $plan;
+        }
+        $current = PortalBugReportHierarchy::live($row->parent_report_id ?? null);
+        if ($plan['parent_key'] === null) {
+            return $current !== null && $this->owns($current) ? [...$plan, 'parent_report_id' => null] : $plan;
+        }
+        $parent = $this->handled(DB::connection('portal')->table('bug_reports'))
+            ->where('jira_issue_key', $plan['parent_key'])->where('id', '!=', $row->id)->whereNull('deleted_at')->first();
+
+        return $parent !== null && $this->owns($parent)
+            ? [...$plan, 'parent_key' => null, 'parent_summary' => null, 'parent_report_id' => (int) $parent->id]
+            : [...$plan, 'parent_report_id' => null];
+    }
+
+    /**
+     * Whether a save changes the others who work on it, which a report read with them knows.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    public static function othersChange(object $row, array $changes): bool
+    {
+        return array_key_exists('other_assignees', $changes) && $changes['other_assignees'] !== ($row->other_assignees ?? []);
+    }
+
+    /**
+     * The others' accounts as the issue's watchers: who joined added, who left taken off -- but its assignee now -- and
+     * nobody the portal never added. Best-effort: without Manage watcher list, or a lookup Jira does not answer, the
+     * watchers stay as they are and the save stands.
+     *
+     * @param  list<int>  $before
+     * @param  list<int>  $after
+     */
+    private function keepWatchers(string $issueId, array $before, array $after, ?int $first): void
+    {
+        try {
+            $accounts = fn (array $ids): array => array_values(array_filter(array_map(fn (int $id): ?string => $this->people->accountOf($id), $ids)));
+            $old = $accounts($before);
+            $new = $accounts($after);
+            $assignee = $first === null ? null : $this->people->accountOf($first);
+            foreach (array_diff($new, $old) as $account) {
+                $this->jira->addWatcher($issueId, $account);
+            }
+            foreach (array_diff($old, $new, array_filter([$assignee])) as $account) {
+                $this->jira->removeWatcher($issueId, $account);
+            }
+        } catch (RuntimeException $error) {
+            Log::warning('portal.jira.watchers_refused', ['issue' => $issueId, 'status' => $error->getCode()]);
+        }
+    }
+
+    // The others on a report, in order.
+    private function othersOn(object $row): array
+    {
+        return PortalBugReportAssignees::othersOf([(int) $row->id])[(int) $row->id] ?? [];
+    }
+
+    /**
+     * The move that lands the issue in the column a portal status stands for, from where it is now.
+     *
+     * @return array{id: string, to: array<string, mixed>}
+     */
+    private function findMove(string $issueId, string $wanted, string $issueKey): array
+    {
+        foreach ($this->jira->transitions($issueId) as $candidate) {
+            if (PortalJiraIssue::portalStatus(['status' => $candidate['to']], '') === $wanted) {
+                return $candidate;
+            }
+        }
+
+        throw new RuntimeException('Jira has no way to move '.$issueKey.' to '.PortalBugReports::STATUS_LABELS[$wanted].' from where it is.', 409);
     }
 
     // Read one issue back, as a webhook delivery asks; a report Jira no longer has is marked deleted.
     public function syncIssue(string $issueId): void
     {
-        $row = DB::connection('portal')->table('bug_reports')->where('jira_issue_id', $issueId)->first();
+        $row = self::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))->where('jira_issue_id', $issueId)->first();
         if ($row === null || ! $this->owns($row)) {
             return;
         }
@@ -225,7 +639,8 @@ final class PortalBugReportsJira
     }
 
     /**
-     * Read every linked report of the configured project back, a hundred at a time.
+     * Read every linked report of the configured project back, a hundred at a time, then find again by id any
+     * linked under a key the project no longer goes by.
      *
      * @return array{synced: int, deleted: int}
      */
@@ -233,12 +648,20 @@ final class PortalBugReportsJira
     {
         $synced = 0;
         $deleted = 0;
-        $prefix = $this->jira->projectKey().'-';
-        DB::connection('portal')->table('bug_reports')
+        $keys = $this->linkedProjectKeys();
+        if ($keys === []) {
+            return ['synced' => 0, 'deleted' => 0];
+        }
+        $refused = false;
+        self::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))
             ->whereNotNull('jira_issue_id')
             ->where('jira_state', '!=', self::STATE_DELETED)
-            ->where('jira_issue_key', 'like', str_replace(['%', '_'], ['\%', '\_'], $prefix).'%')
-            ->chunkById(100, function ($rows) use (&$synced, &$deleted): ?bool {
+            ->where(function (Builder $inner) use ($keys): void {
+                foreach ($keys as $key) {
+                    $inner->orWhere('jira_issue_key', 'like', self::keyPattern($key));
+                }
+            })
+            ->chunkById(100, function ($rows) use (&$synced, &$deleted, &$refused): ?bool {
                 $byIssue = $rows->keyBy('jira_issue_id');
                 $fetched = $this->jira->bulkFetch(array_map('strval', $byIssue->keys()->all()));
                 foreach ($fetched['issues'] as $issue) {
@@ -250,6 +673,7 @@ final class PortalBugReportsJira
                 if ($fetched['issues'] === [] && count($fetched['missing']) >= 2) {
                     Log::warning('portal.jira.all_missing', ['asked' => count($fetched['missing'])]);
                     $this->jira->refuse('Jira returned none of the '.count($fetched['missing']).' issues asked about: check the account can still browse the project.');
+                    $refused = true;
 
                     return false;
                 }
@@ -260,8 +684,41 @@ final class PortalBugReportsJira
 
                 return null;
             });
+        if (! $refused) {
+            $synced += $this->rekey($keys);
+        }
 
         return ['synced' => $synced, 'deleted' => $deleted];
+    }
+
+    /**
+     * The reports linked under a key the project no longer goes by -- its key changed, and the configuration moved
+     * on with it -- asked for by id: Jira answers with each issue's key now, which apply() keeps when it is this
+     * project's. An issue in another project, or one Jira does not show, is left as it is.
+     *
+     * @param  list<string>  $keys
+     */
+    private function rekey(array $keys): int
+    {
+        $found = 0;
+        $query = self::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))
+            ->whereNotNull('jira_issue_id')
+            ->whereNotNull('jira_issue_key')
+            ->where('jira_state', '!=', self::STATE_DELETED);
+        foreach ($keys as $key) {
+            $query->where('jira_issue_key', 'not like', self::keyPattern($key));
+        }
+        $query->chunkById(100, function ($rows) use ($keys, &$found): void {
+            $byIssue = $rows->keyBy('jira_issue_id');
+            foreach ($this->jira->bulkFetch(array_map('strval', $byIssue->keys()->all()))['issues'] as $issue) {
+                if ($byIssue->has($issue['id']) && self::isKeyOf($issue['key'], $keys)) {
+                    $this->apply($byIssue[$issue['id']], $issue);
+                    $found++;
+                }
+            }
+        });
+
+        return $found;
     }
 
     /**
@@ -275,7 +732,7 @@ final class PortalBugReportsJira
         $sent = 0;
         $failed = 0;
         if ($this->autoSend()) {
-            $waiting = DB::connection('portal')->table('bug_reports')
+            $waiting = $this->handled(DB::connection('portal')->table('bug_reports'))
                 ->whereIn('jira_state', [self::STATE_PENDING, self::STATE_FAILED])
                 ->where('jira_attempts', '<', self::MAX_ATTEMPTS)
                 ->orderBy('id')
@@ -309,6 +766,14 @@ final class PortalBugReportsJira
             }
             if ($row->jira_issue_id === null || $row->jira_state === self::STATE_DELETED) {
                 $row = $this->linkIssue($row);
+            }
+            if ($row->jira_create_started_at !== null) {
+                $this->putInStep($row);
+                if ($this->syncFields()) {
+                    $this->keepWatchers((string) $row->jira_issue_id, [], $this->othersOn($row), $row->assignee_id === null ? null : (int) $row->assignee_id);
+                }
+                DB::connection('portal')->table('bug_reports')->where('id', $id)->update(['jira_create_started_at' => null]);
+                $row = $this->row($id) ?? $row;
             }
             $images = DB::connection('portal')->table('bug_report_images')->where('bug_report_id', $id)->orderBy('id')->get()->values();
             for ($index = (int) $row->jira_attached; $index < $images->count(); $index++) {
@@ -351,22 +816,43 @@ final class PortalBugReportsJira
         }
     }
 
-    // The issue the report becomes: one an earlier, unanswered try already made, or a new one.
+    // The issue the report becomes: one an earlier, unanswered try of this server's already made, or a new one.
     private function linkIssue(object $row): object
     {
-        $label = (string) config('services.jira.label', 'ikaika-portal');
+        $environment = $this->environment->label();
         $issue = null;
-        if ($row->jira_state !== null && $row->jira_state !== self::STATE_DELETED) {
-            foreach ($this->jira->issuesDescribing('report '.$row->id, $label) as $found) {
-                if (PortalJiraIssue::isForReport($found['fields'], (int) $row->id)) {
+        // Only a create this server really started can have made an issue, and only since the day before it.
+        $started = $row->jira_create_started_at ?? null;
+        if ($started !== null) {
+            $since = date('Y-m-d', strtotime(substr((string) $started, 0, 10).' -1 day') ?: time());
+            foreach ($this->jira->issuesDescribing('report '.$row->id, $this->environment->searchJql(), $since) as $found) {
+                if (PortalJiraIssue::isForReport($found['fields'], (int) $row->id, $environment)) {
                     $issue = $found;
                     break;
                 }
             }
         }
+        $made = [];
         if ($issue === null) {
             $kind = array_key_exists((string) $row->kind, PortalBugReports::KINDS) ? (string) $row->kind : PortalBugReports::KIND_BUG;
-            $issue = $this->jira->createIssue(PortalJiraIssue::fields($row, (string) $this->jira->projectKey(), $this->issueTypeId($kind), $label, $this->senderName($row)));
+            // Every read first -- the type, and the plan its screen takes -- so a refused one makes nothing, and
+            // there is nothing for a retry to look for.
+            [$typeId, $parentKey] = $this->placeForCreate($row, $kind);
+            [$plan, $default, $account] = $this->planForCreate($row, $typeId, $parentKey);
+            // Filed under the default team, the report names it too; its assignee is what the two sides agree on, and
+            // filed while fields are kept in step, it is in step from the start.
+            $made = [
+                ...($default === null ? [] : ['team_id' => $default['id'], 'team_name' => $default['name']]),
+                'jira_assignee_id' => $account,
+                'jira_assignee_name' => null,
+                'jira_fields_synced_at' => $this->syncFields() ? now('UTC')->format('Y-m-d H:i:s') : null,
+            ];
+            if ($started === null) {
+                DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update(['jira_create_started_at' => now('UTC')->format('Y-m-d H:i:s')]);
+            }
+            $issue = $this->jira->createIssue(PortalJiraIssue::fields(
+                $row, (string) $this->jira->projectKey(), $typeId, (string) config('services.jira.label', 'ikaika-portal'), $this->senderName($row), $environment, $plan,
+            ));
         }
         DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update([
             'jira_issue_id' => $issue['id'],
@@ -374,6 +860,7 @@ final class PortalBugReportsJira
             'jira_state' => self::STATE_PENDING,
             'jira_status' => null,
             'jira_attached' => 0,
+            ...$made,
         ]);
 
         return $this->row((int) $row->id) ?? $row;
@@ -388,7 +875,7 @@ final class PortalBugReportsJira
     {
         $types = $this->jira->issueTypes();
         $wanted = trim((string) config('services.jira.issue_types.'.$kind, self::FALLBACK_TYPE));
-        foreach ([$wanted, self::FALLBACK_TYPE] as $name) {
+        foreach ($kind === PortalBugReports::KIND_EPIC ? [$wanted] : [$wanted, self::FALLBACK_TYPE] as $name) {
             foreach ($types as $type) {
                 if (strcasecmp($type['name'], $name) === 0) {
                     return ['wanted' => $wanted, 'id' => $type['id'], 'name' => $type['name']];
@@ -399,11 +886,92 @@ final class PortalBugReportsJira
         return ['wanted' => $wanted, 'id' => null, 'name' => null];
     }
 
+    /**
+     * What a report's plan is picked from (2026-10-22, user): the teams and epics, the team a new issue goes to,
+     * which plan fields the site has, and which MIS members Jira knows -- that last as best it can, since a
+     * missing Browse users and groups must not hide the rest.
+     *
+     * @return array{projectKey: ?string, teams: list<array{id: string, name: string}>, defaultTeamId: ?string, epics: list<array{key: string, summary: string, isDone: bool}>, fields: array{team: bool, startDate: bool}, people: list<array{id: string, inJira: bool}>}
+     */
+    public function planOptions(): array
+    {
+        $ids = $this->jira->fieldIds();
+        try {
+            $people = array_map(static fn (array $member): array => ['id' => (string) $member['id'], 'inJira' => $member['accountId'] !== null], $this->people->roster());
+        } catch (RuntimeException) {
+            $people = [];
+        }
+        // The key Jira files under now, which an empty list names rather than the configured one (2026-10-22: IPS, now IP2).
+        $keys = $this->jira->projectKeys();
+
+        return [
+            'projectKey' => $keys === [] ? null : $keys[array_key_last($keys)],
+            'teams' => $this->jira->teams(),
+            'defaultTeamId' => $this->defaultTeam()['id'] ?? null,
+            'epics' => $this->jira->epics(),
+            'fields' => ['team' => $ids['team'] !== null, 'startDate' => $ids['startDate'] !== null],
+            'people' => $people,
+        ];
+    }
+
+    /**
+     * The project's epics, or its teams; fresh asks Jira again rather than taking what is kept.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function planList(string $which, bool $fresh = false): array
+    {
+        if ($which === 'epics') {
+            if ($fresh) {
+                $this->jira->forgetEpics();
+            }
+
+            return $this->jira->epics();
+        }
+        if ($fresh) {
+            $this->jira->forgetTeams();
+        }
+
+        return $this->jira->teams();
+    }
+
+    public function forgetEpics(): void
+    {
+        $this->jira->forgetEpics();
+    }
+
+    // The key the project goes by now, which a refusal names it by.
+    public function projectLabel(): string
+    {
+        $keys = $this->jira->projectKeys();
+
+        return (string) (end($keys) ?: $this->jira->projectKey());
+    }
+
+    /**
+     * The team a new issue is filed under (2026-10-22, user: DEV): the one JIRA_DEFAULT_TEAM names, when exactly
+     * one of the field's teams has that name; none when it is blank or names none.
+     *
+     * @return array{id: string, name: string}|null
+     */
+    public function defaultTeam(): ?array
+    {
+        $name = trim((string) config('services.jira.default_team', ''));
+        if ($name === '') {
+            return null;
+        }
+        $named = array_values(array_filter($this->jira->teams(), static fn (array $team): bool => strcasecmp($team['name'], $name) === 0));
+
+        return count($named) === 1 ? $named[0] : null;
+    }
+
     private function issueTypeId(string $kind): string
     {
         $type = $this->issueTypeFor($kind);
         if ($type['id'] === null) {
-            throw new RuntimeException('Jira has no issue type '.$type['wanted'].' or '.self::FALLBACK_TYPE.' in '.$this->jira->projectKey().'.');
+            throw new RuntimeException($kind === PortalBugReports::KIND_EPIC
+                ? 'Jira has no '.$type['wanted'].' type in '.$this->jira->projectKey().'.'
+                : 'Jira has no issue type '.$type['wanted'].' or '.self::FALLBACK_TYPE.' in '.$this->jira->projectKey().'.');
         }
 
         return $type['id'];
@@ -416,20 +984,264 @@ final class PortalBugReportsJira
      */
     private function apply(object $row, array $issue): void
     {
+        // A new issue not yet in step with its report says nothing about the report yet.
+        if (($row->jira_create_started_at ?? null) !== null) {
+            DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update([
+                'jira_issue_key' => $issue['key'],
+                'jira_status' => PortalJiraIssue::statusName($issue['fields']),
+                'jira_synced_at' => now('UTC')->format('Y-m-d H:i:s'),
+            ]);
+
+            return;
+        }
         $status = PortalJiraIssue::portalStatus($issue['fields'], (string) $row->status);
         // The portal's own Fixed in stands until the issue names a fix version.
         $fixedIn = PortalJiraIssue::fixedIn($issue['fields']) ?? $row->fixed_in;
         $kind = $this->kindOfType($issue['fields']['issuetype']['name'] ?? null, (string) $row->kind);
+        [$reason, $original] = $this->triageFrom($row, $issue, $status);
+        // The fields come back only while they are kept in step, and the first time, each side fills what the other lacks.
+        $sync = $this->syncFields();
+        $kept = $sync && ($row->jira_fields_synced_at ?? null) !== null;
+        $plan = $kept ? $this->placeFromJira($row, PortalJiraIssue::planOf($issue['fields'], $this->jira->fieldIds())) : [];
+        $assignee = $kept && array_key_exists('assignee', $issue['fields']) ? $this->assigneeFrom($row, $issue['fields']) : [];
+        $merged = $sync && ! $kept ? $this->firstFieldSync($row, $issue['fields']) : [];
         $changes = [
             'jira_issue_key' => $issue['key'],
             'jira_status' => PortalJiraIssue::statusName($issue['fields']),
             'jira_synced_at' => now('UTC')->format('Y-m-d H:i:s'),
         ];
-        if ($status !== $row->status || $fixedIn !== $row->fixed_in || $kind !== $row->kind) {
-            $changes += ['status' => $status, 'fixed_in' => $fixedIn, 'kind' => $kind, 'updated_at' => now('UTC')->format('Y-m-d H:i:s')];
+        $was = ($row->duplicate_of ?? null) === null ? null : (int) $row->duplicate_of;
+        $planMoved = self::planChanges($row, $plan) !== [] || self::placeChanges($row, $plan) || ($plan['parent_summary'] ?? null) !== ($row->parent_summary ?? null)
+            || (array_key_exists('team_name', $plan) && $plan['team_name'] !== null && $plan['team_name'] !== ($row->team_name ?? null));
+        if ($status !== $row->status || $fixedIn !== $row->fixed_in || $kind !== $row->kind || $reason !== ($row->cancel_reason ?? null) || $original !== $was || $planMoved || $assignee !== [] || $merged !== []) {
+            $changes += [
+                'status' => $status, 'fixed_in' => $fixedIn, 'kind' => $kind, 'cancel_reason' => $reason, 'duplicate_of' => $original,
+                // Jira's name for a team stands; a team it gave by id alone keeps the name the portal has.
+                ...$plan, ...(array_key_exists('team_name', $plan) && $plan['team_name'] === null && ($plan['team_id'] ?? null) === ($row->team_id ?? null) ? ['team_name' => $row->team_name ?? null] : []),
+                ...$assignee,
+                ...$merged,
+                'updated_at' => now('UTC')->format('Y-m-d H:i:s'),
+            ];
             Log::info('portal.jira.synced', ['report' => (int) $row->id, 'status' => $status]);
         }
         DB::connection('portal')->table('bug_reports')->where('id', $row->id)->update($changes);
+        if (($changes['assignee_id'] ?? null) !== null) {
+            PortalBugReportAssignees::madeFirst((int) $row->id, (int) $changes['assignee_id']);
+        }
+    }
+
+    /**
+     * The first read-back once fields are kept in step (2026-10-22, user: no mess on deploy). Where the portal has a
+     * value it goes to Jira; where only Jira has one, the portal takes it; then the report is stamped, and from then on
+     * a change on either side counts. Nothing either side has is cleared, but for someone here Jira has no account
+     * for, whose issue is unassigned there as a change here would leave it. Jira refusing leaves it unstamped, to try
+     * again at the next read-back.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array<string, mixed>
+     */
+    private function firstFieldSync(object $row, array $fields): array
+    {
+        $held = PortalJiraIssue::planOf($fields, $this->jira->fieldIds());
+        $ours = array_filter(array_combine(self::PLAN_COLUMNS, array_map(static fn (string $column): ?string => self::planValue($column, $row->$column ?? null), self::PLAN_COLUMNS)),
+            static fn (?string $value): bool => $value !== null);
+        $edit = $this->planEdit($ours, $fields);
+        $inJira = PortalJiraIssue::assigneeOf($fields)[0];
+        try {
+            $account = $row->assignee_id === null ? null : $this->people->accountOf((int) $row->assignee_id);
+        } catch (RuntimeException) {
+            return [];
+        }
+        // Someone here wins, and one Jira has no account for leaves it unassigned there, as a change here does.
+        if ($row->assignee_id !== null && $inJira !== $account) {
+            $edit['assignee'] = $account === null ? null : ['accountId' => $account];
+        }
+        if ($edit !== []) {
+            try {
+                $this->editPlan((string) $row->jira_issue_id, $edit);
+            } catch (RuntimeException $error) {
+                Log::warning('portal.jira.first_field_sync_failed', ['report' => (int) $row->id, 'status' => $error->getCode()]);
+
+                return [];
+            }
+        }
+        $this->keepWatchers((string) $row->jira_issue_id, [], $this->othersOn($row), $row->assignee_id === null ? null : (int) $row->assignee_id);
+        $adopted = [];
+        foreach (self::PLAN_COLUMNS as $column) {
+            if (! isset($ours[$column]) && ($held[$column] ?? null) !== null) {
+                $adopted[$column] = $held[$column];
+                $adopted += match ($column) {
+                    'team_id' => ['team_name' => $held['team_name'] ?? null],
+                    'parent_key' => ['parent_summary' => $held['parent_summary']],
+                    default => [],
+                };
+            }
+        }
+        // Nobody here takes whoever Jira has.
+        $assignee = $row->assignee_id === null
+            ? $this->assigneeFrom((object) [...(array) $row, 'jira_assignee_id' => null], $fields)
+            : ['jira_assignee_id' => $account, 'jira_assignee_name' => null];
+
+        return [...$adopted, ...$assignee, 'jira_fields_synced_at' => now('UTC')->format('Y-m-d H:i:s')];
+    }
+
+    /**
+     * Who works on it as Jira's assignee says, against the one both sides last agreed on: the same one changes nothing
+     * (but a new name of someone outside MIS), nobody unassigns it, an MIS member's account is that member, and anyone
+     * else unassigns it here and is named. A lookup Jira does not answer leaves it as it was, to be read next time.
+     *
+     * @param  array<string, mixed>  $fields
+     * @return array{assignee_id?: ?int, jira_assignee_id?: ?string, jira_assignee_name?: ?string}
+     */
+    private function assigneeFrom(object $row, array $fields): array
+    {
+        [$account, $name] = PortalJiraIssue::assigneeOf($fields);
+        if ($account === ($row->jira_assignee_id ?? null)) {
+            $outside = $account !== null && $row->assignee_id === null;
+
+            return $outside && $name !== ($row->jira_assignee_name ?? null) ? ['jira_assignee_name' => $name] : [];
+        }
+        if ($account === null) {
+            return ['assignee_id' => null, 'jira_assignee_id' => null, 'jira_assignee_name' => null];
+        }
+        try {
+            $member = $this->people->memberOf($account);
+        } catch (RuntimeException) {
+            Log::warning('portal.jira.people_unreachable', ['report' => (int) $row->id]);
+
+            return [];
+        }
+
+        return $member !== null
+            ? ['assignee_id' => $member, 'jira_assignee_id' => $account, 'jira_assignee_name' => null]
+            : ['assignee_id' => null, 'jira_assignee_id' => $account, 'jira_assignee_name' => $name];
+    }
+
+    /**
+     * The plan columns a save or a read-back changes from what the report has (2026-10-22, user).
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array<string, ?string>
+     */
+    public static function planChanges(object $row, array $changes): array
+    {
+        $changed = [];
+        foreach (self::PLAN_COLUMNS as $column) {
+            if (array_key_exists($column, $changes) && self::planValue($column, $changes[$column]) !== self::planValue($column, $row->$column ?? null)) {
+                $changed[$column] = self::planValue($column, $changes[$column]);
+            }
+        }
+
+        return $changed;
+    }
+
+    // A plan column as it compares: a day as YYYY-MM-DD, whatever the database adds to it.
+    private static function planValue(string $column, mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return str_ends_with($column, '_on') ? substr((string) $value, 0, 10) : (string) $value;
+    }
+
+    /**
+     * The edit a save makes to the issue's plan: each field it changes that Jira holds otherwise. A parent is
+     * cleared only when the issue has one, since Jira answers the clearing of none with an error.
+     *
+     * @param  array<string, ?string>  $changed
+     * @param  array<string, mixed>  $fields  the issue as Jira has it now
+     * @return array<string, mixed>
+     */
+    private function planEdit(array $changed, array $fields): array
+    {
+        $ids = $this->jira->fieldIds();
+        $held = PortalJiraIssue::planOf($fields, $ids);
+        $edit = [];
+        if (array_key_exists('due_on', $changed) && $changed['due_on'] !== ($held['due_on'] ?? null)) {
+            $edit['duedate'] = $changed['due_on'];
+        }
+        if ($ids['startDate'] !== null && array_key_exists('start_on', $changed) && $changed['start_on'] !== ($held['start_on'] ?? null)) {
+            $edit[$ids['startDate']] = $changed['start_on'];
+        }
+        if ($ids['team'] !== null && array_key_exists('team_id', $changed) && $changed['team_id'] !== ($held['team_id'] ?? null)) {
+            $edit[$ids['team']] = $changed['team_id'];
+        }
+        if (array_key_exists('parent_key', $changed) && $changed['parent_key'] !== $held['parent_key']) {
+            if ($changed['parent_key'] !== null) {
+                $edit['parent'] = ['key' => $changed['parent_key']];
+            } elseif ($held['parent_key'] !== null) {
+                $edit['parent'] = null;
+            }
+        }
+
+        return $edit;
+    }
+
+    /**
+     * The plan edit sent, with Jira's words naming the fields as people know them; a refused team forgets the
+     * teams kept, since one was renamed or removed.
+     *
+     * @param  array<string, mixed>  $edit
+     */
+    private function editPlan(string $issueId, array $edit): void
+    {
+        $ids = $this->jira->fieldIds();
+        try {
+            $this->jira->editIssue($issueId, $edit);
+        } catch (RuntimeException $error) {
+            if ($ids['team'] !== null && str_contains($error->getMessage(), $ids['team'])) {
+                $this->jira->forgetTeams();
+            }
+            $names = array_filter([(string) $ids['team'] => 'Team', (string) $ids['startDate'] => 'Start date'], static fn (string $name, string $id): bool => $id !== '', ARRAY_FILTER_USE_BOTH);
+            throw new RuntimeException(strtr($error->getMessage(), $names), $error->getCode());
+        }
+    }
+
+    /**
+     * What a new issue carries of its report's plan, in Jira's terms: who works on it, the dates, the epic and the
+     * team -- the report's, else the default -- as far as the type's create screen takes them; the default team it
+     * went to, which the report then names too; and the account it was assigned to. A screen Jira cannot say is
+     * taken to take them all, and an assignee or a team Jira cannot be asked about holds nothing back.
+     *
+     * @return array{0: array<string, mixed>, 1: array{id: string, name: string}|null, 2: ?string}
+     */
+    private function planForCreate(object $row, string $issueTypeId, ?string $parentKey = null): array
+    {
+        // Filed while fields are not kept in step, a new issue carries none of them, nor the default team.
+        if (! $this->syncFields()) {
+            return [[], null, null];
+        }
+        $ids = $this->jira->fieldIds();
+        $account = null;
+        try {
+            $account = $this->people->accountOf($row->assignee_id === null ? null : (int) $row->assignee_id);
+        } catch (RuntimeException) {
+            // Read back, it is whoever Jira filed it under.
+        }
+        $default = null;
+        $team = $row->team_id ?? null;
+        if ($team === null && $ids['team'] !== null) {
+            try {
+                $default = $this->defaultTeam();
+            } catch (RuntimeException) {
+                // A new issue is not held back for want of its team.
+            }
+            $team = $default['id'] ?? null;
+        }
+        $plan = array_filter([
+            'assignee' => $account === null ? null : ['accountId' => $account],
+            'parent' => ($parentKey ?? $row->parent_key ?? null) === null ? null : ['key' => (string) ($parentKey ?? $row->parent_key)],
+            'duedate' => self::planValue('due_on', $row->due_on ?? null),
+            ...($ids['startDate'] === null ? [] : [$ids['startDate'] => self::planValue('start_on', $row->start_on ?? null)]),
+            ...($ids['team'] === null ? [] : [$ids['team'] => $team]),
+        ], static fn (mixed $value): bool => $value !== null);
+        $screen = $plan === [] ? null : $this->jira->createFields($issueTypeId);
+        if ($screen !== null) {
+            $plan = array_intersect_key($plan, array_flip($screen));
+        }
+
+        return [$plan, $default !== null && $ids['team'] !== null && isset($plan[$ids['team']]) ? $default : null, isset($plan['assignee']) ? $account : null];
     }
 
     /**
@@ -465,12 +1277,178 @@ final class PortalBugReportsJira
         return $current;
     }
 
+    /**
+     * The type a new issue is filed as and the issue it goes under (2026-10-22, user): under a report Jira has, a
+     * sub-task of its issue, and under an epic Jira has, its child -- while fields are kept in step. Otherwise, or
+     * with no sub-task type in the project, as its kind on its own.
+     *
+     * @return array{0: string, 1: ?string}
+     */
+    private function placeForCreate(object $row, string $kind): array
+    {
+        $parent = $kind === PortalBugReports::KIND_EPIC || ! $this->syncFields() ? null : PortalBugReportHierarchy::live($row->parent_report_id ?? null);
+        if ($parent === null || ! $this->owns($parent)) {
+            return [$this->issueTypeId($kind), null];
+        }
+        if ((string) $parent->kind === PortalBugReports::KIND_EPIC) {
+            return [$this->issueTypeId($kind), (string) $parent->jira_issue_key];
+        }
+        $subtask = $this->jira->subtaskType();
+        if ($subtask === null) {
+            Log::warning('portal.jira.no_subtask_type', ['report' => (int) $row->id]);
+
+            return [$this->issueTypeId($kind), null];
+        }
+
+        return [$subtask['id'], (string) $parent->jira_issue_key];
+    }
+
     // The name of a sender who chose to be named, for the issue's description; null for an anonymous one.
     private function senderName(object $row): ?string
     {
         $employee = ($row->reporter_id ?? null) === null ? null : Employee::query()->find((int) $row->reporter_id, ['id', 'first_name', 'last_name']);
 
         return $employee === null ? null : PortalSubmittedReportPresenter::memberName($employee->first_name, $employee->last_name);
+    }
+
+    /**
+     * A new issue starts where its report already is: a report moved on before it reached Jira -- a closed one
+     * send-all carries there, say -- lands in its own column rather than being reset to New by the read-back.
+     */
+    private function putInStep(object $row): void
+    {
+        if ((string) $row->status === PortalBugReports::STATUS_NEW) {
+            return;
+        }
+        $issueId = (string) $row->jira_issue_id;
+        $issue = $this->jira->issue($issueId);
+        if ($issue === null) {
+            return;
+        }
+        $move = PortalJiraIssue::portalStatus($issue['fields'], '') === (string) $row->status
+            ? null
+            : $this->findMove($issueId, (string) $row->status, (string) $row->jira_issue_key);
+        // A duplicate already, before it reached Jira (2026-10-21): labelled and linked there as triage does.
+        if (PortalBugReports::isDuplicate($row->status, $row->cancel_reason ?? null)) {
+            $this->jira->changeLabels($issueId, [$this->duplicateLabel()]);
+            $target = $this->duplicateTarget($row->duplicate_of ?? null);
+            if ($target !== null) {
+                $this->jira->linkIssues($this->duplicateLinkType(), $issueId, $target);
+            }
+        }
+        if ($move !== null) {
+            $this->jira->transition($issueId, $move['id']);
+        }
+    }
+
+    // The issue a duplicate's original became, when this server follows it; none to link to otherwise.
+    private function duplicateTarget(mixed $originalId): ?string
+    {
+        if ($originalId === null) {
+            return null;
+        }
+        $original = $this->row((int) $originalId);
+
+        return $original !== null && $this->owns($original) ? (string) $original->jira_issue_id : null;
+    }
+
+    /**
+     * A closed one's reason and original as the issue now stands: the portal's own while Jira keeps it where the
+     * portal has it, worked out from the issue when Jira closed it on its own -- a duplicate by its resolution or the
+     * label, fixed since 2026-10-22 and cancelled before -- and none once Jira moved it on; the label and the link
+     * then stay in Jira, for whoever moved it to tidy.
+     *
+     * @param  array{id: string, key: string, fields: array<string, mixed>}  $issue
+     * @return array{0: ?string, 1: ?int}
+     */
+    private function triageFrom(object $row, array $issue, string $status): array
+    {
+        $fixed = $status === PortalBugReports::STATUS_FIXED;
+        if (! $fixed && $status !== PortalBugReports::STATUS_CANCELLED) {
+            return [null, null];
+        }
+        $reason = $row->cancel_reason ?? null;
+        if ($row->status === $status && ($reason !== null || $fixed)) {
+            return [$reason, PortalBugReports::isDuplicate($status, $reason) && ($row->duplicate_of ?? null) !== null ? (int) $row->duplicate_of : null];
+        }
+        $reason = PortalJiraIssue::cancelReason($issue['fields'], $this->duplicateLabel());
+        if ($reason !== PortalBugReports::CANCEL_DUPLICATE) {
+            return [$fixed ? null : $reason, null];
+        }
+        $duplicated = PortalJiraIssue::duplicatedIssueId($issue['fields'], $this->duplicateLinkType());
+        $found = $duplicated === null ? null : $this->environment->scope(DB::connection('portal')->table('bug_reports'))
+            ->where('jira_issue_id', $duplicated)
+            ->where('id', '!=', $row->id)
+            ->first(['id', 'status', 'cancel_reason']);
+        $isOriginal = $found !== null && ! PortalBugReports::isDuplicate($found->status, $found->cancel_reason);
+
+        return [PortalBugReports::CANCEL_DUPLICATE, $isOriginal ? (int) $found->id : null];
+    }
+
+    private function duplicateLabel(): string
+    {
+        return (string) config('services.jira.duplicate_label', 'duplicate');
+    }
+
+    private function duplicateLinkType(): string
+    {
+        return (string) config('services.jira.duplicate_link_type', 'Duplicate');
+    }
+
+    // The reports whose Jira side this server follows, as handles() says, for the queries that send.
+    private function handled(Builder $query): Builder
+    {
+        $keys = $this->linkedProjectKeys();
+
+        return self::tracked($this->environment->scope($query))->where(function (Builder $inner) use ($keys): void {
+            $inner->whereNull('jira_issue_key')->orWhere('jira_state', self::STATE_DELETED);
+            foreach ($keys as $key) {
+                $inner->orWhere('jira_issue_key', 'like', self::keyPattern($key));
+            }
+        });
+    }
+
+    /**
+     * The keys a linked report's issue may carry here: the configured one, and -- only once a report this server
+     * sent is linked under another, as a changed project key leaves them -- the ones Jira says the project goes by.
+     *
+     * @return list<string>
+     */
+    private function linkedProjectKeys(): array
+    {
+        $configured = $this->jira->projectKey();
+        if ($configured === null) {
+            return [];
+        }
+        $other = self::tracked($this->environment->scope(DB::connection('portal')->table('bug_reports')))
+            ->whereNotNull('jira_issue_key')
+            ->where('jira_state', '!=', self::STATE_DELETED)
+            ->where('jira_issue_key', 'not like', self::keyPattern($configured))
+            ->exists();
+
+        return $other ? $this->jira->projectKeys() : [$configured];
+    }
+
+    /**
+     * Whether an issue's key is one of these projects': IP2-4 is IP2's, and not IP's.
+     *
+     * @param  list<string>  $projectKeys
+     */
+    private static function isKeyOf(string $issueKey, array $projectKeys): bool
+    {
+        foreach ($projectKeys as $projectKey) {
+            if (str_starts_with(strtoupper($issueKey), $projectKey.'-')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A LIKE pattern for one project's issue keys, its key's own % and _ escaped.
+    private static function keyPattern(string $projectKey): string
+    {
+        return str_replace(['%', '_'], ['\%', '\_'], $projectKey).'-%';
     }
 
     private function markDeleted(int $id): void

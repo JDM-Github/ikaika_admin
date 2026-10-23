@@ -5,6 +5,7 @@
 # Each run first syncs GitHub from Bitbucket, unless told not to, then builds Bitbucket's commit of the branch or tag picked under "Use workflow from".
 # A bump is committed and tagged by github-actions[bot] on that branch, with the changelog filed under it: Bitbucket first, the source of truth, then GitHub.
 # Staging is the Bluehost Test Server; production is refused until ikaika_scripts.env names one. Upload the API before the portal, which calls it.
+# A production upload is a release, tagged v<version>-released, so its version is never same; build_from rebuilds a tag as it was for staging.
 name: Build release
 
 on:
@@ -17,6 +18,10 @@ on:
         default: same
       custom_version:
         description: Custom version x.y.z (version custom only)
+        type: string
+        default: ''
+      build_from:
+        description: Build from a tag instead, e.g. v1.0.0+3 - rebuilds it as it was, for staging only, and never bumps
         type: string
         default: ''
       sync_bitbucket:
@@ -59,7 +64,7 @@ concurrency:
 
 jobs:
   build-release:
-    name: ${{ format('Build the API for {0}{1}', inputs.target, inputs.upload && (inputs.dry_run && ', upload dry run' || ', then upload') || '') }}
+    name: ${{ format('Build the API for {0}{1}{2}', inputs.target, inputs.build_from != '' && format(' from {0}', inputs.build_from) || '', inputs.upload && (inputs.dry_run && ', upload dry run' || ', then upload') || '') }}
     runs-on: windows-2025
     timeout-minutes: 30
     # github-actions[bot] pushes the version commit and tag to GitHub.
@@ -123,6 +128,29 @@ jobs:
           TOOLKIT_BITBUCKET_USER: ${{ secrets.TOOLKIT_BITBUCKET_USER }}
         run: ./.ikaika_scripts_configs/fetch-toolkit.ps1
 
+      # A rebuild needs its tag here: the sync from Bitbucket brings every tag; without it, Bitbucket's is asked for, then GitHub's.
+      - name: Fetch the tag to rebuild
+        if: env.BUILD_FROM != ''
+        env:
+          GIT_CONFIG_COUNT: '3'
+          GIT_CONFIG_KEY_0: ${{ format('url.https://{0}:{1}@bitbucket.org/.insteadOf', secrets.BITBUCKET_REPO_USER || 'x-token-auth', secrets.BITBUCKET_REPO_TOKEN) }}
+          GIT_CONFIG_VALUE_0: https://bitbucket.org/
+          GIT_CONFIG_KEY_1: ${{ format('url.https://x-access-token:{0}@github.com/.insteadOf', github.token) }}
+          GIT_CONFIG_VALUE_1: https://github.com/
+          GIT_CONFIG_KEY_2: credential.helper
+          GIT_CONFIG_VALUE_2: ''
+        run: |
+          $ErrorActionPreference = 'Continue'
+          git rev-parse -q --verify "refs/tags/$env:BUILD_FROM^{commit}" *> $null
+          if ($LASTEXITCODE -eq 0) { Write-Output "$env:BUILD_FROM is here already."; exit 0 }
+          $bitbucket = (Select-String -LiteralPath ikaika_scripts.env -Pattern '^mirror\.source=(.+)$').Matches[0].Groups[1].Value.Trim() -replace '^(https://)[^@/]+@', '$1'
+          foreach ($remote in $bitbucket, "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git") {
+            git fetch --quiet --no-tags $remote "refs/tags/$($env:BUILD_FROM):refs/tags/$($env:BUILD_FROM)" *> $null
+            if ($LASTEXITCODE -eq 0) { Write-Output "Fetched $env:BUILD_FROM from $remote."; exit 0 }
+          }
+          Write-Output "::error title=No tag $env:BUILD_FROM::Neither Bitbucket nor GitHub has $env:BUILD_FROM; build_from takes a tag that exists, like v1.0.0+3."
+          exit 1
+
       # The version commit lands on the branch the run started from, as github-actions[bot], and its build number comes from Bitbucket's tags.
       - name: Ready the branch for the version commit, with Bitbucket's tags
         if: env.TAGGING == 'true'
@@ -166,8 +194,10 @@ jobs:
             exit 1
           }
 
-      # Vite builds the CSS and fonts into public/build, which the archive carries; composer runs on the server instead.
+      # Vite builds the CSS and fonts into public/build, which the archive carries; composer runs on the server instead. A rebuild installs
+      # its tag's own packages in its worktree.
       - name: The Vite build's packages
+        if: env.BUILD_FROM == ''
         run: |
           npm ci --no-audit --no-fund
           exit $LASTEXITCODE
@@ -181,7 +211,7 @@ jobs:
         run: ./script.ps1 secrets -For $env:PURPOSES -Ci
 
       # build-release bumps VERSION as it builds, uncommitted, as the estimator's bumps pubspec.yaml, so the archive carries the version it is built as.
-      - name: ${{ format('Build the API for {0} with build-release{1}', inputs.target, inputs.version != 'same' && format(', bumping {0}', inputs.version == 'custom' && inputs.custom_version || inputs.version) || '') }}
+      - name: ${{ format('Build the API for {0} with build-release{1}', inputs.target, inputs.build_from != '' && format(', rebuilding {0} as it was', inputs.build_from) || (inputs.version != 'same' && format(', bumping {0}', inputs.version == 'custom' && inputs.custom_version || inputs.version) || '')) }}
         id: build
         run: |
           $plan = Get-Content -LiteralPath $env:BUILD_PLAN -Raw | ConvertFrom-Json -AsHashtable

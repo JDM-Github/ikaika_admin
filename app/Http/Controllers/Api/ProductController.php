@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
+use App\Support\ApiVersion;
 use App\Support\Portal\PortalJwt;
 use App\Support\Portal\PortalManageUserPresenter;
 use App\Support\ProductNav;
@@ -41,9 +42,11 @@ class ProductController extends Controller
     public function health(Request $request, string $product): JsonResponse
     {
         $health = ProductRegistry::ping($product);
+        // The release this server runs (2026-10-21, user), so a deploy can say when it is about to install an older one.
         $payload = [
             'product' => $product,
             'health' => $health,
+            'version' => ApiVersion::version(),
         ];
 
         $header = (string) $request->header('Authorization', '');

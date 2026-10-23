@@ -45,6 +45,31 @@ rm -rf "$NEW"
 mkdir -p "$NEW" "$BACKUPS"
 unzip -q "$ZIP" -d "$NEW"
 
+# >>> older-release
+# A release older than the one running (2026-10-21, user: a tag rebuilt to test) is said, with the migrations it does not know --
+# their tables stay, since migrations only go forward -- and production refuses it unless ALLOW_OLDER=1. The build number rises
+# across every version, so it alone decides. A release without VERSION or migrations means saying less, never stopping, so
+# every pipe ends in || true under pipefail. release-tags.tests.ps1 runs this block on its own.
+version_of() { grep -vE '^[[:space:]]*(#|$)' "$1" 2>/dev/null | head -n 1 | tr -d '\r' || true; }
+build_of() { version_of "$1" | sed -nE 's/^[0-9]+\.[0-9]+\.[0-9]+\+([0-9]+)$/\1/p' || true; }
+RUNNING_BUILD=$(build_of "$APP_DIR/VERSION")
+INCOMING_BUILD=$(build_of "$NEW/VERSION")
+if [ -n "$RUNNING_BUILD" ] && [ -n "$INCOMING_BUILD" ] && [ "$INCOMING_BUILD" -lt "$RUNNING_BUILD" ]; then
+    echo "== Older release"
+    echo "   $(version_of "$NEW/VERSION") is older than $(version_of "$APP_DIR/VERSION"), which is running."
+    LACKING=$(comm -23 <(ls -1 "$APP_DIR/database/migrations" 2>/dev/null | sort || true) <(ls -1 "$NEW/database/migrations" 2>/dev/null | sort || true) || true)
+    if [ -n "$LACKING" ]; then
+        echo "   Migrations the running release has run that this one does not know (their tables stay):"
+        printf '%s\n' "$LACKING" | sed 's#^#     #'
+    fi
+    if [ "$API_CHANNEL" = production ] && [ "${ALLOW_OLDER:-}" != 1 ]; then
+        echo "   Production only moves forward: deploy a newer release, or set ALLOW_OLDER=1 to install this one anyway."
+        rm -rf "$NEW"
+        exit 1
+    fi
+fi
+# <<< older-release
+
 # Laravel keeps the last value of a repeated key, so the generated database lines go last and win.
 if [ -f "$ROOT/db.env" ]; then
     cat "$ROOT/.env" <(echo) "$ROOT/db.env" > "$NEW/.env"

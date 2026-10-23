@@ -9,11 +9,12 @@
         .\script.ps1 <command> -Help               what it does, and every switch
         .\script.ps1 use-version -Latest           move to the newest toolkit release
 
-    This project has no commands of its own yet. What the listing shows is the
-    toolkit's own - git/, toolkit/ - and that is deliberate: the integration is being
-    stood up first, and the backend's build, test and deploy commands are added to
-    ikaika_scripts.env and .ikaika_scripts_configs/ once we know what this machine
-    actually needs installed.
+    This project's own commands are in .ikaika_scripts_configs/: commands/ - build-release,
+    secrets, update-database and the rest - and domains/deploy, domains/airtable and
+    domains/devtools, which forward to deployment/*.ps1, migrations/*.ps1 and devtools/
+    without replacing them (2026-10-20). Nobody at the keyboard - a hook, CI, an agent -
+    sets IP_SCRIPTS_NO_GUI, IP_SCRIPTS_NO_PROMPT and IP_SCRIPTS_NO_UPDATE, and passes -Yes
+    where a command would ask.
 
     Everything is forwarded verbatim, including -Help. There is deliberately no
     parameter block and no [CmdletBinding()] here: either one would make this an

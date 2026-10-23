@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Support\Portal\PortalSubmittedReportPresenter;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\Client\Request;
@@ -89,8 +90,9 @@ class PortalJiraSyncTest extends TestCase
         $first = $this->report(['jira_state' => 'pending']);
         $second = $this->report(['jira_state' => 'pending']);
         Http::preventStrayRequests();
+        // Neither has started a create, so the first thing asked is the project's issue types (2026-10-21).
         Http::fake([
-            self::SITE.'/rest/api/3/search/jql*' => Http::response(['errorMessages' => ['Client must be authenticated to access this resource.']], 401),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['errorMessages' => ['Client must be authenticated to access this resource.']], 401),
         ]);
 
         $this->artisan('portal:jira-sync')->expectsOutputToContain('Jira: Jira HTTP 401')->assertExitCode(1);
@@ -120,14 +122,149 @@ class PortalJiraSyncTest extends TestCase
             self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
             self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
             self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Blocks'], ['name' => 'Duplicate']]]),
+            ...$this->peopleStubs(),
         ]);
 
         $this->artisan('portal:jira-check')
             ->expectsOutputToContain('Account: IKAIKA Portal Bot')
+            ->expectsOutputToContain('Duplicates are linked as: Duplicate')
             ->expectsOutputToContain('Feature request -> Task (no Story in the project)')
+            // One project for every server (2026-10-21, user): this one says how its issues are told apart.
+            ->expectsOutputToContain('Files as: development - labels ikaika-portal, development; marked (development report #N)')
             ->expectsOutputToContain('/api/development/jira/webhook')
-            ->expectsOutputToContain('JQL:    project = IKP AND labels = ikaika-portal')
+            ->expectsOutputToContain('JQL:    project = IKP AND labels = ikaika-portal AND labels = development')
             ->assertExitCode(0);
+    }
+
+    // A report's plan is the issue's too (2026-10-22, user): the check names the two fields, the team new issues go
+    // to and the epics, and what a kind's create screen lacks, which a new issue is then sent without.
+    public function test_the_check_names_the_plan_fields_the_default_team_and_the_epics(): void
+    {
+        config(['services.jira.default_team' => 'dev']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/10001*' => Http::response(['fields' => [
+                ['fieldId' => 'summary'], ['fieldId' => 'assignee'], ['fieldId' => 'parent'], ['fieldId' => 'duedate'], ['fieldId' => 'customfield_10001'], ['fieldId' => 'customfield_10015'],
+            ]]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/10003*' => Http::response(['fields' => [['fieldId' => 'summary'], ['fieldId' => 'assignee']]]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [
+                ['id' => '10000', 'name' => 'Epic', 'hierarchyLevel' => 1], ['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task'],
+            ]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
+            self::SITE.'/rest/api/3/jql/autocompletedata/suggestions*' => Http::response(['results' => [['value' => '3688-uuid', 'displayName' => 'DEV']]]),
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => [['key' => 'IKP-12', 'fields' => ['summary' => 'Payroll revamp']]]]),
+            ...$this->peopleStubs(),
+        ]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('Team field: customfield_10001 (set by JIRA_FIELD_TEAM)')
+            ->expectsOutputToContain('Start date field: customfield_10015 (set by JIRA_FIELD_START_DATE)')
+            ->expectsOutputToContain('New issues go to team: DEV (3688-uuid)')
+            ->expectsOutputToContain('Epics: 1 in IKP')
+            ->expectsOutputToContain('Feature request (Task) has no parent, duedate, customfield_10001, customfield_10015 on its create screen, so a new one goes without.')
+            ->assertExitCode(0);
+    }
+
+    // A key the project had before still files (2026-10-22, user: IPS became IP2): the check says to move to the key it
+    // has now, and prints the webhook's JQL with that one.
+    public function test_the_check_names_the_key_a_renamed_project_has_now(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKN', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
+            ...$this->peopleStubs(),
+        ]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('Project: IKN - Portal Issues')
+            ->expectsOutputToContain('JIRA_PROJECT_KEY is a key IKN had before: Jira files new issues as IKN-N, which this server follows too. Set JIRA_PROJECT_KEY=IKN to match.')
+            ->expectsOutputToContain('JQL:    project = IKN AND labels = ikaika-portal AND labels = development')
+            ->assertExitCode(0);
+    }
+
+    // Triage links a duplicate to its original (2026-10-21, user), by a link type the site must have.
+    public function test_the_check_fails_without_the_duplicate_link_type(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Blocks'], ['name' => 'Relates']]]),
+            ...$this->peopleStubs(),
+        ]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('No Duplicate link type on the site, so a duplicate cannot be linked to its original. The site has: Blocks, Relates.')
+            ->assertExitCode(1);
+    }
+
+    // The Test Server carries copies of production's reports (2026-10-21, user): in the shared project they stay production's.
+    public function test_another_servers_reports_are_never_sent_or_read_back(): void
+    {
+        $copied = $this->report(['channel' => null, 'jira_state' => 'sent', 'jira_issue_id' => '10005', 'jira_issue_key' => 'IKP-5']);
+        $waitingThere = $this->report(['channel' => 'production', 'jira_state' => 'pending']);
+        $own = $this->report(['jira_state' => 'sent', 'jira_issue_id' => '10003', 'jira_issue_key' => 'IKP-3']);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/bulkfetch' => Http::response(['issues' => [
+            ['id' => '10003', 'key' => 'IKP-3', 'fields' => ['status' => ['name' => 'In Progress', 'statusCategory' => ['key' => 'indeterminate']]]],
+        ], 'issueErrors' => []])]);
+
+        $this->artisan('portal:jira-sync')->expectsOutputToContain('Sent 0, failed 0, read back 1, gone from Jira 0.')->assertExitCode(0);
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === self::SITE.'/rest/api/3/issue/bulkfetch' && $request['issueIdsOrKeys'] === ['10003']);
+        Http::assertSentCount(1);
+        $this->assertSame(['sent', 'pending', 'in_progress'], [$this->state($copied), $this->state($waitingThere), $this->column($own, 'status')]);
+    }
+
+    // Who in MIS is who in Jira (2026-10-22, user): the check asks Jira afresh, names each member's account or that
+    // there is none, and says when the account may not look people up at all.
+    public function test_the_check_names_each_mis_member_s_jira_account(): void
+    {
+        $members = DB::connection('portal')->table('employees')
+            ->whereRaw("LOWER(TRIM(COALESCE(department, ''))) = 'mis'")->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'active'")
+            ->orderBy('first_name')->orderBy('last_name')->get(['id', 'first_name', 'last_name']);
+        $this->assertGreaterThanOrEqual(2, $members->count(), 'Two active MIS members are needed.');
+        DB::connection('portal')->table('employees')->where('id', $members[0]->id)->update(['email' => 'found@ikaika.test']);
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
+            self::SITE.'/rest/api/3/user/search?query=found%40ikaika.test*' => Http::response([['accountId' => '712020:found', 'accountType' => 'atlassian', 'active' => true]]),
+            ...$this->peopleStubs(),
+        ]);
+        $name = fn (object $member): string => PortalSubmittedReportPresenter::memberName($member->first_name, $member->last_name);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain($name($members[0]).' -> 712020:found')
+            ->expectsOutputToContain($name($members[1]).': no Jira account found by their work address - they can be assigned here, and their issues stay unassigned in Jira.')
+            ->assertExitCode(0);
+    }
+
+    // Without Browse users and groups, nobody is looked up, and the check says why.
+    public function test_the_check_looks_nobody_up_without_browse_users_and_groups(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/myself' => Http::response(['accountId' => '5b10', 'displayName' => 'IKAIKA Portal Bot']),
+            self::SITE.'/rest/api/3/project/IKP' => Http::response(['id' => '10000', 'key' => 'IKP', 'name' => 'Portal Issues']),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [['id' => '10001', 'name' => 'Bug'], ['id' => '10003', 'name' => 'Task']]]),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Duplicate']]]),
+            ...$this->peopleStubs(userPicker: false),
+        ]);
+
+        $this->artisan('portal:jira-check')
+            ->expectsOutputToContain('The account lacks Browse users and groups, so nobody in MIS can be found in Jira.')
+            ->assertExitCode(0);
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/user/search'));
     }
 
     public function test_the_check_fails_on_a_refused_account_without_showing_its_token(): void
@@ -165,6 +302,21 @@ class PortalJiraSyncTest extends TestCase
     /**
      * @param  array<string, mixed>  $columns
      */
+    /**
+     * What the check asks about people (2026-10-22): the account's permissions, and nobody found by address.
+     *
+     * @return array<string, mixed>
+     */
+    private function peopleStubs(bool $userPicker = true): array
+    {
+        return [
+            self::SITE.'/rest/api/3/mypermissions*' => Http::response(['permissions' => [
+                'ASSIGN_ISSUES' => ['havePermission' => true], 'EDIT_ISSUES' => ['havePermission' => true], 'USER_PICKER' => ['havePermission' => $userPicker],
+            ]]),
+            self::SITE.'/rest/api/3/user/search*' => Http::response([]),
+        ];
+    }
+
     private function report(array $columns): int
     {
         return (int) DB::connection('portal')->table('bug_reports')->insertGetId([
@@ -172,6 +324,8 @@ class PortalJiraSyncTest extends TestCase
             'description' => 'The month view jumps from Saturday to Monday.',
             'status' => 'new',
             'reported_on' => '2026-10-19',
+            // Sent on this server, as a test's is unless it says otherwise.
+            'channel' => 'development',
             ...$columns,
         ]);
     }

@@ -691,7 +691,10 @@ final class AirtableSyncMap
      *
      * @var array<string, string>
      */
-    private const PORTAL_ONLY = [];
+    private const PORTAL_ONLY = [
+        // Issues & Requests live in the portal and Jira (2026-10-21): their Recycle Bin deletes and restores stop here.
+        'bug-reports' => 'Issues & Requests live in the portal and Jira; Airtable has no table for them.',
+    ];
 
     public static function portalOnly(?string $resource): ?string
     {

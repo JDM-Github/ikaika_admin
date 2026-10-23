@@ -76,8 +76,9 @@ return [
     ],
 
     // Jira Cloud for Issues & Requests (2026-10-19): a service account's API token creates an issue per report
-    // in one project and reads its progress back. Production and the Test Server each name their own project
-    // (a sandbox on staging); with any of base URL, email, token or project unset, nothing goes to Jira.
+    // in one project and reads its progress back. Production and the Test Server share that project (2026-10-21,
+    // user): each follows only the issues it filed, and staging's carry a staging label (PortalJiraEnvironment).
+    // With any of base URL, email, token or project unset, nothing goes to Jira.
     'jira' => [
         'base_url' => env('JIRA_BASE_URL'),
         // A scoped API token is refused at the site and answered only through Atlassian's gateway for it, which
@@ -90,12 +91,31 @@ return [
         'webhook_secret' => env('JIRA_WEBHOOK_SECRET'),
         // Every issue the portal makes carries it, and the admin webhook's JQL filters on it.
         'label' => 'ikaika-portal',
-        // The issue type each kind is filed as, by name; a project without one falls back to Task.
+        // The API channel that files as it always has; any other adds its channel as a second label.
+        'production_channel' => 'production',
+        // Triage (2026-10-21, user): a duplicate is labelled so, and linked to its original's issue by this type.
+        'duplicate_label' => 'duplicate',
+        'duplicate_link_type' => 'Duplicate',
+        // A report whose level changed is filed anew (2026-10-22, user); its old issue is closed with this label and
+        // linked to the new one by this type.
+        'moved_label' => 'moved',
+        'moved_link_type' => 'Relates',
+        // The issue type each kind is filed as, by name; a project without one falls back to Task -- but an epic,
+        // which is Epic or nothing (2026-10-22, user).
         'issue_types' => [
             'bug' => env('JIRA_ISSUE_TYPE_BUG', 'Bug'),
             'feature' => env('JIRA_ISSUE_TYPE_FEATURE', 'Story'),
             'feedback' => env('JIRA_ISSUE_TYPE_FEEDBACK', 'Task'),
+            'epic' => env('JIRA_ISSUE_TYPE_EPIC', 'Epic'),
         ],
+        // A report's plan is the issue's too (2026-10-22, user). The site's Team and Start date fields, by id
+        // (customfield_N), are found by their type and name unless set here.
+        'fields' => [
+            'team' => env('JIRA_FIELD_TEAM'),
+            'start_date' => env('JIRA_FIELD_START_DATE'),
+        ],
+        // The team every new issue is filed under, by its name; blank, none.
+        'default_team' => env('JIRA_DEFAULT_TEAM', 'DEV'),
     ],
 
     // ID-number sign-in on a deployed portal: only MIS knows it; unset, ID sign-in stays refused there.

@@ -279,15 +279,21 @@ final class PortalActivityCopy
     }
 
     // Who handles an issue or request: taken by the person themselves, given to someone, or let go.
-    public static function assignedBugReport(string $title, ?string $assigneeName, bool $isTaken, string $noun = 'bug report'): string
+    /**
+     * Several can work on one (2026-10-22, user): named in order, or, when you joined, those already on it.
+     *
+     * @param  list<string>  $names
+     */
+    public static function assignedBugReport(string $title, array $names, bool $isTaken, string $noun = 'bug report'): string
     {
+        $listed = count($names) > 1 ? implode(', ', array_slice($names, 0, -1)).' and '.$names[count($names) - 1] : ($names[0] ?? '');
         if ($isTaken) {
-            return self::YOU.' took the '.$noun.' '.$title;
+            return self::YOU.' took the '.$noun.' '.$title.($listed === '' ? '' : ' with '.$listed);
         }
 
-        return $assigneeName === null
+        return $listed === ''
             ? self::YOU.' unassigned the '.$noun.' '.$title
-            : self::YOU.' assigned the '.$noun.' '.$title.' to '.$assigneeName;
+            : self::YOU.' assigned the '.$noun.' '.$title.' to '.$listed;
     }
 
     // MIS sending an issue or request to Jira by hand (2026-10-19), named by the issue it became.
@@ -308,7 +314,57 @@ final class PortalActivityCopy
         return self::YOU.' turned sending new issues and requests to Jira '.($on ? 'on' : 'off');
     }
 
+    public static function switchedJiraFieldSync(bool $on): string
+    {
+        return self::YOU.' turned keeping assignees, dates, parents and teams in step with Jira '.($on ? 'on' : 'off');
+    }
+
+    // Triage (2026-10-21, user): cancelled as won't fix.
+    public static function cancelledBugReport(string $title, string $noun): string
+    {
+        return self::YOU.' cancelled the '.$noun.' '.$title." as won't fix";
+    }
+
+    // Many at once from the page (2026-10-22, user): what was done, to how many, and how many were refused.
+    public static function bulkBugReports(string $done, int $count, int $refused): string
+    {
+        return self::YOU.' '.$done.' '.$count.' '.($count === 1 ? 'issue or request' : 'issues and requests').' at once'
+            .($refused === 0 ? '' : '; '.$refused.' '.($refused === 1 ? 'was' : 'were').' refused');
+    }
+
+    // Marked a duplicate of the report it names, and fixed with it (2026-10-22, user) -- or, before then, cancelled.
+    public static function duplicateBugReport(string $title, string $noun, string $original, bool $fixed): string
+    {
+        return self::YOU.' marked the '.$noun.' '.$title.' a duplicate of '.$original.($fixed ? ' and fixed it' : '');
+    }
+
     // MIS filing a report under another kind (2026-10-19): a bug that is really a feature request, say.
+    // Archived and back, deleted and restored (2026-10-21, user); an open one's issue moved to Cancelled says so.
+    public static function archivedBugReport(string $title, string $noun, ?string $issueKey = null): string
+    {
+        return self::YOU.' archived the '.$noun.' '.$title.self::cancelledInJira($issueKey);
+    }
+
+    public static function unarchivedBugReport(string $title, string $noun): string
+    {
+        return self::YOU.' unarchived the '.$noun.' '.$title;
+    }
+
+    public static function deletedBugReport(string $title, string $noun, ?string $issueKey = null): string
+    {
+        return self::YOU.' deleted the '.$noun.' '.$title.self::cancelledInJira($issueKey);
+    }
+
+    public static function restoredBugReport(string $title, string $noun): string
+    {
+        return self::YOU.' restored the '.$noun.' '.$title;
+    }
+
+    private static function cancelledInJira(?string $issueKey): string
+    {
+        return $issueKey === null ? '' : ' and moved '.$issueKey.' to Cancelled in Jira';
+    }
+
     public static function reclassifiedBugReport(string $title, string $fromNoun, string $asPhrase): string
     {
         return self::YOU.' filed the '.$fromNoun.' '.$title.' as '.$asPhrase;

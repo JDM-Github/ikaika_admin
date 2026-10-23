@@ -4,28 +4,36 @@ namespace App\Http\Controllers\Api\Portal\BugReports;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Portal\Models\Employee;
+use App\Support\Portal\PortalBugReportDeletion;
 use App\Support\Portal\PortalBugReports;
+use App\Support\Portal\PortalBugReportsBulk;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
  * Issues & Requests. `store` is anyone's, and anonymous unless the sender chose to be named: only then is
  * who is signed in kept (2026-10-20, user). `index` and
- * `update` are MIS's, behind the bug-reports rule, as is `refreshFromJira`, which only reads Jira;
- * `sendToJira`, `sendAllToJira` and `updateJira` are behind bug-reports.jira.
+ * `update` are MIS's, behind the bug-reports rule, as are `refreshFromJira`, which only reads Jira, and
+ * `archive`, which can be undone; `sendToJira`, `sendAllToJira` and `updateJira` are behind bug-reports.jira,
+ * and `destroy` behind bug-reports.delete (2026-10-21, user). `bulk` is the page's, each action asking its own rule
+ * on top (2026-10-22, user).
  */
 class BugReportsController extends Controller
 {
-    public function __construct(private readonly PortalBugReports $reports) {}
+    public function __construct(
+        private readonly PortalBugReports $reports,
+        private readonly PortalBugReportDeletion $deletion,
+        private readonly PortalBugReportsBulk $bulk,
+    ) {}
 
     public function store(Request $request): JsonResponse
     {
         return response()->json($this->reports->submit($request, $this->actor($request)), 201);
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        return response()->json($this->reports->list());
+        return response()->json($this->reports->list($request->boolean('withArchived')));
     }
 
     public function update(Request $request, int $id): JsonResponse
@@ -33,9 +41,31 @@ class BugReportsController extends Controller
         return response()->json($this->reports->update($this->actor($request), $id, $request));
     }
 
-    public function refreshFromJira(): JsonResponse
+    public function bulk(Request $request): JsonResponse
     {
-        return response()->json($this->reports->refreshFromJira());
+        return response()->json($this->bulk->change($this->actor($request), $request));
+    }
+
+    public function archive(Request $request, int $id): JsonResponse
+    {
+        return response()->json($this->reports->archive($this->actor($request), $id, $request));
+    }
+
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $this->deletion->destroy($this->actor($request), $id, $request);
+
+        return response()->json(null, 204);
+    }
+
+    public function refreshFromJira(Request $request): JsonResponse
+    {
+        return response()->json($this->reports->refreshFromJira($request->boolean('withArchived')));
+    }
+
+    public function jiraOptions(): JsonResponse
+    {
+        return response()->json($this->reports->jiraOptions());
     }
 
     public function sendToJira(Request $request, int $id): JsonResponse
@@ -45,7 +75,7 @@ class BugReportsController extends Controller
 
     public function sendAllToJira(Request $request): JsonResponse
     {
-        return response()->json($this->reports->sendAllToJira($this->actor($request), $request));
+        return response()->json($this->reports->sendAllToJira($this->actor($request), $request, $request->boolean('withArchived')));
     }
 
     public function updateJira(Request $request): JsonResponse

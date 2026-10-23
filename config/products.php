@@ -4,6 +4,7 @@ use App\Modules\Core\CoreModule;
 use App\Modules\Portal\PortalModule;
 use App\Modules\ProjectEstimator\ProjectEstimatorModule;
 use App\Modules\TransactionTracker\TransactionTrackerModule;
+use App\Support\ApiVersion;
 
 /**
  * Product catalog for the central platform.
@@ -23,6 +24,21 @@ use App\Modules\TransactionTracker\TransactionTrackerModule;
 return [
 
     'channel' => env('API_CHANNEL', 'development'),
+
+    /*
+     * The 18:00 missing-report reminder (2026-10-22, user: false reminders). Unset, it sends on production alone:
+     * every other server runs on a copy of production's reports. A day fewer than this share filed on is taken for
+     * one the records lack, and nobody is reminded of it.
+     */
+    'report_reminders' => [
+        'scheduled' => env('REPORT_REMINDERS_SCHEDULED'),
+        'min_filed_share' => (float) env('REPORT_REMINDERS_MIN_FILED_SHARE', 0.5),
+    ],
+
+    /*
+     * This release's VERSION (x.y.z+n), sent on every response as X-Api-Version and in /health; null without the file.
+     */
+    'version' => ApiVersion::fromFile(base_path('VERSION')),
 
     /*
      * Subdirectory in front of /api. Empty locally. Bluehost example: /staging/central-api

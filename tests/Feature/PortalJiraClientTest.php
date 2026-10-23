@@ -144,7 +144,47 @@ class PortalJiraClientTest extends TestCase
         $this->assertSame(['10042'], array_column($fetched['issues'], 'id'));
         $this->assertSame(['10043'], $fetched['missing']);
         Http::assertSent(fn (Request $request): bool => $request['issueIdsOrKeys'] === ['10042', '10043']
-            && $request['fields'] === ['status', 'resolution', 'fixVersions', 'issuetype']);
+            && $request['fields'] === ['status', 'resolution', 'fixVersions', 'issuetype', 'labels', 'issuelinks', 'parent', 'duedate', 'assignee', 'customfield_10001', 'customfield_10015']);
+    }
+
+    // Triage (2026-10-21, user): a label added through update operations, never fields, which would replace them all.
+    public function test_a_label_is_added_and_removed_without_touching_the_others(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/issue/10042' => Http::response(null, 204)]);
+        $client = app(PortalJiraClient::class);
+
+        $client->changeLabels('10042', ['duplicate']);
+        $client->changeLabels('10042', [], ['duplicate']);
+        $client->changeLabels('10042', []);
+
+        $bodies = Http::recorded()->map(fn (array $pair): array => json_decode($pair[0]->body(), true))->values()->all();
+        $this->assertSame([
+            ['update' => ['labels' => [['add' => 'duplicate']]]],
+            ['update' => ['labels' => [['remove' => 'duplicate']]]],
+        ], $bodies);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT');
+    }
+
+    // The duplicate is the issue the link reads from, and goes in inwardIssue; a link already gone is gone.
+    public function test_a_duplicate_is_linked_from_itself_to_its_original_and_a_link_jira_lost_counts_as_removed(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/issueLink' => Http::response(null, 201),
+            self::SITE.'/rest/api/3/issueLink/30001' => Http::response(['errorMessages' => ['No issue link with id 30001 exists.']], 404),
+            self::SITE.'/rest/api/3/issueLinkType' => Http::response(['issueLinkTypes' => [['name' => 'Blocks'], ['name' => 'Duplicate']]]),
+        ]);
+        $client = app(PortalJiraClient::class);
+
+        $client->linkIssues('Duplicate', '10042', '10007');
+        $client->deleteIssueLink('30001');
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && $request->url() === self::SITE.'/rest/api/3/issueLink'
+            && $request->data() === ['type' => ['name' => 'Duplicate'], 'inwardIssue' => ['id' => '10042'], 'outwardIssue' => ['id' => '10007']]);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE' && str_ends_with($request->url(), '/issueLink/30001'));
+        $this->assertSame(['Blocks', 'Duplicate'], $client->issueLinkTypes());
+        $this->assertSame('ok', $client->connection()['state']);
     }
 
     public function test_an_issue_jira_no_longer_has_reads_as_none_and_the_connection_stays_ok(): void
@@ -171,6 +211,66 @@ class PortalJiraClientTest extends TestCase
 
         $this->assertSame('refused', $client->connection()['state']);
         $this->assertSame('Jira HTTP 404: No project could be found with key IKP.', $client->connection()['message']);
+    }
+
+    // The plan fields (2026-10-22, user): found once a day unless the env names them, and a failed look is tried
+    // again in minutes rather than for every report on a page.
+    public function test_the_plan_fields_are_found_on_the_site_once_and_a_failed_look_only_briefly(): void
+    {
+        config(['services.jira.fields' => ['team' => null, 'start_date' => null]]);
+        Http::preventStrayRequests();
+        Http::fake([self::SITE.'/rest/api/3/field' => Http::sequence()
+            ->push(['errorMessages' => ['You do not have permission.']], 403)
+            ->push([
+                ['id' => 'customfield_10001', 'name' => 'Team', 'schema' => ['custom' => 'com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team']],
+                ['id' => 'customfield_10015', 'name' => 'Start date', 'schema' => ['custom' => 'com.atlassian.jira.plugin.system.customfieldtypes:datepicker']],
+            ])]);
+        $client = app(PortalJiraClient::class);
+
+        $this->assertSame(['team' => null, 'startDate' => null], $client->fieldIds());
+        $this->assertSame(['team' => null, 'startDate' => null], $client->fieldIds());
+        Http::assertSentCount(1);
+        $this->travel(6)->minutes();
+        $this->assertSame(['team' => 'customfield_10001', 'startDate' => 'customfield_10015'], $client->fieldIds());
+        $client->fieldIds();
+        Http::assertSentCount(2);
+        // Named by the env, a field is taken as it is.
+        config(['services.jira.fields' => ['team' => 'customfield_777', 'start_date' => 'customfield_778']]);
+        $this->assertSame(['team' => 'customfield_777', 'startDate' => 'customfield_778'], $client->fieldIds());
+        Http::assertSentCount(2);
+    }
+
+    public function test_the_teams_the_epics_and_a_create_screen_are_asked_once_and_kept(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            self::SITE.'/rest/api/3/jql/autocompletedata/suggestions*' => Http::response(['results' => [['value' => '3688-uuid', 'displayName' => '<b>DEV</b>']]]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/10004*' => Http::response(['fields' => [['fieldId' => 'summary'], ['fieldId' => 'assignee'], ['fieldId' => 'customfield_10001']]]),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes/99999*' => Http::response(['errorMessages' => ['No such issue type.']], 404),
+            self::SITE.'/rest/api/3/issue/createmeta/IKP/issuetypes' => Http::response(['issueTypes' => [
+                ['id' => '10000', 'name' => 'Epic', 'hierarchyLevel' => 1],
+                ['id' => '10004', 'name' => 'Bug', 'hierarchyLevel' => 0],
+                ['id' => '10009', 'name' => 'Subtask', 'subtask' => true, 'hierarchyLevel' => -1],
+            ]]),
+            self::SITE.'/rest/api/3/search/jql*' => Http::response(['issues' => [['key' => 'IKP-12', 'fields' => ['summary' => 'Payroll revamp', 'status' => ['name' => 'To Do']]]]]),
+        ]);
+        $client = app(PortalJiraClient::class);
+
+        $this->assertSame([['id' => '3688-uuid', 'name' => 'DEV']], $client->teams());
+        // An epic is an issue of the level-1 type, whatever the project calls it.
+        $this->assertSame([['key' => 'IKP-12', 'summary' => 'Payroll revamp', 'isDone' => false]], $client->epics());
+        $this->assertSame(['summary', 'assignee', 'customfield_10001'], $client->createFields('10004'));
+        $client->teams();
+        $client->epics();
+        $client->createFields('10004');
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), 'fieldName=cf[10001]'));
+        Http::assertSent(fn (Request $request): bool => str_contains(urldecode($request->url()), 'project = "IKP" AND issuetype in (10000) ORDER BY created DESC'));
+        $this->assertCount(4, Http::recorded());
+        // Refresh asks for the epics again; a screen Jira cannot say is unknown, not empty.
+        $client->forgetEpics();
+        $client->epics();
+        $this->assertCount(5, Http::recorded());
+        $this->assertNull($client->createFields('99999'));
     }
 
     public function test_a_screenshot_is_downloaded_only_from_the_portals_own_cloudinary(): void

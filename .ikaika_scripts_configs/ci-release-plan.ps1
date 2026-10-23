@@ -6,6 +6,8 @@
 # A production upload needs its box ticked and a production to go to: release.assetUrl in ikaika_scripts.env is blank until there is one.
 # clean, as the estimator's: the upload clears the server's older backups too - build-release -Clean, which tells deploy-admin.sh through
 # the archive's deploy.json, since the server's variables travel with the archive.
+# Releases (2026-10-21, user): a production upload is a release, so its version is never same; build_from rebuilds a tag as it was -
+# build-release -FromTag - for staging only, and never bumps. lib/release-policy.ps1 holds build-release's side of the same rules.
 param(
     # Where build-release's arguments are written.
     [string]$PlanFile = (Join-Path $(if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }) 'build-release.json')
@@ -40,6 +42,7 @@ $upload = Test-Answer 'upload'
 $dryRun = Test-Answer 'dry_run'
 $clean = Test-Answer 'clean'
 $githubRelease = Test-Answer 'github_release' $true
+$buildFrom = Get-Answer 'build_from' ''
 $refType = "$env:GITHUB_REF_TYPE"
 $refName = "$env:GITHUB_REF_NAME"
 
@@ -56,6 +59,11 @@ if ($version -eq 'custom') {
 }
 $tagging = $version -ne 'same'
 if ($tagging -and $refType -ne 'branch') { $problems += "A version bump is committed to a branch, and this run is on the $refType $refName - pick a branch under 'Use workflow from'." }
+if ($buildFrom) {
+    if ($buildFrom -notmatch '^[A-Za-z0-9][A-Za-z0-9._+/-]*$') { $problems += "build_from '$buildFrom' is not a tag name." }
+    if ($tagging) { $problems += 'A rebuild from a tag never bumps: leave version on same, or clear build_from.' }
+    if ($target -ne 'staging') { $problems += 'A tag is rebuilt for staging only: production only moves forward, so release it with a version instead of build_from.' }
+}
 $kind = if ($target -eq 'staging') { 'debug' } else { 'release' }
 if (-not (Get-ConfigValue "$kind.assetUrl")) { $problems += "There is no $target to build for yet: $kind.assetUrl is blank in ikaika_scripts.env." }
 # As the project estimator's: a dry run sends nothing, so it needs no production box, and without an upload there is nothing to try.
@@ -64,6 +72,7 @@ if (-not $upload -and ($dryRun -or $clean)) {
     $dryRun = $false; $clean = $false
 }
 if ($upload -and -not $dryRun -and $target -eq 'production' -and -not (Test-Answer 'confirm_production')) { $problems += 'Tick "Yes, upload to PRODUCTION" to upload to production.' }
+if ($upload -and -not $dryRun -and $target -eq 'production' -and -not $tagging) { $problems += 'A production upload is a release, tagged v<version>-released: pick a version - keep takes the next build number only - or tick Dry run.' }
 
 if ($problems.Count) {
     foreach ($p in $problems) { Write-Output "::error title=Build release::$p" }
@@ -73,6 +82,7 @@ if ($problems.Count) {
 $arguments = [ordered]@{ Debug = $target -eq 'staging' }
 # build-release bumps the version as it builds, as the estimator's does; tag-version commits and tags it after.
 if ($tagging) { $arguments.Bump = "$bump" }
+if ($buildFrom) { $arguments.FromTag = $buildFrom }
 if ($clean) { $arguments.Clean = $true }
 $arguments | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $PlanFile -Encoding utf8
 $deploy = $null
@@ -88,6 +98,8 @@ Set-JobVariable 'UPLOADING' $(if ($upload) { 'true' } else { 'false' })
 Set-JobVariable 'DEPLOY_PLAN' $(if ($deploy) { $deploy | ConvertTo-Json -Depth 3 -Compress } else { '' })
 Set-JobVariable 'PURPOSES' $(if ($upload) { "deploy-$target" } else { '' })
 Set-JobVariable 'TAGGING' $(if ($tagging) { 'true' } else { 'false' })
+# The tag a rebuild checks out, which the fetch step brings here first.
+Set-JobVariable 'BUILD_FROM' $buildFrom
 # A release hangs on the tag a bump pushes, so a build that keeps its version stays an artifact.
 $releasing = $githubRelease -and $tagging
 if ($githubRelease -and -not $tagging) { Write-Output '::notice title=No GitHub release::A release hangs on a new version tag, and version is same, so the build is kept as an artifact instead.' }
@@ -101,13 +113,13 @@ Set-JobVariable 'ARTIFACT_NAME' $artifactName
 if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "retention=$retention", "artifact=$artifactName" }
 
 $stages = @('| 1 - Check | These choices, then GitHub synced from Bitbucket and the toolkit fetched |')
-$stages += "| $($stages.Count + 1) - Build | $(if ($tagging) { "VERSION bumped $bump, uncommitted, then " })the $target archive, its fonts served from $(Get-ConfigValue "$kind.assetUrl") |"
+$stages += "| $($stages.Count + 1) - Build | $(if ($buildFrom) { "$buildFrom rebuilt as it was, in a worktree of its own: " } elseif ($tagging) { "VERSION bumped $bump, uncommitted, then " })the $target archive, its fonts served from $(Get-ConfigValue "$kind.assetUrl") |"
 if ($tagging) { $stages += "| $($stages.Count + 1) - Tag | Once the build is good: the changelog filed under the new version, committed and tagged $(if ($target -eq 'staging') { 'as a staging build' } else { 'as a production release' }) by github-actions[bot] on Bitbucket |" }
 if ($upload) { $stages += "| $($stages.Count + 1) - Upload | $(if ($tagging) { 'Once the tag is on Bitbucket: ' })to $target with deploy-admin.sh, composer, the swap, migrations, then the health check$(if ($dryRun) { ', as a dry run that sends nothing' })$(if ($clean) { ', clearing older backups' }) |" }
 if ($tagging) { $stages += "| $($stages.Count + 1) - GitHub | The version commit and tag pushed to GitHub as well |" }
 if ($releasing) { $stages += "| $($stages.Count + 1) - GitHub release | $(if ($target -eq 'staging') { 'A prerelease' } else { 'The latest release' }) keeps the build and this version's changelog, so no artifact takes Actions storage |" }
 $summary = @('### Build release', '', '| Stage | What it does |', '| --- | --- |') + $stages + @('', '| Choice | Value |', '| --- | --- |')
-$summary += "| Version | $(if ($tagging) { $bump } else { 'same, nothing committed or tagged' }) |"
+$summary += "| Version | $(if ($buildFrom) { "$buildFrom's, rebuilt as it was" } elseif ($tagging) { $bump } else { 'same, nothing committed or tagged' }) |"
 $summary += "| Kept as | $(if ($releasing) { 'a GitHub release, and an artifact for a day' } else { 'an artifact, 3 days' }) |"
 foreach ($key in $arguments.Keys) { $summary += "| $key | $($arguments[$key]) |" }
 if ($deploy) { $summary += "| Upload | $(@($deploy.Keys | ForEach-Object { "$_ $($deploy[$_])" }) -join ', ') |" }

@@ -1,0 +1,119 @@
+# Maintenance: one job on a server, by hand, from GitHub (2026-10-20, user) - the API's health (no migration pending, /health
+# answering), or the secret settings pushed to its .env. Each is the same toolkit command a PC runs, deploy/check-health or
+# deploy/push-env, unattended: the sealed archive gives the deploy config and the SSH key, deploy/ssh-key turns them into the
+# bluehost alias the scripts use, and a question would be a hang, so nothing here can ask one.
+# Pushing settings to production needs "Yes, PRODUCTION" ticked; a health check only reads. Copying databases stays on a PC,
+# because it dumps that PC's MySQL. The same switches as every workflow come from env.prefix in ikaika_scripts.env.
+name: Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do - health checks migrations and /health; push-settings sends the secret settings to the server's .env
+        type: choice
+        options: [health, push-settings]
+        default: health
+      target:
+        description: Staging is the Bluehost Test Server; production is portal.ikaikabim.com/v2
+        type: choice
+        options: [staging, production]
+        default: staging
+      confirm_production:
+        description: Yes, PRODUCTION (needed to push settings to production)
+        type: boolean
+        default: false
+      sync_bitbucket:
+        description: Sync GitHub from Bitbucket first and run what Bitbucket has
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maintenance-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    name: ${{ format('{0} on {1}', inputs.action == 'health' && 'Health check' || 'Push the settings', inputs.target) }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GIT_TERMINAL_PROMPT: '0'
+      GCM_INTERACTIVE: never
+      ACTION: ${{ inputs.action }}
+      TARGET: ${{ inputs.target }}
+      CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Plan
+        run: |
+          if (-not (Test-Path ./.ikaika_scripts_configs/domains/deploy/ssh-key.ps1)) {
+            Write-Output "::error title=No deploy commands on $env:GITHUB_REF_NAME::Pick a branch that has .ikaika_scripts_configs/domains/deploy under 'Use workflow from'."
+            exit 1
+          }
+          if ($env:ACTION -eq 'push-settings' -and $env:TARGET -eq 'production' -and $env:CONFIRM_PRODUCTION -ne 'true') {
+            Write-Output '::error title=Production not confirmed::Tick "Yes, PRODUCTION" to push settings to production.'
+            exit 1
+          }
+          $prefix = (Select-String -LiteralPath ikaika_scripts.env -Pattern '^env\.prefix=(.+)$').Matches[0].Groups[1].Value.Trim()
+          foreach ($switch in 'NO_PROMPT', 'NO_GUI', 'NO_UPDATE') { Add-Content -LiteralPath $env:GITHUB_ENV -Value "$($prefix)_SCRIPTS_$switch=1" }
+          $purpose = if ($env:ACTION -eq 'health') { "deploy-$env:TARGET" } else { "settings-$env:TARGET" }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "PURPOSE=$purpose"
+
+      - name: Sync GitHub from Bitbucket, then check out what Bitbucket has
+        if: inputs.sync_bitbucket
+        env:
+          BITBUCKET_REPO_TOKEN: ${{ secrets.BITBUCKET_REPO_TOKEN }}
+          BITBUCKET_REPO_USER: ${{ secrets.BITBUCKET_REPO_USER }}
+          GH_MIRROR_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: ./.ikaika_scripts_configs/sync-from-bitbucket.ps1
+
+      - name: Fetch the toolkit (decoupled-script)
+        env:
+          TOOLKIT_BITBUCKET_TOKEN: ${{ secrets.TOOLKIT_BITBUCKET_TOKEN }}
+          TOOLKIT_BITBUCKET_USER: ${{ secrets.TOOLKIT_BITBUCKET_USER }}
+        run: ./.ikaika_scripts_configs/fetch-toolkit.ps1
+
+      - name: Open the sealed archive for this job
+        env:
+          SHARED_FILES_URL: ${{ secrets.SHARED_FILES_URL }}
+          SHARED_FILES_PASSWORD: ${{ secrets.SHARED_FILES_PASSWORD }}
+        run: |
+          ./script.ps1 secrets -For $env:PURPOSE -Ci
+          exit $LASTEXITCODE
+
+      - name: Make the bluehost alias answer without a passphrase
+        run: |
+          ./script.ps1 deploy/ssh-key -Target $env:TARGET
+          exit $LASTEXITCODE
+
+      - name: ${{ inputs.action == 'health' && 'Check migrations and /health' || 'Push the secret settings' }}
+        id: job
+        run: |
+          if ($env:ACTION -eq 'health') { ./script.ps1 deploy/check-health -Target $env:TARGET } else { ./script.ps1 deploy/push-env -Target $env:TARGET -Yes }
+          exit $LASTEXITCODE
+
+      - name: Remove the unlocked key
+        if: always()
+        run: Remove-Item -Path (Join-Path $HOME '.ssh/*.unlocked') -Force -ErrorAction SilentlyContinue
+
+      - name: Summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.job.outcome }}
+        run: |
+          $what = if ($env:ACTION -eq 'health') { 'Health check' } else { 'Settings pushed' }
+          $result = switch ($env:OUTCOME) { 'success' { 'done' } 'failure' { 'FAILED - see the step above' } default { "not run ($env:OUTCOME)" } }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "### $what on $env:TARGET: $result"

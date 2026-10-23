@@ -17,7 +17,10 @@ final class PortalRecycleBinPresenter
 
     public const TYPE_PROJECT = 'project';
 
-    public const TYPES = [self::TYPE_REPORT, self::TYPE_REQUEST, self::TYPE_PROJECT];
+    // A deleted issue or request (2026-10-21, user).
+    public const TYPE_ISSUE = 'issue';
+
+    public const TYPES = [self::TYPE_REPORT, self::TYPE_REQUEST, self::TYPE_PROJECT, self::TYPE_ISSUE];
 
     /**
      * @return list<string>
@@ -258,12 +261,39 @@ final class PortalRecycleBinPresenter
         if ($value !== '' && str_starts_with($value, 'project')) {
             return self::TYPE_PROJECT;
         }
+        if ($value !== '' && str_starts_with($value, 'bug-report')) {
+            return self::TYPE_ISSUE;
+        }
 
         return self::TYPE_REPORT;
     }
 
     /**
-     * @param  array<string, int>  $types  all, report, request and project, for the type tabs
+     * A deleted issue or request as its detail shows it: what the bin kept, and nothing it did not.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{kind: string, status: string, reportedOn: ?string, page: ?string, jiraKey: ?string, jiraCancelled: bool, images: int}|null
+     */
+    public static function issue(array $payload): ?array
+    {
+        $issue = $payload['issue'] ?? null;
+        if (! is_array($issue)) {
+            return null;
+        }
+
+        return [
+            'kind' => array_key_exists((string) ($issue['kind'] ?? ''), PortalBugReports::KINDS) ? (string) $issue['kind'] : PortalBugReports::KIND_BUG,
+            'status' => array_key_exists((string) ($issue['status'] ?? ''), PortalBugReports::STATUS_LABELS) ? (string) $issue['status'] : PortalBugReports::STATUS_NEW,
+            'reportedOn' => self::optionalDate($issue['reportedOn'] ?? null),
+            'page' => is_string($issue['page'] ?? null) && trim($issue['page']) !== '' ? trim($issue['page']) : null,
+            'jiraKey' => is_string($issue['jiraKey'] ?? null) && $issue['jiraKey'] !== '' ? $issue['jiraKey'] : null,
+            'jiraCancelled' => ($issue['jiraCancelled'] ?? false) === true,
+            'images' => max(0, (int) ($issue['images'] ?? 0)),
+        ];
+    }
+
+    /**
+     * @param  array<string, int>  $types  all, report, request, project and issue, for the type tabs
      * @return array{total: int, types: array<string, int>}
      */
     public static function counts(int $total, array $types = []): array

@@ -48,5 +48,9 @@
         <env name="JIRA_ISSUE_TYPE_BUG" value="Bug"/>
         <env name="JIRA_ISSUE_TYPE_FEATURE" value="Story"/>
         <env name="JIRA_ISSUE_TYPE_FEEDBACK" value="Task"/>
+        <!-- The plan fields as the test site has them, and no team for a new issue unless a test names one. -->
+        <env name="JIRA_FIELD_TEAM" value="customfield_10001"/>
+        <env name="JIRA_FIELD_START_DATE" value="customfield_10015"/>
+        <env name="JIRA_DEFAULT_TEAM" value=""/>
     </php>
 </phpunit>

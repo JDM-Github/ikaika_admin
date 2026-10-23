@@ -25,6 +25,8 @@ use Throwable;
  *
  * MIS changing a linked report's kind or status changes the issue too (2026-10-20, user): its work type is
  * edited, or it is moved along the transition that lands in the matching column. Both are writes, sent once.
+ * Triage (2026-10-21, user) adds three more: a label added or removed through update operations -- a fields
+ * edit would replace every label the issue has -- and a Duplicate link made or removed.
  *
  * Every answer updates the connection the page shows: a 2xx is ok, a refused account or an unknown
  * project is refused, no answer is unreachable. A 400 is about the request, not the connection.
@@ -45,10 +47,25 @@ final class PortalJiraClient
 
     private const GATEWAY = 'https://api.atlassian.com/ex/jira/';
 
-    private const ISSUE_TYPES_KEY = 'portal:jira:issue-types:';
+    // v2 since each type keeps its level (2026-10-22), which says which of them are epics.
+    private const ISSUE_TYPES_KEY = 'portal:jira:issue-types:v2:';
 
-    // The fields a sync reads; nothing else of an issue is ever fetched.
-    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype'];
+    private const SUBTASK_TYPE_KEY = 'portal:jira:subtask-type:';
+
+    private const PROJECT_KEYS_KEY = 'portal:jira:project-keys:';
+
+    private const PLAN_FIELDS_KEY = 'portal:jira:plan-fields:';
+
+    private const TEAMS_KEY = 'portal:jira:teams:';
+
+    private const EPICS_KEY = 'portal:jira:epics:';
+
+    private const CREATE_FIELDS_KEY = 'portal:jira:create-fields:';
+
+    // The fields a sync reads; nothing else of an issue is ever fetched. Labels and links say a duplicate's (2026-10-21);
+    // the parent and due date a report's plan (2026-10-22), with the site's Team and Start date fields (syncFields());
+    // the assignee who works on it (2026-10-22).
+    private const SYNC_FIELDS = ['status', 'resolution', 'fixVersions', 'issuetype', 'labels', 'issuelinks', 'parent', 'duedate', 'assignee'];
 
     // The env keys behind config('services.jira'), for saying which one is missing.
     private const SETTINGS = [
@@ -93,6 +110,12 @@ final class PortalJiraClient
         $key = $this->setting('project');
 
         return $key === null ? null : strtoupper($key);
+    }
+
+    // The configured site, which keeps what is learnt of one site's people and fields apart from another's.
+    public function site(): ?string
+    {
+        return $this->base();
     }
 
     // The issue as a person opens it, or null with no site configured.
@@ -142,9 +165,41 @@ final class PortalJiraClient
     }
 
     /**
-     * The project's issue types a report can be filed as (no subtasks), cached for a day.
+     * The keys the project's issues carry: the configured one, and the one Jira files under now when the project's
+     * key was changed since (2026-10-22: IPS became IP2, Jira still takes IPS, and what it files is IP2-4). Asked
+     * once a day; without an answer, the configured key alone -- for a few minutes, not for every report on a page.
      *
-     * @return list<array{id: string, name: string}>
+     * @return list<string>
+     */
+    public function projectKeys(): array
+    {
+        $configured = $this->projectKey();
+        if ($configured === null) {
+            return [];
+        }
+        $cacheKey = self::PROJECT_KEYS_KEY.$configured;
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached)) {
+            return $cached;
+        }
+        try {
+            $current = strtoupper($this->project()['key']);
+        } catch (RuntimeException) {
+            Cache::put($cacheKey, [$configured], now()->addMinutes(5));
+
+            return [$configured];
+        }
+        $keys = array_values(array_unique(array_filter([$configured, $current])));
+        Cache::put($cacheKey, $keys, now()->addDay());
+
+        return $keys;
+    }
+
+    /**
+     * The project's issue types a report can be filed as (no subtasks), each with its level -- 1 is an epic's --
+     * cached for a day.
+     *
+     * @return list<array{id: string, name: string, level: int}>
      */
     public function issueTypes(): array
     {
@@ -158,12 +213,173 @@ final class PortalJiraClient
         $types = [];
         foreach (is_array($listed) ? $listed : [] as $type) {
             if (is_array($type) && ! ($type['subtask'] ?? false) && isset($type['id'], $type['name'])) {
-                $types[] = ['id' => (string) $type['id'], 'name' => (string) $type['name']];
+                $types[] = ['id' => (string) $type['id'], 'name' => (string) $type['name'], 'level' => (int) ($type['hierarchyLevel'] ?? 0)];
             }
         }
         Cache::put($key, $types, now()->addDay());
 
         return $types;
+    }
+
+    /**
+     * The ids of the site's Team and Start date fields (2026-10-22, user), which differ from site to site: as
+     * JIRA_FIELD_TEAM and JIRA_FIELD_START_DATE set them, else found among the site's fields once a day;
+     * without an answer, none -- for a few minutes, not for every report on a page.
+     *
+     * @return array{team: ?string, startDate: ?string}
+     */
+    public function fieldIds(): array
+    {
+        $set = ['team' => $this->setting('fields.team'), 'startDate' => $this->setting('fields.start_date')];
+        if ($set['team'] !== null && $set['startDate'] !== null) {
+            return $set;
+        }
+        $key = self::PLAN_FIELDS_KEY.$this->base();
+        $found = Cache::get($key);
+        if (! is_array($found)) {
+            try {
+                $found = PortalJiraIssue::planFieldIds($this->read('GET', '/rest/api/3/field')->json());
+                Cache::put($key, $found, now()->addDay());
+            } catch (RuntimeException) {
+                $found = ['team' => null, 'startDate' => null];
+                Cache::put($key, $found, now()->addMinutes(5));
+            }
+        }
+
+        return ['team' => $set['team'] ?? $found['team'], 'startDate' => $set['startDate'] ?? $found['startDate']];
+    }
+
+    /**
+     * The teams the Team field offers, as its suggestions name them, cached for a day; none without the field.
+     *
+     * @return list<array{id: string, name: string}>
+     */
+    public function teams(): array
+    {
+        $field = $this->fieldIds()['team'];
+        if ($field === null) {
+            return [];
+        }
+        $key = self::TEAMS_KEY.$this->base().'|'.$field;
+        $cached = Cache::get($key);
+        if (is_array($cached)) {
+            return $cached;
+        }
+        $number = preg_replace('/\D+/', '', $field);
+        $body = $this->read('GET', '/rest/api/3/jql/autocompletedata/suggestions?'.http_build_query(['fieldName' => 'cf['.$number.']', 'fieldValue' => '']))->json();
+        $teams = PortalJiraIssue::teamsFrom($body['results'] ?? []);
+        Cache::put($key, $teams, now()->addDay());
+
+        return $teams;
+    }
+
+    // A 400 naming the Team field means the cached teams are stale: one was renamed or removed.
+    public function forgetTeams(): void
+    {
+        $field = $this->fieldIds()['team'];
+        if ($field !== null) {
+            Cache::forget(self::TEAMS_KEY.$this->base().'|'.$field);
+        }
+    }
+
+    /**
+     * The project's epics -- the issues a report's issue can sit under -- newest first, cached for ten minutes.
+     *
+     * @return list<array{key: string, summary: string, isDone: bool}>
+     */
+    public function epics(): array
+    {
+        $key = self::EPICS_KEY.$this->projectKey();
+        $cached = Cache::get($key);
+        if (is_array($cached)) {
+            return $cached;
+        }
+        $levels = array_values(array_filter($this->issueTypes(), static fn (array $type): bool => $type['level'] === 1));
+        $epics = [];
+        if ($levels !== []) {
+            $jql = 'project = "'.$this->projectKey().'" AND issuetype in ('.implode(', ', array_column($levels, 'id')).') ORDER BY created DESC';
+            $body = $this->read('GET', '/rest/api/3/search/jql?'.http_build_query(['jql' => $jql, 'fields' => 'summary,status', 'maxResults' => 100]))->json();
+            $epics = PortalJiraIssue::epicsFrom($body['issues'] ?? []);
+        }
+        Cache::put($key, $epics, now()->addMinutes(10));
+
+        return $epics;
+    }
+
+    // Refresh shows an epic made in Jira since, rather than in ten minutes.
+    public function forgetEpics(): void
+    {
+        Cache::forget(self::EPICS_KEY.$this->projectKey());
+    }
+
+    /**
+     * The fields an issue type's create screen has, cached for a day: a new issue is sent only those of its
+     * plan the screen takes, so a project without one still takes the issue. Null when Jira cannot say.
+     *
+     * @return list<string>|null
+     */
+    public function createFields(string $issueTypeId): ?array
+    {
+        $key = self::CREATE_FIELDS_KEY.$this->projectKey().':'.$issueTypeId;
+        $cached = Cache::get($key);
+        if (is_array($cached)) {
+            return $cached;
+        }
+        try {
+            $body = $this->read('GET', '/rest/api/3/issue/createmeta/'.rawurlencode((string) $this->projectKey()).'/issuetypes/'.rawurlencode($issueTypeId).'?maxResults=200')->json();
+        } catch (RuntimeException) {
+            return null;
+        }
+        $fields = [];
+        foreach (is_array($body['fields'] ?? $body['values'] ?? null) ? ($body['fields'] ?? $body['values']) : [] as $field) {
+            $id = is_array($field) ? ($field['fieldId'] ?? $field['key'] ?? null) : null;
+            if (is_string($id) && $id !== '') {
+                $fields[] = $id;
+            }
+        }
+        Cache::put($key, $fields, now()->addDay());
+
+        return $fields;
+    }
+
+    /**
+     * The Jira account a work address belongs to (2026-10-22, user): the one active person a search for the
+     * address finds, whose address matches wherever Jira shows it; null for none or several. Jira hides most
+     * people's addresses, so the address is searched for rather than read.
+     */
+    public function accountByAddress(string $address): ?string
+    {
+        $body = $this->read('GET', '/rest/api/3/user/search?'.http_build_query(['query' => $address, 'maxResults' => 10]))->json();
+        $found = [];
+        foreach (is_array($body) ? $body : [] as $user) {
+            if (! is_array($user) || ($user['accountType'] ?? '') !== 'atlassian' || ($user['active'] ?? false) !== true || ! is_string($user['accountId'] ?? null)) {
+                continue;
+            }
+            $shown = $user['emailAddress'] ?? null;
+            if (is_string($shown) && $shown !== '' && strcasecmp($shown, $address) !== 0) {
+                continue;
+            }
+            $found[$user['accountId']] = true;
+        }
+
+        return count($found) === 1 ? (string) array_key_first($found) : null;
+    }
+
+    /**
+     * Which of these the account holds in the project: ASSIGN_ISSUES, EDIT_ISSUES, USER_PICKER and the like.
+     *
+     * @param  list<string>  $keys
+     * @return array<string, bool>
+     */
+    public function permissions(array $keys): array
+    {
+        $body = $this->read('GET', '/rest/api/3/mypermissions?'.http_build_query(['projectKey' => $this->projectKey(), 'permissions' => implode(',', $keys)]))->json();
+        $held = [];
+        foreach ($keys as $key) {
+            $held[$key] = ($body['permissions'][$key]['havePermission'] ?? false) === true;
+        }
+
+        return $held;
     }
 
     // What the answers alone cannot tell: every issue asked about came back missing, so the account lost sight of them.
@@ -176,6 +392,33 @@ final class PortalJiraClient
     public function forgetIssueTypes(): void
     {
         Cache::forget(self::ISSUE_TYPES_KEY.$this->projectKey());
+        Cache::forget(self::SUBTASK_TYPE_KEY.$this->projectKey());
+    }
+
+    /**
+     * The project's sub-task type (2026-10-22, user: a report under another is its sub-task), which issueTypes()
+     * leaves out: the first Jira marks a sub-task, or null when the project has none. Cached for a day.
+     *
+     * @return array{id: string, name: string}|null
+     */
+    public function subtaskType(): ?array
+    {
+        $key = self::SUBTASK_TYPE_KEY.$this->projectKey();
+        $cached = Cache::get($key);
+        if (is_array($cached)) {
+            return $cached['type'];
+        }
+        $body = $this->read('GET', '/rest/api/3/issue/createmeta/'.rawurlencode((string) $this->projectKey()).'/issuetypes', missingIsRefusal: true)->json();
+        $type = null;
+        foreach ($body['issueTypes'] ?? $body['values'] ?? [] as $listed) {
+            if (is_array($listed) && (($listed['subtask'] ?? false) === true || (int) ($listed['hierarchyLevel'] ?? 0) === -1) && isset($listed['id'], $listed['name'])) {
+                $type = ['id' => (string) $listed['id'], 'name' => (string) $listed['name']];
+                break;
+            }
+        }
+        Cache::put($key, ['type' => $type], now()->addDay());
+
+        return $type;
     }
 
     /**
@@ -229,6 +472,80 @@ final class PortalJiraClient
         ));
     }
 
+    /**
+     * Labels added and removed without touching the rest: update operations, never fields.labels, which would
+     * replace them all -- the portal's own label and a server's with them.
+     *
+     * @param  list<string>  $add
+     * @param  list<string>  $remove
+     */
+    public function changeLabels(string $issueId, array $add, array $remove = []): void
+    {
+        $operations = [
+            ...array_map(fn (string $label): array => ['add' => $label], $add),
+            ...array_map(fn (string $label): array => ['remove' => $label], $remove),
+        ];
+        if ($operations === []) {
+            return;
+        }
+        $this->write(fn (PendingRequest $request): Response => $request->put(
+            $this->url('/rest/api/3/issue/'.rawurlencode($issueId)),
+            ['update' => ['labels' => $operations]],
+        ));
+    }
+
+    /**
+     * A link of the type between two issues, as "from" duplicates "to". Jira's request names the ends from the
+     * other issue's side, so the issue the link reads from goes in inwardIssue; read back, the duplicate's own
+     * links show the original as its outwardIssue. Jira takes the same link twice as one.
+     */
+    public function linkIssues(string $type, string $fromIssueId, string $toIssueId): void
+    {
+        $this->write(fn (PendingRequest $request): Response => $request->post($this->url('/rest/api/3/issueLink'), [
+            'type' => ['name' => $type],
+            'inwardIssue' => ['id' => $fromIssueId],
+            'outwardIssue' => ['id' => $toIssueId],
+        ]));
+    }
+
+    // Someone made a watcher (2026-10-22, user: the others who work on a report). The body is the account id alone,
+    // as a JSON string; another user takes Manage watcher list on the project.
+    public function addWatcher(string $issueId, string $accountId): void
+    {
+        $this->write(fn (PendingRequest $request): Response => $request
+            ->withBody((string) json_encode($accountId), 'application/json')
+            ->post($this->url('/rest/api/3/issue/'.rawurlencode($issueId).'/watchers')));
+    }
+
+    // A watcher taken off; one Jira no longer has is gone already.
+    public function removeWatcher(string $issueId, string $accountId): void
+    {
+        $this->answer(fn (): Response => $this->request()->delete(
+            $this->url('/rest/api/3/issue/'.rawurlencode($issueId).'/watchers?'.http_build_query(['accountId' => $accountId])),
+        ), false, true);
+    }
+
+    // A link removed; one Jira no longer has is gone already.
+    public function deleteIssueLink(string $linkId): void
+    {
+        $this->answer(fn (): Response => $this->request()->delete($this->url('/rest/api/3/issueLink/'.rawurlencode($linkId))), false, true);
+    }
+
+    /**
+     * The link types the site has, by name, for portal:jira-check.
+     *
+     * @return list<string>
+     */
+    public function issueLinkTypes(): array
+    {
+        $listed = $this->read('GET', '/rest/api/3/issueLinkType')->json('issueLinkTypes');
+
+        return array_values(array_filter(array_map(
+            fn (mixed $type): ?string => is_array($type) && is_string($type['name'] ?? null) ? $type['name'] : null,
+            is_array($listed) ? $listed : [],
+        )));
+    }
+
     public function attach(string $issueId, string $fileName, string $contents, string $mimeType): void
     {
         $this->write(fn (PendingRequest $request): Response => $request
@@ -245,21 +562,23 @@ final class PortalJiraClient
     public function issue(string $issueId): ?array
     {
         $request = $this->retrying();
-        $response = $this->answer(fn (): Response => $request->get($this->url('/rest/api/3/issue/'.rawurlencode($issueId).'?fields='.implode(',', self::SYNC_FIELDS))), false, true);
+        $response = $this->answer(fn (): Response => $request->get($this->url('/rest/api/3/issue/'.rawurlencode($issueId).'?fields='.implode(',', $this->syncFields()))), false, true);
 
         return $response === null ? null : $this->issueFrom($response->json());
     }
 
     /**
      * The portal's issues whose description holds these words, oldest first, with the description to check
-     * them by: how a retry finds what an unanswered create made. Jira matches words, not the exact text.
+     * them by: how a retry finds what an unanswered create made. Jira matches words, not the exact text. The
+     * labels say whose issues they may be, and a create's day keeps out any older issue (2026-10-21).
      *
      * @return list<array{id: string, key: string, fields: array<string, mixed>}>
      */
-    public function issuesDescribing(string $words, string $label): array
+    public function issuesDescribing(string $words, string $labelsJql, ?string $createdSince = null): array
     {
-        $jql = 'project = "'.$this->projectKey().'" AND labels = "'.$label.'" AND description ~ "\\"'.$words.'\\"" ORDER BY created ASC';
-        $fields = implode(',', [...self::SYNC_FIELDS, 'description']);
+        $since = $createdSince === null ? '' : ' AND created >= "'.$createdSince.'"';
+        $jql = 'project = "'.$this->projectKey().'" AND '.$labelsJql.$since.' AND description ~ "\\"'.$words.'\\"" ORDER BY created ASC';
+        $fields = implode(',', [...$this->syncFields(), 'description']);
         $body = $this->read('GET', '/rest/api/3/search/jql?'.http_build_query(['jql' => $jql, 'fields' => $fields, 'maxResults' => 10]))->json();
         $issues = [];
         foreach (is_array($body['issues'] ?? null) ? $body['issues'] : [] as $issue) {
@@ -273,6 +592,18 @@ final class PortalJiraClient
     }
 
     /**
+     * The fields every read asks for: the sync's own, and the site's Team and Start date fields where it has them.
+     *
+     * @return list<string>
+     */
+    private function syncFields(): array
+    {
+        $ids = $this->fieldIds();
+
+        return [...self::SYNC_FIELDS, ...array_values(array_filter([$ids['team'], $ids['startDate']]))];
+    }
+
+    /**
      * Up to 100 issues by id in one call, and the ids Jira did not return -- deleted, moved out of reach,
      * or no longer visible to the account.
      *
@@ -281,7 +612,7 @@ final class PortalJiraClient
      */
     public function bulkFetch(array $issueIds): array
     {
-        $body = $this->read('POST', '/rest/api/3/issue/bulkfetch', ['issueIdsOrKeys' => array_values($issueIds), 'fields' => self::SYNC_FIELDS])->json();
+        $body = $this->read('POST', '/rest/api/3/issue/bulkfetch', ['issueIdsOrKeys' => array_values($issueIds), 'fields' => $this->syncFields()])->json();
         $issues = [];
         foreach (is_array($body['issues'] ?? null) ? $body['issues'] : [] as $issue) {
             $parsed = is_array($issue) ? $this->issueFrom($issue) : null;

@@ -1,5 +1,5 @@
 {
-  "version": "0.0.0+1",
+  "version": "1.0.0+2",
   "name": "IkaIka Portal Backend",
   "title": "IkaIka Portal Backend",
   "description": "The Laravel API behind the Ikaika portal - decoupled-script 1.39.3",
@@ -61,6 +61,20 @@
             "default": ""
           },
           {
+            "flag": "FromTag",
+            "label": "-FromTag   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Rebuild this tag as it was, for staging: its sources in a worktree of their own.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/build-release FromTag",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh commands/build-release FromTag",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh commands/build-release FromTag -Preview"
+            }
+          },
+          {
             "flag": "Deploy",
             "label": "-Deploy   [SwitchParameter]",
             "type": "boolean",
@@ -107,6 +121,14 @@
             "default": ""
           },
           {
+            "flag": "AllowDirty",
+            "label": "-AllowDirty   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "With a -Bump, build over uncommitted changes, which the version's tag would then not hold.",
+            "default": ""
+          },
+          {
             "flag": "Gui",
             "label": "-Gui   [SwitchParameter]",
             "type": "boolean",
@@ -116,7 +138,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Bump ${build-release.args.Bump} -Tag ${build-release.args.Tag} -Deploy ${build-release.args.Deploy} -DryRun ${build-release.args.DryRun} -Clean ${build-release.args.Clean} -Keep ${build-release.args.Keep} -FixTarget ${build-release.args.FixTarget} -Gui ${build-release.args.Gui}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/build-release -Bump ${build-release.args.Bump} -Tag ${build-release.args.Tag} -FromTag ${build-release.args.FromTag} -Deploy ${build-release.args.Deploy} -DryRun ${build-release.args.DryRun} -Clean ${build-release.args.Clean} -Keep ${build-release.args.Keep} -FixTarget ${build-release.args.FixTarget} -AllowDirty ${build-release.args.AllowDirty} -Gui ${build-release.args.Gui}"
         ]
       },
       "check-targets": {
@@ -211,6 +233,20 @@
             ]
           },
           {
+            "flag": "BuildFrom",
+            "label": "-BuildFrom   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Rebuild this tag as it was, for staging, as the form's build_from does.",
+            "default": "",
+            "choices": "pwsh -NoProfile -File ${root}/script.ps1 choices commands/ci-local BuildFrom",
+            "refresh": {
+              "label": "Update",
+              "command": "pwsh -NoProfile -File ${root}/script.ps1 refresh commands/ci-local BuildFrom",
+              "preview": "pwsh -NoProfile -File ${root}/script.ps1 refresh commands/ci-local BuildFrom -Preview"
+            }
+          },
+          {
             "flag": "Upload",
             "label": "-Upload   [SwitchParameter]",
             "type": "boolean",
@@ -236,7 +272,7 @@
           }
         ],
         "command-after-success": [
-          "pwsh -NoProfile -File ${root}/script.ps1 commands/ci-local -Target ${ci-local.args.Target} -ConfirmProduction ${ci-local.args.ConfirmProduction} -Version ${ci-local.args.Version} -Upload ${ci-local.args.Upload} -NoGitHub ${ci-local.args.NoGitHub} -PlanOnly ${ci-local.args.PlanOnly}"
+          "pwsh -NoProfile -File ${root}/script.ps1 commands/ci-local -Target ${ci-local.args.Target} -ConfirmProduction ${ci-local.args.ConfirmProduction} -Version ${ci-local.args.Version} -BuildFrom ${ci-local.args.BuildFrom} -Upload ${ci-local.args.Upload} -NoGitHub ${ci-local.args.NoGitHub} -PlanOnly ${ci-local.args.PlanOnly}"
         ],
         "skipped": [
           "SecretsPath"
@@ -616,6 +652,476 @@
         ],
         "command-after-success": [
           "pwsh -NoProfile -File ${root}/script.ps1 commands/update-database -Product ${update-database.args.Product} -AllProducts ${update-database.args.AllProducts} -Step ${update-database.args.Step} -Clear ${update-database.args.Clear} -Drop ${update-database.args.Drop} -Idempotent ${update-database.args.Idempotent} -DropAndRecreate ${update-database.args.DropAndRecreate} -Migrate ${update-database.args.Migrate} -Preset ${update-database.args.Preset} -ConfigFile ${update-database.args.ConfigFile} -DryRun ${update-database.args.DryRun}"
+        ]
+      }
+    },
+    "airtable": {
+      "check-live": {
+        "description": "Checks that each base's export still matches live Airtable, by record counts",
+        "args": [
+          {
+            "flag": "Env",
+            "label": "-Env   [String]",
+            "type": "string",
+            "required": false,
+            "description": "The bases to count.",
+            "default": "test",
+            "allowed_values": [
+              "test",
+              "prod"
+            ]
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 airtable/check-live -Env ${check-live.args.Env}"
+        ]
+      },
+      "copy-to-sql": {
+        "description": "Adopts each generated data.sql into the committed sql/ folder, and records which environment it came from",
+        "args": [
+          {
+            "flag": "Env",
+            "label": "-Env   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Which set of outputs to adopt.",
+            "default": "test",
+            "allowed_values": [
+              "test",
+              "prod"
+            ]
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 airtable/copy-to-sql -Env ${copy-to-sql.args.Env}"
+        ]
+      },
+      "migrate-all": {
+        "description": "Pulls every Airtable base of an environment into SQL: fetch, attachments, data.sql, checks and schema.sql",
+        "args": [
+          {
+            "flag": "Env",
+            "label": "-Env   [String]",
+            "type": "string",
+            "required": false,
+            "description": "The bases to pull: the sandbox ones, or the live ones.",
+            "default": "test",
+            "allowed_values": [
+              "test",
+              "prod"
+            ]
+          },
+          {
+            "flag": "Step",
+            "label": "-Step   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Where to start: the whole pull, or one part of it again.",
+            "default": "all",
+            "allowed_values": [
+              "all",
+              "fetch",
+              "upload",
+              "generate"
+            ]
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 airtable/migrate-all -Env ${migrate-all.args.Env} -Step ${migrate-all.args.Step}"
+        ]
+      },
+      "reset-local": {
+        "description": "Drops and recreates this PC's portal, estimator and tracker databases, and loads them from sql/",
+        "args": [
+          {
+            "flag": "Yes",
+            "label": "-Yes   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the question. For a scripted run, where a question is a hang.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 airtable/reset-local -Yes ${reset-local.args.Yes}"
+        ]
+      },
+      "verify": {
+        "description": "Checks every generated data.sql against the Airtable export it came from",
+        "args": [
+          {
+            "flag": "Env",
+            "label": "-Env   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Which set of outputs to check.",
+            "default": "test",
+            "allowed_values": [
+              "test",
+              "prod"
+            ]
+          },
+          {
+            "flag": "Detailed",
+            "label": "-Detailed   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Every table's counts, not only the summary.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 airtable/verify -Env ${verify.args.Env} -Detailed ${verify.args.Detailed}"
+        ]
+      }
+    },
+    "deploy": {
+      "admin": {
+        "description": "Builds and deploys the admin API alone to the Test Server",
+        "args": [
+          {
+            "flag": "Bump",
+            "label": "-Bump   [String]",
+            "type": "string",
+            "required": false,
+            "description": "same installs this checkout untagged; keep (the next build number only), patch, minor or major release it first.",
+            "default": "same",
+            "allowed_values": [
+              "same",
+              "keep",
+              "patch",
+              "minor",
+              "major"
+            ]
+          },
+          {
+            "flag": "SkipBuild",
+            "label": "-SkipBuild   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Deploy the last build instead of building again.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/admin -Bump ${admin.args.Bump} -SkipBuild ${admin.args.SkipBuild}"
+        ]
+      },
+      "check-health": {
+        "description": "Checks a server's API: no migration left pending, and its health URL answering",
+        "args": [
+          {
+            "flag": "Target",
+            "label": "-Target   [String]",
+            "type": "string",
+            "required": false,
+            "description": "The server to check.",
+            "default": "staging",
+            "allowed_values": [
+              "staging",
+              "production"
+            ]
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/check-health -Target ${check-health.args.Target}"
+        ]
+      },
+      "copy-databases": {
+        "description": "Copies this PC's databases to the Test Server: dumped here, uploaded, imported there",
+        "args": [
+          {
+            "flag": "Only",
+            "label": "-Only   [String[]]",
+            "type": "array",
+            "required": false,
+            "description": "The databases to copy; all four when left out.",
+            "default": "",
+            "allowed_values": [
+              "core",
+              "portal",
+              "tracker",
+              "estimator"
+            ]
+          },
+          {
+            "flag": "Wipe",
+            "label": "-Wipe   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Empty the Test Server's databases before importing, rather than importing over them.",
+            "default": ""
+          },
+          {
+            "flag": "Yes",
+            "label": "-Yes   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the question -Wipe asks. For a scripted run, where a question is a hang.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/copy-databases -Only ${copy-databases.args.Only} -Wipe ${copy-databases.args.Wipe} -Yes ${copy-databases.args.Yes}"
+        ]
+      },
+      "dump-databases": {
+        "description": "Dumps this PC's databases to deployment/out/db, one .sql each, ready for the Test Server",
+        "args": [
+          {
+            "flag": "Only",
+            "label": "-Only   [String[]]",
+            "type": "array",
+            "required": false,
+            "description": "The databases to dump; all four when left out.",
+            "default": "",
+            "allowed_values": [
+              "core",
+              "portal",
+              "tracker",
+              "estimator"
+            ]
+          },
+          {
+            "flag": "MysqldumpPath",
+            "label": "-MysqldumpPath   [String]",
+            "type": "file",
+            "required": false,
+            "description": "The mysqldump to use; the one WampServer serves when left out.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/dump-databases -Only ${dump-databases.args.Only} -MysqldumpPath ${dump-databases.args.MysqldumpPath}"
+        ]
+      },
+      "import-airtable": {
+        "description": "Replaces production's portal, estimator and tracker databases with the Airtable export",
+        "args": [
+          {
+            "flag": "SkipGenerate",
+            "label": "-SkipGenerate   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Load the SQL generated last time instead of generating it again.",
+            "default": ""
+          },
+          {
+            "flag": "Yes",
+            "label": "-Yes   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the question. For a scripted run, where a question is a hang.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/import-airtable -SkipGenerate ${import-airtable.args.SkipGenerate} -Yes ${import-airtable.args.Yes}"
+        ]
+      },
+      "production": {
+        "description": "Builds and deploys the admin API and the portal to production, portal.ikaikabim.com/v2",
+        "args": [
+          {
+            "flag": "Bump",
+            "label": "-Bump   [String]",
+            "type": "string",
+            "required": false,
+            "description": "What both repos release as: keep takes the next build number only; patch, minor and major bump the version.",
+            "default": "keep",
+            "allowed_values": [
+              "keep",
+              "patch",
+              "minor",
+              "major"
+            ]
+          },
+          {
+            "flag": "SkipBuild",
+            "label": "-SkipBuild   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Deploy the released archives as they stand instead of releasing new ones.",
+            "default": ""
+          },
+          {
+            "flag": "Yes",
+            "label": "-Yes   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the question. For a scripted release, where a question is a hang.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/production -Bump ${production.args.Bump} -SkipBuild ${production.args.SkipBuild} -Yes ${production.args.Yes}"
+        ]
+      },
+      "push-env": {
+        "description": "Pushes the secret settings - Cloudinary, Jira, mail relay and the rest - to a server's .env",
+        "args": [
+          {
+            "flag": "Target",
+            "label": "-Target   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Where the settings go: the Test Server, or production.",
+            "default": "staging",
+            "allowed_values": [
+              "staging",
+              "production"
+            ]
+          },
+          {
+            "flag": "Only",
+            "label": "-Only   [String[]]",
+            "type": "array",
+            "required": false,
+            "description": "The keys to send; every one of them when left out. Not -Keys: the dispatcher reads its own list as .Keys.",
+            "default": "",
+            "allowed_values": [
+              "CLOUDINARY_CLOUD_NAME",
+              "CLOUDINARY_API_KEY",
+              "CLOUDINARY_API_SECRET",
+              "BITBUCKET_TOKEN",
+              "BITBUCKET_WEBHOOK_SECRET",
+              "JIRA_BASE_URL",
+              "JIRA_EMAIL",
+              "JIRA_API_TOKEN",
+              "JIRA_PROJECT_KEY",
+              "JIRA_CLOUD_ID",
+              "JIRA_WEBHOOK_SECRET",
+              "JIRA_ISSUE_TYPE_BUG",
+              "JIRA_ISSUE_TYPE_FEATURE",
+              "JIRA_ISSUE_TYPE_FEEDBACK",
+              "JIRA_DEFAULT_TEAM",
+              "JIRA_FIELD_TEAM",
+              "JIRA_FIELD_START_DATE",
+              "MAIL_RELAY_URL",
+              "MAIL_RELAY_KEY",
+              "OLLAMA_API_KEY",
+              "PORTAL_ID_LOGIN_PASSWORD"
+            ]
+          },
+          {
+            "flag": "Yes",
+            "label": "-Yes   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the question production asks. For a scripted run, where a question is a hang.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/push-env -Target ${push-env.args.Target} -Only ${push-env.args.Only} -Yes ${push-env.args.Yes}"
+        ]
+      },
+      "ssh-key": {
+        "description": "Makes the bluehost SSH alias the deployment scripts use answer without a passphrase, here or on a CI runner",
+        "args": [
+          {
+            "flag": "Target",
+            "label": "-Target   [String]",
+            "type": "string",
+            "required": false,
+            "description": "On a CI runner, the server the alias reaches; at a desk the key is the same for both.",
+            "default": "staging",
+            "allowed_values": [
+              "staging",
+              "production"
+            ]
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/ssh-key -Target ${ssh-key.args.Target}"
+        ]
+      },
+      "test-server": {
+        "description": "Deploys the secret settings, the admin API and the portal to the Test Server from this PC",
+        "args": [
+          {
+            "flag": "Bump",
+            "label": "-Bump   [String]",
+            "type": "string",
+            "required": false,
+            "description": "same installs both checkouts untagged; keep (the next build number only), patch, minor or major release both first.",
+            "default": "same",
+            "allowed_values": [
+              "same",
+              "keep",
+              "patch",
+              "minor",
+              "major"
+            ]
+          },
+          {
+            "flag": "SkipSettings",
+            "label": "-SkipSettings   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Leave the server's secret settings as they are.",
+            "default": ""
+          },
+          {
+            "flag": "SkipBuild",
+            "label": "-SkipBuild   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Deploy the last builds instead of building again.",
+            "default": ""
+          },
+          {
+            "flag": "ResetDatabases",
+            "label": "-ResetDatabases   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Replace every Test Server database with this PC's first; the old data is backed up on the server.",
+            "default": ""
+          },
+          {
+            "flag": "Yes",
+            "label": "-Yes   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Skip the question -ResetDatabases asks. For a scripted run, where a question is a hang.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 deploy/test-server -Bump ${test-server.args.Bump} -SkipSettings ${test-server.args.SkipSettings} -SkipBuild ${test-server.args.SkipBuild} -ResetDatabases ${test-server.args.ResetDatabases} -Yes ${test-server.args.Yes}"
+        ]
+      }
+    },
+    "devtools": {
+      "console": {
+        "description": "Opens the Ikaika Console: one window of buttons for the Airtable pull, the Test Server and production",
+        "args": [],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 devtools/console"
+        ]
+      },
+      "remark-probe": {
+        "description": "Asks an Ollama model to format a remark and checks the answer against the shape the portal stores",
+        "args": [
+          {
+            "flag": "Remark",
+            "label": "-Remark   [String]",
+            "type": "string",
+            "required": false,
+            "description": "Your own remark to format; the built-in samples when left out.",
+            "default": ""
+          },
+          {
+            "flag": "SelfTest",
+            "label": "-SelfTest   [SwitchParameter]",
+            "type": "boolean",
+            "required": false,
+            "description": "Check the checker only; no model is asked.",
+            "default": ""
+          }
+        ],
+        "command-after-success": [
+          "pwsh -NoProfile -File ${root}/script.ps1 devtools/remark-probe -Remark ${remark-probe.args.Remark} -SelfTest ${remark-probe.args.SelfTest}"
         ]
       }
     },
@@ -1324,5 +1830,27 @@
         ]
       }
     }
-  }
+  },
+  "groups": [
+    {
+      "label": "Deploy",
+      "domains": [
+        "deploy",
+        "server"
+      ]
+    },
+    {
+      "label": "Data",
+      "domains": [
+        "airtable"
+      ]
+    },
+    {
+      "label": "Develop",
+      "domains": [
+        "commands",
+        "devtools"
+      ]
+    }
+  ]
 }

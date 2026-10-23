@@ -16,8 +16,19 @@
         @{ Name = 'a custom version'; Answers = @{ version = 'custom'; custom_version = '1.2.0' }; Exit = 0; Plan = @{ Bump = '1.2.0' }; Outputs = @{ VERSION_BUMP = '1.2.0' } }
         @{ Name = 'a custom version that is not x.y.z is refused'; Answers = @{ version = 'custom'; custom_version = '1.2' }; Exit = 1; Says = 'custom_version must be x.y.z' }
         @{ Name = 'a bump from a tag is refused'; Answers = @{ version = 'patch' }; Ref = 'refs/tags/v1.0.0+1'; Exit = 1; Says = 'A version bump is committed to a branch' }
-        # There is no production yet; the plan says so rather than building for a folder nobody named.
-        @{ Name = 'production with no production set up is refused'; Answers = @{ target = 'production'; upload = $true; confirm_production = $true }; Exit = 1; Says = 'There is no production to build for yet' }
+        # A production upload is a release (2026-10-21, user): a version, tagged v<version>-released, and its box ticked.
+        @{ Name = 'a production release is bumped, tagged and uploaded'; Answers = @{ target = 'production'; version = 'keep'; upload = $true; confirm_production = $true }; Exit = 0
+            Plan = @{ Debug = $false; Bump = 'keep' }; Outputs = @{ PURPOSES = 'deploy-production'; TAGGING = 'true'; DEPLOY_PLAN = '{"Debug":false,"Force":true}' }; Says = 'tagged as a production release' }
+        @{ Name = 'a production upload of same is refused'; Answers = @{ target = 'production'; upload = $true; confirm_production = $true }; Exit = 1; Says = 'A production upload is a release' }
+        @{ Name = 'production without its confirmation is refused'; Answers = @{ target = 'production'; version = 'keep'; upload = $true }; Exit = 1; Says = 'Tick "Yes, upload to PRODUCTION"' }
+        @{ Name = 'a production dry run needs no version and no box'; Answers = @{ target = 'production'; upload = $true; dry_run = $true }; Exit = 0; Outputs = @{ TAGGING = 'false'; DEPLOY_PLAN = '{"Debug":false,"Force":true,"DryRun":true}' } }
+        # Build from a tag (2026-10-21, user): the tag rebuilt as it was, for staging only, never bumped or tagged.
+        @{ Name = 'a tag rebuilt for staging'; Answers = @{ build_from = 'v1.0.0+3' }; Exit = 0; Plan = @{ Debug = $true; FromTag = 'v1.0.0+3' }; Outputs = @{ BUILD_FROM = 'v1.0.0+3'; TAGGING = 'false'; RELEASING = 'false' }; Absent = @('Bump'); Says = 'v1.0.0+3 rebuilt as it was' }
+        @{ Name = 'a tag rebuilt and uploaded to staging'; Answers = @{ build_from = 'v1.0.0+3'; upload = $true }; Exit = 0; Outputs = @{ UPLOADING = 'true'; DEPLOY_PLAN = '{"Debug":true,"Force":true}'; BUILD_FROM = 'v1.0.0+3' } }
+        @{ Name = 'a rebuild with a bump is refused'; Answers = @{ build_from = 'v1.0.0+3'; version = 'patch' }; Exit = 1; Says = 'A rebuild from a tag never bumps' }
+        @{ Name = 'a rebuild for production is refused'; Answers = @{ build_from = 'v1.0.0+3'; target = 'production' }; Exit = 1; Says = 'A tag is rebuilt for staging only' }
+        @{ Name = 'a build_from that is no tag name is refused'; Answers = @{ build_from = '-v1' }; Exit = 1; Says = "build_from '-v1' is not a tag name" }
+        @{ Name = 'without build_from nothing is rebuilt'; Answers = @{}; Exit = 0; Outputs = @{ BUILD_FROM = '' }; Absent = @('FromTag') }
         @{ Name = 'a target the form cannot send is refused'; Answers = @{ target = 'qa' }; Exit = 1; Says = "target is 'qa'" }
         # A bump is kept as a GitHub release, where it costs no Actions storage; anything else stays an artifact.
         @{ Name = 'a bump is kept as a GitHub release, its artifact a day'; Answers = @{ version = 'patch' }; Exit = 0; Outputs = @{ RELEASING = 'true'; RETENTION = '1' }; Says = '| Kept as | a GitHub release' }

@@ -41,4 +41,10 @@ final class CoreRecycleKey
     {
         return 'project-'.$projectId;
     }
+
+    // An issue or request is the company's too (2026-10-21), so keyed on itself alone, as a project is.
+    public static function bugReport(int $bugReportId): string
+    {
+        return 'bug-report-'.$bugReportId;
+    }
 }

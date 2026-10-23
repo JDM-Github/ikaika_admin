@@ -44,6 +44,9 @@ class PortalReportRemindersTest extends TestCase
     {
         parent::setUp();
         Cache::flush();
+        // The 2020 window holds no real reports, so every day of it would read as one the records lack; the tests of
+        // that guard set the share back themselves.
+        config(['products.report_reminders.min_filed_share' => 0]);
 
         [$this->member, $this->starter, $this->leaver] = Employee::query()
             ->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
@@ -197,6 +200,67 @@ class PortalReportRemindersTest extends TestCase
         $this->assertNotNull($event);
         $this->assertSame('0 18 * * 1-5', $event->expression);
         $this->assertSame('Asia/Manila', $event->timezone);
+    }
+
+    // False reminders (2026-10-22, user): a day on which almost nobody filed is one the records lack -- a holiday the
+    // calendar does not have, or reports this database never received -- and nobody is reminded of it.
+    public function test_a_day_too_few_filed_on_is_taken_for_missing_records(): void
+    {
+        config(['products.report_reminders.min_filed_share' => 0.5]);
+        // Everyone else on the roster in 2020 too, and filed on the 10th alone.
+        $everyoneElse = Employee::query()->whereRaw("LOWER(COALESCE(status, '')) = 'active'")
+            ->whereNotIn('id', [$this->member->getKey(), $this->starter->getKey(), $this->leaver->getKey()])->get();
+        foreach ($everyoneElse as $person) {
+            $person->forceFill(['start_date' => null, 'end_date' => null])->save();
+            $this->insertLine($person, '2020-03-10');
+        }
+        $today = Carbon::parse(self::TODAY, PortalReportReminders::ZONE);
+
+        $coverage = $this->reminders()->coverage($today);
+        $plan = collect($this->reminders()->missing($today))->keyBy('email');
+
+        $this->assertTrue($coverage['2020-03-10']['whole']);
+        $this->assertSame($coverage['2020-03-10']['expected'] - 1, $coverage['2020-03-10']['filed']);
+        $this->assertSame(['expected' => $coverage['2020-03-09']['expected'], 'filed' => 0, 'whole' => false], $coverage['2020-03-09']);
+        // Only the day the records are whole for is one the member is reminded of; the starter's days are all unrecorded.
+        $this->assertSame(['2020-03-10'], $plan['member@ikaika.test']['days']);
+        $this->assertFalse($plan->has('starter@ikaika.test'));
+
+        Carbon::setTestNow($today);
+        $this->artisan('portal:remind-missing-reports', ['--dry-run' => true])
+            ->expectsOutputToContain('2020-03-09: 0 of '.$coverage['2020-03-09']['expected'].' filed, too few for these records to be whole - nobody is reminded of it.')
+            ->assertExitCode(0);
+        Carbon::setTestNow();
+    }
+
+    // The Test Server runs on a copy of production's reports and reminded people of days they had filed there
+    // (2026-10-22, user): only production sends, unless REPORT_REMINDERS_SCHEDULED says otherwise.
+    public function test_only_production_sends_the_scheduled_reminders(): void
+    {
+        Mail::fake();
+        $scheduled = fn (string $channel, ?bool $set = null): bool => (bool) tap(true, fn () => config(['products.channel' => $channel, 'products.report_reminders.scheduled' => $set]))
+            && PortalReportReminders::scheduled();
+        $this->assertSame([true, false, false, true, false], [
+            $scheduled('production'), $scheduled('staging'), $scheduled('development'), $scheduled('staging', true), $scheduled('production', false),
+        ]);
+
+        config(['products.channel' => 'staging', 'products.report_reminders.scheduled' => null]);
+        $event = collect(app(Schedule::class)->events())
+            ->first(fn (Event $event): bool => str_contains((string) $event->command, 'portal:remind-missing-reports'));
+        $this->assertFalse($event->filtersPass(app()));
+        $sent = (int) EmailMessage::query()->max('id');
+        Carbon::setTestNow(Carbon::parse(self::TODAY, PortalReportReminders::ZONE));
+        $this->artisan('portal:remind-missing-reports')
+            ->expectsOutputToContain('Reminders are off on this server (staging)')
+            ->assertExitCode(1);
+        // A dry run still lists them there.
+        $this->artisan('portal:remind-missing-reports', ['--dry-run' => true])->expectsOutputToContain('member@ikaika.test')->assertExitCode(0);
+        Carbon::setTestNow();
+        Mail::assertNothingSent();
+        $this->assertSame($sent, (int) EmailMessage::query()->max('id'));
+
+        config(['products.channel' => 'production']);
+        $this->assertTrue($event->filtersPass(app()));
     }
 
     private function reminders(): PortalReportReminders
