@@ -6,6 +6,10 @@ CHANGELOG.json, the copy the app reads, is written from this file.
 
 ## Unreleased
 
+## 1.0.0+4 - 2026-10-23
+
+_No user-facing changes._
+
 ## 1.0.0+3 - 2026-10-23
 
 ### Added
