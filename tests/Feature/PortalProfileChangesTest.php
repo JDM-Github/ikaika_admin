@@ -103,6 +103,8 @@ class PortalProfileChangesTest extends TestCase
         $this->assertSame('Pending', $asked['status']);
         $this->assertContains(['key' => 'bloodType', 'from' => $before['blood_type'], 'to' => 'AB+'], $asked['fields']);
         $this->assertSame('ss_id', $asked['documents']['added'][0]['field']);
+        // Named for its request, so two people's waiting files never share an id (2026-10-23).
+        $this->assertSame('new-'.$asked['id'].'-0', $asked['documents']['added'][0]['id']);
         $this->assertStringContainsString('/upload/pg_{page},f_jpg', (string) $asked['documents']['added'][0]['pagesUrl']);
         $this->assertSame((string) $kept, $asked['documents']['removed'][0]['id']);
 
